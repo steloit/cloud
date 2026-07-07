@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info: {title: Steloit Platform API, version: "1.0", description: "REST API behind the console. CLI (`steloit …`) is a thin client of the same endpoints. Auth: Bearer personal token (acts as the user, shrinks with roles) or org API key."}
+servers: [{url: https://api.steloit.app/v1}]
+x-conventions:
+  ids: "prefixed opaque ids: org_, prj_, env_, svc_, dep_, bnd_, sec_, pol_, evt_, inv_, mbr_, tok_, key_, cell_, tpl_, dsh_, wdg_, sch_, rule_, dom_, prp_, ins_"
+  pagination: "cursor-based: ?limit=50&cursor=…; responses carry {data:[], next_cursor}"
+  filtering: "?env=, ?project=, ?status=, ?q=; sorting ?sort=field,-field"
+  errors: "problem+json {type,title,status,detail,remediation}; 402 quota/plan gates include price or plan; 429 includes Retry-After"
+  env_as_filter: "every project-scoped list accepts ?env="
+paths:
+  /orgs: {post: {summary: Create org}, get: {summary: List my orgs}}
+  /orgs/{org}: {get: {}, patch: {}, delete: {summary: "Owner only; 90-day billing rule enforced server-side"}}
+  /orgs/{org}/members: {get: {}, }
+  /orgs/{org}/members/{member}: {patch: {summary: change role}, delete: {}}
+  /orgs/{org}/invites: {post: {summary: "201 {expires_at:+7d}; 402 seat overage price"}, get: {}}
+  /invites/{invite}: {get: {summary: "public: inviter, org, role, email-hint, status"}, post: {summary: "accept (must match session email)"}, delete: {summary: decline-notifies}}
+  /invites/{invite}/renew: {post: {summary: "request new — notifies inviter (A7)"}}
+  /orgs/{org}/projects: {post: {}, get: {}}
+  /projects/{project}: {get: {}, patch: {}, delete: {summary: typed-name confirm client-side}}
+  /projects/{project}/envs: {post: {}, get: {}}
+  /estimates: {post: {summary: "price a shape/template before anything provisions"}}
+  /envs/{env}/services: {post: {summary: "provisions; 402 if plan-gated"}, get: {}}
+  /services/{service}: {get: {}, patch: {summary: "shape/scale changes; temp overrides need reason"}, delete: {summary: "takes final backup; response lists broken dependents"}}
+  /services/{service}/bindings: {post: {}, get: {}}
+  /bindings/{binding}: {delete: {summary: rotates credentials}}
+  /services/{service}/domains: {post: {}, get: {summary: "status: verifying|issued|failed + records[]"}}
+  /services/{service}/lifecycle-rules: {post: {}, get: {}}
+  /services/{service}/lifecycle-rules:dryRun: {post: {}}
+  /services/{service}/schedules: {post: {}, get: {}}
+  /schedules:preview: {get: {summary: "?cron= → next 3 runs in tz"}}
+  /envs/{env}/deployments: {post: {}, get: {}}
+  /deployments/{dep}/rollback: {post: {}}
+  /envs/{env}/metrics: {get: {summary: "?query=&from=&to= → series"}}
+  /envs/{env}/logs: {get: {}}
+  /envs/{env}/traces/{trace}: {get: {}}
+  /envs/{env}/events: {get: {summary: unified event stream}}
+  /projects/{project}/alert-rules: {post: {}, get: {}}
+  /alert-rules:backtest: {post: {summary: "{query,condition,window,days} → firings[]"}}
+  /orgs/{org}/dashboards: {post: {summary: "{name,scope,visibility,start_from}"}, get: {summary: "?scope=project:…"}}
+  /dashboards/{dash}: {get: {}, patch: {summary: "layout, widgets; shared edits audited"}, delete: {}}
+  /dashboards/{dash}/widgets: {post: {summary: "{source: metrics|logs|cost|deploys|ai|alerts, query, viz}"}}
+  /orgs/{org}/templates: {post: {summary: "capture; server strips secrets; returns required_inputs[]"}, get: {}}
+  /templates/{tpl}: {get: {}, patch: {}, delete: {summary: "copies unaffected"}}
+  /templates/{tpl}/refresh: {post: {summary: refresh-from-source → new version}}
+  /orgs/{org}/policies: {post: {}, get: {}}
+  /policies/{policy}: {get: {}, patch: {summary: "incl. ai-assistant enforcement: enabled|opt_in|disabled"}}
+  /orgs/{org}/cells: {post: {summary: BYOC connect (Business+)}, get: {}}
+  /orgs/{org}/audit: {get: {summary: cursor ledger}}
+  /me/tokens: {post: {summary: "201 returns token once; only hash stored"}, get: {}}
+  /me/tokens/{tok}: {delete: {}}
+  /orgs/{org}/api-keys: {post: {}, get: {}, }
+  /orgs/{org}/billing/overview: {get: {summary: "mtd, forecast, by-project; one arithmetic"}}
+  /orgs/{org}/billing/usage: {get: {}}
+  /orgs/{org}/billing/quotas: {get: {summary: "allowances w/ type soft|hard, used, price_beyond"}}
+  /orgs/{org}/billing/invoices: {get: {}, }
+  /orgs/{org}/subscription: {get: {}, post: {summary: "change plan: upgrades immediate+prorated; downgrade 409 w/ blocking reasons"}, delete: {summary: cancel at anchor}}
+  /orgs/{org}/payment-methods: {post: {}, get: {}}
+  /assistant/threads: {post: {}, get: {}}
+  /assistant/threads/{id}/messages: {post: {summary: "answers cite evidence refs"}}
+  /assistant/insights: {get: {summary: "ranked; 404-equivalent empty when policy disabled"}}
+  /assistant/insights/{ins}: {patch: {summary: snooze|dismiss(reason)}}
+  /assistant/proposals/{prp}: {get: {}, post: {summary: "apply — requires human token w/ permission; audited 'as user, via assistant'"}}
+components:
+  schemas:
+    Error: {type: object, properties: {type:{type:string}, title:{type:string}, status:{type:integer}, detail:{type:string}, remediation:{type:string}}}
+    Service: {type: object, properties: {id:{type:string}, name:{type:string}, product:{enum:[postgres,valkey,storage,queue,web,worker,ai-gateway]}, status:{enum:[provisioning,running,degraded,failed,suspended,deleted]}, shape:{type:object}, monthly_estimate:{type:number}}}
+    Quota: {type: object, properties: {name:{}, type:{enum:[soft,hard]}, included:{}, used:{}, price_beyond:{type:string}, at_limit:{type:string}}}
+    Proposal: {type: object, properties: {id:{}, evidence:[], reasoning:{}, change:{}, impact:{}, status:{enum:[open,applied,dismissed,snoozed]}}}
