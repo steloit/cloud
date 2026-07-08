@@ -32,6 +32,8 @@ Everything required to build the Steloit developer-cloud console, for human engi
 | 14-development | architecture.md — structure, conventions, error handling |
 | 15-assets | tokens.css · sprite.svg (icons) |
 | 16-qa | qa.md — canonical scenarios, consistency + regression checklists |
+| 17-brand | brand.md — identity system ("the Slip" mark, lockups, color, type) + logo/ SVGs |
+| 18-philosophy | product-philosophy.md — the constitution: philosophy, promise, grammar, question ownership, review checklist, the "nevers" |
 
 ## Non-negotiable product rules (the short list)
 Estimate before provision · env-as-filter · one arithmetic everywhere · plans gate capabilities, never safety · soft limits bill / hard limits fail loudly at 80%-warned · templates copy, never link; secrets never captured · tokens reveal once · interaction tiers (no inline forms) · the AI four laws · every failure state has a way forward.
