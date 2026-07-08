@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Environments — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "environments", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+  const params = new URLSearchParams(location.search);
+
+  window.renderPage = function (ctx) {
+    const p = ctx.p;
+    content.innerHTML = `
+      <div class="page-head">
+        <h1>Environments</h1>
+        <span class="sub"><span class="u-mono">${ctx.project}</span> · isolated by default, region fixed at creation</span>
+        <div class="u-right"><button class="btn btn--primary" id="new-env">${Shell.icon("plus", "ic--s")} New environment</button></div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Environment</th><th>Region</th><th>Services</th><th>Status</th><th style="text-align:right">Cost mtd</th><th></th></tr></thead>
+        <tbody>
+        ${p.envs.map(e => {
+          const st = e.services.length ? DB.worstState(e.services) : "ready";
+          const mtd = e.services.reduce((s, x) => s + x.mtd, 0);
+          return `<tr class="is-clickable" data-env="${e.slug}">
+            <td><span class="u-row"><span class="u-mono">${e.slug}</span>${e.production ? '<span class="tag-prod">production</span>' : ""}</span></td>
+            <td class="tag-region">${e.region}</td>
+            <td>${e.services.length}</td>
+            <td><span class="badge badge--${st}"><span class="dot"></span>${st}</span></td>
+            <td class="u-num cost-chip">$${mtd.toFixed(2)}</td>
+            <td style="text-align:right"><a class="u-12" href="settings-env.html?project=${ctx.project}&env=${e.slug}" onclick="event.stopPropagation()">Settings</a></td></tr>`;
+        }).join("")}
+        </tbody></table></div>
+      <p class="u-12 u-faint" style="margin-top:12px">Switching environments filters every page — it never navigates you away. Try <span class="kbd">[</span> <span class="kbd">]</span>.</p>`;
+
+    content.querySelectorAll("tr[data-env]").forEach(r => r.addEventListener("click", () => {
+      location.href = "overview.html?project=" + ctx.project + "&env=" + r.dataset.env;
+    }));
+    document.getElementById("new-env").addEventListener("click", createDialog);
+  };
+
+  function createDialog() { // SH-26
+    const regions = DATA.regions.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+    Shell.dialog({
+      title: "New environment",
+      body: `
+        <div class="field"><label for="env-name">Name</label>
+          <input id="env-name" class="input input--mono" placeholder="preview" autocomplete="off" spellcheck="false">
+          <div class="help">Lowercase letters, numbers, and dashes. Isolated from every other environment.</div></div>
+        <div class="field"><label for="env-region">Region</label>
+          <select id="env-region" class="select">${regions}</select>
+          <div class="help">All services in this environment share its region. It can't change later.</div></div>
+        <div class="banner banner--info" style="margin:0">${Shell.icon("info", "ic--s")}<span><b class="u-mono">$0.00/mo</b> until you add services.</span></div>`,
+      confirmLabel: "Create environment",
+      onConfirm: (close, ok) => {
+        const name = document.getElementById("env-name").value.trim();
+        if (!/^[a-z][a-z0-9-]*$/.test(name)) { Shell.toast("Names use lowercase letters, numbers, dashes; start with a letter. <span class='u-mono u-faint'>E-SLUG-422</span>"); return; }
+        if (Shell.ctx().p.envs.some(e => e.slug === name)) { Shell.toast(`<b class="u-mono">${name}</b> already exists in ${Shell.ctx().project}. <span class="u-mono u-faint">E-SLUG-409</span>`); return; }
+        ok.textContent = "Creating…"; ok.disabled = true;
+        setTimeout(() => { close(); Shell.toast(`<b class="u-mono">${name}</b> created — empty and billing $0 (prototype: resets on reload).`); }, 700);
+      },
+    });
+    setTimeout(() => document.getElementById("env-name").focus(), 50);
+  }
+
+  Shell.protoStates([
+    { label: "Open create dialog (SH-26)", fn: createDialog },
+  ]);
+
+  renderPage(Shell.ctx());
+  if (params.get("create") === "1") createDialog();
+})();
+</script>
+</body>
+</html>

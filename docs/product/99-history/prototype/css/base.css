@@ -1,0 +1,58 @@
+/* ============================================================
+   Steloit — Base & Typography
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:var(--font-ui);font-size:var(--fs-13);line-height:var(--lh-body);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0;line-height:var(--lh-tight);font-weight:var(--w-semi)}
+h1{font-size:var(--fs-18);letter-spacing:-.01em}
+h2{font-size:var(--fs-16)}
+h3{font-size:var(--fs-14)}
+p{margin:0}
+a{color:var(--text-link);text-decoration:none}
+a:hover{text-decoration:underline}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+code,.mono{font-family:var(--font-mono);font-size:.92em}
+strong{font-weight:var(--w-semi)}
+hr{border:0;border-top:1px solid var(--border);margin:var(--sp-4) 0}
+::selection{background:rgba(124,140,255,.28)}
+
+/* Focus — visible everywhere (G10 / a11y floor) */
+:focus{outline:none}
+:focus-visible{box-shadow:var(--focus-ring);border-radius:var(--r-1)}
+
+/* Utility */
+.u-dim{color:var(--text-dim)}
+.u-faint{color:var(--text-faint)}
+.u-mono{font-family:var(--font-mono)}
+.u-num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.u-11{font-size:var(--fs-11)}
+.u-12{font-size:var(--fs-12)}
+.u-14{font-size:var(--fs-14)}
+.u-row{display:flex;align-items:center;gap:var(--sp-2)}
+.u-grow{flex:1 1 auto;min-width:0}
+.u-right{margin-left:auto}
+.u-hide{display:none!important}
+.u-sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.u-trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Icons */
+.ic{width:16px;height:16px;flex:none;display:inline-block;vertical-align:-3px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ic--s{width:13px;height:13px;vertical-align:-2px}
+.ic--l{width:20px;height:20px}
+
+/* Skip link */
+.skip-link{position:fixed;top:-48px;left:var(--sp-4);z-index:200;background:var(--surface-2);border:1px solid var(--border-strong);
+  padding:var(--sp-2) var(--sp-3);border-radius:var(--r-2);transition:top var(--motion-fast) var(--ease);color:var(--text)}
+.skip-link:focus{top:var(--sp-2)}
+
+/* Scrollbars (dense console feel) */
+*{scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:var(--r-full);border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
