@@ -1,0 +1,50 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./styles/tokens.css";
+@import "./styles/lattice.css";
+
+/* Theme is a class swap: `:root` is dark, `.light` on <html> flips tokens
+   (01-design-system: tokens only, zero component forks). */
+@custom-variant light (&:where(.light, .light *));
+
+@theme inline {
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
+  --color-ink1: var(--ink1);
+  --color-ink2: var(--ink2);
+  --color-ink3: var(--ink3);
+  --color-hair: var(--hair);
+  --color-steel: var(--steel);
+  --color-steel-tint: var(--steel-tint);
+  --color-ok: var(--ok);
+  --color-ok-tint: var(--ok-tint);
+  --color-warn: var(--warn);
+  --color-warn-tint: var(--warn-tint);
+  --color-err: var(--err);
+  --color-err-tint: var(--err-tint);
+  --color-prov: var(--prov);
+  --color-assist: var(--assist);
+  --color-assist-tint: var(--assist-tint);
+  --color-mono-bg: var(--mono-bg);
+  --color-page: var(--page);
+
+  --shadow-e1: var(--e1);
+  --shadow-e2: var(--e2);
+}
+
+@layer base {
+  * {
+    border-color: var(--hair);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+}

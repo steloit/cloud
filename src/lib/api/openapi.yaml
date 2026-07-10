@@ -1,0 +1,1614 @@
+openapi: 3.1.0
+info:
+  title: Steloit Platform API
+  version: "1.0"
+  description: >
+    REST API behind the console. CLI (`steloit …`) is a thin client of the same
+    endpoints; no console-only capabilities exist. Auth: Bearer personal token
+    (acts as the user, shrinks with roles) or org API key (explicit scopes).
+    AuthZ is two-layer: role matrix ceiling, then policy evaluation at
+    {org, project, env} scope (11-permissions/rbac.md).
+servers:
+  - url: https://api.steloit.app/v1
+x-conventions:
+  ids: "prefixed opaque ids: org_, prj_, env_, svc_, dep_, bnd_, sec_, pol_, evt_, inv_, mbr_, tok_, key_, cell_, tpl_, dsh_, wdg_, sch_, rule_, dom_, prp_, ins_, thr_, usr_, pm_"
+  json: "snake_case keys everywhere"
+  money: "integer cents, fields suffixed _cents; clients render via fmtMoney in mono"
+  timestamps: "RFC 3339 UTC, fields suffixed _at"
+  pagination: "cursor-based: ?limit=50&cursor=…; list responses are {data:[], next_cursor}"
+  filtering: "?env=, ?project=, ?status=, ?q=; sorting ?sort=field,-field"
+  env_as_filter: "every project-scoped list accepts ?env="
+  errors: "problem+json (RFC 9457). 402 quota/plan gates include price or plan; 403 names the missing role or denying policy; 409 includes blocking reasons[]; 429 includes Retry-After. Every error carries remediation — a next step, never a dead end."
+  realtime: "GET endpoints marked x-streamable accept Accept: text/event-stream for live tail (state.md: SSE drives toasts, bell, status flips, markers)"
+x-error-catalog:
+  validation_failed: {status: 422, note: "field errors under errors[]; client renders inline under the field"}
+  permission_denied: {status: 403, note: "detail names missing role OR denying policy (E3 grammar); denial audited"}
+  plan_gated: {status: 402, note: "carries required_plan; client renders B6 lock grammar"}
+  quota_exceeded: {status: 402, note: "soft quota: carries overage_price_cents and proceeds only on explicit confirm=true; hard quota: fails with remediation"}
+  conflict: {status: 409, note: "carries reasons[] (e.g. downgrade blockers, dependents); client renders banner with remediation"}
+  not_found: {status: 404}
+  rate_limited: {status: 429, note: "Retry-After honored by all clients"}
+  provider_error: {status: 502, note: "carries incident-grade event id in detail"}
+security:
+  - bearer: []
+tags:
+  - {name: orgs}
+  - {name: projects}
+  - {name: services}
+  - {name: deploy}
+  - {name: observe}
+  - {name: billing}
+  - {name: governance}
+  - {name: assistant}
+  - {name: account}
+
+paths:
+  /orgs:
+    post:
+      tags: [orgs]
+      operationId: createOrg
+      summary: Create organization (A5)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, minLength: 3, maxLength: 32, description: "slugified [a-z0-9-]; slug immutable after create"}
+                home_region: {type: string, default: aws/ap-south-1, description: "provider-faceted region code; a prefill for new environments, never a lock"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Org"}}}}
+        "409": {$ref: "#/components/responses/Conflict"}
+    get:
+      tags: [orgs]
+      operationId: listMyOrgs
+      summary: List organizations I belong to (SW1)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/OrgList"}}}}
+
+  /orgs/{org}:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [orgs]
+      operationId: getOrg
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Org"}}}}
+    patch:
+      tags: [orgs]
+      operationId: updateOrg
+      summary: Rename, change default region (G5). Slug never changes.
+      requestBody: {content: {application/json: {schema: {type: object, properties: {name: {type: string}, home_region: {type: string}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Org"}}}}
+    delete:
+      tags: [orgs]
+      operationId: deleteOrg
+      summary: "Owner only; typed-confirm client-side; 90-day billing-data rule enforced server-side"
+      responses:
+        "202": {description: "Deletion scheduled; state kept per dunning/deletion contract"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /orgs/{org}/members:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [orgs]
+      operationId: listMembers
+      summary: Members with role and MFA posture (G6)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/MemberList"}}}}
+
+  /orgs/{org}/members/{member}:
+    parameters: [{$ref: "#/components/parameters/org"}, {name: member, in: path, required: true, schema: {type: string}}]
+    patch:
+      tags: [orgs]
+      operationId: changeMemberRole
+      summary: "Role change applies without re-login; audited before → after (G2). Tokens shrink immediately."
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [role], properties: {role: {$ref: "#/components/schemas/Role"}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Member"}}}}
+        "409": {description: "Last Owner cannot be demoted (F1)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    delete:
+      tags: [orgs]
+      operationId: removeMember
+      summary: "Sessions + personal tokens revoked immediately; owned resources flagged, never silently reassigned (G6)"
+      responses:
+        "200": {description: "Removed; response lists flagged owned resources", content: {application/json: {schema: {type: object, properties: {flagged_resources: {type: array, items: {type: object, properties: {id: {type: string}, kind: {type: string}, name: {type: string}}}}}}}}}
+
+  /orgs/{org}/invites:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [orgs]
+      operationId: createInvite
+      summary: "Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: {type: string, format: email}
+                role: {$ref: "#/components/schemas/Role"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Invite"}}}}
+        "402": {description: "Seat limit (soft): carries overage_price_cents ($7/seat prorated, F1); retry with confirm=true to accept the overage", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {description: "Already a member or already invited → noop with message", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [orgs]
+      operationId: listInvites
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/InviteList"}}}}
+
+  /invites/{invite}:
+    parameters: [{name: invite, in: path, required: true, schema: {type: string}}]
+    get:
+      operationId: getInvitePublic
+      summary: "Public: inviter, org, role (explained by consequences), email hint, status (A6)"
+      security: []
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/InvitePublic"}}}}
+        "410": {description: "Expired/used/revoked — response distinguishes the A7 failure states with a working way forward"}
+    post:
+      operationId: acceptInvite
+      summary: "Accept — session email must match the invited address (A7 card 3); grants access instantly, audited"
+      responses:
+        "200": {description: "Accepted; member created"}
+        "403": {description: "Wrong account — invite bound to the sent address"}
+    delete:
+      operationId: declineInvite
+      summary: Decline — notifies inviter, invalidates the link
+      responses:
+        "204": {description: Declined}
+
+  /invites/{invite}/renew:
+    post:
+      operationId: renewInvite
+      summary: "Request a new link for an expired invite — notifies the inviter (A7)"
+      security: []
+      responses:
+        "202": {description: "Inviter notified"}
+
+  /orgs/{org}/projects:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [projects]
+      operationId: createProject
+      summary: "Create project (W2/A8), optionally from template; production env created by default"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string}
+                template_id: {type: string, description: "tpl_…; instantiation copies, never links; required_inputs must be supplied"}
+                region: {type: string, description: "defaults to org home_region"}
+                required_inputs: {type: object, additionalProperties: {type: string}, description: "wiring for bindings the template captured as inputs (T3)"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Project"}}}}
+        "402": {description: "Plan project-limit gate, with reason (F2)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [projects]
+      operationId: listProjects
+      summary: Projects with health, monthly cost, env count, last deploy (W1)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/ProjectList"}}}}
+
+  /projects/{project}:
+    parameters: [{$ref: "#/components/parameters/project"}]
+    get:
+      tags: [projects]
+      operationId: getProject
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Project"}}}}
+    patch:
+      tags: [projects]
+      operationId: updateProject
+      summary: "Rename (with redirect promise, G1), transfer"
+      requestBody: {content: {application/json: {schema: {type: object, properties: {name: {type: string}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Project"}}}}
+    delete:
+      tags: [projects]
+      operationId: deleteProject
+      summary: "Typed-name confirm client-side; blocked while services/envs exist unless cascade acknowledged; final backups taken (U6)"
+      responses:
+        "202": {description: Deletion started}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /projects/{project}/envs:
+    parameters: [{$ref: "#/components/parameters/project"}]
+    post:
+      tags: [projects]
+      operationId: createEnvironment
+      summary: "New environment (C8): own home region (org default = prefill), clone-shape-at-S or start empty"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: {type: string}
+                region: {type: string, description: "environment home region; instances inherit it"}
+                clone_shape_from: {type: string, description: "env_… to copy shape (not data) at small scale"}
+                data: {type: string, enum: [empty, branch], default: empty, description: "branch = cross-region branch, priced in the estimate"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Environment"}}}}
+    get:
+      tags: [projects]
+      operationId: listEnvironments
+      summary: Environments with per-env cost and parity info (M3)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EnvironmentList"}}}}
+
+  /estimates:
+    post:
+      tags: [billing]
+      operationId: createEstimate
+      summary: "Price a shape or template BEFORE anything provisions — the estimate-before-provision law. Estimate line grammar == invoice line grammar."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                env: {type: string, description: "env_… context for region/policy pricing"}
+                services: {type: array, items: {$ref: "#/components/schemas/ServiceShapeInput"}}
+                template_id: {type: string}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Estimate"}}}}
+
+  /envs/{env}/services:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    post:
+      tags: [services]
+      operationId: createService
+      summary: "Provision (C-series). Metering starts at `ready`; failed provisioning never bills and lands in the audit log with a reason (C4)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ServiceCreate"}
+      responses:
+        "201": {description: "Provisioning; status=provisioning with step timeline", content: {application/json: {schema: {$ref: "#/components/schemas/Service"}}}}
+        "402": {description: "Plan-gated product or hard quota", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [services]
+      operationId: listServices
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/ServiceList"}}}}
+
+  /services/{service}:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    get:
+      tags: [services]
+      operationId: getService
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Service"}}}}
+    patch:
+      tags: [services]
+      operationId: updateService
+      summary: "Shape/scale changes state blast radius pre-apply (D12 grammar); temporary scale overrides require reason and auto-expire 24h (D22)"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shape: {type: object, description: "product-specific; contract fields immutable where consumers depend on them"}
+                scaling: {$ref: "#/components/schemas/Scaling"}
+                override: {type: object, properties: {instances: {type: integer}, reason: {type: string}}, required: [instances, reason], description: "manual pin: warn-bordered, banner while active, 24h auto-expiry"}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Service"}}}}
+    delete:
+      tags: [services]
+      operationId: deleteService
+      summary: "Takes a final backup (restorable 30 d); 409 names dependents that will knowingly break (U6); typed-confirm client-side"
+      responses:
+        "202": {description: "Deleting; final backup recorded"}
+        "409": {description: "Dependents listed", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+
+  /services/{service}/bindings:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: createBinding
+      summary: "Bindings are wiring — $0; credentials minted at bind, rotated at unbind; effective next deploy; edge appears `pending` on topology immediately (U2/F3)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: {type: string, description: "svc_… in the same environment (cross-env requires elevated permission — policy default)"}
+                scope: {type: string, enum: [read_only, read_write], default: read_only}
+      responses:
+        "201": {description: "Created; env vars deterministic <TARGET>_URL, values masked", content: {application/json: {schema: {$ref: "#/components/schemas/Binding"}}}}
+        "409": {description: Duplicate binding, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [services]
+      operationId: listBindings
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BindingList"}}}}
+
+  /bindings/{binding}:
+    parameters: [{name: binding, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [services]
+      operationId: deleteBinding
+      summary: Unbind — rotates credentials immediately
+      responses:
+        "204": {description: Removed}
+
+  /services/{service}/domains:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: addDomain
+      summary: "Custom domain (U5): async-safe — closing the drawer never cancels verification; cert auto-issues; 60s rechecks; DNS >48h gets guidance, never expiry"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [domain], properties: {domain: {type: string, description: "FQDN; wildcard not on Free"}}}
+      responses:
+        "201": {description: Verifying, content: {application/json: {schema: {$ref: "#/components/schemas/Domain"}}}}
+    get:
+      tags: [services]
+      operationId: listDomains
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/DomainList"}}}}
+
+  /services/{service}/lifecycle-rules:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: createLifecycleRule
+      summary: "Storage lifecycle rule (U3); no immediate deletes — dry-run first is the drawer's default path"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/LifecycleRuleInput"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/LifecycleRule"}}}}
+    get:
+      tags: [services]
+      operationId: listLifecycleRules
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/LifecycleRuleList"}}}}
+
+  /services/{service}/lifecycle-rules:dryRun:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: dryRunLifecycleRule
+      summary: What this rule would touch, before it exists
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LifecycleRuleInput"}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {objects: {type: integer}, bytes: {type: integer}, monthly_savings_cents: {type: integer}}}}}}
+
+  /services/{service}/schedules:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: createSchedule
+      summary: "Cron schedule (U4) with {{date}}/{{run_id}} payload template"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleInput"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Schedule"}}}}
+    get:
+      tags: [services]
+      operationId: listSchedules
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/ScheduleList"}}}}
+
+  /schedules:preview:
+    get:
+      tags: [services]
+      operationId: previewSchedule
+      summary: "?cron= → next 3 runs in tz (U4's next-runs preview)"
+      parameters:
+        - {name: cron, in: query, required: true, schema: {type: string}}
+        - {name: tz, in: query, schema: {type: string, description: "default org tz"}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {next_runs: {type: array, items: {type: string, format: date-time}}}}}}}
+        "422": {$ref: "#/components/responses/Validation"}
+
+  /envs/{env}/deployments:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    post:
+      tags: [deploy]
+      operationId: createDeployment
+      summary: "Deploy / promote (DP1-2). Production promotion runs progressively behind health gates; auto-abort contract: error rate > 2× baseline for 2 min → traffic back in <10 s, migration stays."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                service: {type: string, description: "svc_… compute service"}
+                promote_from: {type: string, description: "dep_… in the previous environment; server computes the diff (image, config keys, migrations)"}
+                git_sha: {type: string}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Deployment"}}}}
+    get:
+      tags: [deploy]
+      operationId: listDeployments
+      summary: Immutable history — id, git sha, actor, state, annotations (DP1)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/DeploymentList"}}}}
+
+  /deployments/{dep}/rollback:
+    parameters: [{name: dep, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [deploy]
+      operationId: rollbackDeployment
+      summary: "Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)"
+      responses:
+        "201": {description: "Rollback deployment created", content: {application/json: {schema: {$ref: "#/components/schemas/Deployment"}}}}
+
+  /envs/{env}/metrics:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    get:
+      tags: [observe]
+      operationId: queryMetrics
+      summary: "?query=&from=&to= → series. Panes are copyable queries — the console holds no private metrics API. Retention: raw 15 d, downsampled 13 mo."
+      x-streamable: true
+      parameters:
+        - {name: query, in: query, required: true, schema: {type: string, description: "the shared query language (verbatim with ⌘K, CLI, alert rules)"}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: compare, in: query, schema: {type: string, enum: [previous_period], description: "renders as the dashed ghost"}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/MetricResult"}}}}
+
+  /envs/{env}/logs:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    get:
+      tags: [observe]
+      operationId: queryLogs
+      summary: "Token query bar grammar (`level:warn+ source:postgres \"duration\"`) shared verbatim with ⌘K and the CLI"
+      x-streamable: true
+      parameters:
+        - {name: query, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/LogResult"}}}}
+
+  /envs/{env}/traces/{trace}:
+    parameters: [{$ref: "#/components/parameters/env"}, {name: trace, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [observe]
+      operationId: getTrace
+      summary: "Waterfall (O6). Sampling honesty: 100% of errors and >SLO requests, 1% baseline — slow and broken are never sampled away."
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Trace"}}}}
+
+  /envs/{env}/events:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    get:
+      tags: [observe]
+      operationId: listEvents
+      summary: "The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit."
+      x-streamable: true
+      parameters:
+        - {name: kind, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EventList"}}}}
+
+  /projects/{project}/alert-rules:
+    parameters: [{$ref: "#/components/parameters/project"}]
+    post:
+      tags: [observe]
+      operationId: createAlertRule
+      summary: "Alert rule (U8). Rules speak the query language verbatim; fires into the inbox (N2); delivery is personal (P6), escalation is org policy."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AlertRuleInput"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/AlertRule"}}}}
+    get:
+      tags: [observe]
+      operationId: listAlertRules
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/AlertRuleList"}}}}
+
+  /alert-rules:backtest:
+    post:
+      tags: [observe]
+      operationId: backtestAlertRule
+      summary: "7-day backtest — how you tune a threshold without a week of false pages (U8; must reproduce the 431 ms canon firing)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query, condition, window]
+              properties:
+                query: {type: string}
+                condition: {$ref: "#/components/schemas/AlertCondition"}
+                window: {type: string, enum: [1m, 5m, 15m]}
+                days: {type: integer, default: 7}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {firings: {type: array, items: {type: object, properties: {at: {type: string, format: date-time}, value: {type: number}, duration_s: {type: integer}}}}}}}}}
+
+  /orgs/{org}/dashboards:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [observe]
+      operationId: createDashboard
+      summary: "Create (DB8): scope (org|project) ⊥ visibility (personal|org|restricted); project-scoped = born filtered + project permissions"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scope, visibility]
+              properties:
+                name: {type: string}
+                scope: {type: string, description: "\"org\" or \"project:prj_…\""}
+                visibility: {$ref: "#/components/schemas/Visibility"}
+                start_from: {type: string, description: "blank | template:dsh_tpl | duplicate:dsh_…"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Dashboard"}}}}
+    get:
+      tags: [observe]
+      operationId: listDashboards
+      summary: "Pre-built are generated views, never files; org-wide dashboards render only viewer-accessible projects and say so"
+      parameters: [{name: scope, in: query, schema: {type: string}}]
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/DashboardList"}}}}
+
+  /dashboards/{dash}:
+    parameters: [{name: dash, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [observe]
+      operationId: getDashboard
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Dashboard"}}}}
+    patch:
+      tags: [observe]
+      operationId: updateDashboard
+      summary: "Layout, rename, visibility. Editing a shared dashboard is live for all viewers and audited (F7)."
+      requestBody: {content: {application/json: {schema: {type: object, properties: {name: {type: string}, visibility: {$ref: "#/components/schemas/Visibility"}, layout: {type: object}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Dashboard"}}}}
+    delete:
+      tags: [observe]
+      operationId: deleteDashboard
+      responses:
+        "204": {description: Deleted}
+
+  /dashboards/{dash}/widgets:
+    parameters: [{name: dash, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [observe]
+      operationId: addWidget
+      summary: "Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/WidgetInput"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Widget"}}}}
+
+  /orgs/{org}/templates:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [governance]
+      operationId: captureTemplate
+      summary: "Save-as-template (T3). Server strips ALL secret material (checked at write); bindings to excluded services become required_inputs[]; instantiation estimate carried from birth."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, source, services]
+              properties:
+                name: {type: string}
+                visibility: {type: string, enum: [org, restricted], default: org}
+                source: {type: object, required: [project, env], properties: {project: {type: string}, env: {type: string}}}
+                services: {type: array, items: {type: string}, description: "subset of svc_… to capture"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Template"}}}}
+    get:
+      tags: [governance]
+      operationId: listTemplates
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TemplateList"}}}}
+
+  /templates/{tpl}:
+    parameters: [{name: tpl, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [governance]
+      operationId: getTemplate
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Template"}}}}
+    patch:
+      tags: [governance]
+      operationId: updateTemplate
+      summary: "Edit contents/visibility — never touches anything created from it (frozen-copy semantics)"
+      requestBody: {content: {application/json: {schema: {type: object, properties: {name: {type: string}, visibility: {type: string, enum: [org, restricted]}, contents: {type: object}}}}}}
+      responses:
+        "200": {description: "OK; version incremented", content: {application/json: {schema: {$ref: "#/components/schemas/Template"}}}}
+    delete:
+      tags: [governance]
+      operationId: deleteTemplate
+      summary: "\"A template instantiates copies, never links; deleting the recipe doesn't touch the meals\" (T1)"
+      responses:
+        "204": {description: Deleted}
+
+  /templates/{tpl}/refresh:
+    parameters: [{name: tpl, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [governance]
+      operationId: refreshTemplate
+      summary: Refresh-from-source → new version (T2)
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Template"}}}}
+
+  /orgs/{org}/policies:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [governance]
+      operationId: createPolicy
+      summary: "Policy (G9): structured rule, warn-first default posture, promote-to-enforce date; dry-run via ?dry_run=true returns impact preview instead of creating"
+      parameters: [{name: dry_run, in: query, schema: {type: boolean, default: false}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PolicyInput"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+        "200": {description: "Dry-run impact preview (preview before enforce)", content: {application/json: {schema: {$ref: "#/components/schemas/PolicyImpact"}}}}
+        "409": {description: "Conflicts as a checklist with fixes (G11), never a wall of red", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [governance]
+      operationId: listPolicies
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/PolicyList"}}}}
+
+  /policies/{policy}:
+    parameters: [{name: policy, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [governance]
+      operationId: getPolicy
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+    patch:
+      tags: [governance]
+      operationId: updatePolicy
+      summary: "Versioned; one-click audited revert; incl. the ai-assistant policy (AI3: enabled|opt_in|disabled — disable hides all AI surfaces, deletes nothing)"
+      requestBody: {content: {application/json: {schema: {type: object, properties: {enforcement: {$ref: "#/components/schemas/Enforcement"}, config: {type: object}, enforce_from: {type: string, format: date-time}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+
+  /orgs/{org}/cells:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [governance]
+      operationId: connectCell
+      summary: "BYOC connect (X2): prerequisites validated before provisioning; external-ID-guarded assume-role; no static keys leave the account. Business+; per-cell control-plane fee."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, provider, region]
+              properties:
+                name: {type: string}
+                provider: {type: string, enum: [aws, gcp, azure]}
+                region: {type: string}
+                account_ref: {type: string, description: "customer account/project id"}
+      responses:
+        "201": {description: "Connecting; stepper state in status", content: {application/json: {schema: {$ref: "#/components/schemas/Cell"}}}}
+        "402": {description: Business+ required, content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    get:
+      tags: [governance]
+      operationId: listCells
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/CellList"}}}}
+
+  /orgs/{org}/audit:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [governance]
+      operationId: listAuditEvents
+      summary: "Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`."
+      parameters:
+        - {name: actor, in: query, schema: {type: string}}
+        - {name: action, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EventList"}}}}
+
+  /me/tokens:
+    post:
+      tags: [account]
+      operationId: createPersonalToken
+      summary: "Personal token (P5/U7): acts as YOU, carries your roles and shrinks the moment they do; plaintext returned exactly once, only hash stored"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TokenInput"}
+      responses:
+        "201": {description: "Reveal-once", content: {application/json: {schema: {$ref: "#/components/schemas/TokenCreated"}}}}
+    get:
+      tags: [account]
+      operationId: listPersonalTokens
+      summary: Returns prefix + metadata only — never the secret
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TokenList"}}}}
+
+  /me/tokens/{tok}:
+    parameters: [{name: tok, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [account]
+      operationId: revokePersonalToken
+      responses:
+        "204": {description: Revoked immediately}
+
+  /orgs/{org}/api-keys:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [governance]
+      operationId: createApiKey
+      summary: "Org automation keys (G8): explicit least-privilege scopes; same reveal-once/hash contract; stale keys flagged for hygiene"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TokenInput"}
+      responses:
+        "201": {description: Reveal-once, content: {application/json: {schema: {$ref: "#/components/schemas/TokenCreated"}}}}
+    get:
+      tags: [governance]
+      operationId: listApiKeys
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TokenList"}}}}
+
+  /orgs/{org}/billing/overview:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: getBillingOverview
+      summary: "One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere."
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BillingOverview"}}}}
+
+  /orgs/{org}/billing/usage:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: getUsage
+      summary: "The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`."
+      parameters:
+        - {name: month, in: query, schema: {type: string, description: "YYYY-MM"}}
+        - {name: project, in: query, schema: {type: string}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/UsageReport"}}}}
+
+  /orgs/{org}/billing/quotas:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: getQuotas
+      summary: "Soft quotas keep working and bill; hard quotas fail loudly — both warned at 80% with the math (banner + bell + email, B8)"
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: "#/components/schemas/Quota"}}}}}}}
+
+  /orgs/{org}/billing/invoices:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: listInvoices
+      summary: "An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever"
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/InvoiceList"}}}}
+
+  /orgs/{org}/subscription:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: getSubscription
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Subscription"}}}}
+    post:
+      tags: [billing]
+      operationId: changePlan
+      summary: "Upgrades immediate + prorated; downgrades at anchor, 409 with ALL blocking reasons verbatim (B4: '12 members > Free's 3 — the button says why')"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [plan], properties: {plan: {$ref: "#/components/schemas/Plan"}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Subscription"}}}}
+        "409": {description: "Blocking reasons[], each with remediation", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+    delete:
+      tags: [billing]
+      operationId: cancelSubscription
+      summary: "Cancel at anchor. Plan ≠ resources: services keep running and metering (B12). Response echoes the wind-down contract."
+      requestBody: {content: {application/json: {schema: {type: object, properties: {reason_code: {type: string}}}}}}
+      responses:
+        "200": {description: "Cancelled at anchor; wind-down contract echoed", content: {application/json: {schema: {$ref: "#/components/schemas/Subscription"}}}}
+
+  /orgs/{org}/payment-methods:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [billing]
+      operationId: addPaymentMethod
+      summary: "Processor-tokenized; backup-card-before-dunning encouraged (B4)"
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [processor_token], properties: {processor_token: {type: string}, backup: {type: boolean, default: false}}}}}}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/PaymentMethod"}}}}
+    get:
+      tags: [billing]
+      operationId: listPaymentMethods
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: "#/components/schemas/PaymentMethod"}}}}}}}
+
+  /assistant/threads:
+    post:
+      tags: [assistant]
+      operationId: createThread
+      summary: "New conversation, scoped to current context; drawer and workspace share the thread (AI2/AI4)"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                context: {type: object, properties: {org: {type: string}, project: {type: string}, env: {type: string}, page: {type: string}, entity: {type: string}}}
+                attached_insight: {type: string, description: "ins_… — seeds the thread with that insight's evidence (AI9)"}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Thread"}}}}
+        "404": {description: "Returned as empty-equivalent when ai-assistant policy is disabled (Law 4)"}
+    get:
+      tags: [assistant]
+      operationId: listThreads
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: "#/components/schemas/Thread"}}, next_cursor: {type: string}}}}}}
+
+  /assistant/threads/{thread}/messages:
+    parameters: [{name: thread, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [assistant]
+      operationId: postMessage
+      summary: "Answers cite evidence refs for every claim (Law 2); retrieval scoped to the VIEWER's RBAC (Law 3); answers without citable evidence say so"
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [content], properties: {content: {type: string}}}}}}
+      responses:
+        "201": {description: "Assistant reply", content: {application/json: {schema: {$ref: "#/components/schemas/Message"}}}}
+
+  /assistant/insights:
+    get:
+      tags: [assistant]
+      operationId: listInsights
+      summary: "The inbox (AI10): ranked by impact/severity; each insight's evidence re-checked against viewer scope at read time; durable ledger — applied/dismissed persist with state"
+      parameters:
+        - {name: category, in: query, schema: {type: string, enum: [reliability, performance, cost, security]}}
+        - {name: status, in: query, schema: {type: string, enum: [open, applied, dismissed, snoozed]}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {data: {type: array, items: {$ref: "#/components/schemas/Insight"}}, next_cursor: {type: string}}}}}}
+
+  /assistant/insights/{ins}:
+    parameters: [{name: ins, in: path, required: true, schema: {type: string}}]
+    patch:
+      tags: [assistant]
+      operationId: updateInsight
+      summary: "Snooze or dismiss; dismissal requires a reason and is logged"
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [status], properties: {status: {type: string, enum: [snoozed, dismissed]}, reason: {type: string}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Insight"}}}}
+
+  /assistant/proposals/{prp}:
+    parameters: [{name: prp, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [assistant]
+      operationId: getProposal
+      summary: "The proposal object (W10 grammar) — render in order: evidence[] → reasoning → proposed_change → impact → human-only Apply"
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Proposal"}}}}
+    post:
+      tags: [assistant]
+      operationId: applyProposal
+      summary: "Apply — a NORMAL human-session API call: requires the caller's own permission for the underlying change (two-layer RBAC evaluation), audited as `applied as <user>, via assistant`. No auto-apply path exists (Law 1). Failed applies never auto-reapply."
+      responses:
+        "200": {description: "Applied; audit event id returned", content: {application/json: {schema: {$ref: "#/components/schemas/Proposal"}}}}
+        "403": {description: "Caller lacks the underlying permission — the assistant cannot lend permissions", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: "Personal token (stp_…) or org API key. Tokens act as their user and shrink with role changes."
+  parameters:
+    org: {name: org, in: path, required: true, schema: {type: string}, description: "org_… or slug"}
+    project: {name: project, in: path, required: true, schema: {type: string}}
+    env: {name: env, in: path, required: true, schema: {type: string}}
+    service: {name: service, in: path, required: true, schema: {type: string}}
+  responses:
+    Conflict:
+      description: Conflict with blocking reasons
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Validation:
+      description: Field validation errors (inline under field)
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Problem:
+      type: object
+      description: "RFC 9457 problem+json. remediation is REQUIRED product-wide: every error names a next step."
+      required: [type, title, status, detail, remediation]
+      properties:
+        type: {type: string, description: "URI slug from x-error-catalog, e.g. https://api.steloit.app/problems/quota-exceeded"}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string, description: "for 403: names the missing role or denying policy (E3 grammar)"}
+        remediation: {type: string}
+        reasons: {type: array, items: {type: object, properties: {code: {type: string}, message: {type: string}, remediation: {type: string}}}, description: "409: ALL blockers, not just the first"}
+        errors: {type: array, items: {type: object, properties: {field: {type: string}, message: {type: string}}}, description: "422 field errors"}
+        required_plan: {$ref: "#/components/schemas/Plan"}
+        overage_price_cents: {type: integer, description: "402 soft-quota: the math, in the open"}
+        event_id: {type: string, description: "5xx: incident reference shown in mono"}
+    Role: {type: string, enum: [owner, admin, developer, billing]}
+    Plan: {type: string, enum: [free, pro, business, enterprise]}
+    Visibility: {type: string, enum: [personal, org, restricted]}
+    Enforcement: {type: string, enum: [enabled, opt_in, disabled, warn, enforce], description: "ai-assistant uses enabled|opt_in|disabled; rule policies use warn|enforce (warn-first default posture)"}
+    ServiceStatus:
+      type: string
+      enum: [provisioning, ready, degraded, failed, suspended, deleting]
+      description: "The one status vocabulary (spec §1.2): ✓ ◌ ! ✕ ○ · — metering starts at ready"
+    Product: {type: string, enum: [postgres, valkey, storage, queue, web, worker, gpu-worker, ai-gateway]}
+    Org:
+      type: object
+      required: [id, slug, name, home_region, plan, created_at]
+      properties:
+        id: {type: string}
+        slug: {type: string, description: immutable}
+        name: {type: string}
+        home_region: {type: string}
+        plan: {$ref: "#/components/schemas/Plan"}
+        created_at: {type: string, format: date-time}
+    OrgList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Org"}}
+        next_cursor: {type: [string, "null"]}
+    Member:
+      type: object
+      required: [id, user_id, email, role]
+      properties:
+        id: {type: string}
+        user_id: {type: string}
+        email: {type: string}
+        name: {type: string}
+        role: {$ref: "#/components/schemas/Role"}
+        mfa_enabled: {type: boolean}
+        joined_at: {type: string, format: date-time}
+    MemberList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Member"}}
+        next_cursor: {type: [string, "null"]}
+        seats: {type: object, properties: {included: {type: integer}, used: {type: integer}, overage_price_cents: {type: integer}}}
+    Invite:
+      type: object
+      required: [id, email, role, status, expires_at]
+      properties:
+        id: {type: string}
+        email: {type: string}
+        role: {$ref: "#/components/schemas/Role"}
+        status: {type: string, enum: [pending, accepted, declined, expired, revoked]}
+        expires_at: {type: string, format: date-time}
+        inviter_id: {type: string}
+    InviteList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Invite"}}
+        next_cursor: {type: [string, "null"]}
+    InvitePublic:
+      type: object
+      properties:
+        inviter_name: {type: string}
+        org_name: {type: string}
+        role: {$ref: "#/components/schemas/Role"}
+        role_consequences: {type: array, items: {type: string}, description: "what this role can and can't do — shown before accepting (A6)"}
+        email_hint: {type: string, description: "masked"}
+        status: {type: string}
+    Project:
+      type: object
+      required: [id, org_id, name]
+      properties:
+        id: {type: string}
+        org_id: {type: string}
+        name: {type: string}
+        health: {type: string, enum: [ok, warn, err]}
+        monthly_cost_cents: {type: integer, description: "the SAME number every surface shows"}
+        env_count: {type: integer}
+        last_deployment: {type: object, properties: {id: {type: string}, at: {type: string, format: date-time}}}
+        created_at: {type: string, format: date-time}
+    ProjectList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Project"}}
+        next_cursor: {type: [string, "null"]}
+    Environment:
+      type: object
+      required: [id, project_id, name, region]
+      properties:
+        id: {type: string}
+        project_id: {type: string}
+        name: {type: string}
+        region: {type: string, description: "home region; instances inherit; override is an explicit exception (C7)"}
+        kind: {type: string, enum: [standard, preview]}
+        monthly_cost_cents: {type: integer}
+        policy_flags: {type: array, items: {type: string}, description: "e.g. preview-minimal, branch-data-masking"}
+        expires_at: {type: [string, "null"], format: date-time, description: "previews: expired by policy"}
+    EnvironmentList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Environment"}}
+        next_cursor: {type: [string, "null"]}
+    ServiceShapeInput:
+      type: object
+      required: [product]
+      properties:
+        product: {$ref: "#/components/schemas/Product"}
+        name: {type: string}
+        shape: {type: object, description: "product-specific type block (C2/C3/C9–C12): version, size, memory, mode, HA…"}
+    ServiceCreate:
+      allOf:
+        - {$ref: "#/components/schemas/ServiceShapeInput"}
+        - type: object
+          required: [name, estimate_id]
+          properties:
+            estimate_id: {type: string, description: "the accepted estimate — nothing provisions without one (F2)"}
+            bindings: {type: array, items: {type: object, properties: {target: {type: string}, scope: {type: string, enum: [read_only, read_write]}}}, description: "pre-wired at create; issued · activates at ready (C4/D11)"}
+    Service:
+      type: object
+      required: [id, env_id, name, product, status]
+      properties:
+        id: {type: string}
+        env_id: {type: string}
+        name: {type: string, description: "unique within env"}
+        product: {$ref: "#/components/schemas/Product"}
+        status: {$ref: "#/components/schemas/ServiceStatus"}
+        shape: {type: object}
+        region: {type: string, description: "provider-faceted; ≠ env home only via the C7 exception"}
+        monthly_estimate_cents: {type: integer}
+        provisioning_steps:
+          type: array
+          description: "C4 timeline: allocate → configure → network/credentials → first backup → ready"
+          items: {type: object, properties: {step: {type: string}, status: {type: string, enum: [pending, active, done, failed]}}}
+        created_at: {type: string, format: date-time}
+    ServiceList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Service"}}
+        next_cursor: {type: [string, "null"]}
+    Scaling:
+      type: object
+      description: "D22: mode + range; changing range never restarts; changing SIZE does (and lives in shape)"
+      properties:
+        mode: {type: string, enum: [fixed, autoscale, scale_to_zero]}
+        floor: {type: integer}
+        ceiling: {type: integer}
+        signals: {type: array, items: {type: string, enum: [cpu, rps, p95]}}
+    Binding:
+      type: object
+      required: [id, source_id, target_id, scope, status]
+      properties:
+        id: {type: string}
+        source_id: {type: string}
+        target_id: {type: string}
+        scope: {type: string, enum: [read_only, read_write]}
+        status: {type: string, enum: [pending, active, revoked], description: "pending until next deploy"}
+        env_vars: {type: object, additionalProperties: {type: string}, description: "deterministic <TARGET>_URL; values always masked in reads"}
+        rotated_at: {type: string, format: date-time}
+    BindingList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Binding"}}
+        next_cursor: {type: [string, "null"]}
+    DnsRecord:
+      type: object
+      properties:
+        type: {type: string, enum: [CNAME, TXT]}
+        name: {type: string}
+        value: {type: string}
+        verified: {type: boolean}
+    Domain:
+      type: object
+      required: [id, domain, status]
+      properties:
+        id: {type: string}
+        domain: {type: string}
+        status: {type: string, enum: [verifying, issued, failed]}
+        records: {type: array, items: {$ref: "#/components/schemas/DnsRecord"}}
+        cert_expires_at: {type: [string, "null"], format: date-time, description: "cert auto-renews; TLS never optional, never plan-gated (F5)"}
+    DomainList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Domain"}}
+        next_cursor: {type: [string, "null"]}
+    LifecycleRuleInput:
+      type: object
+      required: [prefix, action]
+      properties:
+        prefix: {type: string}
+        action: {type: string, enum: [expire, tier_cold]}
+        after_days: {type: integer, minimum: 1, default: 7}
+    LifecycleRule:
+      allOf:
+        - {$ref: "#/components/schemas/LifecycleRuleInput"}
+        - type: object
+          required: [id]
+          properties:
+            id: {type: string}
+            created_at: {type: string, format: date-time}
+    LifecycleRuleList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/LifecycleRule"}}
+        next_cursor: {type: [string, "null"]}
+    ScheduleInput:
+      type: object
+      required: [name, cron]
+      properties:
+        name: {type: string, description: slug}
+        cron: {type: string, description: 5-field}
+        payload_template: {type: object, description: "JSON; {{date}} and {{run_id}} allowed (D17)"}
+        tz: {type: string, description: "default org tz"}
+    Schedule:
+      allOf:
+        - {$ref: "#/components/schemas/ScheduleInput"}
+        - type: object
+          required: [id]
+          properties:
+            id: {type: string}
+            next_runs: {type: array, items: {type: string, format: date-time}}
+    ScheduleList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Schedule"}}
+        next_cursor: {type: [string, "null"]}
+    Deployment:
+      type: object
+      required: [id, env_id, service_id, state, actor]
+      properties:
+        id: {type: string}
+        number: {type: integer, description: "the #142 in every marker"}
+        env_id: {type: string}
+        service_id: {type: string}
+        git_sha: {type: string}
+        state: {type: string, enum: [queued, building, migrating, canary, verifying, live, failed, rolled_back, aborted]}
+        actor: {type: string, description: "human, token, or `user via assistant`"}
+        canary_percent: {type: [integer, "null"]}
+        gates:
+          type: array
+          items: {type: object, properties: {name: {type: string}, status: {type: string, enum: [waiting, passing, failed]}, detail: {type: string}}}
+        migrations: {type: array, items: {type: object, properties: {id: {type: string}, reversible: {type: boolean}, reverse: {type: string}}}}
+        annotation: {type: [string, "null"], description: "e.g. `p95 alert followed · evt_9d21c4` (DP1)"}
+        created_at: {type: string, format: date-time}
+    DeploymentList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Deployment"}}
+        next_cursor: {type: [string, "null"]}
+    MetricResult:
+      type: object
+      properties:
+        query: {type: string}
+        resolution: {type: string}
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              label: {type: string}
+              points: {type: array, items: {type: array, prefixItems: [{type: string, format: date-time}, {type: number}]}}
+        markers:
+          type: array
+          description: "the shared incident timeline: ◆ deploy · ◇ scale · ⬖ policy — same markers on every chart"
+          items: {type: object, properties: {kind: {type: string, enum: [deploy, scale, policy, alert]}, at: {type: string, format: date-time}, ref: {type: string}, label: {type: string}}}
+    LogEntry:
+      type: object
+      properties:
+        at: {type: string, format: date-time}
+        level: {type: string, enum: [debug, info, warn, error]}
+        source: {type: string, description: "svc name"}
+        message: {type: string}
+        fields: {type: object, description: "structured row expansion (O3)"}
+        trace_id: {type: [string, "null"], description: "stitches api → jobs → db in one stream"}
+    LogResult:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/LogEntry"}}
+        next_cursor: {type: [string, "null"]}
+        histogram: {type: array, items: {type: object, properties: {at: {type: string, format: date-time}, counts: {type: object, additionalProperties: {type: integer}}}}}
+        facets: {type: object, description: "computed on the filtered window: level, source, top patterns"}
+        total_matches: {type: integer}
+    Trace:
+      type: object
+      properties:
+        id: {type: string}
+        duration_ms: {type: number}
+        spans:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              parent_id: {type: [string, "null"]}
+              service: {type: string}
+              name: {type: string}
+              start_ms: {type: number}
+              duration_ms: {type: number}
+              attrs: {type: object}
+    Event:
+      type: object
+      required: [id, kind, at, actor]
+      properties:
+        id: {type: string}
+        kind: {type: string, description: "deploy | scale | alert_state | policy_trigger | lifecycle | membership | billing | …"}
+        at: {type: string, format: date-time}
+        actor: {type: string}
+        via: {type: string, enum: [user, assistant, system]}
+        action: {type: string}
+        subject: {type: string, description: "the xxx_ id acted on"}
+        detail: {type: object}
+    EventList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Event"}}
+        next_cursor: {type: [string, "null"]}
+    AlertCondition:
+      type: object
+      required: [op, value]
+      properties:
+        op: {type: string, enum: [">", "<", ">=", "<="]}
+        value: {type: number}
+        unit: {type: string}
+    AlertRuleInput:
+      type: object
+      required: [query, condition, window]
+      properties:
+        name: {type: string, description: "auto from query, editable"}
+        query: {type: string, description: "the shared query language, verbatim"}
+        condition: {$ref: "#/components/schemas/AlertCondition"}
+        window: {type: string, enum: [1m, 5m, 15m]}
+        routes: {type: array, items: {type: string, enum: [bell, email, webhook]}}
+    AlertRule:
+      allOf:
+        - {$ref: "#/components/schemas/AlertRuleInput"}
+        - type: object
+          required: [id, state]
+          properties:
+            id: {type: string}
+            state: {type: string, enum: [ok, watching, firing, fired, silenced]}
+            burn_rate: {type: [number, "null"]}
+    AlertRuleList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/AlertRule"}}
+        next_cursor: {type: [string, "null"]}
+    WidgetInput:
+      type: object
+      required: [source, query, viz]
+      properties:
+        source: {type: string, enum: [metrics, logs, cost, deploys, ai, alerts]}
+        query: {type: string}
+        viz: {type: string, enum: [line, area, stat, table, list]}
+        pos: {type: object, properties: {x: {type: integer}, y: {type: integer}, w: {type: integer}, h: {type: integer}}}
+    Widget:
+      allOf:
+        - {$ref: "#/components/schemas/WidgetInput"}
+        - type: object
+          required: [id]
+          properties:
+            id: {type: string}
+    Dashboard:
+      type: object
+      required: [id, name, scope, visibility]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        scope: {type: string, description: "\"org\" or \"project:prj_…\" — orthogonal to visibility"}
+        visibility: {$ref: "#/components/schemas/Visibility"}
+        prebuilt: {type: boolean, description: "generated views, always current, fork-to-customize"}
+        owner_id: {type: string}
+        widgets: {type: array, items: {$ref: "#/components/schemas/Widget"}}
+        layout: {type: object}
+    DashboardList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Dashboard"}}
+        next_cursor: {type: [string, "null"]}
+    Template:
+      type: object
+      required: [id, name, visibility, version]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        visibility: {type: string, enum: [org, restricted]}
+        version: {type: integer}
+        source: {type: object, properties: {project: {type: string}, env: {type: string}}, description: "provenance: saved from ecommerce/production · v4"}
+        contents: {type: object, description: "NEVER contains secret material — checked at write"}
+        required_inputs: {type: array, items: {type: object, properties: {name: {type: string}, description: {type: string}}}, description: "bindings to excluded services, surfaced never silently dropped"}
+        monthly_estimate_cents: {type: integer, description: "instantiation price, carried from birth (T3)"}
+        used_by_count: {type: integer, description: informational — copies never link}
+        updated_by: {type: string}
+        updated_at: {type: string, format: date-time}
+    TemplateList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Template"}}
+        next_cursor: {type: [string, "null"]}
+    PolicyInput:
+      type: object
+      required: [key, rule]
+      properties:
+        key: {type: string, description: "e.g. allowed-regions, mfa-required, ai-assistant, branch-data-masking, compute-ceiling, preview-minimal"}
+        description: {type: string}
+        scope: {type: object, properties: {project_id: {type: [string, "null"], description: "null = org-level"}}}
+        rule: {type: object, description: "structured so the platform can evaluate it, not prose so nobody can interpret it (G9)"}
+        enforcement: {$ref: "#/components/schemas/Enforcement"}
+        enforce_from: {type: [string, "null"], format: date-time, description: "warn-first: public promote-to-enforce date"}
+    Policy:
+      allOf:
+        - {$ref: "#/components/schemas/PolicyInput"}
+        - type: object
+          required: [id, version]
+          properties:
+            id: {type: string}
+            version: {type: integer}
+            last_change_event: {type: string, description: "evt_… — every row carries its audit ref (G7)"}
+            violation_count_30d: {type: integer, description: "warn-mode telemetry that makes promote-to-enforce a data-backed click (G12)"}
+    PolicyList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Policy"}}
+        next_cursor: {type: [string, "null"]}
+    PolicyImpact:
+      type: object
+      description: "preview before enforce — the governance analog of estimate before provision"
+      properties:
+        affected: {type: array, items: {type: object, properties: {id: {type: string}, name: {type: string}, effect: {type: string}}}}
+        conflicts: {type: array, items: {type: object, properties: {with_policy: {type: string}, detail: {type: string}, resolutions: {type: array, items: {type: string}}}}}
+        members_affected: {type: integer}
+    Cell:
+      type: object
+      required: [id, name, provider, region, status]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        provider: {type: string}
+        region: {type: string}
+        status: {type: string, enum: [connecting, healthy, degraded, upgrade_available]}
+        environments_deployed: {type: integer}
+        agent_version: {type: string}
+        last_heartbeat_at: {type: string, format: date-time}
+    CellList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Cell"}}
+        next_cursor: {type: [string, "null"]}
+    TokenInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        scope: {type: string, enum: [full, read_only], default: read_only}
+        expires_in_days: {type: integer, enum: [30, 60, 90, 365], default: 90}
+    TokenCreated:
+      type: object
+      required: [id, token, shown_once, prefix, hash_stored]
+      properties:
+        id: {type: string}
+        token: {type: string, description: "stp_… — THE ONLY TIME the plaintext exists in a response"}
+        shown_once: {type: boolean, const: true}
+        prefix: {type: string}
+        hash_stored: {type: boolean, const: true}
+        expires_at: {type: string, format: date-time}
+    Token:
+      type: object
+      required: [id, name, prefix, scope]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        prefix: {type: string}
+        scope: {type: string, enum: [full, read_only]}
+        last_used_at: {type: [string, "null"], format: date-time}
+        expires_at: {type: string, format: date-time}
+    TokenList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Token"}}
+        next_cursor: {type: [string, "null"]}
+    Estimate:
+      type: object
+      required: [id, monthly_total_cents, lines]
+      properties:
+        id: {type: string, description: "est_… — passed to createService as acceptance proof"}
+        monthly_total_cents: {type: integer}
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              name: {type: string}
+              product: {$ref: "#/components/schemas/Product"}
+              monthly_cents: {type: integer}
+              basis: {type: string, description: "fixed | usage_projection ($0 if unused, labeled a projection)"}
+              egress_note: {type: [string, "null"], description: "cross-region: egress priced here, never a billing surprise (C7)"}
+        expires_at: {type: string, format: date-time}
+    BillingOverview:
+      type: object
+      properties:
+        mtd_cents: {type: integer}
+        forecast_cents: {type: integer}
+        forecast_margin_cents: {type: integer}
+        budget: {type: object, properties: {limit_cents: {type: integer}, used_percent: {type: number}, alert_thresholds: {type: array, items: {type: integer}}}}
+        plan_fee_cents: {type: integer}
+        resources_cents: {type: integer}
+        by_project:
+          type: array
+          description: "reconciles exactly: resources + plan = org total, the same numbers the sidebars show"
+          items: {type: object, properties: {project_id: {type: string}, name: {type: string}, mtd_cents: {type: integer}, forecast_cents: {type: integer}}}
+        last_invoice: {type: object, properties: {id: {type: string}, status: {type: string}, total_cents: {type: integer}}}
+        change_feed: {type: array, items: {type: object, properties: {at: {type: string, format: date-time}, delta_cents: {type: integer}, cause: {type: string}, event_id: {type: string}}}}
+    UsageReport:
+      type: object
+      properties:
+        month: {type: string}
+        meters:
+          type: array
+          items:
+            type: object
+            properties:
+              meter: {type: string, description: "events | ai_requests | egress_gb | build_minutes | seats | per-service resource meters"}
+              included: {type: number}
+              used: {type: number}
+              overage_price: {type: string, description: "printed HERE, not discovered on the invoice"}
+              overage_cents: {type: integer}
+              detail: {type: array, items: {type: object}, description: "expandable rows, e.g. scale-to-zero honesty: billed only while awake — 21h · $1.22"}
+        updated_at: {type: string, format: date-time, description: "~5 min lag"}
+    Quota:
+      type: object
+      required: [name, type, included, used]
+      properties:
+        name: {type: string}
+        type: {type: string, enum: [soft, hard], description: "soft keeps working and bills; hard fails loudly (429/402 with reason); BOTH warn at 80% with the math"}
+        included: {type: number}
+        used: {type: number}
+        price_beyond: {type: [string, "null"]}
+        at_limit: {type: string, description: "what actually happens: bills | queues with reason | 429 + Retry-After"}
+    Invoice:
+      type: object
+      required: [id, period, status, total_cents]
+      properties:
+        id: {type: string}
+        period: {type: string}
+        status: {type: string, enum: [accruing, open, paid, failed, disputed]}
+        total_cents: {type: integer}
+        tax: {type: object, properties: {kind: {type: string, description: "e.g. GST 18%"}, id: {type: string, description: GSTIN}, cents: {type: integer}}}
+        lines:
+          type: array
+          items: {type: object, properties: {description: {type: string}, project_id: {type: [string, "null"]}, cents: {type: integer}, usage_ref: {type: string, description: "expands to the B2 rows behind it, queryable forever"}}}
+        formats: {type: array, items: {type: string, enum: [pdf, csv, json]}, description: "an invoice is data, not just a PDF"}
+    InvoiceList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Invoice"}}
+        next_cursor: {type: [string, "null"]}
+    Subscription:
+      type: object
+      required: [plan, status, anchor_day]
+      properties:
+        plan: {$ref: "#/components/schemas/Plan"}
+        status: {type: string, enum: [current, trial, grace, provisioning_paused, suspended, cancelled_at_anchor]}
+        anchor_day: {type: integer}
+        trial_ends_at: {type: [string, "null"], format: date-time}
+        dunning:
+          type: object
+          description: "the contract printed up front (B4): day 0–7 retries+notify · 7–21 banner+provisioning paused, running services untouched · 21+ suspend state-kept · no data deleted for billing reasons within 90 days"
+          properties:
+            state: {type: string, enum: [current, grace, provisioning_paused, suspended]}
+            day: {type: [integer, "null"]}
+            next_retry_at: {type: [string, "null"], format: date-time}
+        wind_down: {type: [object, "null"], description: "on cancel: what stops vs what keeps running and metering", properties: {plan_ends_at: {type: string, format: date-time}, resources_unaffected: {type: boolean, const: true}}}
+    PaymentMethod:
+      type: object
+      required: [id, brand, last4]
+      properties:
+        id: {type: string}
+        brand: {type: string}
+        last4: {type: string}
+        backup: {type: boolean}
+        expires: {type: string}
+    Thread:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        context: {type: object, description: "the scope chip: org/project/env/page/entity"}
+        attached_insight: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    Message:
+      type: object
+      required: [id, role, content]
+      properties:
+        id: {type: string}
+        role: {type: string, enum: [user, assistant]}
+        content: {type: string}
+        evidence: {type: array, items: {$ref: "#/components/schemas/Evidence"}, description: "Law 2: every claim cites; the context rail renders these"}
+        proposal_id: {type: [string, "null"], description: "when the conversation produced one"}
+        created_at: {type: string, format: date-time}
+    Evidence:
+      type: object
+      required: [kind, ref]
+      properties:
+        kind: {type: string, enum: [metric, trace, log, query_plan, config, cost, schema, event]}
+        ref: {type: string, description: "the citable id: tr_8814, evt_9d21c4, a metric query…"}
+        excerpt: {type: string, description: "rendered in the logwell, mono"}
+    Insight:
+      type: object
+      required: [id, severity, category, status, evidence]
+      properties:
+        id: {type: string}
+        service_id: {type: [string, "null"]}
+        category: {type: string, enum: [reliability, performance, cost, security]}
+        severity: {type: string, enum: [low, medium, high]}
+        title: {type: string}
+        status: {type: string, enum: [open, applied, dismissed, snoozed]}
+        evidence: {type: array, items: {$ref: "#/components/schemas/Evidence"}}
+        impact_summary: {type: string}
+        proposal_id: {type: [string, "null"]}
+        resolution: {type: [string, "null"], description: "e.g. `applied via #143`; dismissals keep their logged reason"}
+    Proposal:
+      type: object
+      required: [id, evidence, reasoning, proposed_change, impact, status]
+      description: "One platform-wide proposal-artifact schema; teams CANNOT ship AI features outside it (spec §6). Render in order: evidence → reasoning → proposed_change → impact → human-only Apply."
+      properties:
+        id: {type: string}
+        insight_id: {type: [string, "null"]}
+        evidence: {type: array, items: {$ref: "#/components/schemas/Evidence"}}
+        reasoning: {type: string}
+        proposed_change: {type: object, properties: {kind: {type: string, enum: [migration, config, lifecycle_rule, scaling, deploy_fix]}, diff: {type: string, description: "mono diff block"}, apply_path: {type: string, description: "e.g. `preview branch first` (W10) or `via Settings` (AI6)"}}}
+        impact: {type: object, properties: {cost_delta_cents: {type: integer}, risk: {type: string}, blast_radius: {type: string}}}
+        status: {type: string, enum: [open, applied, dismissed, snoozed]}
+        applied_by: {type: [string, "null"], description: "audited as `applied as <user>, via assistant`"}
+        applied_event_id: {type: [string, "null"]}

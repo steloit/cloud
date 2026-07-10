@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Steloit Console</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // No-flash theme boot: dark is the default (:root); light is a class swap.
+      try {
+        const raw = localStorage.getItem("steloit-ui");
+        if (raw && JSON.parse(raw).state.theme === "light") {
+          document.documentElement.classList.add("light");
+        }
+      } catch (_) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
