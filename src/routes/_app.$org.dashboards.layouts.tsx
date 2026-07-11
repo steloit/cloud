@@ -1,11 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { NewDashboardModal } from "@/features/dashboards/new-dashboard-modal";
 
 /**
  * DB6 · Dashboard templates — arrangements only; a template binds to your
  * services when instantiated. Not the same asset as Settings → Templates.
+ * "Use layout" opens the DB8 modal prefilled with the layout's slug — the
+ * frame speccs no instantiation flow of its own (finding), and only
+ * dsh_tpl_release_review exists in the fixtures, so the modal's "Start from"
+ * options stay DB8's regardless of which layout launched it (finding).
  */
 
 const LAYOUTS = [
@@ -36,14 +42,28 @@ const LAYOUTS = [
   },
 ];
 
+/** "Golden Signals" → "golden-signals" — dashboard names are kebab across canon. */
+function slug(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, "-");
+}
+
 function DashboardTemplates() {
+  const { org } = Route.useParams();
+  // Strictly one overlay: the DB8 modal — prefilled from a layout card,
+  // blank-default from the header CTA.
+  const [modal, setModal] = useState<{ initialName?: string } | null>(null);
+
   return (
     <main className="main">
       <div className="pgpad">
         <Pghead
           title="Dashboard templates"
           sub="Starting layouts — a template is the arrangement only; it binds to your services when instantiated. Not the same asset as Settings → Templates (those are infrastructure shapes)."
-        />
+        >
+          <Btn variant="p" onClick={() => setModal({})}>
+            New dashboard (DB8)
+          </Btn>
+        </Pghead>
 
         <div className="grid grid-cols-3 gap-3.5">
           {LAYOUTS.map((layout) => (
@@ -54,7 +74,7 @@ function DashboardTemplates() {
               </div>
               <div className="flex-1 text-11 leading-relaxed text-ink2">{layout.desc}</div>
               <div>
-                <Btn variant="s" disabled disabledReason="Instantiation lands in Phase 4">
+                <Btn variant="s" onClick={() => setModal({ initialName: slug(layout.name) })}>
                   Use layout
                 </Btn>
               </div>
@@ -67,6 +87,13 @@ function DashboardTemplates() {
           differ; that's the point of five layouts instead of one.
         </div>
       </div>
+      {modal ? (
+        <NewDashboardModal
+          org={org}
+          initialName={modal.initialName}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
     </main>
   );
 }

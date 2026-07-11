@@ -9,6 +9,7 @@ import { Card } from "@/design-system/card";
 import { TypedConfirmModal } from "@/design-system/confirm";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Flabel, Inp } from "@/design-system/inp";
+import { Pill } from "@/design-system/pill";
 import { RenameModal } from "@/features/common/rename-modal";
 import { useOrgs } from "@/features/org/hooks";
 import { deleteOrgMutation, errorMessage, listMyOrgsQueryKey, updateOrgMutation } from "@/lib/api";
@@ -86,14 +87,20 @@ function OrgGeneralPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-3 border-err/45 p-4">
             <Eyebrow className="text-err">Danger zone</Eyebrow>
-            {/* Pass-4: the frame's disabled verb + "blocked" pill become a live verb
-                behind the 480 typed confirm — B6 grammar moves into the overlay.
-                A real block now arrives as a 409 Problem (DeleteOrgErrors) and is
-                toasted with its blocking reasons, not painted on statically. */}
+            {/* G5 frame truth: canon Acme's delete is dependency-blocked, and
+                "the button says why" — the typed-confirm modal below ships as
+                the unblocked path (U-series contract) and opens only once the
+                blockers clear (never, in canon). */}
             <div className="flex items-center gap-2.5">
-              <Btn variant="dgr" onClick={() => setDeleteOpen(true)}>
+              <Btn
+                variant="dgr"
+                disabled
+                disabledReason="blocked — 4 projects, 12 members, active subscription"
+                onClick={() => setDeleteOpen(true)}
+              >
                 Delete Acme…
               </Btn>
+              <Pill tone="err">blocked — 4 projects, 12 members, active subscription</Pill>
             </div>
             <div className="text-10p5 text-ink3">
               delete or transfer every project first; the final invoice closes the account, and

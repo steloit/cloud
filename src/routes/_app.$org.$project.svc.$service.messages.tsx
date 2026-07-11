@@ -29,7 +29,6 @@ interface DlqRow {
   firstFailed: string;
   attempts: string;
   lastError: string;
-  selected?: boolean;
 }
 
 const DLQ: DlqRow[] = [
@@ -38,7 +37,6 @@ const DLQ: DlqRow[] = [
     firstFailed: "14:03:12",
     attempts: "5/5",
     lastError: "TypeError: receiptUrl undefined",
-    selected: true,
   },
   {
     message: "msg_9f224 · order.paid",
@@ -48,11 +46,18 @@ const DLQ: DlqRow[] = [
   },
 ];
 
+/** "msg_9f221 · order.paid" → "msg_9f221" — the row's id is the message string's first token. */
+const msgId = (m: DlqRow) => m.message.split(" · ")[0] ?? m.message;
+
 function MessagesPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
   const [tabIdx, setTabIdx] = useState(2);
+  // Pass-5: the rows are selectable — the detail panel renders whichever dead
+  // letter is picked. msg_9f221 is the canon exemplar and starts selected.
+  const [selectedId, setSelectedId] = useState("msg_9f221");
+  const selectedMsg = DLQ.find((r) => msgId(r) === selectedId);
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -157,41 +162,89 @@ function MessagesPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {DLQ.map((m) => (
-                        <tr key={m.message}>
-                          <td className={cn("mono", m.selected && "bg-steel-tint")}>{m.message}</td>
-                          <td className={cn("mono", m.selected && "bg-steel-tint")}>
-                            {m.firstFailed}
-                          </td>
-                          <td className={cn("mono", m.selected && "bg-steel-tint")}>
-                            {m.attempts}
-                          </td>
-                          <td className={cn("mono", m.selected && "bg-steel-tint")}>
-                            {m.lastError}
-                          </td>
-                        </tr>
-                      ))}
+                      {DLQ.map((m) => {
+                        const selected = msgId(m) === selectedId;
+                        return (
+                          // Row-click selection — the invoices-list idiom (B3).
+                          // aria-selected, not aria-pressed: rows carry the row
+                          // role, which only supports the former (a11y lint).
+                          <tr
+                            key={m.message}
+                            className="cursor-pointer"
+                            aria-selected={selected}
+                            onClick={() => setSelectedId(msgId(m))}
+                          >
+                            <td className={cn("mono", selected && "bg-steel-tint")}>{m.message}</td>
+                            <td className={cn("mono", selected && "bg-steel-tint")}>
+                              {m.firstFailed}
+                            </td>
+                            <td className={cn("mono", selected && "bg-steel-tint")}>
+                              {m.attempts}
+                            </td>
+                            <td className={cn("mono", selected && "bg-steel-tint")}>
+                              {m.lastError}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </Card>
 
-              <Card className="flex w-[380px] shrink-0 flex-col gap-2.5 self-start p-4">
-                <Eyebrow>Payload · msg_9f221</Eyebrow>
-                <div className="logwell">
-                  <div>{"{"}</div>
-                  <div>&nbsp;&nbsp;"type": "order.paid",</div>
-                  <div>&nbsp;&nbsp;"order_id": "ord_9f221",</div>
-                  <div>&nbsp;&nbsp;"user_id": 8241,</div>
-                  <div>&nbsp;&nbsp;"total": 4180.00,</div>
-                  <div>&nbsp;&nbsp;"currency": "INR",</div>
-                  <div>
-                    &nbsp;&nbsp;<span className="lv-e">"receipt": null</span>
-                    &nbsp;&nbsp;&nbsp;<span className="t">← introduced by #142</span>
+              {selectedId === "msg_9f221" ? (
+                <Card className="flex w-[380px] shrink-0 flex-col gap-2.5 self-start p-4">
+                  <Eyebrow>Payload · msg_9f221</Eyebrow>
+                  <div className="logwell">
+                    <div>{"{"}</div>
+                    <div>&nbsp;&nbsp;"type": "order.paid",</div>
+                    <div>&nbsp;&nbsp;"order_id": "ord_9f221",</div>
+                    <div>&nbsp;&nbsp;"user_id": 8241,</div>
+                    <div>&nbsp;&nbsp;"total": 4180.00,</div>
+                    <div>&nbsp;&nbsp;"currency": "INR",</div>
+                    <div>
+                      &nbsp;&nbsp;<span className="lv-e">"receipt": null</span>
+                      &nbsp;&nbsp;&nbsp;<span className="t">← introduced by #142</span>
+                    </div>
+                    <div>{"}"}</div>
                   </div>
-                  <div>{"}"}</div>
-                </div>
-              </Card>
+                </Card>
+              ) : selectedMsg ? (
+                // msg_9f224's payload never made the canon fixtures — the panel
+                // renders the row's own metadata and says so (finding).
+                <Card className="flex w-[380px] shrink-0 flex-col gap-2.5 self-start p-4">
+                  <Eyebrow>Message · {msgId(selectedMsg)}</Eyebrow>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between text-11p5">
+                      <span className="text-ink3">Type</span>
+                      <span className="mono">{selectedMsg.message.split(" · ")[1]}</span>
+                    </div>
+                    <div className="flex justify-between text-11p5">
+                      <span className="text-ink3">Attempts</span>
+                      <span className="mono">{selectedMsg.attempts}</span>
+                    </div>
+                    <div className="flex justify-between text-11p5">
+                      <span className="text-ink3">First failed</span>
+                      <span className="mono">{selectedMsg.firstFailed}</span>
+                    </div>
+                    <div className="flex justify-between text-11p5">
+                      <span className="text-ink3">Last error</span>
+                      <span className="mono text-err">{selectedMsg.lastError}</span>
+                    </div>
+                    {/* No canon clock on this surface — age renders as the row's
+                        own absolute since-time, Jul 2 per the incident. */}
+                    <div className="flex justify-between text-11p5">
+                      <span className="text-ink3">Age</span>
+                      <span className="mono">
+                        in the DLQ since {selectedMsg.firstFailed} · Jul 2
+                      </span>
+                    </div>
+                  </div>
+                  <p className="border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
+                    payload not captured in the canon fixtures — msg_9f221 is the exemplar (finding)
+                  </p>
+                </Card>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-2.5">

@@ -9,7 +9,7 @@ import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
-import { Pill } from "@/design-system/pill";
+import { Pill, type PillTone } from "@/design-system/pill";
 import { SkeletonLines } from "@/design-system/skeleton";
 import { RenameModal } from "@/features/common/rename-modal";
 import { ApiFailureCard } from "@/features/errors/failure-states";
@@ -25,8 +25,10 @@ import { fmtMoney } from "@/lib/fmt";
 /**
  * C6 · Template detail — review everything, rename, then it feeds the guided
  * flow (W2). "store" is the canon exemplar and is frame-fixed (it is a gallery
- * template, not in fixtures); other :tpl params render from getTemplateOptions
- * with an honest reduced layout. No snav — plain two-column main.
+ * template, not in fixtures); the other five gallery templates render a
+ * reduced detail from their own C5 card data; other :tpl params render from
+ * getTemplateOptions with an honest reduced layout. No snav — plain
+ * two-column main.
  */
 
 /** The store services table — frame-fixed (C6), copy verbatim. */
@@ -175,6 +177,114 @@ function StoreDetail({ org }: { org: string }) {
 }
 
 /**
+ * C5 · Gallery template detail — the five non-store gallery templates, fed by
+ * the C5 cards' own data (copied verbatim from new-project_.templates.tsx —
+ * the cards are the frame source). None of these cards spec a per-service
+ * split (finding: per-service split unspecced by the C5 frame) — the detail
+ * shows the composition and the total only; store (C6) stays the full exemplar.
+ */
+interface GalleryDetailData {
+  pill: { tone: PillTone; label: string };
+  deploys: string;
+  desc: string;
+  services: string[];
+  /** The card's single monthly total — no per-service split exists in C5. */
+  est: string;
+  category?: string;
+}
+
+const GALLERY_DETAILS: Record<string, GalleryDetailData> = {
+  "saas-starter": {
+    pill: { tone: "mut", label: "by Steloit" },
+    deploys: "940 deploys",
+    desc: "Multi-tenant SaaS core with auth integrated (not rebuilt) per the boundary rules.",
+    services: ["Postgres", "Valkey", "api", "Clerk pattern"],
+    est: "$96",
+    category: "SaaS",
+  },
+  "ai-app": {
+    pill: { tone: "ai", label: "pgvector" },
+    deploys: "1.6k deploys",
+    desc: "RAG and embeddings on the anchor database — no separate vector product to learn.",
+    services: ["Postgres + pgvector", "Queue", "api + worker"],
+    est: "$74",
+    category: "AI",
+  },
+  "analytics-etl": {
+    pill: { tone: "mut", label: "by Steloit" },
+    deploys: "410 deploys",
+    desc: "Scheduled ingestion into a reporting database; dashboards read-only via binding.",
+    services: ["Postgres", "Queue", "worker + cron"],
+    est: "$88",
+    category: "Data",
+  },
+  "queue-worker": {
+    pill: { tone: "mut", label: "minimal" },
+    deploys: "780 deploys",
+    desc: "The smallest honest background-job setup — queue, worker, DLQ, retry policy.",
+    services: ["Queue", "worker"],
+    est: "$16",
+  },
+  "docs-site": {
+    pill: { tone: "mut", label: "static" },
+    deploys: "520 deploys",
+    desc: "Static docs with preview environments per PR — no database at all. Rail shows one icon.",
+    services: ["Web service", "Storage"],
+    est: "$14",
+  },
+};
+
+function GalleryDetail({ org, tpl, t }: { org: string; tpl: string; t: GalleryDetailData }) {
+  return (
+    <div className="flex gap-4">
+      <div className="flex max-w-[740px] flex-1 flex-col gap-3.5">
+        <div className="flex items-center gap-3">
+          <span className="glyph h-[42px] w-[42px]" style={{ background: "var(--steel-tint)" }}>
+            <Icon id="s-hex" className="!h-5 !w-5 text-steel" />
+          </span>
+          <div>
+            <h1 className="h1 flex items-center gap-2.5">
+              {tpl} <Pill tone={t.pill.tone}>{t.pill.label}</Pill>
+            </h1>
+            <div className="hsub">{[t.category, t.deploys].filter(Boolean).join(" · ")}</div>
+          </div>
+        </div>
+        <p className="text-12p5 leading-relaxed text-ink2">{t.desc}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Eyebrow className="mr-1">Services</Eyebrow>
+          {t.services.map((s) => (
+            <Pill key={s} tone="mut">
+              {s}
+            </Pill>
+          ))}
+        </div>
+      </div>
+      <div className="flex w-[320px] shrink-0 flex-col gap-3">
+        <Card className="flex flex-col gap-2 p-4">
+          <Eyebrow>Estimated monthly cost</Eyebrow>
+          <div className="mono text-[28px] font-semibold tracking-[-0.5px]">
+            {t.est}
+            <span className="ml-1.5 text-11 font-normal text-ink3">/month · production only</span>
+          </div>
+          <p className="mt-1 border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
+            You'll review and edit every service in the guided flow before confirming — the template
+            only pre-fills it.
+          </p>
+        </Card>
+        <Link to="/$org/new-project" params={{ org }}>
+          <Btn variant="p" className="h-[38px] w-full justify-center">
+            Use this template →
+          </Btn>
+        </Link>
+        <div className="flex justify-center">
+          <Copybit>{`steloit init --template ${tpl}`}</Copybit>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * T2 · Org template detail — a frozen copy of the shape, not a live link to
  * the source. Contents rows for store-baseline are frame-fixed (T2); other
  * org templates render from the API. Frame id tpl_9c22e1 vs fixtures'
@@ -228,8 +338,8 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   if (!template.data) {
     return (
       <Card dashed className="max-w-[560px] p-6 text-12 text-ink2">
-        Template <span className="mono">{tpl}</span> wasn't found. Gallery detail exists only for{" "}
-        <b>store</b> — org templates are listed under Settings → Templates.
+        Template <span className="mono">{tpl}</span> wasn't found. Gallery templates live on New
+        project → Templates (C5) — org templates are listed under Settings → Templates.
       </Card>
     );
   }
@@ -434,13 +544,20 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   );
 }
 
-/** C6 (store, frame-fixed) or T2 (org templates, API-backed) by param. */
+/** C6 (store, frame-fixed), C5 (gallery, card-fed) or T2 (org templates, API-backed) by param. */
 function TemplateDetailPage() {
   const { org, tpl } = Route.useParams();
+  const gallery = GALLERY_DETAILS[tpl];
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
-        {tpl === "store" ? <StoreDetail org={org} /> : <OrgTemplateDetail org={org} tpl={tpl} />}
+        {tpl === "store" ? (
+          <StoreDetail org={org} />
+        ) : gallery ? (
+          <GalleryDetail org={org} tpl={tpl} t={gallery} />
+        ) : (
+          <OrgTemplateDetail org={org} tpl={tpl} />
+        )}
       </div>
     </main>
   );

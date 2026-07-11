@@ -1,15 +1,30 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Pill } from "@/design-system/pill";
-import { planLabel } from "@/features/billing/hooks";
+import { Skeleton } from "@/design-system/skeleton";
+import { planLabel, useSubscription } from "@/features/billing/hooks";
 import { useOrgs } from "@/features/org/hooks";
+import type { Plan } from "@/lib/api";
 
 /**
  * B5 · Plans — the four-column matrix, verbatim from the frame. Reached from
  * Payment & plan and Quotas; lives under Payment & plan in the snav.
+ * The current column derives from GET /orgs/{org}/subscription (the B4
+ * source) — canon acme resolves to Business, exactly the frame's column.
  */
+
+const UPGRADE_REASON =
+  "No upgrade flow in the frames — trial→Pro via the confirm page (B11) is the one wired path (finding)";
+
+/** Column order doubles as plan rank — below current downgrades, above upgrades. */
+const COLS: Array<{ key: Plan; label: string; price: string }> = [
+  { key: "free", label: "Free", price: "$0" },
+  { key: "pro", label: "Pro", price: "$29 /mo" },
+  { key: "business", label: "Business", price: "$99 /mo" },
+  { key: "enterprise", label: "Enterprise", price: "custom" },
+];
 
 const MATRIX: Array<[string, string, string, string, string]> = [
   ["Members", "3", "5 then $7/seat", "20 then $7/seat", "custom + SCIM"],
@@ -38,6 +53,52 @@ function PlansPage() {
   const { org } = Route.useParams();
   const orgs = useOrgs();
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
+  const sub = useSubscription(org);
+  // Subscription is the source (B4's); the org record backstops while it
+  // loads. Undefined (both pending/failed) marks no column current — the
+  // matrix itself is frame content and renders regardless.
+  const plan: Plan | undefined = sub.data?.plan ?? orgRecord?.plan;
+  const rank = plan ? COLS.findIndex((c) => c.key === plan) : -1;
+
+  /** The CTA row, per column — current pill · downgrade link · gated upgrade. */
+  const cta = (col: (typeof COLS)[number], i: number) => {
+    if (!plan) return <Skeleton className="h-6 w-24" />;
+    if (col.key === plan) return <Pill tone="mut">Current plan</Pill>;
+    if (col.key === "enterprise") {
+      return (
+        <Btn
+          variant="s"
+          onClick={() => {
+            window.location.href = "mailto:sales@steloit.com";
+          }}
+        >
+          Talk to us
+        </Btn>
+      );
+    }
+    if (i < rank) {
+      // B5 frame truth: downgrades from canon Business are blocked and "the
+      // button says why, like every blocked action here" — reasons verbatim
+      // from the frame. The unblocked flow lives on Payment & plan (B4).
+      const reason =
+        col.key === "free"
+          ? "blocked — 12 members > Free's 3 · 4 projects > Free's 1"
+          : "blocked — 12 members > 5 · 2 cells need Business";
+      return (
+        <span className="flex items-center gap-2">
+          <Btn variant="s" disabled disabledReason={reason}>
+            {col.key === "free" ? "Downgrade to Free…" : "Downgrade…"}
+          </Btn>
+          <Pill tone="err">blocked</Pill>
+        </span>
+      );
+    }
+    return (
+      <Btn variant="s" disabled disabledReason={UPGRADE_REASON}>
+        Upgrade…
+      </Btn>
+    );
+  };
 
   return (
     <>
@@ -60,78 +121,48 @@ function PlansPage() {
               <thead>
                 <tr>
                   <th />
-                  <th>Free</th>
-                  <th>Pro</th>
-                  <th className="bg-steel-tint">
-                    <span className="flex items-center gap-2">
-                      Business <Pill tone="st">current</Pill>
-                    </span>
-                  </th>
-                  <th>Enterprise</th>
+                  {COLS.map((col) => (
+                    <th key={col.key} className={col.key === plan ? "bg-steel-tint" : undefined}>
+                      {col.key === plan ? (
+                        <span className="flex items-center gap-2">
+                          {col.label} <Pill tone="st">current</Pill>
+                        </span>
+                      ) : (
+                        col.label
+                      )}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td className="text-ink3">Price</td>
-                  <td className="mono">$0</td>
-                  <td className="mono">$29 /mo</td>
-                  <td className="mono bg-steel-tint">$99 /mo</td>
-                  <td className="mono">custom</td>
+                  {COLS.map((col) => (
+                    <td key={col.key} className={col.key === plan ? "mono bg-steel-tint" : "mono"}>
+                      {col.price}
+                    </td>
+                  ))}
                 </tr>
-                {MATRIX.map(([feature, free, pro, business, enterprise]) => (
+                {MATRIX.map(([feature, ...cells]) => (
                   <tr key={feature}>
                     <td className="font-medium">{feature}</td>
-                    <td className="text-ink2">{free}</td>
-                    <td className="text-ink2">{pro}</td>
-                    <td className="bg-steel-tint">{business}</td>
-                    <td className="text-ink2">{enterprise}</td>
+                    {COLS.map((col, i) => (
+                      <td
+                        key={col.key}
+                        className={col.key === plan ? "bg-steel-tint" : "text-ink2"}
+                      >
+                        {cells[i]}
+                      </td>
+                    ))}
                   </tr>
                 ))}
                 <tr>
                   <td />
-                  <td>
-                    <div className="flex flex-col items-start gap-1.5">
-                      <span className="flex items-center gap-2">
-                        <Btn variant="s" disabled disabledReason="12 members > 3 · 4 projects > 1">
-                          Downgrade…
-                        </Btn>
-                        <Pill tone="err">blocked</Pill>
-                      </span>
-                      <span className="text-10p5 text-ink3">
-                        12 members &gt; 3 · 4 projects &gt; 1
-                      </span>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="flex flex-col items-start gap-1.5">
-                      <span className="flex items-center gap-2">
-                        <Btn
-                          variant="s"
-                          disabled
-                          disabledReason="12 members > 5 · 2 cells need Business"
-                        >
-                          Downgrade…
-                        </Btn>
-                        <Pill tone="err">blocked</Pill>
-                      </span>
-                      <span className="text-10p5 text-ink3">
-                        12 members &gt; 5 · 2 cells need Business
-                      </span>
-                    </div>
-                  </td>
-                  <td className="bg-steel-tint">
-                    <Pill tone="st">your plan</Pill>
-                  </td>
-                  <td>
-                    <Btn
-                      variant="s"
-                      onClick={() => {
-                        window.location.href = "mailto:sales@steloit.com";
-                      }}
-                    >
-                      Talk to us
-                    </Btn>
-                  </td>
+                  {COLS.map((col, i) => (
+                    <td key={col.key} className={col.key === plan ? "bg-steel-tint" : undefined}>
+                      {cta(col, i)}
+                    </td>
+                  ))}
                 </tr>
               </tbody>
             </table>

@@ -33,8 +33,17 @@ const STARTS = [
 ] as const;
 type StartKey = (typeof STARTS)[number]["key"];
 
-export function NewDashboardModal({ org, onClose }: { org: string; onClose: () => void }) {
-  const [name, setName] = useState("release-watch");
+export function NewDashboardModal({
+  org,
+  initialName,
+  onClose,
+}: {
+  org: string;
+  /** Prefills the name — DB6's "Use layout" passes the layout's slug; default stays DB8's. */
+  initialName?: string;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(initialName ?? "release-watch");
   const [scope, setScope] = useState<Scope>("ecommerce");
   const [visibility, setVisibility] = useState<Visibility>("personal");
   const [start, setStart] = useState<StartKey>("template");

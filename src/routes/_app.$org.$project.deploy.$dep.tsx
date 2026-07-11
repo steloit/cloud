@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
@@ -8,13 +9,20 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Pill, Stlab } from "@/design-system/pill";
 import { Skeleton } from "@/design-system/skeleton";
+import { RollbackConfirm } from "@/features/deploy/rollback-confirm";
 import { ApiFailureCard } from "@/features/errors/failure-states";
-import { queryMetricsOptions } from "@/lib/api";
+import { useDeployments } from "@/features/services/hooks";
+import { type Deployment, queryMetricsOptions } from "@/lib/api";
 
 /**
  * DP2 · Rollout detail — the live view of #143 promoting to production.
  * The canary-vs-baseline chart reads the canon p95 telemetry; everything else
  * is frame-fixed DP2 microcopy (the rollout state machine lands in Phase 3).
+ *
+ * Every other deployment id lands on the completed-deployment view below —
+ * no frame speccs that page (the DP gallery only draws the in-flight
+ * rollout; finding), so it is assembled from the API row plus DP1's canon
+ * stories, with anything beyond the row labelled in place.
  */
 
 const GUARD_REASON = "Pause/abort are guarded — they land with live rollouts in Phase 3";
@@ -26,6 +34,229 @@ function minuteOf(at: string): number {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+/**
+ * Frame-fixed change lines for the identity header (DP1's Change column).
+ * Finding: DP1's frame strings carry shas (`gift-cards @ a41f2c`,
+ * `checkout-retry @ 88ba02`) that differ from the fixtures' git_sha
+ * (a71c9e2, b3f19d0) — the header's mono sha below is the fixture's, the
+ * API's truth.
+ */
+const CHANGE: Record<number, string> = {
+  142: "gift-cards",
+  140: "checkout-retry",
+};
+
+/** "2026-07-02T13:58:00+05:30" → "13:58" — the canon pills' time style. */
+function fmtTime(at: string | undefined): string {
+  if (!at) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(at));
+}
+
+/** "2026-07-02T13:58:00+05:30" → "Jul 2 · 13:58" — the canon tables' style. */
+function fmtWhen(at: string | undefined): string {
+  if (!at) return "";
+  const day = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(at));
+  return `${day} · ${fmtTime(at)}`;
+}
+
+/**
+ * Completed-deployment detail — the canon deployments that aren't the live
+ * rollout (#142 live, #140 rolled back). Identity and outcome come from the
+ * API row; the #142 incident story cites only canon numbers (812 ms, 14:02).
+ */
+function CompletedDeployPage({
+  org,
+  project,
+  env,
+  dep,
+}: {
+  org: string;
+  project: string;
+  env: string;
+  dep: string;
+}) {
+  const deployments = useDeployments(env);
+  // ONE rollback idiom (overlay census): the shared RollbackConfirm.
+  const [confirming, setConfirming] = useState(false);
+
+  const rows = deployments.data ?? [];
+  // D19 links by bare number ("141") — DP1 links by fixture id ("dep_142").
+  const found = rows.find((d) => d.id === dep || String(d.number) === dep);
+  const live = rows.find((d) => d.state === "live");
+
+  if (deployments.isPending) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Skeleton className="h-[46px] w-[460px]" />
+          <Skeleton className="h-[104px]" />
+          <Skeleton className="h-[72px]" />
+        </div>
+      </main>
+    );
+  }
+
+  if (deployments.isError) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <ApiFailureCard
+            title="Deployment didn't load"
+            error={deployments.error}
+            requestLine={`GET /envs/${env}/deployments`}
+            onRetry={() => deployments.refetch()}
+          />
+        </div>
+      </main>
+    );
+  }
+
+  if (!found) {
+    // D19's #141 (and any other frame-fixed history number) has no fixture
+    // row — the per-service history and the fixtures diverge (the finding
+    // recorded in D19's header); the API is the truth this page renders.
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Card className="flex flex-col items-start gap-2.5 p-4">
+            <b className="text-13">
+              {/^\d+$/.test(dep) ? `#${dep}` : dep} isn't in the canon fixtures
+            </b>
+            <p className="text-11p5 text-ink3">
+              Only #140, #142 and #143 exist in the fixtures — the per-service history rows (D19)
+              are frame-fixed and diverge (finding).
+            </p>
+            <Link to="/$org/$project/deploy" params={{ org, project }} search={{ env }}>
+              <Btn variant="s">Back to Deployments</Btn>
+            </Link>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  const change =
+    (found.number !== undefined ? CHANGE[found.number] : undefined) ??
+    found.annotation ??
+    found.git_sha;
+  const failedGate = found.gates?.find((g) => g.status === "failed");
+  const completed = found.state !== "live" && found.state !== "canary";
+  const migration = found.migrations?.[0];
+
+  const statusPill = (d: Deployment) => {
+    if (d.state === "live") return <Pill tone="ok">live · {fmtTime(d.created_at)}</Pill>;
+    if (d.state === "rolled_back") return <Pill tone="err">rolled back · {d.actor}</Pill>;
+    return <Pill tone="mut">{d.state}</Pill>;
+  };
+
+  return (
+    <main className="main">
+      <div className="pgpad !overflow-y-auto">
+        <Pghead
+          title={`#${found.number} · ${change}`}
+          sub={
+            <>
+              <span className="mono">{found.git_sha}</span> · by {found.actor} ·{" "}
+              {fmtWhen(found.created_at)}
+            </>
+          }
+        >
+          {statusPill(found)}
+          {completed ? (
+            // Rolling back re-serves this image, so a gate-aborted deploy is
+            // not a known-good target — the button says why (the shared
+            // confirm's consequence line promises "last known-good image").
+            <Btn
+              variant="s"
+              disabled={Boolean(failedGate)}
+              disabledReason={
+                failedGate
+                  ? `This image was auto-aborted — gate: ${failedGate.detail} — not a known-good target`
+                  : undefined
+              }
+              onClick={() => setConfirming(true)}
+            >
+              <Icon id="s-undo" className="h-3 w-3" /> Roll back to this image
+            </Btn>
+          ) : null}
+        </Pghead>
+
+        <Card className="flex flex-col gap-2.5 p-4">
+          <Eyebrow>Outcome</Eyebrow>
+          {found.number === 142 ? (
+            // The canon incident: dep_142's gate detail reads "passed at
+            // rollout; regression emerged post-full" — fixtures keep #142
+            // live while #143's canary carries the fix (not a rollback).
+            <>
+              <div className="flex items-start gap-2 text-12">
+                <Stlab tone="warn">p95 812 ms</Stlab>
+                <span>
+                  Passed its gates at rollout; the regression emerged post-full — p95 hit 812 ms and
+                  the alert fired at 14:02. #143 carries the index fix, promoting now.
+                </span>
+              </div>
+              <div>
+                <Link
+                  to="/$org/$project/observe/metrics"
+                  params={{ org, project }}
+                  search={{ env }}
+                >
+                  <Btn variant="s">View the incident on Observe →</Btn>
+                </Link>
+              </div>
+            </>
+          ) : failedGate ? (
+            <div className="flex items-start gap-2 text-12">
+              <Stlab tone="err">gate: {failedGate.detail}</Stlab>
+              <span>
+                Auto-aborted — traffic returned to the previous image in &lt; 10 s, the same gate
+                contract DP2 prints.
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 text-12">
+              <Stlab tone="ok">clean</Stlab>
+              <span>No gate tripped while this image served.</span>
+            </div>
+          )}
+          {migration ? (
+            <p className="mono text-10p5 text-ink3">
+              migration {migration.id} · reversible
+              {migration.reverse ? ` · reverse: ${migration.reverse}` : ""}
+            </p>
+          ) : null}
+        </Card>
+
+        <Card className="flex flex-col gap-2 p-4">
+          <Eyebrow>Rollout log</Eyebrow>
+          <p className="text-11 leading-relaxed text-ink3">
+            Per-step logs are retained 30 d — not in the canon fixtures (finding).
+          </p>
+        </Card>
+
+        {confirming ? (
+          // The POST addresses the live deployment (the DP1/D19 precedent);
+          // the title names the image that comes back.
+          <RollbackConfirm
+            target={`#${found.number}`}
+            dep={live?.id ?? found.id}
+            onClose={() => setConfirming(false)}
+          />
+        ) : null}
+      </div>
+    </main>
+  );
+}
+
 function RolloutPage() {
   const { org, project, dep } = Route.useParams();
   const { env } = Route.useSearch();
@@ -35,20 +266,7 @@ function RolloutPage() {
   );
 
   if (dep !== "dep_143" && dep !== "143") {
-    return (
-      <main className="main">
-        <div className="pgpad !overflow-y-auto">
-          <Card className="flex flex-col items-start gap-2.5 p-4">
-            <b className="text-13">
-              Only in-flight rollouts have a live view — #143 is the one promoting
-            </b>
-            <Link to="/$org/$project/deploy" params={{ org, project }} search={{ env }}>
-              <Btn variant="s">Back to Deployments</Btn>
-            </Link>
-          </Card>
-        </div>
-      </main>
-    );
+    return <CompletedDeployPage org={org} project={project} env={env} dep={dep} />;
   }
 
   const points = metrics.data?.series?.[0]?.points ?? [];

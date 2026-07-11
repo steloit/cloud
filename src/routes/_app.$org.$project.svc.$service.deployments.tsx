@@ -20,6 +20,8 @@ import { resolveEnvKey } from "@/lib/canon-env";
 
 interface HistoryRow {
   deploy: string;
+  /** Bare number for the detail-route link — the frame rows carry no fixture id. */
+  num: string;
   /** Muted deploy cell for the non-live rows. */
   mut?: boolean;
   highlight?: boolean;
@@ -34,6 +36,7 @@ interface HistoryRow {
 const ROWS: HistoryRow[] = [
   {
     deploy: "#142 · live",
+    num: "142",
     highlight: true,
     change: "feat: gift cards at checkout",
     sha: "8f31c02",
@@ -44,6 +47,7 @@ const ROWS: HistoryRow[] = [
   },
   {
     deploy: "#141",
+    num: "141",
     mut: true,
     change: "fix: cart total rounding",
     sha: "c02d911",
@@ -54,6 +58,7 @@ const ROWS: HistoryRow[] = [
   },
   {
     deploy: "#140",
+    num: "140",
     mut: true,
     change: "chore: bump node 20.14",
     sha: "a8812fe",
@@ -181,9 +186,31 @@ function DeploymentsPage() {
                       : undefined
                   }
                 >
-                  <td className={row.mut ? "mono text-ink3" : "mono"}>{row.deploy}</td>
+                  {/* Number + change link to the deploy detail. The route
+                      resolves by fixture id/number: #142/#140 land on the
+                      fixtures' rows (which diverge from these frame-fixed
+                      strings — the header finding), #141 lands on the honest
+                      not-in-fixtures card. Action buttons stay buttons. */}
+                  <td className={row.mut ? "mono text-ink3" : "mono"}>
+                    <Link
+                      to="/$org/$project/deploy/$dep"
+                      params={{ org, project, dep: row.num }}
+                      search={{ env }}
+                      className="hover:underline"
+                    >
+                      {row.deploy}
+                    </Link>
+                  </td>
                   <td>
-                    {row.change} <span className="mono text-ink3">{row.sha}</span>
+                    <Link
+                      to="/$org/$project/deploy/$dep"
+                      params={{ org, project, dep: row.num }}
+                      search={{ env }}
+                      className="hover:underline"
+                    >
+                      {row.change}
+                    </Link>{" "}
+                    <span className="mono text-ink3">{row.sha}</span>
                   </td>
                   <td>{row.by}</td>
                   <td className="mono">{row.when}</td>

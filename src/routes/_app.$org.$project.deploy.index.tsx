@@ -199,8 +199,29 @@ function DeploymentsPage() {
                             key={dep.id}
                             className={display?.highlight ? "bg-steel-tint" : undefined}
                           >
-                            <td className="mono">#{dep.number}</td>
-                            <td>{display?.change(dep) ?? dep.git_sha}</td>
+                            {/* Number + change link to the deploy detail (DP2
+                                for the in-flight #143, the completed view
+                                otherwise); the action buttons stay buttons. */}
+                            <td className="mono">
+                              <Link
+                                to="/$org/$project/deploy/$dep"
+                                params={{ org, project, dep: dep.id }}
+                                search={{ env }}
+                                className="hover:underline"
+                              >
+                                #{dep.number}
+                              </Link>
+                            </td>
+                            <td>
+                              <Link
+                                to="/$org/$project/deploy/$dep"
+                                params={{ org, project, dep: dep.id }}
+                                search={{ env }}
+                                className="hover:underline"
+                              >
+                                {display?.change(dep) ?? dep.git_sha}
+                              </Link>
+                            </td>
                             <td>production</td>
                             <td>{display?.status ?? dep.state}</td>
                             <td className="mono">{display?.duration}</td>

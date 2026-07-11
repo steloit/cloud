@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Fragment, useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils";
 /**
  * D4 · Query Insights (default) + W10 · AI proposal (?proposal=prp_7c31a2).
  * 08-api has no pg_stat_statements endpoint — the D4 rows are frame-fixed
- * canon (spec gap, a finding). The W10 panel preserves the Phase-2 build:
+ * canon (spec gap, a finding). Rows expand inline (the B3 accordion grammar):
+ * the regressed row shows its sampled plan — the canon exists only for it
+ * (finding) — the rest their known stats. The W10 panel preserves the Phase-2 build:
  * evidence, reasoning, a reviewable diff; the apply button belongs to the
  * human (the four laws, ADR-005) — apply paths land with the assistant in
  * Phase 3, disabled with the reason, never hidden.
@@ -82,6 +85,17 @@ function QueryInsightsList({
   env: string;
 }) {
   const canon = name === "db-main";
+  // Inline accordion (the B3 invoice-line grammar): one interaction model —
+  // every row expands; the regressed row's proposal navigation lives inside
+  // its expansion as a button, no whole-row jump.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleRow = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   if (!canon) {
     return (
@@ -160,21 +174,82 @@ function QueryInsightsList({
             </tr>
           </thead>
           <tbody>
-            {QUERY_ROWS.map((row) => (
-              <tr
-                key={row.query}
-                className={row.regressed ? "hov cursor-pointer" : undefined}
-                style={row.regressed ? { background: "var(--warn-tint)" } : undefined}
-                onClick={row.regressed ? openProposal : undefined}
-              >
-                <td className="mono text-11">{row.query}</td>
-                <td className="mono text-11">{row.calls}</td>
-                <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.mean}</td>
-                <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.p95}</td>
-                <td className="mono text-11">{row.total}</td>
-                <td>{row.plan ? <Pill tone={row.plan.tone}>{row.plan.label}</Pill> : "—"}</td>
-              </tr>
-            ))}
+            {QUERY_ROWS.map((row) => {
+              const open = expanded.has(row.query);
+              return (
+                <Fragment key={row.query}>
+                  <tr
+                    className="hov cursor-pointer"
+                    style={row.regressed ? { background: "var(--warn-tint)" } : undefined}
+                    aria-expanded={open}
+                    onClick={() => toggleRow(row.query)}
+                  >
+                    <td className="mono text-11">
+                      <span className="flex items-center gap-1.5">
+                        <Icon
+                          id="s-chev"
+                          className={cn(
+                            "h-[10px] w-[10px] shrink-0 text-ink3 transition-transform",
+                            open && "rotate-90",
+                          )}
+                        />
+                        {row.query}
+                      </span>
+                    </td>
+                    <td className="mono text-11">{row.calls}</td>
+                    <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.mean}</td>
+                    <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.p95}</td>
+                    <td className="mono text-11">{row.total}</td>
+                    <td>{row.plan ? <Pill tone={row.plan.tone}>{row.plan.label}</Pill> : "—"}</td>
+                  </tr>
+                  {open ? (
+                    <tr>
+                      <td colSpan={6}>
+                        {row.regressed ? (
+                          // The sampled plan — the same canon block the W10
+                          // proposal cites as evidence, verbatim.
+                          <div className="flex flex-col gap-2.5 py-1">
+                            <div className="logwell">
+                              <div>
+                                <span className="t">query&nbsp;&nbsp;&nbsp;</span>SELECT * FROM
+                                orders WHERE customer_id = $1 ORDER BY created_at DESC
+                              </div>
+                              <div>
+                                <span className="t">plan&nbsp;&nbsp;&nbsp;&nbsp;</span>Seq Scan on
+                                orders (rows=1,204,318) · Sort ·{" "}
+                                <span className="lv-w">642 ms avg</span> since deploy #142
+                              </div>
+                              <div>
+                                <span className="t">metrics&nbsp;</span>calls 214/min (was 3/min) ·
+                                61% of db time · connections 96% of pool
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Btn
+                                variant="s"
+                                className="h-6 px-2.5 text-10p5"
+                                onClick={openProposal}
+                              >
+                                View proposal <span className="mono">prp_7c31a2</span> →
+                              </Btn>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-baseline gap-4 py-1">
+                            <span className="mono text-11">
+                              calls {row.calls} · mean {row.mean} · total {row.total}
+                            </span>
+                            <span className="text-10p5 text-ink3">
+                              plan sampling captured only for the regressed query (finding)
+                            </span>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

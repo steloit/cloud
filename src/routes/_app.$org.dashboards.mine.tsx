@@ -177,11 +177,19 @@ function DashTable({
                       <Btn variant="gh">Open</Btn>
                     </Link>
                   ) : (
-                    <Btn variant="gh" disabled disabledReason="only canon dashboards are navigable">
+                    <Btn
+                      variant="gh"
+                      disabled
+                      disabledReason="Only checkout-health carries canon widgets — the others aren't in the fixtures (finding)"
+                    >
                       Open
                     </Btn>
                   )}
-                  <Btn variant="gh" disabled disabledReason="Duplicate lands in Phase 4">
+                  <Btn
+                    variant="gh"
+                    disabled
+                    disabledReason="No duplicate endpoint in the spec (finding)"
+                  >
                     Duplicate
                   </Btn>
                   {onDelete ? (

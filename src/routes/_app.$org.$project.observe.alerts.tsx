@@ -110,10 +110,62 @@ function AlertsPage() {
           </Btn>
         </div>
 
-        {tab === "history" || tab === "silences" ? (
-          <p className="text-11p5 text-ink3">
-            {tab === "history" ? "History lands in Phase 3" : "Silences land in Phase 3"}
-          </p>
+        {tab === "history" ? (
+          <>
+            {/* Finding: the History tab is unspecced by frames — the one row is
+                the Jul 2 canon incident, and there is no firings endpoint in
+                08-api so it renders frame-fixed. The rule name here follows the
+                frame's naming (api-p95-burn); the fixtures call the firing rule
+                p95-slo — the same frames↔fixtures divergence flagged in the
+                header NOTE, surfaced rather than resolved. */}
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Rule</th>
+                    <th>Fired</th>
+                    <th>Peak</th>
+                    <th>Resolved</th>
+                    <th>Acknowledged</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="font-semibold">api-p95-burn</td>
+                    <td>
+                      Jul 2 · <span className="mono">14:02</span>
+                    </td>
+                    <td className="mono">812 ms</td>
+                    <td>
+                      <span className="mono">14:41</span> · after <span className="mono">#143</span>
+                    </td>
+                    <td>priya</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-10p5 text-ink3">history retention 90 d</p>
+          </>
+        ) : tab === "silences" ? (
+          /* Finding: the Silences tab is unspecced by frames and 08-api has no
+             silences endpoint — the empty state's disabled CTA carries that
+             reason instead of faking the flow. The tab's 0 is frame-fixed. */
+          <EmptyState
+            compact
+            icon="s-bell"
+            title="No silences active"
+            meaning={
+              <>
+                a silence mutes routing, never recording — alerts still evaluate and log while
+                silenced, so History stays complete
+              </>
+            }
+            cta={
+              <Btn variant="p" disabled disabledReason="No silences endpoint in the spec (finding)">
+                New silence…
+              </Btn>
+            }
+          />
         ) : rules.isError ? (
           <ApiFailureCard
             title="Alert rules didn't load"

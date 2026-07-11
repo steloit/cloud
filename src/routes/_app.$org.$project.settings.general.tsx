@@ -93,14 +93,20 @@ function ProjectGeneralPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-3 border-err/45 p-4">
             <Eyebrow className="text-err">Danger zone</Eyebrow>
-            {/* Pass-4: the frame's disabled verb + "blocked" pill become a live verb
-                behind the 480 typed confirm — B6 grammar moves into the overlay.
-                A real block now arrives as a 409 Problem (DeleteProjectErrors) and
-                is toasted with its blocking reasons, not painted on statically. */}
+            {/* G1 frame truth: canon ecommerce's delete is dependency-blocked,
+                and "the button says why" — the typed-confirm modal below ships
+                as the unblocked path and opens only once the blockers clear
+                (never, in canon). */}
             <div className="flex items-center gap-2.5">
-              <Btn variant="dgr" onClick={() => setDeleteOpen(true)}>
+              <Btn
+                variant="dgr"
+                disabled
+                disabledReason="blocked — 7 services across 3 environments"
+                onClick={() => setDeleteOpen(true)}
+              >
                 Delete ecommerce…
               </Btn>
+              <Pill tone="err">blocked — 7 services across 3 environments</Pill>
             </div>
             {/* Finding: the frame says "typing the project slug", but the typed-confirm
                 grammar expects the exact name, never a slug of one — name wins. */}

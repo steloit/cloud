@@ -100,8 +100,6 @@ const CATEGORIES: ("All" | Category)[] = [
   "Internal tools",
 ];
 
-const PREVIEW_REASON = "Template detail lands per-template — store is the canon exemplar";
-
 function TemplatesGallery() {
   const { org } = Route.useParams();
   const orgs = useOrgs();
@@ -211,17 +209,11 @@ function TemplatesGallery() {
                   <div className="mt-auto flex items-center">
                     <span className="mono text-11 text-ink2">{g.est}</span>
                     <span className="sp" />
-                    {g.name === "store" ? (
-                      <Link to="/$org/template/$tpl" params={{ org, tpl: "store" }}>
-                        <Btn variant="gh" className="text-steel">
-                          Preview →
-                        </Btn>
-                      </Link>
-                    ) : (
-                      <Btn variant="gh" disabled disabledReason={PREVIEW_REASON}>
+                    <Link to="/$org/template/$tpl" params={{ org, tpl: g.name }}>
+                      <Btn variant="gh" className="text-steel">
                         Preview →
                       </Btn>
-                    )}
+                    </Link>
                   </div>
                 </Card>
               ))}
