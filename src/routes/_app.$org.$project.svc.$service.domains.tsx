@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
@@ -55,7 +56,7 @@ function DomainsPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <h1 className="h1">Domains</h1>
+          <h1 className="h1">{PRODUCT_LABEL[svc.product]} · Domains</h1>
           <p className="hsub">
             Domains (D21) is a web surface — {svc.name} is {svc.product}.
           </p>
@@ -67,8 +68,10 @@ function DomainsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame D21 shows the bare "Domains" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Domains"
+          title={`${PRODUCT_LABEL[svc.product]} · Domains`}
           sub={
             <span className="mono">
               {svc.name} · {env} · certificates issued and renewed automatically

@@ -14,10 +14,13 @@ function ProjectGitPage() {
   const { org, project } = Route.useParams();
   const orgs = useOrgs();
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
+  // Pass-6: identity derives from the orgs query (slug while it loads); the
+  // repo names (acme/store, acme/admin) and "asha" are frame-fixed canon.
+  const orgName = orgRecord?.name ?? org;
 
   return (
     <>
-      <SnavSettings org={org} orgName={orgRecord?.name ?? org} project={project} active="p-git" />
+      <SnavSettings org={org} orgName={orgName} project={project} active="p-git" />
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead
@@ -28,7 +31,8 @@ function ProjectGitPage() {
           <Card className="flex max-w-[760px] items-center gap-3.5 p-4">
             <Glyph id="s-branch" />
             <div>
-              <div className="text-13 font-semibold">GitHub · Acme</div>
+              {/* Identity-derived (Pass-6) — was hardcoded "GitHub · Acme". */}
+              <div className="text-13 font-semibold">GitHub · {orgName}</div>
               <div className="text-11 text-ink3">
                 installed by asha · scoped to 3 repositories · webhooks healthy
               </div>
@@ -101,7 +105,11 @@ function ProjectGitPage() {
               keep serving.
             </div>
             <div>
-              <Btn variant="dgr" disabled disabledReason="Disconnect lands in Phase 4">
+              <Btn
+                variant="dgr"
+                disabled
+                disabledReason="Disconnect lands with the Git-integration endpoints the API lacks (finding)"
+              >
                 Disconnect…
               </Btn>
             </div>

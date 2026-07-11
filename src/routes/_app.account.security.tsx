@@ -131,8 +131,10 @@ function SecurityPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Security & MFA" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Security & MFA"
+          title="Account · Security & MFA"
           sub="These protect you everywhere — they belong to your account, not to Acme"
         />
 
@@ -176,7 +178,11 @@ function SecurityPage() {
             pill="none"
             pillTone="mut"
             action={
-              <Btn variant="s" disabled disabledReason="Passkey enrollment lands in Phase 5">
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Passkeys land with the WebAuthn endpoints the API lacks (finding)"
+              >
                 Add passkey
               </Btn>
             }
@@ -191,7 +197,7 @@ function SecurityPage() {
               <Btn
                 variant="s"
                 disabled
-                disabledReason="Recovery-code regeneration lands in Phase 5"
+                disabledReason="Recovery codes land with the MFA endpoints the API lacks (finding)"
               >
                 Regenerate… invalidates old
               </Btn>

@@ -182,7 +182,7 @@ function HealthPage() {
                   variant="gh"
                   className="h-6 px-2.5 text-10p5"
                   disabled
-                  disabledReason="Silences land in Phase 3"
+                  disabledReason="No silences endpoint in the spec (finding) — the Silences tab shows the design"
                 >
                   Silence…
                 </Btn>

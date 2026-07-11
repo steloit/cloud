@@ -14,6 +14,7 @@ import {
 } from "@/features/invites/hooks";
 import { ProblemError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { cn } from "@/lib/utils";
 
 /**
  * A6 · Invitation accept/decline + A7 · failure states. Every failure state
@@ -36,7 +37,10 @@ function CenterCard({
         {icon ? (
           <Icon
             id={icon}
-            className={`h-6 w-6 ${tone === "warn" ? "text-warn" : tone === "err" ? "text-err" : "text-ink2"}`}
+            className={cn(
+              "h-6 w-6",
+              tone === "warn" ? "text-warn" : tone === "err" ? "text-err" : "text-ink2",
+            )}
           />
         ) : null}
         {children}

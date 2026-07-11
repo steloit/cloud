@@ -117,8 +117,17 @@ function SaveTemplatePage() {
                 />
               </div>
               <div>
-                <Flabel>Visibility</Flabel>
-                <div className="inp w-[220px]">Organization ▾</div>
+                <Flabel htmlFor="tpl-visibility">Visibility</Flabel>
+                {/* Real (disabled) select instead of a div dressed as an
+                    input — one honest option until sharing exists. */}
+                <select
+                  id="tpl-visibility"
+                  className="inp w-[220px]"
+                  disabled
+                  title="Visibility beyond org needs the sharing endpoints (finding)"
+                >
+                  <option>Organization</option>
+                </select>
               </div>
             </Card>
             <Card className="flex flex-col p-4">

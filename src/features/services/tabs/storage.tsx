@@ -37,9 +37,11 @@ function ToggleRow({ label, title }: { label: string; title?: string }) {
 export function StorageSettingsTab({ svc, env }: TabProps) {
   return (
     <>
+      {/* Finding: frame D16 shows the bare "Settings" title — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
         before={<Glyph id="s-bucket" />}
-        title="Settings"
+        title="Object Storage · Settings"
         sub={
           <span className="mono">
             {svc.name} · {env}

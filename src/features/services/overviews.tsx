@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { Btn } from "@/design-system/btn";
 import { Copybit } from "@/design-system/copybit";
 import { Dot, Pill } from "@/design-system/pill";
 import { type Binding, errorMessage, rollbackDeploymentMutation, type Service } from "@/lib/api";
@@ -53,7 +54,15 @@ function scopeLabel(scope: Binding["scope"]): string {
 // --------------------------------------------------------------------------
 // S1 · Valkey — calm state: keyspace shape as the Right-now panel
 // --------------------------------------------------------------------------
-export function ValkeyOverview({ svc, projectTotalCents, consumers, nameOf }: OverviewCtx) {
+export function ValkeyOverview({
+  svc,
+  org,
+  project,
+  env,
+  projectTotalCents,
+  consumers,
+  nameOf,
+}: OverviewCtx) {
   const rows: ConsumerRow[] = consumers.map((b) => ({
     icon: "s-globe",
     name: nameOf(b.source_id),
@@ -103,27 +112,28 @@ export function ValkeyOverview({ svc, projectTotalCents, consumers, nameOf }: Ov
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           {
             title: "Open CLI",
             sub: "read-only session",
-            disabledReason: "CLI Console (D6) lands in Phase 3",
+            tab: "cli",
           },
           {
             title: "Data browser",
             sub: "keys & TTLs",
-            disabledReason: "Data Browser (D3) lands in Phase 3",
+            tab: "data-browser",
           },
           {
             title: "Switch to Durable…",
             sub: "+$6 · stated restart",
-            disabledReason: "Mode switch (D14) lands in Phase 3",
+            tab: "settings",
           },
           {
             title: "Flush…",
             sub: "unlock + confirm",
             danger: true,
-            disabledReason: "Guarded FLUSHALL (D14) lands in Phase 3",
+            tab: "settings",
           },
         ]}
       />
@@ -134,7 +144,15 @@ export function ValkeyOverview({ svc, projectTotalCents, consumers, nameOf }: Ov
 // --------------------------------------------------------------------------
 // S2 · Object Storage — activity feed; usage-based cost cell
 // --------------------------------------------------------------------------
-export function StorageOverview({ projectTotalCents, consumers, nameOf }: OverviewCtx) {
+export function StorageOverview({
+  svc,
+  org,
+  project,
+  env,
+  projectTotalCents,
+  consumers,
+  nameOf,
+}: OverviewCtx) {
   const rows: ConsumerRow[] = consumers.map((b) => ({
     icon: b.source_id.includes("worker") ? "s-worker" : "s-globe",
     name: nameOf(b.source_id),
@@ -202,26 +220,28 @@ export function StorageOverview({ projectTotalCents, consumers, nameOf }: Overvi
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           {
             title: "Object browser",
             sub: "prefixes & preview",
-            disabledReason: "Object Browser (D7) lands in Phase 3",
+            tab: "objects",
           },
           {
             title: "Upload objects",
             sub: "drag or CLI",
-            disabledReason: "Uploads land with the Object Browser (D7)",
+            disabledReason: "No object-upload endpoint in the spec (finding)",
           },
           {
             title: "New lifecycle rule",
             sub: "dry-run first",
-            disabledReason: "Lifecycle composer (U3/D15) lands in Phase 3",
+            tab: "lifecycle",
           },
           {
             title: "Request public CDN…",
             sub: "routed to an Admin",
-            disabledReason: "Public access is a policy-gated request (D16) — Phase 3",
+            disabledReason:
+              "Public access is a policy-gated request (D16) — no public-access endpoint in the spec (finding)",
           },
         ]}
       />
@@ -232,7 +252,15 @@ export function StorageOverview({ projectTotalCents, consumers, nameOf }: Overvi
 // --------------------------------------------------------------------------
 // S3 · Queue — DLQ attention card; delivery contract in chips
 // --------------------------------------------------------------------------
-export function QueueOverview({ svc, projectTotalCents, consumers, nameOf }: OverviewCtx) {
+export function QueueOverview({
+  svc,
+  org,
+  project,
+  env,
+  projectTotalCents,
+  consumers,
+  nameOf,
+}: OverviewCtx) {
   const rows: ConsumerRow[] = consumers.map((b) => ({
     icon: b.source_id.includes("worker") ? "s-worker" : "s-globe",
     name: nameOf(b.source_id),
@@ -271,22 +299,16 @@ export function QueueOverview({ svc, projectTotalCents, consumers, nameOf }: Ove
               <span className="lv-e">"receipt": null</span>
             </div>
             <div className="mt-2.5 flex gap-2.5">
-              <button
-                type="button"
-                className="btn p"
-                disabled
-                title="Messages & dead letters (D8) land in Phase 3"
+              <Link
+                to="/$org/$project/svc/$service/messages"
+                params={{ org, project, service: svc.name }}
+                search={{ env }}
               >
-                View dead letters
-              </button>
-              <button
-                type="button"
-                className="btn s"
-                disabled
-                title="Redrive lands with D8 in Phase 3"
-              >
+                <Btn variant="p">View dead letters</Btn>
+              </Link>
+              <Btn variant="s" disabled disabledReason="No redrive endpoint in the spec (finding)">
                 Redrive after the fix
-              </button>
+              </Btn>
             </div>
           </div>
           <FloorStrip>
@@ -304,27 +326,28 @@ export function QueueOverview({ svc, projectTotalCents, consumers, nameOf }: Ove
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           {
             title: "Open messages",
             sub: "ready · in-flight · DLQ",
-            disabledReason: "Messages (D8) land in Phase 3",
+            tab: "messages",
           },
           {
             title: "Redrive DLQ (2)",
             sub: "after the fix ships",
-            disabledReason: "Redrive lands with D8 in Phase 3",
+            disabledReason: "No redrive endpoint in the spec (finding)",
           },
           {
             title: "New schedule (U4)",
             sub: "missed runs alert",
-            disabledReason: "Schedules (D17/U4) land in Phase 3",
+            tab: "schedules",
           },
           {
             title: "Purge…",
             sub: "typed name + reason",
             danger: true,
-            disabledReason: "Guarded purge (D18) lands in Phase 3",
+            tab: "settings",
           },
         ]}
       />
@@ -392,18 +415,16 @@ export function WebOverview({
                 params={{ org, project, service: "db-main" }}
                 search={{ env }}
               >
-                <button type="button" className="btn p">
-                  View proposal prp_7c31a2
-                </button>
+                <Btn variant="p">View proposal prp_7c31a2</Btn>
               </Link>
-              <button
-                type="button"
-                className="btn s"
+              <Btn
+                variant="s"
                 onClick={doRollback}
                 disabled={rollback.isPending}
+                disabledReason="Rolling back…"
               >
                 Roll back to #141
-              </button>
+              </Btn>
             </div>
           </div>
           <FloorStrip>
@@ -436,22 +457,23 @@ export function WebOverview({
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           { title: "Roll back to #141", sub: "instant · image warm", onClick: doRollback },
           {
             title: "Open shell",
             sub: "audited · masked",
-            disabledReason: "Shell (D20) lands in Phase 3",
+            tab: "shell",
           },
           {
             title: "Add domain",
             sub: "CNAME → auto-TLS",
-            disabledReason: "Domains (D21/U5) land in Phase 3",
+            tab: "domains",
           },
           {
             title: "Adjust scaling",
             sub: "ceiling is a cost",
-            disabledReason: "Scaling (D22) lands in Phase 3",
+            tab: "scaling",
           },
         ]}
       />
@@ -462,7 +484,15 @@ export function WebOverview({
 // --------------------------------------------------------------------------
 // S5 · Worker — schedules and consumption as the Right-now panel
 // --------------------------------------------------------------------------
-export function WorkerOverview({ svc, projectTotalCents, uses, nameOf }: OverviewCtx) {
+export function WorkerOverview({
+  svc,
+  org,
+  project,
+  env,
+  projectTotalCents,
+  uses,
+  nameOf,
+}: OverviewCtx) {
   const usePills = uses.map((b) => {
     const target = nameOf(b.target_id);
     if (target === "jobs") return "jobs · consume · concurrency 8";
@@ -528,26 +558,27 @@ export function WorkerOverview({ svc, projectTotalCents, uses, nameOf }: Overvie
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           {
             title: "Run receipts-daily",
             sub: "manual · logged",
-            disabledReason: "Manual runs land with schedules in Phase 3",
+            disabledReason: "Manual runs land with a schedule-run endpoint the API lacks (finding)",
           },
           {
             title: "Open shell",
             sub: "audited · masked",
-            disabledReason: "Shell (D20) lands in Phase 3",
+            tab: "shell",
           },
           {
             title: "Add schedule",
             sub: "cron + payload",
-            disabledReason: "Schedules (U4) land in Phase 3",
+            tab: "schedules",
           },
           {
             title: "Adjust concurrency",
             sub: "backpressure aware",
-            disabledReason: "Scaling (D22) lands in Phase 3",
+            tab: "scaling",
           },
         ]}
       />
@@ -558,7 +589,15 @@ export function WorkerOverview({ svc, projectTotalCents, uses, nameOf }: Overvie
 // --------------------------------------------------------------------------
 // S6 · PostgreSQL fresh instance — honest zeros, the "when amber appears" promise
 // --------------------------------------------------------------------------
-export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameOf }: OverviewCtx) {
+export function FreshPostgresOverview({
+  svc,
+  org,
+  project,
+  env,
+  projectTotalCents,
+  consumers,
+  nameOf,
+}: OverviewCtx) {
   const shape = (svc.shape ?? {}) as Record<string, unknown>;
   const rows: ConsumerRow[] = consumers.map((b) => ({
     icon: "s-worker",
@@ -594,22 +633,20 @@ export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameO
               alerts will land here — the panel turns amber only when something needs you.
             </p>
             <div className="flex gap-2.5">
-              <button
-                type="button"
-                className="btn p"
-                disabled
-                title="SQL Editor (D1) lands in Phase 3"
+              <Link
+                to="/$org/$project/svc/$service/sql-editor"
+                params={{ org, project, service: svc.name }}
+                search={{ env }}
               >
-                Run your first query
-              </button>
-              <button
-                type="button"
-                className="btn s"
+                <Btn variant="p">Run your first query</Btn>
+              </Link>
+              <Btn
+                variant="s"
                 disabled
-                title="Import lands with the SQL editor in Phase 3"
+                disabledReason="No import endpoint in the spec — the SQL editor is the first-query path (finding)"
               >
                 Import data…
-              </button>
+              </Btn>
             </div>
           </div>
           <FloorStrip>
@@ -627,16 +664,18 @@ export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameO
         />
       </div>
       <ActRow
+        nav={{ org, project, env, service: svc.name }}
         tiles={[
           {
             title: "Open SQL editor",
             sub: "readonly role by default",
-            disabledReason: "SQL Editor (D1) lands in Phase 3",
+            tab: "sql-editor",
           },
           {
             title: "Import data",
             sub: "from dump or CSV",
-            disabledReason: "Import lands with the SQL editor in Phase 3",
+            disabledReason:
+              "No import endpoint in the spec — the SQL editor is the first-query path (finding)",
           },
           {
             title: "New branch",
@@ -646,7 +685,7 @@ export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameO
           {
             title: "New binding",
             sub: "least-privilege",
-            disabledReason: "Bindings (D11/U2) land in Phase 3",
+            tab: "bindings",
           },
         ]}
       />
@@ -687,9 +726,7 @@ export function InternalToolsDbOverview({ svc, org, project }: OverviewCtx) {
           </p>
           <div className="flex items-center gap-3">
             <Link to="/$org/create" params={{ org }} search={{ env: "production" }}>
-              <button type="button" className="btn s">
-                + Add a product to this project
-              </button>
+              <Btn variant="s">+ Add a product to this project</Btn>
             </Link>
             <Copybit>{`steloit valkey create cache --project ${project}`}</Copybit>
           </div>

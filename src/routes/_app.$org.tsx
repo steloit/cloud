@@ -108,19 +108,22 @@ function OrgShell() {
 
   const path = location.pathname;
   const activeService = services.data?.find((s) => s.name === childParams.service);
-  const active: RailActive = path.includes("/settings")
-    ? { kind: "settings" }
-    : path.includes("/observe")
-      ? { kind: "observe" }
-      : path.includes("/deploy")
-        ? { kind: "deploy" }
-        : path.endsWith("/create")
-          ? { kind: "create" }
-          : childParams.service === "gateway" || childParams.service === "ai-gateway"
-            ? { kind: "product", product: "ai-gateway" }
-            : childParams.service && activeService
-              ? { kind: "product", product: activeService.product as Product }
-              : { kind: "home" };
+  // Service context wins first: a service tab's /settings or /deployments
+  // suffix must not light the gear/Deploy domain icons — exactly one .rit.on.
+  const active: RailActive =
+    childParams.service === "gateway" || childParams.service === "ai-gateway"
+      ? { kind: "product", product: "ai-gateway" }
+      : childParams.service && activeService
+        ? { kind: "product", product: activeService.product as Product }
+        : path.includes("/settings")
+          ? { kind: "settings" }
+          : path.includes("/observe")
+            ? { kind: "observe" }
+            : path.includes("/deploy")
+              ? { kind: "deploy" }
+              : path.endsWith("/create")
+                ? { kind: "create" }
+                : { kind: "home" };
 
   return (
     <div className="flex h-screen flex-col bg-canvas">
@@ -134,7 +137,7 @@ function OrgShell() {
         searchPlaceholder={
           childParams.service ? "Search or jump…" : "Search projects, services, docs…"
         }
-        showAssistant={Boolean(childParams.service)}
+        showAssistant
       />
       <div className="fbody">
         <Rail

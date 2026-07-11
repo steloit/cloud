@@ -28,7 +28,9 @@ function CostUsage() {
         <Pghead
           title={
             <span className="flex items-center gap-2.5">
-              Cost & Usage <Pill tone="st">pre-built</Pill>
+              {/* Finding: frame DB4 shows the bare "Cost & Usage" title — the design-system
+                  "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+              Dashboards · Cost & Usage <Pill tone="st">pre-built</Pill>
             </span>
           }
           sub="Spend as telemetry — burn, trend and meters, watched like latency. The ledger and the contract live in Billing (B1); this page watches them."

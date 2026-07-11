@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, useChildMatches } from "@tanstack/react-router";
 import { type DashboardsActive, SnavDashboards } from "@/app/shell/snav-dashboards";
+import { useOrgs } from "@/features/org/hooks";
 
 /**
  * Dashboards layout (DB1–DB8): the plane's snav + the selected page. A viewed
@@ -8,6 +9,10 @@ import { type DashboardsActive, SnavDashboards } from "@/app/shell/snav-dashboar
  */
 function DashboardsLayout() {
   const { org } = Route.useParams();
+  // Pass-6: the snav header names the org — derived via the standard useOrgs
+  // lookup (slug or id), never hardcoded; the slug stands in until it resolves.
+  const orgs = useOrgs();
+  const orgName = orgs.data?.find((o) => o.slug === org || o.id === org)?.name;
   const childMatches = useChildMatches();
 
   const leaf = childMatches[childMatches.length - 1]?.routeId ?? "";
@@ -25,7 +30,7 @@ function DashboardsLayout() {
 
   return (
     <>
-      <SnavDashboards org={org} active={active} />
+      <SnavDashboards org={org} orgName={orgName} active={active} />
       <Outlet />
     </>
   );

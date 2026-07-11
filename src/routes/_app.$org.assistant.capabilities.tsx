@@ -84,8 +84,10 @@ function CapabilitiesPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Capabilities" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Capabilities"
+          title="Assistant · Capabilities"
           sub="Everything the Assistant can do and where each surfaces — all under the four laws, none acting without you."
         />
         <div className="grid grid-cols-2 gap-3.5">

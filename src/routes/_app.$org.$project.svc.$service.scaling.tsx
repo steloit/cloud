@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
@@ -70,7 +71,7 @@ function ScalingPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <h1 className="h1">Scaling</h1>
+          <h1 className="h1">{PRODUCT_LABEL[svc.product]} · Scaling</h1>
           <p className="hsub">
             Scaling (D22) is a web/worker surface — {svc.name} is {svc.product}.
           </p>
@@ -106,8 +107,10 @@ function ScalingPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame D22 shows the bare "Scaling" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Scaling"
+          title={`${PRODUCT_LABEL[svc.product]} · Scaling`}
           sub={
             <span className="mono">
               {svc.name} · {env} · changes apply without a restart and land in the audit log

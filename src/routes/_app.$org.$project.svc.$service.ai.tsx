@@ -2,6 +2,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
@@ -319,7 +320,11 @@ function ProposalPanel({
         <div className="mt-auto flex items-center gap-2 border-hair border-t p-[12px_16px]">
           {product === "valkey" ? (
             <>
-              <Btn variant="p" disabled disabledReason="Settings apply flow lands in Phase 5">
+              <Btn
+                variant="p"
+                disabled
+                disabledReason="Per-service AI overrides land with a policy-override endpoint the API lacks (finding)"
+              >
                 <Icon id="s-gear" />
                 Open in Settings (D14)
               </Btn>
@@ -408,15 +413,17 @@ function ServiceAiPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frames AI6/AI7/AI8 title this pane by service name — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. The env pill is
+            display-only (no switcher wired), so it carries no chevron. */}
         <Pghead
           before={<Glyph id="s-ai" />}
-          title={service}
+          title={`${svc ? PRODUCT_LABEL[svc.product] : service} · Assistant`}
           sub={<span className="mono">{PRODUCT_SUB[product] ?? "AI insights"}</span>}
         >
           <span className="envpill">
             <Icon id="s-env" />
             {env}
-            <Icon id="s-chevd" className="h-[11px] w-[11px]" />
           </span>
         </Pghead>
 

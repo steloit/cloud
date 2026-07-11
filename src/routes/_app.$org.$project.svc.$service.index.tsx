@@ -88,32 +88,29 @@ function statusLabel(svc: Service): string {
   return svc.status;
 }
 
-function headerActions(svc: Service) {
+function headerActions(svc: Service, nav: { org: string; project: string; env: string }) {
+  const tabLink = (tab: string, label: string) => (
+    <Link
+      to={`/$org/$project/svc/$service/${tab}` as string}
+      params={{ org: nav.org, project: nav.project, service: svc.name }}
+      search={{ env: nav.env }}
+    >
+      <Btn variant="s">{label}</Btn>
+    </Link>
+  );
   switch (svc.product) {
     case "postgres":
-      return (
-        <Btn variant="s" disabled disabledReason="SQL Editor (D1) lands in Phase 3">
-          Open SQL editor
-        </Btn>
-      );
+      return tabLink("sql-editor", "Open SQL editor");
     case "valkey":
-      return (
-        <Btn variant="s" disabled disabledReason="CLI Console (D6) lands in Phase 3">
-          Open CLI
-        </Btn>
-      );
+      return tabLink("cli", "Open CLI");
     case "storage":
       return (
-        <Btn variant="s" disabled disabledReason="Uploads land with the Object Browser (D7)">
+        <Btn variant="s" disabled disabledReason="No object-upload endpoint in the spec (finding)">
           Upload
         </Btn>
       );
     case "queue":
-      return (
-        <Btn variant="s" disabled disabledReason="Messages (D8) land in Phase 3">
-          Open messages
-        </Btn>
-      );
+      return tabLink("messages", "Open messages");
     case "web":
       return (
         <Btn
@@ -127,7 +124,11 @@ function headerActions(svc: Service) {
       );
     case "worker":
       return (
-        <Btn variant="s" disabled disabledReason="Manual runs land with schedules in Phase 3">
+        <Btn
+          variant="s"
+          disabled
+          disabledReason="Manual runs land with a schedule-run endpoint the API lacks (finding)"
+        >
           Run a job now
         </Btn>
       );
@@ -242,13 +243,17 @@ function DbMainOverview(ctx: OverviewCtx) {
             <span className="text-10p5 text-ink3">instant copy-on-write</span>
           </Card>
         </Link>
-        <Card
-          className="flex flex-col gap-1 p-3.5 opacity-55"
-          title="Restore (D5) lands in Phase 3"
+        <Link
+          to="/$org/$project/svc/$service/backups"
+          params={{ org, project, service: svc.name }}
+          search={{ env }}
         >
-          <b className="text-12p5">Restore to branch…</b>
-          <span className="text-10p5 text-ink3">never in place</span>
-        </Card>
+          {/* The D5 restore drawer lives on Backups — wired, no longer gated. */}
+          <Card className="flex h-full flex-col gap-1 p-3.5 hover:border-ink3">
+            <b className="text-12p5">Restore to branch…</b>
+            <span className="text-10p5 text-ink3">never in place</span>
+          </Card>
+        </Link>
         <Link
           to="/$org/$project/svc/$service/insights"
           params={{ org, project, service: svc.name }}
@@ -361,7 +366,7 @@ function ServiceOverview() {
             )
           }
         >
-          {provisioning ? null : headerActions(svc)}
+          {provisioning ? null : headerActions(svc, { org, project, env })}
           <Btn variant="s">Docs</Btn>
         </Pghead>
         {overviewFor(ctx)}

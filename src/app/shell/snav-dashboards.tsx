@@ -14,7 +14,16 @@ export type DashboardsActive =
   | "mine"
   | "layouts";
 
-export function SnavDashboards({ org, active }: { org: string; active: DashboardsActive }) {
+export function SnavDashboards({
+  org,
+  orgName,
+  active,
+}: {
+  org: string;
+  /** Display name threaded from the layout's orgs query; the slug stands in while it loads. */
+  orgName?: string;
+  active: DashboardsActive;
+}) {
   const params = { org };
   return (
     <Snav>
@@ -24,7 +33,9 @@ export function SnavDashboards({ org, active }: { org: string; active: Dashboard
         </span>
         <div>
           <div className="t">Dashboards</div>
-          <div className="u">Acme · all projects</div>
+          {/* Pass-6: derived from the routed org (was hardcoded "Acme") — renders
+              the same canon string for acme, and the truth elsewhere. */}
+          <div className="u">{orgName ?? org} · all projects</div>
         </div>
       </div>
       <NitLink to="/$org/dashboards" params={params} label="Overview" on={active === "overview"} />
@@ -39,9 +50,13 @@ export function SnavDashboards({ org, active }: { org: string; active: Dashboard
       <NitDisabled
         icon="s-chip"
         label="Valkey Performance"
-        reason="Valkey Performance lands in Phase 4"
+        reason="Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)"
       />
-      <NitDisabled icon="s-ai" label="AI Gateway" reason="AI Gateway dashboard lands in Phase 4" />
+      <NitDisabled
+        icon="s-ai"
+        label="AI Gateway"
+        reason="Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)"
+      />
       <NitLink
         to="/$org/dashboards/infrastructure"
         params={params}
@@ -59,7 +74,7 @@ export function SnavDashboards({ org, active }: { org: string; active: Dashboard
       <NitDisabled
         icon="s-deploy"
         label="Deployments"
-        reason="Deployments dashboard lands in Phase 4"
+        reason="Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)"
       />
       <Nsec>Yours</Nsec>
       <NitLink

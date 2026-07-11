@@ -248,7 +248,11 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
               <span className="text-ink2">Backup method</span>
               <Pill tone="mut">none</Pill>
               <span className="ml-auto">
-                <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
+                <Btn
+                  variant="s"
+                  disabled
+                  disabledReason="No payment-method endpoints in the spec (finding)"
+                >
                   Add backup
                 </Btn>
               </span>

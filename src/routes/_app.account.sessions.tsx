@@ -16,7 +16,9 @@ function SessionsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
-        <Pghead title="Sessions" sub="Everywhere you're signed in right now">
+        {/* Finding: the frame shows the bare "Sessions" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+        <Pghead title="Account · Sessions" sub="Everywhere you're signed in right now">
           <Btn variant="dgr" disabled disabledReason={REVOKE_REASON}>
             Sign out all other sessions
           </Btn>

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
 import { resolveEnvKey } from "@/lib/canon-env";
@@ -21,7 +22,7 @@ function ShellPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <h1 className="h1">Shell</h1>
+          <h1 className="h1">{PRODUCT_LABEL[svc.product]} · Shell</h1>
           <p className="hsub">
             Shell (D20) is a web/worker surface — {svc.name} is {svc.product}.
           </p>
@@ -39,7 +40,7 @@ function ShellPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead
-            title="Shell"
+            title={`${PRODUCT_LABEL[svc.product]} · Shell`}
             sub={
               <span className="mono">
                 {svc.name} · {env} · ephemeral session · everything typed here is logged
@@ -68,8 +69,10 @@ function ShellPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame D20 shows the bare "Shell" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Shell"
+          title={`${PRODUCT_LABEL[svc.product]} · Shell`}
           sub={
             <span className="mono">
               {svc.name} · {env} · ephemeral session on instance i-2 · everything typed here is

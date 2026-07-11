@@ -331,7 +331,10 @@ function PolicyNewPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-12">
                     <span>When a branch is created from</span>
-                    <span className="chip">production ▾</span>
+                    {/* Static value chip (frame microcopy, ▾ dropped) — a
+                        source-env picker isn't wired; the rule body carries
+                        production only (finding). */}
+                    <span className="chip">production</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-12">
                     <span>→ mask columns tagged</span>

@@ -74,12 +74,18 @@ function PostgresHealth() {
         <Pghead
           title={
             <span className="flex items-center gap-2.5">
-              PostgreSQL Health <Pill tone="st">pre-built</Pill>
+              {/* Finding: frame DB2 shows the bare "PostgreSQL Health" title — the
+                  design-system "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+              Dashboards · PostgreSQL Health <Pill tone="st">pre-built</Pill>
             </span>
           }
           sub="Every PostgreSQL you run — across projects and environments — on one screen. Generated from your topology; always current."
         >
-          <Btn variant="s" disabled disabledReason="Forking lands in Phase 4">
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="Forking lands with a dashboard-fork endpoint the API lacks (finding)"
+          >
             Customize — forks a copy
           </Btn>
         </Pghead>

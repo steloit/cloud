@@ -4,7 +4,6 @@ import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Copybit } from "@/design-system/copybit";
 import { EmptyRow } from "@/design-system/empty-state";
-import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useAuditEvents, useOrgs } from "@/features/org/hooks";
@@ -94,16 +93,13 @@ function AuditLogPage() {
             </Btn>
           </Pghead>
 
+          {/* Static context pills (frame microcopy, ▾ dropped) — live pickers
+              need time/project/actor query params the audit API lacks
+              (finding); a chevron that opens nothing is a dead affordance. */}
           <div className="flex items-center gap-2">
-            <span className="envpill">
-              Last 24 hours <Icon id="s-chevd" className="h-[11px] w-[11px]" />
-            </span>
-            <span className="envpill">
-              All projects <Icon id="s-chevd" className="h-[11px] w-[11px]" />
-            </span>
-            <span className="envpill">
-              All actors <Icon id="s-chevd" className="h-[11px] w-[11px]" />
-            </span>
+            <span className="envpill">Last 24 hours</span>
+            <span className="envpill">All projects</span>
+            <span className="envpill">All actors</span>
             <span className="envpill text-steel">event: config, policy, deploy ×</span>
             <span className="ml-auto">
               <Copybit>steloit audit list --since 24h</Copybit>

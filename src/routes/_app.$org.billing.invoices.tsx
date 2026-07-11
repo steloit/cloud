@@ -153,11 +153,11 @@ function InvoicesPage() {
                               if (!accruing) setSelectedId(inv.id);
                             }}
                           >
-                            <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
+                            <td className={cn("mono", isSelected ? "bg-steel-tint" : "")}>
                               {accruing ? <span className="text-ink3">upcoming</span> : inv.id}
                             </td>
                             <td className={isSelected ? "bg-steel-tint" : ""}>{inv.period}</td>
-                            <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
+                            <td className={cn("mono", isSelected ? "bg-steel-tint" : "")}>
                               {accruing
                                 ? `≈ ${fmtMoney(inv.total_cents)}`
                                 : fmtMoney(inv.total_cents)}
@@ -189,10 +189,18 @@ function InvoicesPage() {
                       </div>
                     </div>
                     <span className="ml-auto flex items-center gap-2">
-                      <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
+                      <Btn
+                        variant="s"
+                        disabled
+                        disabledReason="PDF/CSV renders land with a billing-export endpoint the API lacks (finding)"
+                      >
                         PDF
                       </Btn>
-                      <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
+                      <Btn
+                        variant="s"
+                        disabled
+                        disabledReason="PDF/CSV renders land with a billing-export endpoint the API lacks (finding)"
+                      >
                         CSV
                       </Btn>
                       <Btn variant="s" onClick={() => downloadJson(selected)}>

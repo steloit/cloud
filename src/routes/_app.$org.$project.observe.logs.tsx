@@ -168,11 +168,13 @@ function LogRow({
           <div className="t">msg_9f22 · attempt 3/3 · "receipt": null</div>
           <div className="flex items-center gap-2">
             <Pill tone="st">trace tr_8814 → api</Pill>
+            {/* Honest reasons, not phase numbers: each names the concrete
+                gap that unblocks it (dead-affordance sweep). */}
             <Btn
               variant="gh"
               className="h-5 px-2 text-10"
               disabled
-              disabledReason="Log context windows land in Phase 3"
+              disabledReason="Context windows land with an around-timestamp logs query the API lacks (finding)"
             >
               Context ± 5 s
             </Btn>
@@ -180,7 +182,7 @@ function LogRow({
               variant="gh"
               className="h-5 px-2 text-10"
               disabled
-              disabledReason="The queue DLQ view (D8) lands in Phase 3"
+              disabledReason="Message deep-links land with the messages/DLQ endpoints the API lacks (finding) — D8 itself is live on the queue service"
             >
               Open in DLQ (D8)
             </Btn>
@@ -188,7 +190,7 @@ function LogRow({
               variant="gh"
               className="h-5 px-2 text-10"
               disabled
-              disabledReason="The rule drawer (U8) lands in Phase 3"
+              disabledReason="Pre-filling the rule drawer from a log pattern isn't wired yet — U8 opens pre-filled from Metrics ⚑ today"
             >
               ⚑ Alert on this pattern
             </Btn>
@@ -226,8 +228,14 @@ function LogsPage() {
             — same language as ⌘K, the CLI, and alert rules
           </span>
           <span className="flex-1" />
-          <span className="chip">Saved: incident-triage ▾</span>
-          <Btn variant="s" disabled disabledReason="The rule drawer (U8) lands in Phase 3">
+          {/* Static context chip (frame microcopy) — a saved-searches picker
+              needs saved-search endpoints the API lacks (finding). */}
+          <span className="chip">Saved: incident-triage</span>
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="Pre-filling the rule drawer from a log query isn't wired yet — U8 opens pre-filled from Metrics ⚑ today"
+          >
             ⚑ Alert on this query
           </Btn>
         </div>

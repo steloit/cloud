@@ -20,7 +20,10 @@ function OrgGeneralPage() {
   const { org } = Route.useParams();
   const orgs = useOrgs();
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
-  const orgName = orgRecord?.name ?? "Acme";
+  // Pass-6: identity strings derive from the orgs query (the slug stands in
+  // while it loads) — canon renders the same "Acme", other orgs their own.
+  const orgName = orgRecord?.name ?? org;
+  const orgSlug = orgRecord?.slug ?? org;
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -32,17 +35,15 @@ function OrgGeneralPage() {
 
   return (
     <>
-      <SnavSettings
-        org={org}
-        orgName={orgRecord?.name ?? org}
-        project="ecommerce"
-        active="o-general"
-      />
+      {/* project="ecommerce" is frame-fixed: org-level settings has no project
+          in route scope; the G-series snav shows the canon project group. */}
+      <SnavSettings org={org} orgName={orgName} project="ecommerce" active="o-general" />
       <main className="main">
         <div className="pgpad !overflow-y-auto">
+          {/* Name is identity-derived; "Business plan" is frame-fixed canon. */}
           <Pghead
             title="Organization · General"
-            sub="Acme · Business plan · the boundary of identity, billing and policy"
+            sub={`${orgName} · Business plan · the boundary of identity, billing and policy`}
           />
 
           <Card className="flex max-w-[640px] flex-col gap-4 p-4">
@@ -52,7 +53,8 @@ function OrgGeneralPage() {
                   now honest readOnly, with rename as an explicit overlay verb. */}
               <div className="flex items-center gap-2.5">
                 <span className="flex-1">
-                  <Inp id="org-name" defaultValue="Acme" readOnly />
+                  {/* Identity-derived (Pass-6) — was hardcoded "Acme". */}
+                  <Inp id="org-name" defaultValue={orgName} readOnly />
                 </span>
                 <Btn variant="s" onClick={() => setRenameOpen(true)}>
                   Rename…
@@ -61,10 +63,12 @@ function OrgGeneralPage() {
             </div>
             <div>
               <Flabel htmlFor="org-slug">Slug</Flabel>
-              <Inp id="org-slug" className="mono" defaultValue="acme" readOnly />
+              {/* Identity-derived (Pass-6) — was hardcoded "acme". */}
+              <Inp id="org-slug" className="mono" defaultValue={orgSlug} readOnly />
             </div>
             <div>
               <Flabel htmlFor="org-region">Default home region</Flabel>
+              {/* Frame-fixed canon (not identity) — the region stays verbatim. */}
               <Inp id="org-region" className="mono" defaultValue="aws · ap-south-1" readOnly />
               <div className="mt-1.5 text-10p5 text-ink3">
                 prefill for new environments — never a constraint
@@ -74,12 +78,17 @@ function OrgGeneralPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-3 p-4">
             <Eyebrow>Ownership</Eyebrow>
+            {/* "asha is the owner" is frame-fixed canon (not identity-derived). */}
             <div className="text-12 text-ink2">
               asha is the owner. Transfer requires the new owner to accept — it never happens to
               someone.
             </div>
             <div>
-              <Btn variant="s" disabled disabledReason="Ownership transfer lands in Phase 4">
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Ownership transfer lands with a transfer endpoint the API lacks (finding)"
+              >
                 Transfer ownership…
               </Btn>
             </div>
@@ -90,7 +99,8 @@ function OrgGeneralPage() {
             {/* G5 frame truth: canon Acme's delete is dependency-blocked, and
                 "the button says why" — the typed-confirm modal below ships as
                 the unblocked path (U-series contract) and opens only once the
-                blockers clear (never, in canon). */}
+                blockers clear (never, in canon). The blocked reason is
+                frame-verbatim canon and stays hardcoded; only the name derives. */}
             <div className="flex items-center gap-2.5">
               <Btn
                 variant="dgr"
@@ -98,7 +108,7 @@ function OrgGeneralPage() {
                 disabledReason="blocked — 4 projects, 12 members, active subscription"
                 onClick={() => setDeleteOpen(true)}
               >
-                Delete Acme…
+                Delete {orgName}…
               </Btn>
               <Pill tone="err">blocked — 4 projects, 12 members, active subscription</Pill>
             </div>

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { ConfirmModal } from "@/design-system/confirm";
@@ -109,8 +110,10 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
 
   return (
     <>
+      {/* Finding: frame D11 shows the bare "Bindings" title — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
-        title="Bindings"
+        title={`${PRODUCT_LABEL[svc.product]} · Bindings`}
         sub={
           <span className="mono">
             {svc.name} · {bindings.isSuccess ? rows.length : "…"} consumers · credentials minted per

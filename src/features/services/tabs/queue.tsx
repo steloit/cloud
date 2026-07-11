@@ -41,9 +41,11 @@ export function QueueSettingsTab({ svc, env }: TabProps) {
   const [purging, setPurging] = useState(false);
   return (
     <>
+      {/* Finding: frame D18 shows the bare "Settings" title — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
         before={<Glyph id="s-queue" />}
-        title="Settings"
+        title="Queue · Settings"
         sub={
           <span className="mono">
             {svc.name} · {env}

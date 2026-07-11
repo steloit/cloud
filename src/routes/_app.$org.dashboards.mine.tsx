@@ -272,8 +272,10 @@ function MyDashboards() {
   return (
     <main className="main">
       <div className="pgpad">
+        {/* Finding: frame DB5 titles this pane "My dashboards & shared" — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="My dashboards & shared"
+          title="Dashboards · My dashboards"
           sub="Yours are personal by default; share to the org or a project when a view is worth standardizing. Scope (org-wide vs project) is a separate axis from visibility — project-scoped dashboards are born filtered and inherit project permissions."
         >
           <Btn variant="p" onClick={() => setModalOpen(true)}>

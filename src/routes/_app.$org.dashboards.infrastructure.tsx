@@ -24,17 +24,23 @@ function InfrastructureOverview() {
         <Pghead
           title={
             <span className="flex items-center gap-2.5">
-              Infrastructure Overview <Pill tone="st">pre-built</Pill>
+              {/* Finding: frame DB3 titles this pane "Infrastructure Overview" — the
+                  design-system "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+              Dashboards · Infrastructure <Pill tone="st">pre-built</Pill>
             </span>
           }
           sub={`Golden signals across every service — the "Production Health" view that ends tab-jumping. Deploys drawn on every chart.`}
         >
-          <Btn variant="s" disabled disabledReason="Forking lands in Phase 4">
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="Forking lands with a dashboard-fork endpoint the API lacks (finding)"
+          >
             Customize — forks a copy
           </Btn>
         </Pghead>
 
-        <FilterChips defaultOn={["All projects ▾", "production ▾"]} />
+        <FilterChips defaultOn={["All projects", "production"]} />
 
         {/* Four-state grammar on the chart sections — O2's grouping: one
             failure card per section (the golden-signals pair, then the small

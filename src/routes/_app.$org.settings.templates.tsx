@@ -51,7 +51,8 @@ const DISPLAY: Record<string, TemplateDisplay> = {
 
 type Filter = "all" | "org" | "restricted";
 
-const EDIT_REASON = "Template editing lands in Phase 4";
+const EDIT_REASON =
+  "Shape editing isn't in the spec — rename ships; edits land with a template-revision endpoint (finding)";
 
 function TemplatesPage() {
   const { org } = Route.useParams();

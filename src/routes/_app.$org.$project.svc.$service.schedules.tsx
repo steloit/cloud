@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { EmptyState } from "@/design-system/empty-state";
@@ -70,9 +71,11 @@ function SchedulesPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame D17 shows the bare "Schedules" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-cron" />}
-          title="Schedules"
+          title={`${PRODUCT_LABEL[svc.product]} · Schedules`}
           sub={
             <span className="mono">
               {svc.name} · scheduled publishes · timezone Asia/Kolkata (org) — UTC shown alongside

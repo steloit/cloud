@@ -102,8 +102,10 @@ function TokensPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Personal tokens" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Personal tokens"
+          title="Account · Personal tokens"
           sub="Tokens that act as you — they carry your roles and shrink the moment your roles do"
         >
           <Btn variant="p" onClick={() => setCreateOpen((v) => !v)}>

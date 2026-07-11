@@ -44,9 +44,12 @@ function ProjectGeneralPage() {
       />
       <main className="main">
         <div className="pgpad !overflow-y-auto">
+          {/* Name is identity-derived from the route param (Pass-6); the
+              provenance ("created from the store template · 7 months ago") is
+              frame-fixed canon. */}
           <Pghead
             title="Project · General"
-            sub="ecommerce · created from the store template · 7 months ago"
+            sub={`${project} · created from the store template · 7 months ago`}
           />
 
           <Card className="flex max-w-[640px] flex-col gap-4 p-4">
@@ -56,7 +59,8 @@ function ProjectGeneralPage() {
                   now honest readOnly, with rename as an explicit overlay verb. */}
               <div className="flex items-center gap-2.5">
                 <span className="flex-1">
-                  <Inp id="prj-name" defaultValue="ecommerce" readOnly />
+                  {/* Identity-derived (Pass-6) — was hardcoded "ecommerce". */}
+                  <Inp id="prj-name" defaultValue={project} readOnly />
                 </span>
                 <Btn variant="s" onClick={() => setRenameOpen(true)}>
                   Rename…
@@ -67,13 +71,15 @@ function ProjectGeneralPage() {
               <Flabel htmlFor="prj-slug">Slug</Flabel>
               <div className="flex items-center gap-2.5">
                 <span className="flex-1">
-                  <Inp id="prj-slug" className="mono" defaultValue="acme/ecommerce" readOnly />
+                  {/* Identity-derived (Pass-6) — was hardcoded "acme/ecommerce". */}
+                  <Inp id="prj-slug" className="mono" defaultValue={`${org}/${project}`} readOnly />
                 </span>
                 <Pill tone="mut">renaming updates URLs · old slugs redirect 90 d</Pill>
               </div>
             </div>
             <div>
               <Flabel htmlFor="prj-defenv">Default environment</Flabel>
+              {/* Frame-fixed canon (not identity) — the default env stays verbatim. */}
               <Inp id="prj-defenv" className="mono" defaultValue="production" readOnly />
             </div>
           </Card>
@@ -85,7 +91,11 @@ function ProjectGeneralPage() {
               billing switches at the next invoice boundary.
             </div>
             <div>
-              <Btn variant="s" disabled disabledReason="Project transfer lands in Phase 4">
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Project transfer lands with a transfer endpoint the API lacks (finding)"
+              >
                 Transfer…
               </Btn>
             </div>
@@ -96,7 +106,8 @@ function ProjectGeneralPage() {
             {/* G1 frame truth: canon ecommerce's delete is dependency-blocked,
                 and "the button says why" — the typed-confirm modal below ships
                 as the unblocked path and opens only once the blockers clear
-                (never, in canon). */}
+                (never, in canon). The blocked reason is frame-verbatim canon
+                and stays hardcoded; only the name derives. */}
             <div className="flex items-center gap-2.5">
               <Btn
                 variant="dgr"
@@ -104,7 +115,7 @@ function ProjectGeneralPage() {
                 disabledReason="blocked — 7 services across 3 environments"
                 onClick={() => setDeleteOpen(true)}
               >
-                Delete ecommerce…
+                Delete {project}…
               </Btn>
               <Pill tone="err">blocked — 7 services across 3 environments</Pill>
             </div>

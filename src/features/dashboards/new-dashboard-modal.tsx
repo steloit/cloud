@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * renders this conditionally; the scrim click and Cancel both close.
  */
 
-const SCOPES = ["org-wide", "ecommerce", "other project ▾"] as const;
+const SCOPES = ["org-wide", "ecommerce"] as const;
 type Scope = (typeof SCOPES)[number];
 
 const VISIBILITIES: Visibility[] = ["personal", "org", "restricted"];
@@ -93,6 +93,18 @@ export function NewDashboardModal({
               {s}
             </button>
           ))}
+          {/* De-afforded (frame microcopy kept, ▾ dropped): selecting it
+              would still create against this project's id — a real picker
+              needs a project list wired into the create body (finding). */}
+          <button
+            type="button"
+            className="chip cursor-not-allowed opacity-55"
+            disabled
+            title="Scoping to another project isn't wired yet — the create body carries only this project's id (finding)"
+            aria-disabled="true"
+          >
+            other project
+          </button>
         </div>
         <div className="text-10p5 text-ink3">
           Project-scoped is born filtered — it inherits the crumb's environment filter and the

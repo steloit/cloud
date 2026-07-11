@@ -1,4 +1,4 @@
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
@@ -21,7 +21,8 @@ import { usePostMessage } from "./hooks";
 const CANON_THREAD = "thr_db_slow";
 
 // ?proposal= rides along on the W10 deep link; the route validates { env } only.
-const W10_SEARCH = { env: "production", proposal: "prp_7c31a2" } as { env: string };
+// Pass-6: env is the drawer's routed scope, not a hardcoded "production".
+const w10Search = (env: string) => ({ env, proposal: "prp_7c31a2" }) as { env: string };
 
 /** AI9 frames the valkey case; the other fixture insights get the same banner shape. */
 const ATTACHED: Record<
@@ -94,7 +95,17 @@ function UserBubble({ children }: { children: ReactNode }) {
   );
 }
 
-function DrawerConversation({ org, attached }: { org: string; attached: string | null }) {
+function DrawerConversation({
+  org,
+  project,
+  env,
+  attached,
+}: {
+  org: string;
+  project: string;
+  env: string;
+  attached: string | null;
+}) {
   const close = useUIStore((s) => s.closeAssistant);
   const post = usePostMessage(CANON_THREAD);
   const [draft, setDraft] = useState("");
@@ -126,10 +137,12 @@ function DrawerConversation({ org, attached }: { org: string; attached: string |
                   <Pill tone="warn">642ms SeqScan</Pill>
                 </div>
                 <div className="mt-2 flex gap-1.5">
+                  {/* db-main is the canon fix's target service; project/env ride
+                      the drawer's routed scope (Pass-6). */}
                   <Link
                     to="/$org/$project/svc/$service/insights"
-                    params={{ org, project: "ecommerce", service: "db-main" }}
-                    search={W10_SEARCH}
+                    params={{ org, project, service: "db-main" }}
+                    search={w10Search(env)}
                     onClick={close}
                   >
                     <Btn variant="s" className="h-6 border-assist text-10 text-assist">
@@ -210,8 +223,19 @@ export function AssistantDrawer() {
   const open = useUIStore((s) => s.assistantOpen);
   const attached = useUIStore((s) => s.attachedInsight);
   const close = useUIStore((s) => s.closeAssistant);
-  const params = useParams({ strict: false }) as { org?: string };
+  // Pass-6: the drawer states the scope it was opened over — project/service
+  // from the route params, env from ?env=; the canon values (api · ecommerce /
+  // production) are the fallback when a param isn't in scope (org-level pages).
+  const params = useParams({ strict: false }) as {
+    org?: string;
+    project?: string;
+    service?: string;
+  };
+  const search = useSearch({ strict: false }) as { env?: string };
   const org = params.org ?? "acme";
+  const project = params.project ?? "ecommerce";
+  const service = params.service ?? "api";
+  const env = search.env ?? "production";
 
   // Deliberate exception to the Drawer recipe: the assistant is a persistent
   // side panel (AI1) — no scrim, the page stays interactive beside it. Esc
@@ -259,7 +283,7 @@ export function AssistantDrawer() {
       <div className="flex items-center gap-2 border-hair border-b bg-steel-tint p-[8px_13px]">
         <Dot tone="ok" />
         <span className="text-10 text-ink2">
-          Context: <b>api</b> · ecommerce / production
+          Context: <b>{service}</b> · {project} / {env}
         </span>
         <span className="sp flex-1" />
         <span className="text-10 text-steel">change ▾</span>
@@ -292,8 +316,10 @@ export function AssistantDrawer() {
                   ? "/$org/$project/svc/$service/insights"
                   : "/$org/$project/svc/$service/ai"
               }
-              params={{ org, project: "ecommerce", service: banner.service }}
-              search={{ env: "production" }}
+              // banner.service is the insight's canon target; project/env ride
+              // the drawer's routed scope (Pass-6).
+              params={{ org, project, service: banner.service }}
+              search={{ env }}
               onClick={close}
             >
               <Btn variant="gh" className="h-[22px] text-10">
@@ -305,7 +331,13 @@ export function AssistantDrawer() {
       ) : null}
 
       {/* keyed so switching between default and seeded mode re-seeds the thread */}
-      <DrawerConversation key={attached ?? "default"} org={org} attached={attached} />
+      <DrawerConversation
+        key={attached ?? "default"}
+        org={org}
+        project={project}
+        env={env}
+        attached={attached}
+      />
     </aside>
   );
 }

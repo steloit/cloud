@@ -82,9 +82,11 @@ function MessagesPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Messages" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-queue" />}
-          title="Messages"
+          title="Queue · Messages"
           sub={
             <span className="mono">
               {svc.name} · {env}

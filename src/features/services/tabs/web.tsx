@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
@@ -31,8 +32,10 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
   const [editingVars, setEditingVars] = useState(false);
   return (
     <>
+      {/* Finding: frame D23 shows the bare "Settings" title — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
-        title="Settings"
+        title={`${PRODUCT_LABEL[svc.product]} · Settings`}
         sub={
           <span className="mono">
             {svc.name} · {env}
@@ -149,7 +152,7 @@ function EditVariablesDrawer({
           <Btn
             variant="p"
             disabled
-            disabledReason="Env-var CRUD folds into updateService.shape — apply flow lands in Phase 5"
+            disabledReason="Env-var apply lands with a vars field on updateService (finding)"
           >
             Apply
           </Btn>

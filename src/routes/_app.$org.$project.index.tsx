@@ -431,25 +431,31 @@ function ProjectOverview() {
                     <span className="flex-1">
                       <b>jobs</b>: 2 dead letters · <span className="mono">"receipt": null</span>
                     </span>
-                    <Btn
-                      variant="s"
-                      className="h-6 px-2 text-10p5"
-                      disabled
-                      disabledReason="The queue DLQ view (D8) lands in Phase 3"
+                    {/* Pass-6: the DLQ view exists — the jobs Messages tab (D8);
+                        the stale "lands in Phase 3" gate was a lie. */}
+                    <Link
+                      to="/$org/$project/svc/$service/messages"
+                      params={{ org, project, service: "jobs" }}
+                      search={{ env }}
                     >
-                      Open DLQ
-                    </Btn>
+                      <Btn variant="s" className="h-6 px-2 text-10p5">
+                        Open DLQ
+                      </Btn>
+                    </Link>
                   </div>
                   <div className="flex items-center gap-2 text-11p5">
                     <span className="flex-1">
                       branch <span className="mono">preview/pr-142</span> flagged by{" "}
                       <span className="mono">branch-data-masking</span>
                     </span>
+                    {/* Pass-6: honest gate — the org rulebook page exists, but the
+                        spec has no per-policy view to open branch-data-masking on
+                        (in canon it's the G7 draft, not yet a listed policy). */}
                     <Btn
                       variant="gh"
                       className="h-6 px-2 text-10p5"
                       disabled
-                      disabledReason="Policies land in Phase 3"
+                      disabledReason="No per-policy view in the spec (finding) — the rulebook lives in Settings → Policies"
                     >
                       Policy
                     </Btn>

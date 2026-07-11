@@ -56,8 +56,10 @@ function DashboardTemplates() {
   return (
     <main className="main">
       <div className="pgpad">
+        {/* Finding: frame DB6 titles this pane "Dashboard templates" — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Dashboard templates"
+          title="Dashboards · Templates"
           sub="Starting layouts — a template is the arrangement only; it binds to your services when instantiated. Not the same asset as Settings → Templates (those are infrastructure shapes)."
         >
           <Btn variant="p" onClick={() => setModal({})}>

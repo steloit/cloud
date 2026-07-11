@@ -49,11 +49,13 @@ function Row({ row, org, unread }: { row: NotificationRow; org: string; unread: 
                 Review request
               </Btn>
             </Link>
+            {/* Pass-6: was "lands in Phase 5" while the policies page said Phase 4 —
+                two surfaces disagreed; both now carry the honest non-phase reason. */}
             <Btn
               variant="gh"
               className="h-6 px-2 text-10p5"
               disabled
-              disabledReason="Approval threads land in Phase 5"
+              disabledReason="Approval threads land with the N-series notification endpoints (finding)"
             >
               Deny…
             </Btn>

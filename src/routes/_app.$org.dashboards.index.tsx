@@ -39,13 +39,15 @@ const PREBUILT: Array<{
     icon: "s-chip",
     name: "Valkey Performance",
     sub: "1 instance",
-    reason: "Valkey Performance lands in Phase 4",
+    reason:
+      "Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)",
   },
   {
     icon: "s-ai",
     name: "AI Gateway",
     sub: "3 models",
-    reason: "AI Gateway dashboard lands in Phase 4",
+    reason:
+      "Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)",
   },
   {
     icon: "s-pulse",
@@ -63,7 +65,8 @@ const PREBUILT: Array<{
     icon: "s-deploy",
     name: "Deployments",
     sub: "releases & markers",
-    reason: "Deployments dashboard lands in Phase 4",
+    reason:
+      "Not fixture-backed — only PostgreSQL Health, Infrastructure and Cost & Usage carry canon data (finding)",
   },
 ];
 
@@ -81,6 +84,9 @@ function PrebuiltCard({ org, item }: { org: string; item: (typeof PREBUILT)[numb
       <div>
         <div className="text-12p5 font-semibold">{item.name}</div>
         <div className="text-10p5 text-ink3">{item.sub}</div>
+        {/* Pass-6: gated cards state their reason in ink, not only in a hover
+            title (16-qa: visible-but-disabled says why). */}
+        {item.reason ? <div className="text-10p5 text-ink3">{item.reason}</div> : null}
       </div>
     </Card>
   );

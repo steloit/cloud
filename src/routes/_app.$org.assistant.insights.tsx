@@ -343,8 +343,10 @@ function InsightsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame AI10 shows the bare "Insights" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Insights"
+          title="Assistant · Insights"
           sub="Recommendations across ecommerce, ranked by impact — you review and approve each one."
         >
           <div className="chiprow">

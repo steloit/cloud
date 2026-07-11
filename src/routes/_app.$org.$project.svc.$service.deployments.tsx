@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
+import { PRODUCT_LABEL } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { EmptyState } from "@/design-system/empty-state";
@@ -85,7 +86,7 @@ function DeploymentsPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <h1 className="h1">Deployments</h1>
+          <h1 className="h1">{PRODUCT_LABEL[svc.product]} · Deployments</h1>
           <p className="hsub">
             Deployments (D19) is a web/worker surface — {svc.name} is {svc.product}.
           </p>
@@ -104,7 +105,7 @@ function DeploymentsPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead
-            title="Deployments"
+            title={`${PRODUCT_LABEL[svc.product]} · Deployments`}
             sub={
               <span className="mono">
                 {svc.name} · {env} · zero-downtime · last 5 images kept warm for instant rollback
@@ -151,8 +152,10 @@ function DeploymentsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: frame D19 shows the bare "Deployments" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Deployments"
+          title={`${PRODUCT_LABEL[svc.product]} · Deployments`}
           sub={
             <span className="mono">
               {svc.name} · {env} · zero-downtime · last 5 images kept warm for instant rollback

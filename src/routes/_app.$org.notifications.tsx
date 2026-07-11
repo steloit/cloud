@@ -4,7 +4,6 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
-import { Icon } from "@/design-system/icon";
 import { Dot, Pill } from "@/design-system/pill";
 import {
   isUnread,
@@ -170,7 +169,7 @@ function P95Detail({ org }: { org: string }) {
         <Btn
           variant="s"
           disabled
-          disabledReason="Silences land in Phase 5 — every silence is logged with actor + duration"
+          disabledReason="Silences land with the silence endpoints (finding) — every silence is logged with actor + duration"
         >
           Silence 24 h…
         </Btn>
@@ -297,13 +296,12 @@ function NotificationsInbox() {
               {c.label}
             </button>
           ))}
+          {/* Static context pills (frame microcopy, ▾ dropped) — live
+              project/env pickers need filter params the notifications feed
+              lacks (finding). */}
           <span className="ml-auto flex gap-1.5">
-            <span className="envpill">
-              Project: all <Icon id="s-chevd" className="h-[11px] w-[11px]" />
-            </span>
-            <span className="envpill">
-              Env: all <Icon id="s-chevd" className="h-[11px] w-[11px]" />
-            </span>
+            <span className="envpill">Project: all</span>
+            <span className="envpill">Env: all</span>
           </span>
         </div>
 

@@ -29,7 +29,9 @@ function PreviewsPage() {
           title="Deploy · Previews"
           sub="A preview is an environment — created when a PR opens, commented on the PR, expired by policy. Same grammar as production, S-sized shape"
         >
-          <span className="chip">policy: preview-minimal v2 ▾</span>
+          {/* Static context chip (frame microcopy) — a policy picker needs
+              the policy endpoints wired to previews (finding). */}
+          <span className="chip">policy: preview-minimal v2</span>
         </Pghead>
 
         {/* Four-state grammar (16-qa) on the environments query. The torn-down
@@ -93,18 +95,26 @@ function PreviewsPage() {
                 </div>
                 <div className="flex items-center gap-2.5">
                   <Copybit>https://pr-142.ecommerce.previews.steloit.app</Copybit>
-                  <Btn variant="s">Open</Btn>
+                  {/* The preview host is a canon fixture — nothing live to
+                      open; a live Open lands with real preview deploys. */}
                   <Btn
                     variant="s"
                     disabled
-                    disabledReason="Redeploy lands with Git integration in Phase 3"
+                    disabledReason="The preview URL is canon fixture — there's no live host to open (finding)"
+                  >
+                    Open
+                  </Btn>
+                  <Btn
+                    variant="s"
+                    disabled
+                    disabledReason="Redeploy lands with the Git integration — previews deploy on PR push (finding)"
                   >
                     Redeploy
                   </Btn>
                   <Btn
                     variant="dgr"
                     disabled
-                    disabledReason="Typed-confirm teardown (U6 grammar) lands in Phase 3"
+                    disabledReason="Teardown lands with an environment-delete endpoint the API lacks (finding) — behind the U6 typed-confirm"
                   >
                     Tear down…
                   </Btn>

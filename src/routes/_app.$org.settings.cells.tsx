@@ -57,7 +57,7 @@ const CELL_DISPLAY: Record<string, CellDisplay> = {
   },
 };
 
-const OPS_REASON = "Cell ops land in Phase 5";
+const OPS_REASON = "Cell drain/detach land with the cell-ops endpoints the API lacks (finding)";
 
 const CONNECT_STEPS = [
   { state: "done", title: "Choose provider", sub: "AWS" },
@@ -280,7 +280,7 @@ function CellsPage() {
                     <Btn
                       variant="s"
                       disabled
-                      disabledReason="Cell connect (POST /orgs/{org}/cells) lands in Phase 5"
+                      disabledReason="Cell connect is spec'd (POST /orgs/{org}/cells) — the connect flow isn't built yet (finding)"
                     >
                       I've run it →
                     </Btn>

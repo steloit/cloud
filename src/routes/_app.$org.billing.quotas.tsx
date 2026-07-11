@@ -9,6 +9,7 @@ import { planLabel, useQuotas } from "@/features/billing/hooks";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import type { Quota } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /** B7 · Quotas & included usage — lives under Usage in the snav (active b-usage). */
 
@@ -115,7 +116,7 @@ function QuotasPage() {
                             </div>
                             <div className="mt-1.5 h-1.5 w-[120px] overflow-hidden rounded bg-surface2">
                               <div
-                                className={`h-full rounded ${warn ? "bg-warn" : "bg-steel"}`}
+                                className={cn("h-full rounded", warn ? "bg-warn" : "bg-steel")}
                                 style={{ width: `${Math.min(100, pct)}%` }}
                               />
                             </div>

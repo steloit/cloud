@@ -74,7 +74,7 @@ function WidgetShell({
             variant="gh"
             className="h-5 px-1.5"
             disabled
-            disabledReason="Widget removal lands in Phase 4"
+            disabledReason="Widget removal lands with a widget-delete endpoint the API lacks (finding)"
           >
             ×
           </Btn>
@@ -315,13 +315,20 @@ function DashboardDetail() {
         <Pghead
           title={
             <span className="flex items-center gap-2.5">
-              checkout-health <Pill tone="st">ecommerce</Pill> <Pill tone="mut">personal</Pill>
+              {/* Finding: frame DB7 shows the bare "checkout-health" title — the design-system
+                  "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+              Dashboards · checkout-health <Pill tone="st">ecommerce</Pill>{" "}
+              <Pill tone="mut">personal</Pill>
               {editing ? <Pill tone="st">editing</Pill> : null}
             </span>
           }
           sub="Project-scoped to ecommerce — born filtered, env follows the crumb when opened in-project. Created Jul 2, during the incident. Drag ⋮⋮ to rearrange; layout saves on Done."
         >
-          <Btn variant="s" disabled disabledReason="Sharing lands in Phase 4">
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="Sharing lands with the share endpoints the API lacks (finding)"
+          >
             Share…
           </Btn>
           <Btn variant="p" onClick={toggleEdit}>

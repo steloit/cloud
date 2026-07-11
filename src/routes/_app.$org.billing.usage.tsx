@@ -165,8 +165,12 @@ function UsagePage() {
             </Btn>
           </Pghead>
 
+          {/* Static context row (frame microcopy) — the ‹ › stepper glyphs
+              are dropped and the project chips don't toggle: month stepping
+              and per-project filtering need month/project query params the
+              usage API lacks (finding). */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="envpill">‹ July 2026 · in progress ›</span>
+            <span className="envpill">July 2026 · in progress</span>
             <span className="chip on">All projects</span>
             <span className="chip">ecommerce</span>
             <span className="chip">analytics-pipeline</span>

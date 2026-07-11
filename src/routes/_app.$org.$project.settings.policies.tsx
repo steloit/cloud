@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
@@ -70,9 +70,11 @@ function ProjectPoliciesPage() {
             title="Project · Policies"
             sub="What applies to ecommerce — project rules can tighten org rules, never loosen them"
           >
-            <Btn variant="p" disabled disabledReason="Project policy creation lands in Phase 4">
-              New project policy
-            </Btn>
+            {/* The G7 wizard is live at the org level and scopes to a project —
+                the honest destination (finding: no project-scoped policy endpoint). */}
+            <Link to="/$org/settings/policies/new" params={{ org }}>
+              <Btn variant="p">New project policy</Btn>
+            </Link>
           </Pghead>
 
           {policies.isError ? (
@@ -94,9 +96,9 @@ function ProjectPoliciesPage() {
                 </>
               }
               cta={
-                <Btn variant="p" disabled disabledReason="Project policy creation lands in Phase 4">
-                  New project policy
-                </Btn>
+                <Link to="/$org/settings/policies/new" params={{ org }}>
+                  <Btn variant="p">New project policy</Btn>
+                </Link>
               }
               cli="steloit policy create --project ecommerce"
             />

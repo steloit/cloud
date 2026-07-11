@@ -111,9 +111,11 @@ function EnvironmentsPage() {
           title="Environments"
           sub="Shape is the project's; presence and scale are each environment's. Every environment is fully isolated — own network, own credentials, own data."
         >
-          <Btn variant="p" disabled disabledReason="New environment (C8) lands in Phase 5">
-            + New environment
-          </Btn>
+          {/* Wired: C8 exists at /$org/$project/new-env — the combined
+              region/cell selector is the create surface for environments. */}
+          <Link to="/$org/$project/new-env" params={{ org, project }}>
+            <Btn variant="p">+ New environment</Btn>
+          </Link>
         </Pghead>
 
         {/* Four-state grammar (16-qa) on the matrix — both queries feed it
@@ -192,9 +194,15 @@ function EnvironmentsPage() {
             instead of hiding the icon.
           </p>
           <div>
-            <Btn variant="s" disabled disabledReason="Environment provisioning lands in Phase 5">
-              Add to this environment · +$0.40/mo
-            </Btn>
+            {/* Wired: adding the queue to pr-142 is a create (ADR-014) — the
+                ONE create surface, pre-scoped to this env and product. */}
+            <Link
+              to="/$org/create"
+              params={{ org }}
+              search={{ type: "queue", env: "preview/pr-142" }}
+            >
+              <Btn variant="s">Add to this environment · +$0.40/mo</Btn>
+            </Link>
           </div>
         </Card>
 

@@ -158,7 +158,7 @@ function StoreDetail({ org }: { org: string }) {
             className="foc"
           />
         </div>
-        {/* Template-prefilled create lands in Phase 5 — for now the button opens the guided flow (W2). */}
+        {/* Template-prefilled create lands with a template param on W2 (finding) — the button opens the guided flow. */}
         <Link to="/$org/new-project" params={{ org }}>
           <Btn variant="p" className="h-[38px] w-full justify-center">
             Use this template →

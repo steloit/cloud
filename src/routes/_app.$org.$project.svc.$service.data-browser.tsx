@@ -84,7 +84,7 @@ function DataBrowserPage() {
         <div className="pgpad !overflow-y-auto">
           <Pghead
             before={<Glyph id="s-chip" />}
-            title="Data Browser"
+            title="Valkey · Data Browser"
             sub="cache-mode · LRU eviction · read-only by default"
           />
           <EmptyState
@@ -108,9 +108,11 @@ function DataBrowserPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Data Browser" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-chip" />}
-          title="Data Browser"
+          title="Valkey · Data Browser"
           sub="cache-mode · LRU eviction · read-only by default"
         />
 

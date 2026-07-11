@@ -77,10 +77,20 @@ function OrgPoliciesPage() {
               yesterday 16:40
             </span>
             <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-              <Btn variant="p" disabled disabledReason="Approval threads land in Phase 4">
+              {/* Pass-6: was "lands in Phase 4" while the bell panel said Phase 5 —
+                  two surfaces disagreed; both now carry the honest non-phase reason. */}
+              <Btn
+                variant="p"
+                disabled
+                disabledReason="Approval threads land with the N-series notification endpoints (finding)"
+              >
                 Review
               </Btn>
-              <Btn variant="s" disabled disabledReason="Approval threads land in Phase 4">
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Approval threads land with the N-series notification endpoints (finding)"
+              >
                 Deny…
               </Btn>
             </span>

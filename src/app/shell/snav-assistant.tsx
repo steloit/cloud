@@ -15,7 +15,16 @@ import { Nfoot, NitLink, Snav } from "./snav";
 
 export type AssistantLens = "ask" | "insights" | "activity" | "capabilities";
 
-export function SnavAssistant({ org, active }: { org: string; active: AssistantLens }) {
+export function SnavAssistant({
+  org,
+  orgName,
+  active,
+}: {
+  org: string;
+  /** Display name threaded from the layout's orgs query; the slug stands in while it loads. */
+  orgName?: string;
+  active: AssistantLens;
+}) {
   const params = { org };
 
   return (
@@ -26,7 +35,10 @@ export function SnavAssistant({ org, active }: { org: string; active: AssistantL
         </span>
         <div>
           <div className="t">Assistant</div>
-          <div className="u">ecommerce · production</div>
+          {/* Pass-6: was hardcoded "ecommerce · production" — a scope leak. The
+              workspace is org-scoped (see the route-scope note above), so the
+              header states the org-level truth, derived from the routed org. */}
+          <div className="u">{orgName ?? org} · all projects</div>
         </div>
       </div>
       <NitLink

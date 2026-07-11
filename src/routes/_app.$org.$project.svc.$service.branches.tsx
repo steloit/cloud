@@ -126,9 +126,11 @@ function BranchesPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame titles this pane by service name — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-db" />}
-          title={service}
+          title="PostgreSQL · Branches"
           sub={
             <span className="mono">
               PostgreSQL 16 · branches are copy-on-write — created in seconds, billed by delta

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Icon } from "@/design-system/icon";
 import { Nfoot, NitLink, Nsec, Snav } from "./snav";
 
@@ -40,10 +41,11 @@ export function SnavSettings({
   const o = { org };
   return (
     <Snav>
-      <div className="snhead">
+      {/* The chevron reads as "back" — so it is one (audit: dead affordance). */}
+      <Link to="/$org" params={o} className="snhead" aria-label="Back to projects">
         <Icon id="s-chev" className="h-3.5 w-3.5 rotate-180 text-ink3" />
         <div className="t">Settings</div>
-      </div>
+      </Link>
       <Nsec>Project · {project}</Nsec>
       <NitLink
         to="/$org/$project/settings/general"

@@ -64,7 +64,7 @@ function TablesPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead
-            title="Table Viewer"
+            title="PostgreSQL · Table Viewer"
             sub={
               <span>
                 schema <span className="mono">public</span> · no tables yet
@@ -98,8 +98,10 @@ function TablesPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Table Viewer" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Table Viewer"
+          title="PostgreSQL · Table Viewer"
           sub={
             <span>
               schema <span className="mono">public</span> · 12 tables · 21.4 GB

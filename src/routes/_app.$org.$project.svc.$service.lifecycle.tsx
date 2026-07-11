@@ -63,9 +63,11 @@ function LifecyclePage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Lifecycle rules" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-bucket" />}
-          title="Lifecycle rules"
+          title="Object Storage · Lifecycle rules"
           sub={
             <span className="mono">
               {svc.name} · rules run daily at 03:00 · every action lands in the audit log

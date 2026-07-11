@@ -566,7 +566,7 @@ function CreatePage() {
                           variant="p"
                           className="justify-center"
                           disabled
-                          disabledReason="Multi-service create lands in Phase 5 — create each via its type block today"
+                          disabledReason="Multi-service create lands with AI1's batch endpoint (finding) — create each via its type block today"
                         >
                           Review & create {on.length} services →
                         </Btn>

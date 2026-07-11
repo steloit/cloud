@@ -55,7 +55,7 @@ function BackupsPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead
-            title="Backups"
+            title="PostgreSQL · Backups"
             sub={
               <span className="mono">
                 {svc.name} · point-in-time recovery · {env}
@@ -112,8 +112,10 @@ function BackupsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Backups" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Backups"
+          title="PostgreSQL · Backups"
           sub={
             <span className="mono">
               {svc.name} · point-in-time recovery · {env}

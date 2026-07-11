@@ -378,7 +378,9 @@ function InstancesPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <h1 className="h1">Instances</h1>
+          {/* Finding: this fallback carried a bare "Instances" h1 — the "Area · Thing"
+              grammar wants an honest Thing even when the product doesn't resolve. */}
+          <h1 className="h1">Instances · unknown product</h1>
           <p className="hsub">
             No product named <span className="mono">{product}</span> — the rail lists the six.
           </p>

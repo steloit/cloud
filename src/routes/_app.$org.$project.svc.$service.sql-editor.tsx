@@ -62,8 +62,10 @@ function SqlEditorPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "SQL Editor" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="SQL Editor"
+          title="PostgreSQL · SQL Editor"
           sub={
             <span>
               Running as role: <span className="mono">readonly</span> (from your binding) · every

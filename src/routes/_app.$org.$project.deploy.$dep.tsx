@@ -25,7 +25,7 @@ import { type Deployment, queryMetricsOptions } from "@/lib/api";
  * stories, with anything beyond the row labelled in place.
  */
 
-const GUARD_REASON = "Pause/abort are guarded — they land with live rollouts in Phase 3";
+const GUARD_REASON = "Pause/abort land with a rollout-control endpoint the API lacks (finding)";
 
 /** ISO "…T14:50…" → minute-of-day for the chart's x-domain. */
 function minuteOf(at: string): number {
@@ -390,42 +390,44 @@ function RolloutPage() {
           <div className="flex w-[400px] shrink-0 flex-col gap-3.5">
             <Card className="flex flex-col gap-2 p-4">
               <Eyebrow>Health gates — the rollout advances only past these</Eyebrow>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Gate</th>
-                    <th>Canary</th>
-                    <th>Baseline</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>p95 latency</td>
-                    <td className="mono text-ok">431 ms</td>
-                    <td className="mono">812 ms</td>
-                    <td>
-                      <Stlab tone="ok">passing</Stlab>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>Error rate</td>
-                    <td className="mono">0.2%</td>
-                    <td className="mono">0.4%</td>
-                    <td>
-                      <Stlab tone="ok">passing</Stlab>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>5xx</td>
-                    <td className="mono">0</td>
-                    <td className="mono">0</td>
-                    <td>
-                      <Stlab tone="ok">passing</Stlab>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="tblwrap">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Gate</th>
+                      <th>Canary</th>
+                      <th>Baseline</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>p95 latency</td>
+                      <td className="mono text-ok">431 ms</td>
+                      <td className="mono">812 ms</td>
+                      <td>
+                        <Stlab tone="ok">passing</Stlab>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>Error rate</td>
+                      <td className="mono">0.2%</td>
+                      <td className="mono">0.4%</td>
+                      <td>
+                        <Stlab tone="ok">passing</Stlab>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>5xx</td>
+                      <td className="mono">0</td>
+                      <td className="mono">0</td>
+                      <td>
+                        <Stlab tone="ok">passing</Stlab>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
               <p className="border-hair border-t pt-2 text-10p5 leading-relaxed text-ink3">
                 Auto-abort: error rate &gt; 2× baseline for 2 min, or any 5xx spike → traffic
                 returns to #142 instances in &lt; 10 s. The migration stays — expand-contract means

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { Icon } from "@/design-system/icon";
 import { Nfoot, NitLink, Snav } from "./snav";
 
@@ -13,10 +14,11 @@ export type AccountActive = "profile" | "security" | "sessions" | "tokens" | "no
 export function SnavAccount({ active }: { active: AccountActive }) {
   return (
     <Snav>
-      <div className="snhead">
+      {/* The chevron reads as "back" — so it is one (audit: dead affordance). */}
+      <Link to="/" className="snhead" aria-label="Back to the console">
         <Icon id="s-chev" className="h-3.5 w-3.5 rotate-180 text-ink3" />
         <div className="t">Account</div>
-      </div>
+      </Link>
       <NitLink to="/account/profile" label="Profile" on={active === "profile"} />
       <NitLink to="/account/security" label="Security & MFA" on={active === "security"} />
       <NitLink to="/account/sessions" label="Sessions" count="3" on={active === "sessions"} />

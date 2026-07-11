@@ -38,9 +38,11 @@ function CliPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "CLI Console" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-term" />}
-          title="CLI Console"
+          title="Valkey · CLI Console"
           sub={
             <span className="mono">
               {svc.name} · {env} · read-only session — writes require an explicit unlock

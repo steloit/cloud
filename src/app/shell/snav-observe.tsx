@@ -1,11 +1,11 @@
 import { Icon, type IconId } from "@/design-system/icon";
 import { Dot } from "@/design-system/pill";
-import { Nfoot, NitDisabled, NitLink, Snav } from "./snav";
+import { Nfoot, NitLink, Snav } from "./snav";
 
 /**
  * Snav variant for the Observe suite (O1–O6): one workspace, six lenses over
- * the same time context. Dashboards (O-dash) land in Phase 3 — visible but
- * disabled with the reason, never hidden.
+ * the same time context. Dashboards live at the org level — one grid, any
+ * plane — so the nit is a live cross-plane link, never a dead entry.
  */
 
 export type ObserveLens = "health" | "metrics" | "logs" | "traces" | "events" | "alerts";
@@ -56,7 +56,8 @@ export function SnavObserve({
           on={active === item.lens}
         />
       ))}
-      <NitDisabled icon="s-grid" label="Dashboards" count="3" reason="Dashboards land in Phase 3" />
+      {/* Wired: org-level Dashboards (DB1) is live — one grid, any plane. */}
+      <NitLink to="/$org/dashboards" params={{ org }} icon="s-grid" label="Dashboards" count="3" />
       <Nfoot>
         <div className="flex items-center justify-between px-1.5">
           <span className="flex items-center gap-1.5 text-warn">

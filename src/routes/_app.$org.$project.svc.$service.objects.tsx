@@ -61,7 +61,7 @@ function ObjectsPage() {
         <div className="pgpad !overflow-y-auto">
           <Pghead
             before={<Glyph id="s-bucket" />}
-            title="Object Browser"
+            title="Object Storage · Object Browser"
             sub={<span className="mono">{svc.name} · 0 objects</span>}
           />
           <EmptyState
@@ -83,9 +83,11 @@ function ObjectsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Object Browser" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
           before={<Glyph id="s-bucket" />}
-          title="Object Browser"
+          title="Object Storage · Object Browser"
           sub={<span className="mono">{svc.name} / products/ · 214,033 objects in prefix</span>}
         />
 

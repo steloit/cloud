@@ -52,9 +52,11 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
 
   return (
     <>
+      {/* Finding: frames D13/D14 show bare tab titles — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
         before={<Glyph id="s-chip" />}
-        title="Metrics"
+        title="Valkey · Metrics"
         sub={
           <span className="mono">
             {svc.name} · {env}
@@ -210,7 +212,7 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
     <>
       <Pghead
         before={<Glyph id="s-chip" />}
-        title="Settings"
+        title="Valkey · Settings"
         sub={
           <span className="mono">
             {svc.name} · {env}
@@ -237,7 +239,7 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
           <Btn
             variant="s"
             disabled
-            disabledReason="Mode switch rides updateService.shape — apply flow lands in Phase 5"
+            disabledReason="Mode rides updateService.shape — the guarded switch lands with the D14 restart contract (finding)"
           >
             Switch to Durable…
           </Btn>

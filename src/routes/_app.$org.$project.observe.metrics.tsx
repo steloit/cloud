@@ -7,6 +7,7 @@ import { Copybit } from "@/design-system/copybit";
 import { Pill } from "@/design-system/pill";
 import { Skeleton } from "@/design-system/skeleton";
 import { ApiFailureCard } from "@/features/errors/failure-states";
+import { AlertRuleDrawer } from "@/features/observe/alert-rule-drawer";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import { cn } from "@/lib/utils";
@@ -252,6 +253,9 @@ function MetricsPage() {
   const { org, project } = Route.useParams();
   const { env } = Route.useSearch();
   const [tab, setTab] = useState("Compute");
+  // ⚑ opens the U8 rule drawer — its default query IS this chart's query
+  // (p95{service=api,env=production}), so the pre-fill is the real thing.
+  const [alertOpen, setAlertOpen] = useState(false);
 
   const p95 = useMetrics(env, "service:api metric:p95");
   const errorRate = useMetrics(env, "service:api metric:error_rate");
@@ -294,7 +298,9 @@ function MetricsPage() {
           <>
             <div className="flex items-center gap-3">
               <Copybit>{"p95(http.request.duration){service=api,env=production}"}</Copybit>
-              <span className="chip">compare: yesterday ▾</span>
+              {/* Static context chip (frame microcopy) — comparison picking
+                  needs a compare param the metrics API lacks (finding). */}
+              <span className="chip">compare: yesterday</span>
             </div>
 
             <Card className="flex flex-col gap-2.5 p-4">
@@ -302,7 +308,9 @@ function MetricsPage() {
                 <span className="text-12p5 font-semibold">api · p95 latency</span>
                 <Pill tone="warn">812 ms · +37% vs yesterday</Pill>
                 <span className="flex-1" />
-                <span className="text-10p5 text-ink3">split by: route ▾ · ghost = yesterday</span>
+                {/* Static context line (frame microcopy) — split-by needs a
+                    group-by param the metrics API lacks (finding). */}
+                <span className="text-10p5 text-ink3">split by: route · ghost = yesterday</span>
               </div>
               {p95.isError ? (
                 <ApiFailureCard
@@ -334,11 +342,12 @@ function MetricsPage() {
                     Logs for this range →
                   </Btn>
                 </Link>
+                {/* Wired: the U8 drawer exists and pre-fills this chart's
+                    p95 query — see alertOpen above. */}
                 <Btn
                   variant="s"
                   className="h-6 px-2.5 text-10p5"
-                  disabled
-                  disabledReason="The rule drawer (U8) lands in Phase 3"
+                  onClick={() => setAlertOpen(true)}
                 >
                   ⚑ Alert on this query
                 </Btn>
@@ -416,6 +425,7 @@ function MetricsPage() {
           </>
         )}
       </div>
+      {alertOpen ? <AlertRuleDrawer project={project} onClose={() => setAlertOpen(false)} /> : null}
     </main>
   );
 }

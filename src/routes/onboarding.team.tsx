@@ -116,7 +116,10 @@ function OnboardingTeamPage() {
                 >
                   <span className="uav">{invite.email.slice(0, 1).toUpperCase()}</span>
                   <span className="mono flex-1 text-11p5">{invite.email}</span>
-                  <span className="text-11p5 text-ink2">{invite.role} ▾</span>
+                  {/* Static role label (▾ dropped) — per-row role editing
+                      isn't built; the role is set by the picker above at add
+                      time, and re-adding replaces the invite. */}
+                  <span className="text-11p5 text-ink2">{invite.role}</span>
                   <button
                     type="button"
                     className="icb h-6 w-6"

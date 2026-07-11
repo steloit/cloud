@@ -1,10 +1,12 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useNavigate } from "@tanstack/react-router";
+import { menuContentClass, menuItemClass } from "@/app/shell/ctx";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Dot, statusDotTone } from "@/design-system/pill";
 import type { CreatableProduct } from "@/features/create/type-blocks";
 import type { Service } from "@/lib/api";
 import { fmtMoney, fmtMoneyPerMonth } from "@/lib/fmt";
+import { cn } from "@/lib/utils";
 import { PRODUCT_ICON, PRODUCT_LABEL } from "./rail";
 import { Nfoot, NitDisabled, NitLink, Nsec, Snav } from "./snav";
 
@@ -225,7 +227,7 @@ export function SnavProduct({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="z-50 min-w-[260px] rounded-xl border border-hair bg-surface p-1 shadow-e2"
+              className={cn(menuContentClass, "min-w-[260px]")}
               align="start"
               sideOffset={4}
             >
@@ -233,7 +235,7 @@ export function SnavProduct({
                 {PRODUCT_LABEL[service.product]} in {project} · {siblings.length}
               </div>
               <DropdownMenu.Item
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 outline-none data-[highlighted]:bg-surface2"
+                className={menuItemClass}
                 onSelect={() =>
                   navigate({
                     to: "/$org/$project/instances/$product",
@@ -249,7 +251,7 @@ export function SnavProduct({
               {siblings.map((s) => (
                 <DropdownMenu.Item
                   key={s.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 outline-none data-[highlighted]:bg-surface2"
+                  className={menuItemClass}
                   onSelect={() =>
                     navigate({
                       to: `/$org/$project/svc/$service/${active === "overview" ? "" : active}`,
@@ -272,7 +274,7 @@ export function SnavProduct({
               ))}
               <DropdownMenu.Separator className="my-1 h-px bg-hair" />
               <DropdownMenu.Item
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 text-steel outline-none data-[highlighted]:bg-surface2"
+                className={cn(menuItemClass, "text-steel")}
                 onSelect={() =>
                   navigate({
                     to: "/$org/create",

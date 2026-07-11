@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
+import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Dot } from "@/design-system/pill";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,13 @@ const ROWS: RoutingRow[] = [
   },
 ];
 
+const QUIET_SEED = { start: "22:00", end: "07:00" };
+
 function NotificationSettingsPage() {
+  // Quiet-hours inputs track dirty so Save can gate honestly (see below).
+  const [quiet, setQuiet] = useState(QUIET_SEED);
+  const quietDirty = quiet.start !== QUIET_SEED.start || quiet.end !== QUIET_SEED.end;
+
   // Working local toggles — keyed "{rowId}.{channel}", seeded from the canon rows.
   const [toggles, setToggles] = useState<Record<string, boolean>>(() => {
     const seed: Record<string, boolean> = {};
@@ -76,8 +83,10 @@ function NotificationSettingsPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Notifications" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Notifications"
+          title="Account · Notifications"
           sub="How things reach you — routing is yours; whether something fires is the org's"
         />
 
@@ -113,13 +122,36 @@ function NotificationSettingsPage() {
           </div>
           <span className="flex items-center gap-2">
             <span className="inp mono !h-8 !w-[76px] justify-center !px-2 text-12">
-              <input className="text-center" defaultValue="22:00" aria-label="Quiet hours start" />
+              <input
+                className="text-center"
+                value={quiet.start}
+                onChange={(e) => setQuiet((q) => ({ ...q, start: e.target.value }))}
+                aria-label="Quiet hours start"
+              />
             </span>
             <span className="text-ink3">→</span>
             <span className="inp mono !h-8 !w-[76px] justify-center !px-2 text-12">
-              <input className="text-center" defaultValue="07:00" aria-label="Quiet hours end" />
+              <input
+                className="text-center"
+                value={quiet.end}
+                onChange={(e) => setQuiet((q) => ({ ...q, end: e.target.value }))}
+                aria-label="Quiet hours end"
+              />
             </span>
             <span className="mono text-10p5 text-ink3">Asia/Kolkata</span>
+            {/* Pass-6: the inputs edited into nowhere — Save exists, takes the enabled look only once something changed (dirty-tracked), and stays gated with the finding. */}
+            <Btn
+              variant="p"
+              className={cn("h-8", quietDirty && "!opacity-100")}
+              disabled
+              disabledReason={
+                quietDirty
+                  ? "No notification-settings endpoint in the spec (finding)"
+                  : "Nothing changed yet"
+              }
+            >
+              Save
+            </Btn>
           </span>
         </Card>
 

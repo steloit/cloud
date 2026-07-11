@@ -16,7 +16,12 @@ function ProfilePage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
-        <Pghead title="Profile" sub="Your identity across every organization you belong to" />
+        {/* Finding: the frame shows the bare "Profile" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
+        <Pghead
+          title="Account · Profile"
+          sub="Your identity across every organization you belong to"
+        />
 
         <Card className="flex items-center gap-4 p-4">
           <span className="uav !h-14 !w-14 text-[18px]">PS</span>
@@ -24,7 +29,11 @@ function ProfilePage() {
             <div className="text-13 font-semibold">{name}</div>
             <div className="mono mt-0.5 text-10p5 text-ink3">usr_2ka91f · joined Mar 2026</div>
           </div>
-          <Btn variant="s" disabled disabledReason="Avatar upload lands in Phase 5">
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="No avatar-upload endpoint in the spec (finding)"
+          >
             Change photo
           </Btn>
         </Card>
@@ -63,10 +72,7 @@ function ProfilePage() {
               <tr>
                 <td>
                   <span className="flex items-center gap-2.5">
-                    <span
-                      className="cav flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-10 font-bold text-white"
-                      style={{ background: "linear-gradient(135deg,#E36C4B,#B34A2E)" }}
-                    >
+                    <span className="cav orggrad flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-10 font-bold text-white">
                       A
                     </span>
                     Acme
@@ -81,7 +87,7 @@ function ProfilePage() {
                     variant="gh"
                     className="text-err"
                     disabled
-                    disabledReason="Leaving requires transferring owned resources — Phase 5"
+                    disabledReason="Leaving requires transferring owned resources first — no leave endpoint in the spec (finding)"
                   >
                     Leave
                   </Btn>
@@ -102,7 +108,7 @@ function ProfilePage() {
           <Btn
             variant="dgr"
             disabled
-            disabledReason="Requires leaving or transferring every organization first — Phase 5"
+            disabledReason="Requires leaving or transferring every organization first — no account-delete endpoint in the spec (finding)"
           >
             Delete account…
           </Btn>

@@ -52,8 +52,10 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
 
   return (
     <>
+      {/* Finding: frames D9/D10/D12 show bare tab titles — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
-        title="Metrics"
+        title="PostgreSQL · Metrics"
         sub={
           <span className="mono">
             {svc.name} · {env} · the same series alerting and the assistant read
@@ -64,7 +66,7 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
         <Btn variant="s" disabled disabledReason="U8 pre-fill lands from Observe">
           Create alert
         </Btn>
-        <Btn variant="s" disabled disabledReason="Metrics export lands in Phase 5">
+        <Btn variant="s" disabled disabledReason="No export endpoint in the spec (finding)">
           Export
         </Btn>
       </Pghead>
@@ -308,7 +310,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
   return (
     <>
       <Pghead
-        title="Logs"
+        title="PostgreSQL · Logs"
         sub={
           <span className="mono">
             {svc.name} · {env} · structured · 14 d retention · streams into Observe
@@ -375,7 +377,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
               variant="gh"
               className="h-5 self-start px-2 text-10"
               disabled
-              disabledReason="The rule drawer (U8) lands in Phase 3"
+              disabledReason="Pre-filling the rule drawer from this chart isn't wired — U8 opens pre-filled from Observe → Metrics ⚑ (finding)"
             >
               alert on this
             </Btn>
@@ -425,7 +427,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                           variant="gh"
                           className="h-5 px-2 text-10"
                           disabled
-                          disabledReason="Log context windows land in Phase 3"
+                          disabledReason="Context windows land with an around-timestamp logs query the API lacks (finding)"
                         >
                           Context ±5 s
                         </Btn>
@@ -451,7 +453,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                           variant="gh"
                           className="h-5 px-2 text-10"
                           disabled
-                          disabledReason="The rule drawer (U8) lands in Phase 3"
+                          disabledReason="Pre-filling the rule drawer from this chart isn't wired — U8 opens pre-filled from Observe → Metrics ⚑ (finding)"
                         >
                           Create alert from pattern
                         </Btn>
@@ -516,7 +518,7 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
   return (
     <>
       <Pghead
-        title="Settings"
+        title="PostgreSQL · Settings"
         sub={
           <span className="mono">
             {svc.name} · {env} · service-scoped — this page never leaves the service (§4.6)

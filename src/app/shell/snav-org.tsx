@@ -23,12 +23,7 @@ export function SnavOrg({
   return (
     <Snav>
       <div className="snhead">
-        <span
-          className="cav h-6 w-6 rounded-md"
-          style={{ background: "linear-gradient(135deg,#E36C4B,#B34A2E)" }}
-        >
-          {orgName.slice(0, 1).toUpperCase()}
-        </span>
+        <span className="cav orggrad h-6 w-6 rounded-md">{orgName.slice(0, 1).toUpperCase()}</span>
         <div>
           <div className="t">{orgName}</div>
           <div className="u">

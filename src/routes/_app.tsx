@@ -24,6 +24,16 @@ function AppLayout() {
         if (assistantOpen) closeAssistant();
         else openAssistant();
       }
+      // ? — the shortcut the user menu advertises; opens the palette.
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target as HTMLElement | null;
+        const typing =
+          t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable;
+        if (!typing) {
+          e.preventDefault();
+          setPaletteOpen(true);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

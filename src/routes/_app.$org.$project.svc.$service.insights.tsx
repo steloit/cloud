@@ -101,7 +101,7 @@ function QueryInsightsList({
     return (
       <>
         <Pghead
-          title="Query Insights"
+          title="PostgreSQL · Query Insights"
           sub={
             <span className="mono">
               {name} · pg_stat_statements · last 1h · {env}
@@ -135,8 +135,10 @@ function QueryInsightsList({
 
   return (
     <>
+      {/* Finding: frames D4/W10 show bare or service-name titles — the design-system
+          "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
       <Pghead
-        title="Query Insights"
+        title="PostgreSQL · Query Insights"
         sub={<span className="mono">db-main · pg_stat_statements · last 1h · production</span>}
       />
 
@@ -263,12 +265,12 @@ function QueryInsightsList({
 }
 
 /** W10 — the proposal panel, preserved verbatim from the Phase-2 build. */
-function ProposalView({ service, env }: { service: string; env: string }) {
+function ProposalView({ env }: { env: string }) {
   return (
     <>
       <Pghead
         before={<Glyph id="s-db" />}
-        title={service}
+        title="PostgreSQL · Query Insights"
         sub={<span className="mono">PostgreSQL 16 · Query insights</span>}
       >
         <span className="envpill">
@@ -345,13 +347,25 @@ function ProposalView({ service, env }: { service: string; env: string }) {
               </span>
             </div>
             <div className="flex items-center gap-2.5 border-hair border-t pt-3">
-              <Btn variant="p" disabled disabledReason="The assistant apply path lands in Phase 3">
+              <Btn
+                variant="p"
+                disabled
+                disabledReason="Apply from this view isn't wired — review and apply from Assistant · Insights (AI10) today (finding)"
+              >
                 Open in preview branch
               </Btn>
-              <Btn variant="s" disabled disabledReason="The assistant apply path lands in Phase 3">
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Apply from this view isn't wired — review and apply from Assistant · Insights (AI10) today (finding)"
+              >
                 Apply to production…
               </Btn>
-              <Btn variant="gh" disabled disabledReason="The assistant apply path lands in Phase 3">
+              <Btn
+                variant="gh"
+                disabled
+                disabledReason="Apply from this view isn't wired — review and apply from Assistant · Insights (AI10) today (finding)"
+              >
                 Dismiss (logged)
               </Btn>
               <span className="ml-auto text-10p5 text-ink3">
@@ -422,7 +436,7 @@ function InsightsPage() {
       <div className="pgpad !overflow-y-auto">
         {/* prp_7c31a2 is db-main's proposal — the deep link never renders it on another instance. */}
         {proposal === "prp_7c31a2" && svc.name === "db-main" ? (
-          <ProposalView service={service} env={env} />
+          <ProposalView env={env} />
         ) : (
           <QueryInsightsList openProposal={openProposal} name={svc.name} env={env} />
         )}

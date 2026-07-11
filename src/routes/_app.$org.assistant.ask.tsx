@@ -164,8 +164,10 @@ function AskPage() {
   return (
     <main className="main">
       <div className="pgpad">
+        {/* Finding: frame AI2 shows the bare "Ask" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Ask"
+          title="Assistant · Ask"
           sub="Conversations scoped to ecommerce / production — I answer with evidence and propose; you approve."
         >
           <Btn variant="s" onClick={newConversation} disabled={createThread.isPending}>
@@ -175,26 +177,33 @@ function AskPage() {
         </Pghead>
 
         <div className="flex min-h-0 flex-1 gap-3">
-          {/* conversation rail */}
+          {/* conversation rail — a static list until the threads endpoint exists:
+              no pointer cursors on rows, and the search input is disabled with
+              its reason (dead-affordance rule — finding). */}
           <Card className="flex w-[262px] shrink-0 flex-col overflow-hidden p-0">
             <div className="border-hair border-b p-[11px_12px]">
-              <Inp placeholder="Search conversations" className="h-8 text-11" />
+              <Inp
+                placeholder="Search conversations"
+                className="h-8 text-11"
+                disabled
+                title="Thread search lands with the threads endpoint (finding)"
+              />
             </div>
             <div className="flex-1 overflow-auto p-2">
               <div className="nsec pl-1.5">Today</div>
-              <div className="cursor-pointer rounded-lg bg-steel-tint p-[8px_10px]">
+              <div className="rounded-lg bg-steel-tint p-[8px_10px]">
                 <div className="truncate text-11p5 font-medium text-ink1">
                   Why is my database slow?
                 </div>
                 <div className="mt-0.5 text-10 text-ink3">2 follow-ups · 14:12</div>
               </div>
-              <div className="cursor-pointer rounded-lg p-[8px_10px]">
+              <div className="rounded-lg p-[8px_10px]">
                 <div className="truncate text-11p5 text-ink2">Cheaper config for staging</div>
                 <div className="mt-0.5 text-10 text-ink3">11:40</div>
               </div>
               <div className="nsec mt-2 pl-1.5">Earlier this week</div>
               {EARLIER_THREADS.map((t) => (
-                <div key={t.title} className="cursor-pointer rounded-lg p-[8px_10px]">
+                <div key={t.title} className="rounded-lg p-[8px_10px]">
                   <div className="truncate text-11p5 text-ink2">{t.title}</div>
                   <div className="mt-0.5 text-10 text-ink3">{t.when}</div>
                 </div>

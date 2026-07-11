@@ -29,9 +29,9 @@ interface CtxProps {
   showAssistant?: boolean;
 }
 
-const menuContentClass =
+export const menuContentClass =
   "z-50 min-w-[240px] rounded-xl border border-hair bg-surface p-1 shadow-e2";
-const menuItemClass =
+export const menuItemClass =
   "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 font-medium outline-none data-[highlighted]:bg-surface2";
 
 export function Ctx({
@@ -64,9 +64,7 @@ export function Ctx({
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button type="button" className="crumb">
-            <span className="cav" style={{ background: "linear-gradient(135deg,#E36C4B,#B34A2E)" }}>
-              {org.name.slice(0, 1).toUpperCase()}
-            </span>
+            <span className="cav orggrad">{org.name.slice(0, 1).toUpperCase()}</span>
             {org.name}
             <Icon id="s-chevd" className="cv h-[11px] w-[11px]" />
           </button>
@@ -195,7 +193,7 @@ export function Ctx({
         // Assist button filled ⇔ drawer open (16-qa)
         <button
           type="button"
-          className={cn("btn a h-[30px]", assistantOpen && "!bg-assist !text-white")}
+          className={cn("btn a h-[30px]", assistantOpen && "!bg-assist !text-canvas")}
           onClick={() => (assistantOpen ? closeAssistant() : openAssistant())}
         >
           <Icon id="s-ai" />

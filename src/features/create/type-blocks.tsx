@@ -407,6 +407,9 @@ function PostgresBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           />
         </Group>
         <Group label="Extensions">
+          {/* "+18 allowlisted" is a static count chip (muted → span, never a
+              button) — browsing the full allowlist needs an extensions
+              catalog endpoint (finding). */}
           <Chips
             options={[
               ...PG_EXTENSIONS.map((e) => ({ label: e })),
@@ -628,6 +631,8 @@ function WebBlock({ onChange }: { onChange: (s: BlockState) => void }) {
                 {s.label}
               </button>
             ))}
+            {/* Static value chip — the autoscale defaults are stated, not
+                editable here; a scaling editor is D13's surface. */}
             <span className="chip text-ink3">Autoscale 1–3 · CPU target 70%</span>
           </div>
         </Group>
@@ -720,7 +725,18 @@ function StorageBlock({ onChange }: { onChange: (s: BlockState) => void }) {
             >
               tmp/ → delete 7d
             </button>
-            <span className="chip border-dashed text-ink3">+ add rule</span>
+            {/* Reads as a button, so it's honestly disabled — extra
+                lifecycle rules aren't built yet; the create body carries the
+                tmp/ rule only (finding). */}
+            <button
+              type="button"
+              className="chip cursor-not-allowed border-dashed text-ink3 opacity-55"
+              disabled
+              title="Extra lifecycle rules aren't built yet — the create body carries the tmp/ rule only (finding)"
+              aria-disabled="true"
+            >
+              + add rule
+            </button>
           </div>
         </Group>
       </Card>

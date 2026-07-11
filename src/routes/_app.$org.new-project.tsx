@@ -139,10 +139,12 @@ function NewProjectPage() {
                     onChange={(e) => setName(e.target.value)}
                     className="foc flex-1"
                   />
+                  {/* Static region pill (⌄ dropped) — single-region canon;
+                      a region picker lands with multi-region (X3 covers the
+                      env-level story). */}
                   <span className="envpill">
                     <Icon id="s-env" />
                     aws · ap-south-1 (Mumbai)
-                    <Icon id="s-chevd" className="h-[11px] w-[11px]" />
                   </span>
                 </div>
                 <div className="mono text-10p5 text-ink3">
@@ -209,9 +211,14 @@ function NewProjectPage() {
                     </span>
                   </div>
                 ))}
+                {/* Disabled with the honest reason (was a dead button) —
+                    aligned with the create surface's multi-service wording. */}
                 <button
                   type="button"
-                  className="mt-2 flex items-center gap-2 text-12 font-medium text-steel"
+                  className="mt-2 flex cursor-not-allowed items-center gap-2 text-12 font-medium text-steel opacity-55"
+                  disabled
+                  title="Multi-service create lands with AI1's batch endpoint (finding) — create each service via its type block today"
+                  aria-disabled="true"
                 >
                   <Icon id="s-plus" className="h-3.5 w-3.5" />
                   Add another service

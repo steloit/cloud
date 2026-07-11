@@ -667,7 +667,8 @@ body {
 }
 .rcnt.warn {
   background: var(--warn);
-  color: var(--canvas);
+  /* fixed near-black ink — readable on the amber fill in both themes */
+  color: #0b0e11;
 }
 .snhead {
   display: flex;
@@ -911,4 +912,9 @@ body {
 :focus-visible {
   outline: 2px solid var(--steel);
   outline-offset: 1px;
+}
+
+/* Org avatar gradient — one source (was inlined in four files). */
+.orggrad {
+  background: linear-gradient(135deg, #e36c4b, #b34a2e);
 }

@@ -19,7 +19,8 @@ interface ProjectMemberRow {
   invited?: boolean;
 }
 
-const CHANGE_REASON = "Project role changes land in Phase 4";
+const CHANGE_REASON =
+  "Project-scoped roles land with project-member endpoints the API lacks (finding)";
 
 function ProjectMembersPage() {
   const { org, project } = Route.useParams();
@@ -82,7 +83,11 @@ function ProjectMembersPage() {
             title="Project · Members & roles"
             sub="Access to ecommerce · org members inherit, project roles can only tighten"
           >
-            <Btn variant="p" disabled disabledReason="Project invites land in Phase 4">
+            <Btn
+              variant="p"
+              disabled
+              disabledReason="Project-scoped invites land with project-member endpoints the API lacks (finding)"
+            >
               Invite to project
             </Btn>
           </Pghead>

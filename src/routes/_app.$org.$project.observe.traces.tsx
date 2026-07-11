@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
@@ -42,6 +42,7 @@ function spanColor(service: string | undefined, isRoot: boolean): string {
 
 function TracesPage() {
   const { org, project } = Route.useParams();
+  const navigate = useNavigate();
   const { env } = Route.useSearch();
   const trace = useTrace(env, "tr_8814");
   // tr_8814 is the default selection (the frame's) and the only trace with
@@ -65,7 +66,11 @@ function TracesPage() {
           <span className="text-10p5 text-ink3">— or paste a trace id from any log line</span>
           <span className="flex-1" />
           <span className="chip">p95 of matches: 811 ms</span>
-          <Btn variant="s" disabled disabledReason="The rule drawer (U8) lands in Phase 3">
+          <Btn
+            variant="s"
+            disabled
+            disabledReason="Pre-filling the rule drawer from this chart isn't wired — U8 opens pre-filled from Observe → Metrics ⚑ (finding)"
+          >
             ⚑ Alert on this query
           </Btn>
         </div>
@@ -191,8 +196,14 @@ function TracesPage() {
                     <Btn
                       variant="s"
                       className="h-6 px-2.5 text-10p5"
-                      disabled
-                      disabledReason="Query insights (D4) lands in Phase 3"
+                      onClick={() =>
+                        // D4 is live — the slow span's home is db-main's insights.
+                        navigate({
+                          to: "/$org/$project/svc/$service/insights",
+                          params: { org, project, service: "db-main" },
+                          search: { env },
+                        })
+                      }
                     >
                       Query insights (D4)
                     </Btn>

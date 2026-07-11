@@ -1,34 +1,22 @@
-import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
  * The shared dashboard filter row (DB1–DB4): one filter bar over every widget
- * at once. Display-state chips in canon mode — clicking toggles .on locally;
- * no refetch behind them yet.
+ * at once. Rendered as STATIC context chips (the frame shows them as context)
+ * — refetch-backed filtering needs query params the dashboards spec lacks
+ * (finding), and a toggle that filters nothing would be a dead affordance.
  */
 
-const CHIPS = ["All projects ▾", "production ▾", "all regions ▾", "all products ▾"] as const;
+const CHIPS = ["All projects", "production", "all regions", "all products"] as const;
 
-export function FilterChips({ defaultOn = ["All projects ▾"] }: { defaultOn?: string[] }) {
-  const [on, setOn] = useState<ReadonlySet<string>>(() => new Set(defaultOn));
+export function FilterChips({ defaultOn = ["All projects"] }: { defaultOn?: string[] }) {
+  const on = new Set(defaultOn);
   return (
     <div className="chiprow">
       {CHIPS.map((chip) => (
-        <button
-          key={chip}
-          type="button"
-          className={cn("chip", on.has(chip) && "on")}
-          onClick={() =>
-            setOn((prev) => {
-              const next = new Set(prev);
-              if (next.has(chip)) next.delete(chip);
-              else next.add(chip);
-              return next;
-            })
-          }
-        >
+        <span key={chip} className={cn("chip", on.has(chip) && "on")}>
           {chip}
-        </button>
+        </span>
       ))}
     </div>
   );

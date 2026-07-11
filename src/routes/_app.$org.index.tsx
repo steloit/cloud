@@ -13,6 +13,7 @@ import { useProjects } from "@/features/projects/hooks";
 import type { Project } from "@/lib/api";
 import { relTime } from "@/lib/canon/now";
 import { fmtMoney } from "@/lib/fmt";
+import { cn } from "@/lib/utils";
 
 /** W1 · Projects home — the org's front door. */
 
@@ -47,7 +48,10 @@ function ProjectCard({
       search={{ env: "production" }}
     >
       <Card
-        className={`flex h-full flex-col gap-3 p-4 hover:border-ink3 ${health === "warn" ? "border-steel" : ""}`}
+        className={cn(
+          "flex h-full flex-col gap-3 p-4 hover:border-ink3",
+          health === "warn" ? "border-steel" : "",
+        )}
       >
         <div className="flex items-start gap-2.5">
           <div className="flex-1">

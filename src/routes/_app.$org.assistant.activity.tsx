@@ -125,8 +125,10 @@ function ActivityPage() {
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
+        {/* Finding: the frame shows the bare "Activity" title — the design-system
+            "Area · Thing" h1 grammar wins per the audit's P1 ruling. */}
         <Pghead
-          title="Activity"
+          title="Assistant · Activity"
           sub={
             'Every AI action in ecommerce — asked, proposed, applied, dismissed. The accountability half of "suggest, don\'t act."'
           }
