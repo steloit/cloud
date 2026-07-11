@@ -50,7 +50,20 @@ export const handlers = [
     const org = world.findOrg(String(params.org));
     return org ? HttpResponse.json(org) : notFound(`Organization ${String(params.org)}`);
   }),
-  http.get("/v1/orgs/:org/members", () => list(world.members)),
+  http.get("/v1/orgs/:org/members", () =>
+    HttpResponse.json({
+      data: world.members,
+      next_cursor: null,
+      seats: { included: 20, used: 12, overage_price_cents: 700 },
+    }),
+  ),
+  http.patch("/v1/orgs/:org/members/:member", async ({ params, request }) => {
+    const body = (await request.json()) as { role: string };
+    const member = world.members.find((m) => m.id === params.member);
+    if (!member) return notFound(`Member ${String(params.member)}`);
+    return HttpResponse.json({ ...member, role: body.role });
+  }),
+  http.delete("/v1/orgs/:org/members/:member", () => HttpResponse.json({ flagged_resources: [] })),
 
   // invites
   http.get("/v1/orgs/:org/invites", () => list(world.pendingInvites)),
@@ -216,10 +229,148 @@ export const handlers = [
   }),
   http.get("/v1/projects/:project/alert-rules", () => list(world.alertRules)),
 
+  // governance: api keys, personal tokens (reveal-once), policies
+  http.get("/v1/orgs/:org/api-keys", () => list(world.apiKeys)),
+  http.post("/v1/orgs/:org/api-keys", async ({ request }) => {
+    const body = (await request.json()) as { name: string; expires_in_days?: number };
+    return HttpResponse.json(
+      {
+        id: `key_${body.name.replace(/-/g, "_")}`,
+        token: "stk_live_Bq72Xw4nLm9cVd…",
+        shown_once: true,
+        prefix: "stk_live_Bq72…",
+        hash_stored: true,
+        expires_at: new Date(
+          world.CANON_NOW.getTime() + (body.expires_in_days ?? 90) * 86_400_000,
+        ).toISOString(),
+      },
+      { status: 201 },
+    );
+  }),
+  http.get("/v1/me/tokens", () => list(world.personalTokens)),
+  http.post("/v1/me/tokens", async ({ request }) => {
+    const body = (await request.json()) as { name: string; expires_in_days?: number };
+    return HttpResponse.json(
+      {
+        id: `tok_${body.name.replace(/-/g, "_")}`,
+        token: "stp_Ax91K3q8pR2vTz…",
+        shown_once: true,
+        prefix: "stp_Ax91…",
+        hash_stored: true,
+        expires_at: new Date(
+          world.CANON_NOW.getTime() + (body.expires_in_days ?? 90) * 86_400_000,
+        ).toISOString(),
+      },
+      { status: 201 },
+    );
+  }),
+  http.delete("/v1/me/tokens/:tok", () => new HttpResponse(null, { status: 204 })),
+  http.get("/v1/orgs/:org/policies", () => list(world.policies)),
+  http.post("/v1/orgs/:org/policies", async ({ request }) => {
+    const url = new URL(request.url);
+    const body = (await request.json()) as Record<string, unknown>;
+    if (url.searchParams.get("dry_run") === "true") {
+      // Impact preview — preview before enforce (G9's live rail)
+      return HttpResponse.json({
+        affected: [
+          {
+            id: "branches_future",
+            name: "New branches",
+            effect: "masked automatically — zero developer effort",
+          },
+          {
+            id: "env_pr142",
+            name: "preview/pr-142",
+            effect: "carries unmasked production data — will be flagged, never deleted",
+          },
+        ],
+        conflicts: [],
+        members_affected: 12,
+      });
+    }
+    return HttpResponse.json(
+      {
+        ...body,
+        id: `pol_${String(body.key ?? "new").replace(/-/g, "_")}`,
+        version: 1,
+        last_change_event: "evt_51aa02",
+        violation_count_30d: 0,
+      },
+      { status: 201 },
+    );
+  }),
+
   // billing + governance
   http.get("/v1/orgs/:org/billing/overview", () => HttpResponse.json(world.billingOverview)),
+  http.get("/v1/orgs/:org/billing/quotas", () => list(world.quotas)),
+  http.get("/v1/orgs/:org/billing/usage", () => HttpResponse.json(world.usageReport)),
+  http.get("/v1/orgs/:org/billing/invoices", () => list(world.invoices)),
+  http.get("/v1/orgs/:org/payment-methods", () => list(world.paymentMethods)),
+  http.get("/v1/orgs/:org/subscription", ({ params }) => {
+    const org = world.findOrg(String(params.org));
+    if (!org) return notFound(`Organization ${String(params.org)}`);
+    if (org.id === "org_borealis") {
+      return HttpResponse.json(borealisSubscription ?? world.borealisLifecycle.trial);
+    }
+    return HttpResponse.json({ plan: org.plan, status: "current", anchor_day: 1 });
+  }),
+  http.post("/v1/orgs/:org/subscription", async ({ params, request }) => {
+    const body = (await request.json()) as { plan: string };
+    const org = world.findOrg(String(params.org));
+    if (!org) return notFound(`Organization ${String(params.org)}`);
+    if (org.id === "org_acme" && body.plan === "free") {
+      return HttpResponse.json(
+        {
+          title: "Downgrade blocked",
+          status: 409,
+          detail: "12 members > Free's 3 · 4 projects > Free's 1",
+          remediation: "Reduce members and projects to Free limits, or stay on Business.",
+          reasons: ["12 members > Free's 3", "4 projects > Free's 1"],
+        },
+        { status: 409, headers: { "Content-Type": "application/problem+json" } },
+      );
+    }
+    if (org.id === "org_borealis") {
+      borealisSubscription = {
+        plan: body.plan,
+        status: "current",
+        anchor_day: 1,
+        trial_ends_at: null,
+        dunning: { state: "current", day: null, next_retry_at: null },
+        wind_down: null,
+      } as (typeof world.borealisLifecycle)["trial"];
+      return HttpResponse.json(borealisSubscription);
+    }
+    return HttpResponse.json({ plan: body.plan, status: "current", anchor_day: 1 });
+  }),
+  http.delete("/v1/orgs/:org/subscription", ({ params }) => {
+    const org = world.findOrg(String(params.org));
+    if (!org) return notFound(`Organization ${String(params.org)}`);
+    const cancelled = {
+      plan: org.plan,
+      status: "cancelled_at_anchor",
+      anchor_day: 1,
+      wind_down: { plan_ends_at: "2026-08-01T00:00:00+05:30", resources_unaffected: true },
+    } as (typeof world.borealisLifecycle)["trial"];
+    if (org.id === "org_borealis") borealisSubscription = cancelled;
+    return HttpResponse.json(cancelled);
+  }),
+  http.get("/v1/orgs/:org/templates", () => list(world.templates)),
+  http.get("/v1/templates/:tpl", ({ params }) => {
+    const tpl = world.templates.find((t) => t.id === params.tpl || t.name === params.tpl);
+    return tpl ? HttpResponse.json(tpl) : notFound(`Template ${String(params.tpl)}`);
+  }),
+  http.get("/v1/orgs/:org/cells", () => list(world.cells)),
+  http.get("/v1/orgs/:org/dashboards", () => list(world.dashboards)),
+  http.get("/v1/dashboards/:dash", ({ params }) => {
+    const dash = world.dashboards.find((d) => d.id === params.dash || d.name === params.dash);
+    return dash ? HttpResponse.json(dash) : notFound(`Dashboard ${String(params.dash)}`);
+  }),
   http.get("/v1/orgs/:org/audit", () => list(world.auditEvents)),
 ];
+
+/** Borealis subscription transitions in-memory (B11 confirm / B12 cancel are real flows). */
+let borealisSubscription: (typeof world.borealisLifecycle)["trial"] | undefined;
 
 /** Session-created services (canon mode is in-memory; refresh resets the demo). */
 const createdServices: (typeof world.services)[number][] = [];

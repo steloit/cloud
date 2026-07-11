@@ -72,7 +72,7 @@ function AuditLogPage() {
 
   return (
     <>
-      <SnavSettings org={org} orgName={orgRecord?.name ?? org} />
+      <SnavSettings org={org} orgName={orgRecord?.name ?? org} project="ecommerce" active="audit" />
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Pghead

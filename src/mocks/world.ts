@@ -1,15 +1,24 @@
 import type {
   AlertRule,
   Binding,
+  Cell,
+  Dashboard,
   Deployment,
   Environment,
   Event,
   Invite,
   InvitePublic,
+  Invoice,
   Member,
   Org,
+  PaymentMethod,
+  Policy,
   Project,
+  Quota,
   Service,
+  Subscription,
+  Template,
+  Token,
   Trace,
 } from "@/lib/api";
 import fixtures from "@/lib/canon/fixtures.json";
@@ -41,6 +50,11 @@ export const trace = section<Trace>("trace");
 export const alertRules = section<AlertRule[]>("alert_rules");
 export const events = section<Event[]>("events");
 export const billingOverview = section<Record<string, unknown>>("billing_overview");
+export const quotas = section<Quota[]>("quotas");
+export const templates = section<Template[]>("templates");
+export const cells = section<Cell[]>("cells");
+export const dashboards = section<Dashboard[]>("dashboards");
+export const borealisLifecycle = section<Record<string, Subscription>>("borealis_lifecycle");
 export const estimateExample = section<Record<string, unknown>>("estimate_example");
 
 /**
@@ -165,6 +179,254 @@ export const auditEvents: Event[] = [
     via: "system",
     action: "restore drill completed · verification passed ✓",
     detail: { target: "ecommerce/db-main", actor_note: "system · drill" },
+  },
+];
+
+/**
+ * Billing canon beyond billing_overview — fixtures.json has no usage, invoices,
+ * or payment-methods sections (finding); rows are frame-fixed from B2/B3/B4.
+ * Known source defects carried as findings, not silently fixed: B2's egress row
+ * (41.3 GB) contradicts the quotas fixture (87/100 — fixtures win here); B3's
+ * invoice lines don't sum to their own printed subtotal (frame arithmetic error).
+ */
+export const usageReport = {
+  month: "2026-07",
+  updated_at: "2026-07-02T14:55:00+05:30",
+  meters: [
+    {
+      meter: "compute_hours",
+      included: 0,
+      used: 1046,
+      overage_price: "$0.031 / S-hr",
+      overage_cents: 3290,
+      detail: [{ label: "api ×3 · workers · admin" }],
+    },
+    {
+      meter: "db_compute_hours",
+      included: 0,
+      used: 312,
+      overage_price: "$0.058 / hr",
+      overage_cents: 1810,
+      detail: [
+        {
+          label: "branches: preview/pr-142 · staging",
+          note: "scale-to-zero — billed only while awake",
+          used_label: "21 h",
+          mtd_cents: 122,
+        },
+      ],
+    },
+    {
+      meter: "db_storage_gb_mo",
+      included: 10,
+      used: 92,
+      overage_price: "$0.12 / GB-mo",
+      overage_cents: 588,
+    },
+    {
+      meter: "object_storage_gb_mo",
+      included: 5,
+      used: 43.1,
+      overage_price: "$0.023 / GB-mo",
+      overage_cents: 191,
+    },
+    {
+      meter: "egress_gb",
+      included: 100,
+      used: 87,
+      overage_price: "$0.09 / GB after included",
+      overage_cents: 0,
+    },
+    {
+      meter: "queue_requests_m",
+      included: 1,
+      used: 2.84,
+      overage_price: "$0.40 / M after included",
+      overage_cents: 74,
+    },
+    {
+      meter: "backups_gb_mo",
+      included: 7,
+      used: 30,
+      overage_price: "$0.021 / GB-mo",
+      overage_cents: 167,
+    },
+  ],
+};
+
+export const invoices: Invoice[] = [
+  { id: "inv_2026_07", period: "Jul 2026", status: "accruing", total_cents: 48200 },
+  {
+    id: "inv_2026_06",
+    period: "Jun 2026",
+    status: "paid",
+    total_cents: 47700,
+    tax: { kind: "GST 18%", id: "29ABCDE1234F1Z5", cents: 13208 },
+    lines: [
+      {
+        description: "ecommerce — compute · databases · storage · network",
+        project_id: "prj_ecommerce",
+        cents: 18930,
+      },
+      { description: "analytics-pipeline", project_id: "prj_internal_tools", cents: 8710 },
+      { description: "internal-tools", project_id: "prj_mobile_api", cents: 3952 },
+      { description: "Business plan · 20 seats included", project_id: null, cents: 9900 },
+    ],
+    formats: ["pdf", "csv", "json"],
+  },
+  { id: "inv_2026_05", period: "May 2026", status: "paid", total_cents: 45944 },
+  { id: "inv_2026_04", period: "Apr 2026", status: "paid", total_cents: 46102 },
+  { id: "inv_2026_03", period: "Mar 2026", status: "paid", total_cents: 47277 },
+  { id: "inv_2026_02", period: "Feb 2026", status: "paid", total_cents: 44719 },
+];
+
+export const paymentMethods: PaymentMethod[] = [
+  { id: "pm_visa_4412", brand: "Visa", last4: "4412", backup: false, expires: "08/27" },
+];
+
+/**
+ * Governance canon — fixtures.json has no api-keys, policies, or personal-token
+ * sections (finding); rows below are frame-fixed from G7/G8/P5/G4.
+ * Note: Token.scope is enum full|read_only while G8 renders richer scope pills
+ * ("ecommerce · deploy") — schema gap, flagged; display strings live in the UI.
+ */
+export const apiKeys: Token[] = [
+  {
+    id: "key_ci_deploy",
+    name: "ci-deploy",
+    prefix: "stk_live_8Ff2…",
+    scope: "full",
+    last_used_at: "2026-07-02T14:01:00+05:30",
+    expires_at: "2027-04-02T00:00:00+05:30",
+  },
+  {
+    id: "key_cost_export",
+    name: "cost-export",
+    prefix: "stk_live_2Kd9…",
+    scope: "read_only",
+    last_used_at: "2026-07-02T02:00:00+05:30",
+    expires_at: "2027-02-02T00:00:00+05:30",
+  },
+  {
+    id: "key_old_terraform",
+    name: "old-terraform",
+    prefix: "stk_live_9Xa1…",
+    scope: "full",
+    last_used_at: "2026-05-02T00:00:00+05:30",
+  },
+];
+
+export const personalTokens: Token[] = [
+  {
+    id: "tok_laptop_cli",
+    name: "laptop-cli",
+    prefix: "stp_9m2K…",
+    scope: "full",
+    last_used_at: "2026-07-02T14:01:00+05:30",
+    expires_at: "2027-04-02T00:00:00+05:30",
+  },
+  {
+    id: "tok_notebook_ro",
+    name: "notebook-readonly",
+    prefix: "stp_4Ha8…",
+    scope: "read_only",
+    last_used_at: "2026-07-04T00:00:00+05:30",
+    expires_at: "2026-08-31T00:00:00+05:30",
+  },
+];
+
+export const policies: Policy[] = [
+  {
+    id: "pol_prod_guard",
+    key: "prod-guard",
+    description: "Developers: production mutations require Admin approval",
+    scope: { project_id: "prj_ecommerce" },
+    rule: { text: "Developers: production mutations require Admin approval" },
+    enforcement: "enforce",
+    version: 1,
+    last_change_event: "evt_pg01…",
+    violation_count_30d: 1,
+  },
+  {
+    id: "pol_preview_minimal",
+    key: "preview-minimal",
+    description: "Previews: exclude jobs & worker · scale S · auto-expire 7 d",
+    scope: { project_id: "prj_ecommerce" },
+    rule: { text: "Previews: exclude jobs & worker · scale S · auto-expire 7 d" },
+    enforcement: "enforce",
+    version: 1,
+    last_change_event: "evt_pm01…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_allowed_regions",
+    key: "allowed-regions",
+    description: "APAC cells + aws · us-east-1 (expanded for the US launch)",
+    scope: { project_id: null },
+    rule: { text: "APAC cells + aws · us-east-1 (expanded for the US launch)" },
+    enforcement: "enforce",
+    version: 3,
+    last_change_event: "evt_44be…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_ai_assistant",
+    key: "ai-assistant",
+    description:
+      "Assistant, describe-to-provision & product AI panels — enabled org-wide; developers may opt out per-project",
+    scope: { project_id: null },
+    rule: {
+      text: "Assistant, describe-to-provision & product AI panels — enabled org-wide; developers may opt out per-project",
+    },
+    enforcement: "enabled",
+    version: 1,
+    last_change_event: "evt_31c0…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_public_buckets",
+    key: "public-buckets",
+    description: "Public visibility requires named Admin approval",
+    scope: { project_id: null },
+    rule: { text: "Public visibility requires named Admin approval" },
+    enforcement: "enforce",
+    version: 1,
+    last_change_event: "evt_pb01…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_credential_rotation",
+    key: "credential-rotation",
+    description: "Binding credentials rotate every 90 d",
+    scope: { project_id: null },
+    rule: { text: "Binding credentials rotate every 90 d" },
+    enforcement: "enforce",
+    version: 1,
+    last_change_event: "evt_cr01…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_compute_ceiling",
+    key: "compute-ceiling",
+    description: "Autoscale ceiling ≤ 6 in production",
+    scope: { project_id: null },
+    rule: { text: "Autoscale ceiling ≤ 6 in production" },
+    enforcement: "enforce",
+    version: 1,
+    last_change_event: "evt_cc01…",
+    violation_count_30d: 0,
+  },
+  {
+    id: "pol_mfa_required",
+    key: "mfa-required",
+    description: "All members enroll MFA within 14 d",
+    scope: { project_id: null },
+    rule: { text: "All members enroll MFA within 14 d" },
+    enforcement: "warn",
+    enforce_from: "2026-07-20T00:00:00+05:30",
+    version: 1,
+    last_change_event: "evt_mfa1…",
+    violation_count_30d: 0,
   },
 ];
 

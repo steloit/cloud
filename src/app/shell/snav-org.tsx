@@ -1,7 +1,7 @@
 import { Dot, healthDotTone } from "@/design-system/pill";
 import type { BillingOverview, Project } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
-import { NitDisabled, NitLink, Nsec, Snav } from "./snav";
+import { NitLink, Nsec, Snav } from "./snav";
 
 /** Snav variant A — org level (W1/W2): All projects · Dashboards · Projects · New project. */
 export function SnavOrg({
@@ -15,7 +15,7 @@ export function SnavOrg({
   orgName: string;
   projects: Project[];
   billing?: BillingOverview;
-  active: "all-projects" | "new-project";
+  active: "all-projects" | "new-project" | "dashboards";
 }) {
   const orgTotal =
     billing?.forecast_cents !== undefined ? `${fmtMoney(billing.forecast_cents)}/mo` : "…";
@@ -43,11 +43,13 @@ export function SnavOrg({
         label="All projects"
         on={active === "all-projects"}
       />
-      <NitDisabled
+      <NitLink
+        to="/$org/dashboards"
+        params={{ org }}
         icon="s-chart"
         label="Dashboards"
         count="7"
-        reason="Dashboards land in Phase 3"
+        on={active === "dashboards"}
       />
       <Nsec>Projects</Nsec>
       {projects.map((p) => (
