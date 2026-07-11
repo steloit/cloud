@@ -1,6 +1,8 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { CommandPalette } from "@/app/command-palette";
+import { AssistantDrawer } from "@/features/assistant/assistant-drawer";
+import { Coachmark } from "@/features/assistant/coachmark";
 import { requireSession } from "@/features/auth/guards";
 import { useUIStore } from "@/lib/store";
 
@@ -14,6 +16,13 @@ function AppLayout() {
         e.preventDefault();
         setPaletteOpen(true);
       }
+      // ⌘J — the assistant is chrome, not a FAB (ADR-020)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        const { assistantOpen, openAssistant, closeAssistant } = useUIStore.getState();
+        if (assistantOpen) closeAssistant();
+        else openAssistant();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -23,6 +32,8 @@ function AppLayout() {
     <>
       <Outlet />
       <CommandPalette />
+      <AssistantDrawer />
+      <Coachmark />
     </>
   );
 }

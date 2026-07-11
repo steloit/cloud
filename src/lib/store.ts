@@ -17,6 +17,11 @@ interface UIState {
 
   assistantOpen: boolean;
   setAssistantOpen: (open: boolean) => void;
+
+  /** AI9: an insight id seeds the drawer with that recommendation's evidence. */
+  attachedInsight: string | null;
+  openAssistant: (insight?: string) => void;
+  closeAssistant: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -31,6 +36,10 @@ export const useUIStore = create<UIState>()(
 
       assistantOpen: false,
       setAssistantOpen: (open) => set({ assistantOpen: open }),
+
+      attachedInsight: null,
+      openAssistant: (insight) => set({ assistantOpen: true, attachedInsight: insight ?? null }),
+      closeAssistant: () => set({ assistantOpen: false, attachedInsight: null }),
     }),
     {
       name: THEME_STORAGE_KEY,

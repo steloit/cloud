@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Dot, Pill } from "@/design-system/pill";
+import { AlertRuleDrawer } from "@/features/observe/alert-rule-drawer";
 import { useAlertRules } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import type { AlertRule } from "@/lib/api";
@@ -66,6 +67,7 @@ function AlertsPage() {
   const { env } = Route.useSearch();
   const rules = useAlertRules(project);
   const [tab, setTab] = useState("rules");
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const all = rules.data ?? [];
   const shown = tab === "firing" ? all.filter((r) => r.state === "firing") : all;
@@ -94,7 +96,7 @@ function AlertsPage() {
               </button>
             ))}
           </div>
-          <Btn variant="p" disabled disabledReason="The rule drawer (U8) lands in Phase 3">
+          <Btn variant="p" onClick={() => setDrawerOpen(true)}>
             New alert rule
           </Btn>
         </div>
@@ -132,7 +134,7 @@ function AlertsPage() {
               opens the rule drawer — ⚑ buttons on Metrics &amp; Logs land there pre-filled
             </p>
             <div>
-              <Btn variant="p" disabled disabledReason="The rule drawer (U8) lands in Phase 3">
+              <Btn variant="p" onClick={() => setDrawerOpen(true)}>
                 New alert rule (U8)
               </Btn>
             </div>
@@ -148,6 +150,10 @@ function AlertsPage() {
             </p>
           </Card>
         </div>
+
+        {drawerOpen ? (
+          <AlertRuleDrawer project={project} onClose={() => setDrawerOpen(false)} />
+        ) : null}
       </div>
     </main>
   );

@@ -1,12 +1,14 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";
 import { Dot, healthDotTone } from "@/design-system/pill";
+import { BellPanel, useUnreadCount } from "@/features/notifications/bell-panel";
 import type { Environment, Org, Project } from "@/lib/api";
 import { fmtMoneyPerMonth } from "@/lib/fmt";
 import { initialsOf, useSession, useSessionStore } from "@/lib/session";
-import { useSetPaletteOpen, useTheme, useToggleTheme } from "@/lib/store";
+import { useSetPaletteOpen, useTheme, useToggleTheme, useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Mark } from "./mark";
 
@@ -48,6 +50,11 @@ export function Ctx({
   const theme = useTheme();
   const toggleTheme = useToggleTheme();
   const setPaletteOpen = useSetPaletteOpen();
+  const [bellOpen, setBellOpen] = useState(false);
+  const assistantOpen = useUIStore((s) => s.assistantOpen);
+  const openAssistant = useUIStore((s) => s.openAssistant);
+  const closeAssistant = useUIStore((s) => s.closeAssistant);
+  const unread = useUnreadCount();
 
   return (
     <header className="ctx">
@@ -185,11 +192,11 @@ export function Ctx({
       <span className="flex-1" />
 
       {showAssistant ? (
+        // Assist button filled ⇔ drawer open (16-qa)
         <button
           type="button"
-          className="btn a h-[30px]"
-          disabled
-          title="Assistant — lands in Phase 3"
+          className={cn("btn a h-[30px]", assistantOpen && "!bg-assist !text-white")}
+          onClick={() => (assistantOpen ? closeAssistant() : openAssistant())}
         >
           <Icon id="s-ai" />
           Assistant
@@ -197,9 +204,20 @@ export function Ctx({
         </button>
       ) : null}
 
-      <button type="button" className="icb" aria-label="Notifications">
+      <button
+        type="button"
+        className="icb"
+        aria-label="Notifications"
+        onClick={() => setBellOpen((v) => !v)}
+      >
         <Icon id="s-bell" />
+        {unread > 0 ? (
+          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-err" aria-hidden="true" />
+        ) : null}
       </button>
+      {bellOpen ? (
+        <BellPanel open={bellOpen} onClose={() => setBellOpen(false)} org={org.slug} />
+      ) : null}
       <a
         className="icb"
         href="https://docs.steloit.app"
@@ -230,7 +248,10 @@ export function Ctx({
                 <span className="mono block text-[10.5px] text-ink3">{session?.email}</span>
               </span>
             </div>
-            <DropdownMenu.Item className={cn(menuItemClass, "opacity-55")} disabled>
+            <DropdownMenu.Item
+              className={menuItemClass}
+              onSelect={() => navigate({ to: "/account/profile" })}
+            >
               <Icon id="s-gear" className="h-3.5 w-3.5 text-ink3" />
               Account settings
             </DropdownMenu.Item>

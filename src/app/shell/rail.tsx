@@ -152,8 +152,16 @@ export function Rail({ org, project, env, services, active }: RailProps) {
         ? productEntries(services).map((entry) => (
             <Link
               key={entry.product}
-              to="/$org/$project/svc/$service"
-              params={{ org, project, service: entry.firstService.name }}
+              to={
+                entry.count > 1
+                  ? "/$org/$project/instances/$product"
+                  : "/$org/$project/svc/$service"
+              }
+              params={
+                entry.count > 1
+                  ? { org, project, product: entry.product }
+                  : { org, project, service: entry.firstService.name }
+              }
               search={search}
             >
               <Rit

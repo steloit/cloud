@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
@@ -8,7 +8,8 @@ import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
-import type { IconId } from "@/design-system/icon";
+import { Icon, type IconId } from "@/design-system/icon";
+import { Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
 import {
   type BlockState,
@@ -34,7 +35,15 @@ import { cn } from "@/lib/utils";
  * service page, which renders the C4 provisioning state.
  */
 
-const CREATABLE = ["postgres", "valkey", "storage", "queue", "web", "worker"] as const;
+const CREATABLE = [
+  "postgres",
+  "valkey",
+  "storage",
+  "queue",
+  "web",
+  "worker",
+  "gpu-worker",
+] as const;
 
 const isCreatable = (v: unknown): v is CreatableProduct =>
   typeof v === "string" && (CREATABLE as readonly string[]).includes(v);
@@ -98,7 +107,160 @@ const C1_STEPS = [
   "4 · Confirm — the only click that creates",
 ];
 
-const GPU_REASON = "Region exception flow (C7) lands in Phase 3";
+/* ---------- AI1 · describe-to-provision (Law 1: suggest, never act) ---------- */
+
+const AI1_DEFAULT_TEXT =
+  "I'm building a SaaS app with authentication, file uploads and background jobs.";
+
+type Ai1Enabled = Record<string, boolean>;
+
+const AI1_SUGGESTIONS: {
+  key: string;
+  icon: IconId;
+  name: string;
+  tag: string;
+  why: string;
+  price: number;
+  defaultOn: boolean;
+}[] = [
+  {
+    key: "postgres",
+    icon: "s-db",
+    name: "PostgreSQL",
+    tag: "Standard · db",
+    why: "durable store for accounts, sessions and app data — the SaaS backbone",
+    price: 58,
+    defaultOn: true,
+  },
+  {
+    key: "storage",
+    icon: "s-bucket",
+    name: "Object Storage",
+    tag: "with lifecycle",
+    why: "file uploads, with a lifecycle rule so temp files expire — you named uploads",
+    price: 9,
+    defaultOn: true,
+  },
+  {
+    key: "queue",
+    icon: "s-queue",
+    name: "Queue",
+    tag: "DLQ included",
+    why: "background jobs run off the request path; DLQ catches failures",
+    price: 12,
+    defaultOn: true,
+  },
+  {
+    key: "valkey",
+    icon: "s-chip",
+    name: "Valkey",
+    tag: "cache · sessions",
+    why: "session store + cache — optional now, cheap to add later",
+    price: 22,
+    defaultOn: false,
+  },
+];
+
+const AI1_DEFAULTS: Ai1Enabled = Object.fromEntries(
+  AI1_SUGGESTIONS.map((s) => [s.key, s.defaultOn]),
+);
+
+/** The working describe card + suggestion block; the estimate rail flip lives in CreatePage. */
+function DescribeToProvision({
+  enabled,
+  onSuggest,
+  onToggle,
+}: {
+  enabled: Ai1Enabled | null;
+  onSuggest: () => void;
+  onToggle: (key: string) => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [text, setText] = useState(AI1_DEFAULT_TEXT);
+
+  return (
+    <>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the click is a focus affordance; the input inside is the interactive element */}
+      <div
+        ref={wrapRef}
+        onClick={() => wrapRef.current?.querySelector("input")?.focus()}
+        role="presentation"
+      >
+        <Card className="flex flex-col gap-2.5 border-assist/40 p-4">
+          <div className="flex items-center gap-3">
+            <Glyph id="s-ai" />
+            <span className="flex-1 text-[12px] leading-relaxed text-ink2">
+              Not sure what you need? Describe what you're building and the assistant suggests a set
+              — you approve every line.
+            </span>
+            <Pill tone="ai">optional</Pill>
+          </div>
+          <Inp
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="text-[12px]"
+            aria-label="Describe what you're building"
+          />
+          <div className="flex items-center gap-2">
+            <Btn variant="a" onClick={onSuggest}>
+              Suggest a setup
+            </Btn>
+            <span className="mono text-[9px] text-ink3">
+              nothing is created — you get a reviewable set
+            </span>
+          </div>
+        </Card>
+      </div>
+
+      {enabled ? (
+        <>
+          <div className="flex items-center gap-2">
+            <Eyebrow className="m-0">Suggested for your description</Eyebrow>
+            <Pill tone="ai">4 services · each explainable</Pill>
+            <span className="sp flex-1" />
+            <span className="mono text-[9px] text-ink3">
+              toggle any off — estimate updates live
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {AI1_SUGGESTIONS.map((s) => {
+              const on = enabled[s.key];
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onToggle(s.key)}
+                  className={cn("card flex items-center gap-3 p-3 text-left", !on && "opacity-55")}
+                >
+                  <span
+                    className={cn(
+                      "flex h-[15px] w-[15px] shrink-0 items-center justify-center rounded",
+                      on ? "bg-steel" : "border-[1.5px] border-hair",
+                    )}
+                  >
+                    {on ? <Icon id="s-check" className="h-2.5 w-2.5 text-white" /> : null}
+                  </span>
+                  <Glyph id={s.icon} />
+                  <span className="flex-1">
+                    <span className="flex items-center gap-2">
+                      <b className="text-[12px]">{s.name}</b>
+                      <span className="mono text-[9.5px] text-ink3">{s.tag}</span>
+                    </span>
+                    <span className="mt-0.5 block text-[10.5px] text-ink2">
+                      <span className="text-assist">Why:</span> {s.why}
+                    </span>
+                  </span>
+                  <span className="mono text-[11px] text-ink2">${s.price}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
 
 function CreatePage() {
   const { org } = Route.useParams();
@@ -115,6 +277,8 @@ function CreatePage() {
   // push: child effects run before parent effects).
   const [est, setEst] = useState<{ forType: string; id: string }>();
   const [block, setBlock] = useState<BlockState>();
+  // AI1: null = no suggestion yet; a toggle map = the reviewable set (Law 1).
+  const [ai1, setAi1] = useState<Ai1Enabled | null>(null);
   const onBlockChange = useCallback((s: BlockState) => setBlock(s), []);
   const estimateId = type && est?.forType === type ? est.id : undefined;
 
@@ -180,18 +344,25 @@ function CreatePage() {
           <>
             <div className="mb-3 flex items-center gap-2">
               <div className="chiprow">
-                {(Object.keys(TYPE_BLOCKS) as CreatableProduct[]).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    aria-pressed={p === type}
-                    className={cn("chip", p === type && "on")}
-                    onClick={() => pick(p)}
-                  >
-                    {TYPE_BLOCKS[p].label}
-                  </button>
-                ))}
-                <button type="button" className="chip opacity-60" disabled title={GPU_REASON}>
+                {(Object.keys(TYPE_BLOCKS) as CreatableProduct[])
+                  .filter((p) => p !== "gpu-worker")
+                  .map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      aria-pressed={p === type}
+                      className={cn("chip", p === type && "on")}
+                      onClick={() => pick(p)}
+                    >
+                      {TYPE_BLOCKS[p].label}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  aria-pressed={type === "gpu-worker"}
+                  className={cn("chip", type === "gpu-worker" && "on")}
+                  onClick={() => pick("gpu-worker")}
+                >
                   GPU Worker <Pill tone="st">beta</Pill>
                 </button>
               </div>
@@ -253,6 +424,16 @@ function CreatePage() {
                     DLQ; Compute adds repo & health checks.
                   </Card>
                 ) : null}
+                {type === "gpu-worker" ? (
+                  <Card className="p-4 text-[10.5px] leading-relaxed text-ink3">
+                    Region model:{" "}
+                    <b className="text-ink2">
+                      env sets the home · instances inherit · exceptions are explicit
+                    </b>{" "}
+                    — offered only for availability gaps and typed cross-region features (read
+                    replicas, multi-region buckets).
+                  </Card>
+                ) : null}
               </div>
             </div>
           </>
@@ -265,17 +446,11 @@ function CreatePage() {
             />
             <div className="flex gap-4">
               <div className="flex max-w-[820px] flex-1 flex-col gap-3.5">
-                <Card
-                  className="flex items-center gap-3 border-assist/40 p-4 opacity-75"
-                  title="Describe-to-provision (AI1) lands in Phase 3"
-                >
-                  <Glyph id="s-ai" />
-                  <span className="flex-1 text-[12px] leading-relaxed text-ink2">
-                    Not sure what you need? Describe what you're building and the assistant suggests
-                    a set — you approve every line.
-                  </span>
-                  <Pill tone="ai">optional</Pill>
-                </Card>
+                <DescribeToProvision
+                  enabled={ai1}
+                  onSuggest={() => setAi1(AI1_DEFAULTS)}
+                  onToggle={(key) => setAi1((prev) => prev && { ...prev, [key]: !prev[key] })}
+                />
                 <div className="ordiv">or pick a product</div>
                 <div className="grid grid-cols-3 gap-2.5">
                   {PRODUCT_GRID.map((p) => (
@@ -297,9 +472,8 @@ function CreatePage() {
                 <div className="grid grid-cols-3 gap-2.5">
                   <button
                     type="button"
-                    disabled
-                    title={GPU_REASON}
-                    className="card flex flex-col gap-1.5 p-3 text-left opacity-75"
+                    onClick={() => pick("gpu-worker")}
+                    className="card flex flex-col gap-1.5 p-3 text-left hover:border-ink3"
                   >
                     <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
                       GPU Worker <Pill tone="st">beta</Pill>
@@ -318,44 +492,94 @@ function CreatePage() {
                       saas-starter $96 · docs-site $14 · store $184 — whole stacks, each opening a
                       full estimate first.
                     </span>
-                    <span className="self-start">
-                      <Btn
-                        variant="gh"
-                        disabled
-                        disabledReason="Templates gallery (C5) lands in Phase 3"
-                        className="!h-auto !p-0 text-steel"
-                      >
+                    <Link to="/$org/new-project/templates" params={{ org }} className="self-start">
+                      <Btn variant="gh" className="!h-auto !p-0 text-steel">
                         Browse templates →
                       </Btn>
-                    </span>
+                    </Link>
                   </Card>
                 </div>
               </div>
               <div className="flex w-[320px] shrink-0 flex-col gap-3">
-                <Card className="flex flex-col gap-2 p-4">
-                  <Eyebrow>Estimate</Eyebrow>
-                  <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
-                    $0
-                    <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
-                  </div>
-                  <p className="text-[11.5px] leading-relaxed text-ink2">
-                    Nothing exists yet. Pick a product and the estimate builds as you configure —
-                    billing starts only at ready, never at click.
-                  </p>
-                  <div className="mt-1 flex flex-col gap-1.5 border-hair border-t pt-2.5">
-                    {C1_STEPS.map((step) => (
-                      <div key={step} className="text-[11.5px] text-ink2">
-                        {step}
-                      </div>
-                    ))}
-                  </div>
-                  <Btn variant="s" className="mt-1 justify-center" onClick={cancel}>
-                    Cancel
-                  </Btn>
-                  <div className="flex justify-center">
-                    <Copybit>steloit add postgres --dry-run</Copybit>
-                  </div>
-                </Card>
+                {ai1 ? (
+                  (() => {
+                    const on = AI1_SUGGESTIONS.filter((s) => ai1[s.key]);
+                    const off = AI1_SUGGESTIONS.filter((s) => !ai1[s.key]);
+                    const total = on.reduce((sum, s) => sum + s.price, 0);
+                    return (
+                      <Card className="flex flex-col gap-2 p-4">
+                        <Eyebrow className="text-steel">
+                          Estimate · {on.length} of 4 enabled
+                        </Eyebrow>
+                        <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
+                          ${total}
+                          <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                        </div>
+                        <div className="mt-1 flex flex-col gap-1.5">
+                          {on.map((s) => (
+                            <div key={s.key} className="flex justify-between text-[11.5px]">
+                              <span className="text-ink2">{s.name}</span>
+                              <span className="mono">${s.price}</span>
+                            </div>
+                          ))}
+                          {off.map((s) => (
+                            <div
+                              key={s.key}
+                              className="flex justify-between text-[11.5px] opacity-50"
+                            >
+                              <span className="text-ink2">{s.name} · off</span>
+                              <span className="mono">+${s.price}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-1 border-hair border-t pt-2.5 text-[10px] leading-relaxed text-ink3">
+                          The assistant proposed; you decide. Nothing provisions until you confirm —{" "}
+                          <b>billing starts at ready, not now</b>.
+                        </p>
+                        <Btn
+                          variant="p"
+                          className="justify-center"
+                          disabled
+                          disabledReason="Multi-service create lands in Phase 5 — create each via its type block today"
+                        >
+                          Review & create {on.length} services →
+                        </Btn>
+                        <Btn variant="s" className="justify-center" onClick={() => setAi1(null)}>
+                          Clear suggestion
+                        </Btn>
+                        <p className="text-center text-[9.5px] leading-relaxed text-ink3">
+                          Law 1: AI suggests, you decide. Law 2: every "Why" is shown. This whole
+                          panel is off if your org disabled AI (P-policy).
+                        </p>
+                      </Card>
+                    );
+                  })()
+                ) : (
+                  <Card className="flex flex-col gap-2 p-4">
+                    <Eyebrow>Estimate</Eyebrow>
+                    <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
+                      $0
+                      <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                    </div>
+                    <p className="text-[11.5px] leading-relaxed text-ink2">
+                      Nothing exists yet. Pick a product and the estimate builds as you configure —
+                      billing starts only at ready, never at click.
+                    </p>
+                    <div className="mt-1 flex flex-col gap-1.5 border-hair border-t pt-2.5">
+                      {C1_STEPS.map((step) => (
+                        <div key={step} className="text-[11.5px] text-ink2">
+                          {step}
+                        </div>
+                      ))}
+                    </div>
+                    <Btn variant="s" className="mt-1 justify-center" onClick={cancel}>
+                      Cancel
+                    </Btn>
+                    <div className="flex justify-center">
+                      <Copybit>steloit add postgres --dry-run</Copybit>
+                    </div>
+                  </Card>
+                )}
               </div>
             </div>
           </>

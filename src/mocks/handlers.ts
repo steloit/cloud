@@ -135,10 +135,31 @@ export const handlers = [
     const project = world.findProject(String(params.project));
     return project ? HttpResponse.json(project) : notFound(`Project ${String(params.project)}`);
   }),
+  http.post("/v1/projects/:project/envs", async ({ params, request }) => {
+    const project = world.findProject(String(params.project));
+    if (!project) return notFound(`Project ${String(params.project)}`);
+    const body = (await request.json()) as { name: string; region?: string };
+    const created = {
+      id: `env_${body.name.replace(/[^a-z0-9]/gi, "_")}`,
+      project_id: project.id,
+      name: body.name,
+      region: body.region ?? "aws/us-east-1",
+      kind: "standard" as const,
+      monthly_cost_cents: 4600,
+      policy_flags: [],
+      expires_at: null,
+    };
+    createdEnvironments.push(created);
+    return HttpResponse.json(created, { status: 201 });
+  }),
   http.get("/v1/projects/:project/envs", ({ params }) => {
     const project = world.findProject(String(params.project));
     if (!project) return notFound(`Project ${String(params.project)}`);
-    return list(project.id === "prj_ecommerce" ? world.environments : []);
+    return list(
+      project.id === "prj_ecommerce"
+        ? [...world.environments, ...createdEnvironments]
+        : createdEnvironments.filter((e) => e.project_id === project.id),
+    );
   }),
 
   // estimates — estimate-before-provision; W2's rail is canon est_w2_demo
@@ -197,6 +218,180 @@ export const handlers = [
     const service = world.findService(key);
     return service ? HttpResponse.json(service) : notFound(`Service ${key}`);
   }),
+  http.post("/v1/services/:service/bindings", async ({ params, request }) => {
+    const service = world.findService(String(params.service));
+    if (!service) return notFound(`Service ${String(params.service)}`);
+    const body = (await request.json()) as { target: string; scope?: string };
+    const target = world.findService(body.target) ?? { id: body.target, name: body.target };
+    return HttpResponse.json(
+      {
+        id: `bnd_${service.name}_${target.name}`.replace(/-/g, ""),
+        source_id: service.id,
+        target_id: target.id,
+        scope: body.scope ?? "read_only",
+        status: "pending",
+        env_vars: { [`${target.name.toUpperCase().replace(/-/g, "_")}_URL`]: "…masked" },
+      },
+      { status: 201 },
+    );
+  }),
+  http.delete("/v1/bindings/:binding", () => new HttpResponse(null, { status: 204 })),
+  http.get("/v1/services/:service/domains", () => list(world.domains)),
+  http.post("/v1/services/:service/domains", async ({ request }) => {
+    const body = (await request.json()) as { domain: string };
+    return HttpResponse.json(
+      {
+        id: `dom_${body.domain.replace(/\./g, "_")}`,
+        domain: body.domain,
+        status: "verifying",
+        records: [
+          {
+            type: "CNAME",
+            name: body.domain.split(".")[0],
+            value: "svc-1aa508.edge.steloit.app",
+            verified: false,
+          },
+          {
+            type: "TXT",
+            name: `_steloit.${body.domain}`,
+            value: "steloit-verify=8f31c02a41",
+            verified: false,
+          },
+        ],
+        cert_expires_at: null,
+      },
+      { status: 201 },
+    );
+  }),
+  http.get("/v1/services/:service/lifecycle-rules", () => list(world.lifecycleRules)),
+  http.post("/v1/services/:service/lifecycle-rules", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      { ...body, id: `rule_${String(body.prefix).replace(/\W/g, "")}` },
+      { status: 201 },
+    );
+  }),
+  http.post("/v1/services/:service/lifecycle-rules:dryRun", async ({ request }) => {
+    const body = (await request.json()) as { prefix?: string };
+    // D15/U3: dry-run counts — canon numbers for tmp/ from S2's activity feed
+    return HttpResponse.json({
+      matches: body.prefix === "tmp/" ? 2041 : 184,
+      bytes_reclaimed: body.prefix === "tmp/" ? 2040109465 : 412000000,
+      note: "no immediate deletes — the rule applies going forward",
+    });
+  }),
+  http.get("/v1/services/:service/schedules", () => list(world.schedules)),
+  http.post("/v1/services/:service/schedules", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      { ...body, id: `sch_${String(body.name).replace(/-/g, "_")}` },
+      { status: 201 },
+    );
+  }),
+  http.post("/v1/projects/:project/alert-rules", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json(
+      {
+        ...body,
+        id: `rule_${String(body.name ?? "new").replace(/-/g, "_")}`,
+        state: "ok",
+        burn_rate: null,
+      },
+      { status: 201 },
+    );
+  }),
+  http.post("/v1/alert-rules:backtest", async () => {
+    // U8: the 7-day backtest must reproduce the canon firing (812 ms at 14:02,
+    // resolved after #143's 431 ms) — one firing in the window.
+    return HttpResponse.json({
+      firings: [{ at: "2026-07-02T14:02:00+05:30", value: 812, duration_s: 2880 }],
+    });
+  }),
+
+  // assistant — threads/messages (canon conversation), insights/proposals
+  http.post("/v1/assistant/threads", async ({ request }) => {
+    const body = (await request.json()) as { attached_insight?: string | null };
+    return HttpResponse.json(
+      {
+        id: "thr_db_slow",
+        title: "Why is my database slow?",
+        context: { org: "acme", project: "ecommerce", env: "production" },
+        attached_insight: body.attached_insight ?? null,
+        created_at: "2026-07-02T14:12:00+05:30",
+      },
+      { status: 201 },
+    );
+  }),
+  http.get("/v1/assistant/threads", () =>
+    list([
+      {
+        id: "thr_db_slow",
+        title: "Why is my database slow?",
+        context: { org: "acme", project: "ecommerce", env: "production" },
+        attached_insight: null,
+        created_at: "2026-07-02T14:12:00+05:30",
+      },
+      {
+        id: "thr_staging_cost",
+        title: "Cheaper config for staging",
+        context: { org: "acme", project: "ecommerce", env: "staging" },
+        attached_insight: null,
+        created_at: "2026-07-02T11:40:00+05:30",
+      },
+    ]),
+  ),
+  http.post("/v1/assistant/threads/:thread/messages", async ({ request }) => {
+    const body = (await request.json()) as { content: string };
+    // Canon-mode reply: the AI9 follow-up answers, keyed on the question text.
+    const q = body.content.toLowerCase();
+    const reply = q.includes("lock")
+      ? "No — CONCURRENTLY builds without an exclusive lock, so reads and writes keep flowing. ~40 s on 1.2M rows. Written as migration 0142, reversible via DROP INDEX. I won't run it — you approve it in Deploy."
+      : q.includes("volatile")
+        ? "volatile-lru only evicts keys that have a TTL — but 40% of your keys (including some session:*) have none, so under pressure it can still hit OOM and reject writes. allkeys-lru can evict anything, which is what guarantees writes keep succeeding."
+        : "I answer with evidence from your metrics, logs and traces — within your permissions. Ask about the p95 regression, the dead letters, or a cheaper config.";
+    return HttpResponse.json(
+      {
+        id: `msg_${Math.abs(hash(body.content)).toString(16).slice(0, 6)}`,
+        role: "assistant",
+        content: reply,
+        evidence: [
+          { kind: "metric", ref: "api p95", excerpt: "812 ms since 14:02" },
+          { kind: "trace", ref: "tr_8814", excerpt: "79% of request in one span" },
+        ],
+        proposal_id: q.includes("lock") ? "prp_7c31a2" : null,
+        created_at: new Date().toISOString(),
+      },
+      { status: 201 },
+    );
+  }),
+  http.patch("/v1/assistant/insights/:ins", async ({ params, request }) => {
+    const body = (await request.json()) as { status: string; reason?: string };
+    const pair = world.insightsAndProposals.find((p) => p.insight.id === params.ins);
+    if (!pair) return notFound(`Insight ${String(params.ins)}`);
+    return HttpResponse.json({ ...pair.insight, status: body.status });
+  }),
+  http.post("/v1/assistant/proposals/:prp", ({ params }) => {
+    const pair = world.insightsAndProposals.find((p) => p.proposal.id === params.prp);
+    if (!pair) return notFound(`Proposal ${String(params.prp)}`);
+    return HttpResponse.json({
+      ...pair.proposal,
+      status: "applied",
+      applied_by: "priya",
+      applied_event_id: "evt_apply",
+    });
+  }),
+
+  // assistant — insights/proposals from canon fixtures (Law 2: evidence cited)
+  http.get("/v1/assistant/insights", () => list(world.insightsAndProposals.map((p) => p.insight))),
+  http.get("/v1/assistant/insights/:ins", ({ params }) => {
+    const pair = world.insightsAndProposals.find((p) => p.insight.id === params.ins);
+    return pair ? HttpResponse.json(pair.insight) : notFound(`Insight ${String(params.ins)}`);
+  }),
+  http.get("/v1/assistant/proposals/:prp", ({ params }) => {
+    const pair = world.insightsAndProposals.find((p) => p.proposal.id === params.prp);
+    return pair ? HttpResponse.json(pair.proposal) : notFound(`Proposal ${String(params.prp)}`);
+  }),
+
   http.get("/v1/services/:service/bindings", ({ params }) => {
     const service = world.findService(String(params.service));
     if (!service) return notFound(`Service ${String(params.service)}`);
@@ -371,6 +566,9 @@ export const handlers = [
 
 /** Borealis subscription transitions in-memory (B11 confirm / B12 cancel are real flows). */
 let borealisSubscription: (typeof world.borealisLifecycle)["trial"] | undefined;
+
+/** Session-created environments (canon mode is in-memory; refresh resets the demo). */
+const createdEnvironments: (typeof world.environments)[number][] = [];
 
 /** Session-created services (canon mode is in-memory; refresh resets the demo). */
 const createdServices: (typeof world.services)[number][] = [];

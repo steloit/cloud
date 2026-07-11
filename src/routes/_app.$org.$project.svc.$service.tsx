@@ -12,6 +12,10 @@ function ServiceLayout() {
   const childMatches = useChildMatches();
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
+  // The leaf segment after $service/ is the active snav key; index = overview.
+  const leafId = childMatches[childMatches.length - 1]?.routeId ?? "";
+  const segment = leafId.split("/$service/")[1] ?? "";
+  const active = segment === "" || segment === "/" ? "overview" : segment.replaceAll("/", "");
   if (!svc) {
     if (services.isPending) return <main className="main" />;
     return (
@@ -27,13 +31,6 @@ function ServiceLayout() {
     );
   }
 
-  const leaf = childMatches[childMatches.length - 1]?.routeId ?? "";
-  const active = leaf.includes("branches")
-    ? "branches"
-    : leaf.includes("insights")
-      ? "insights"
-      : "overview";
-
   return (
     <>
       <SnavProduct
@@ -41,7 +38,7 @@ function ServiceLayout() {
         project={project}
         env={env}
         service={svc}
-        serviceCount={(services.data ?? []).filter((s) => s.product === svc.product).length}
+        siblings={(services.data ?? []).filter((s) => s.product === svc.product)}
         projectTotalCents={projectQuery.data?.monthly_cost_cents}
         active={active}
       />

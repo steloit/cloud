@@ -20,18 +20,30 @@ import { Route as OnboardingProjectRouteImport } from './routes/onboarding.proje
 import { Route as OnboardingOrgRouteImport } from './routes/onboarding.org'
 import { Route as OnboardingConnectRouteImport } from './routes/onboarding.connect'
 import { Route as InviteInviteIdRouteImport } from './routes/invite.$inviteId'
+import { Route as AppWelcomeRouteImport } from './routes/_app.welcome'
+import { Route as AppAccountRouteImport } from './routes/_app.account'
 import { Route as AppOrgRouteImport } from './routes/_app.$org'
 import { Route as AppOrgIndexRouteImport } from './routes/_app.$org.index'
+import { Route as AppAccountTokensRouteImport } from './routes/_app.account.tokens'
+import { Route as AppAccountSessionsRouteImport } from './routes/_app.account.sessions'
+import { Route as AppAccountSecurityRouteImport } from './routes/_app.account.security'
+import { Route as AppAccountProfileRouteImport } from './routes/_app.account.profile'
+import { Route as AppAccountNotificationsRouteImport } from './routes/_app.account.notifications'
+import { Route as AppOrgNotificationsRouteImport } from './routes/_app.$org.notifications'
 import { Route as AppOrgNewProjectRouteImport } from './routes/_app.$org.new-project'
 import { Route as AppOrgDashboardsRouteImport } from './routes/_app.$org.dashboards'
 import { Route as AppOrgCreateRouteImport } from './routes/_app.$org.create'
+import { Route as AppOrgAssistantRouteImport } from './routes/_app.$org.assistant'
 import { Route as AppOrgDashboardsIndexRouteImport } from './routes/_app.$org.dashboards.index'
 import { Route as AppOrgProjectIndexRouteImport } from './routes/_app.$org.$project.index'
+import { Route as AppOrgTemplateTplRouteImport } from './routes/_app.$org.template.$tpl'
 import { Route as AppOrgSettingsTemplatesRouteImport } from './routes/_app.$org.settings.templates'
 import { Route as AppOrgSettingsMembersRouteImport } from './routes/_app.$org.settings.members'
 import { Route as AppOrgSettingsGeneralRouteImport } from './routes/_app.$org.settings.general'
+import { Route as AppOrgSettingsCellsRouteImport } from './routes/_app.$org.settings.cells'
 import { Route as AppOrgSettingsAuditRouteImport } from './routes/_app.$org.settings.audit'
 import { Route as AppOrgSettingsApiKeysRouteImport } from './routes/_app.$org.settings.api-keys'
+import { Route as AppOrgNewProjectTemplatesRouteImport } from './routes/_app.$org.new-project_.templates'
 import { Route as AppOrgDashboardsPostgresHealthRouteImport } from './routes/_app.$org.dashboards.postgres-health'
 import { Route as AppOrgDashboardsMineRouteImport } from './routes/_app.$org.dashboards.mine'
 import { Route as AppOrgDashboardsLayoutsRouteImport } from './routes/_app.$org.dashboards.layouts'
@@ -44,11 +56,18 @@ import { Route as AppOrgBillingPlansRouteImport } from './routes/_app.$org.billi
 import { Route as AppOrgBillingPaymentRouteImport } from './routes/_app.$org.billing.payment'
 import { Route as AppOrgBillingOverviewRouteImport } from './routes/_app.$org.billing.overview'
 import { Route as AppOrgBillingInvoicesRouteImport } from './routes/_app.$org.billing.invoices'
+import { Route as AppOrgAssistantInsightsRouteImport } from './routes/_app.$org.assistant.insights'
+import { Route as AppOrgAssistantCapabilitiesRouteImport } from './routes/_app.$org.assistant.capabilities'
+import { Route as AppOrgAssistantAskRouteImport } from './routes/_app.$org.assistant.ask'
+import { Route as AppOrgAssistantActivityRouteImport } from './routes/_app.$org.assistant.activity'
 import { Route as AppOrgProjectObserveRouteImport } from './routes/_app.$org.$project.observe'
+import { Route as AppOrgProjectNewEnvRouteImport } from './routes/_app.$org.$project.new-env'
+import { Route as AppOrgProjectEnvironmentsRouteImport } from './routes/_app.$org.$project.environments'
 import { Route as AppOrgProjectDeployRouteImport } from './routes/_app.$org.$project.deploy'
 import { Route as AppOrgSettingsPoliciesIndexRouteImport } from './routes/_app.$org.settings.policies.index'
 import { Route as AppOrgProjectDeployIndexRouteImport } from './routes/_app.$org.$project.deploy.index'
 import { Route as AppOrgSettingsPoliciesNewRouteImport } from './routes/_app.$org.settings.policies.new'
+import { Route as AppOrgSettingsPoliciesAiAssistantRouteImport } from './routes/_app.$org.settings.policies.ai-assistant'
 import { Route as AppOrgProjectSvcServiceRouteImport } from './routes/_app.$org.$project.svc.$service'
 import { Route as AppOrgProjectSettingsPoliciesRouteImport } from './routes/_app.$org.$project.settings.policies'
 import { Route as AppOrgProjectSettingsMembersRouteImport } from './routes/_app.$org.$project.settings.members'
@@ -60,11 +79,30 @@ import { Route as AppOrgProjectObserveLogsRouteImport } from './routes/_app.$org
 import { Route as AppOrgProjectObserveHealthRouteImport } from './routes/_app.$org.$project.observe.health'
 import { Route as AppOrgProjectObserveEventsRouteImport } from './routes/_app.$org.$project.observe.events'
 import { Route as AppOrgProjectObserveAlertsRouteImport } from './routes/_app.$org.$project.observe.alerts'
+import { Route as AppOrgProjectInstancesProductRouteImport } from './routes/_app.$org.$project.instances.$product'
 import { Route as AppOrgProjectDeployPreviewsRouteImport } from './routes/_app.$org.$project.deploy.previews'
 import { Route as AppOrgProjectDeployDepRouteImport } from './routes/_app.$org.$project.deploy.$dep'
 import { Route as AppOrgProjectSvcServiceIndexRouteImport } from './routes/_app.$org.$project.svc.$service.index'
+import { Route as AppOrgProjectSvcServiceTablesRouteImport } from './routes/_app.$org.$project.svc.$service.tables'
+import { Route as AppOrgProjectSvcServiceSqlEditorRouteImport } from './routes/_app.$org.$project.svc.$service.sql-editor'
+import { Route as AppOrgProjectSvcServiceShellRouteImport } from './routes/_app.$org.$project.svc.$service.shell'
+import { Route as AppOrgProjectSvcServiceSettingsRouteImport } from './routes/_app.$org.$project.svc.$service.settings'
+import { Route as AppOrgProjectSvcServiceSchedulesRouteImport } from './routes/_app.$org.$project.svc.$service.schedules'
+import { Route as AppOrgProjectSvcServiceScalingRouteImport } from './routes/_app.$org.$project.svc.$service.scaling'
+import { Route as AppOrgProjectSvcServiceObjectsRouteImport } from './routes/_app.$org.$project.svc.$service.objects'
+import { Route as AppOrgProjectSvcServiceMetricsRouteImport } from './routes/_app.$org.$project.svc.$service.metrics'
+import { Route as AppOrgProjectSvcServiceMessagesRouteImport } from './routes/_app.$org.$project.svc.$service.messages'
+import { Route as AppOrgProjectSvcServiceLogsRouteImport } from './routes/_app.$org.$project.svc.$service.logs'
+import { Route as AppOrgProjectSvcServiceLifecycleRouteImport } from './routes/_app.$org.$project.svc.$service.lifecycle'
 import { Route as AppOrgProjectSvcServiceInsightsRouteImport } from './routes/_app.$org.$project.svc.$service.insights'
+import { Route as AppOrgProjectSvcServiceDomainsRouteImport } from './routes/_app.$org.$project.svc.$service.domains'
+import { Route as AppOrgProjectSvcServiceDeploymentsRouteImport } from './routes/_app.$org.$project.svc.$service.deployments'
+import { Route as AppOrgProjectSvcServiceDataBrowserRouteImport } from './routes/_app.$org.$project.svc.$service.data-browser'
+import { Route as AppOrgProjectSvcServiceCliRouteImport } from './routes/_app.$org.$project.svc.$service.cli'
 import { Route as AppOrgProjectSvcServiceBranchesRouteImport } from './routes/_app.$org.$project.svc.$service.branches'
+import { Route as AppOrgProjectSvcServiceBindingsRouteImport } from './routes/_app.$org.$project.svc.$service.bindings'
+import { Route as AppOrgProjectSvcServiceBackupsRouteImport } from './routes/_app.$org.$project.svc.$service.backups'
+import { Route as AppOrgProjectSvcServiceAiRouteImport } from './routes/_app.$org.$project.svc.$service.ai'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -120,6 +158,16 @@ const InviteInviteIdRoute = InviteInviteIdRouteImport.update({
   path: '/invite/$inviteId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppWelcomeRoute = AppWelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAccountRoute = AppAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppOrgRoute = AppOrgRouteImport.update({
   id: '/$org',
   path: '/$org',
@@ -128,6 +176,36 @@ const AppOrgRoute = AppOrgRouteImport.update({
 const AppOrgIndexRoute = AppOrgIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppOrgRoute,
+} as any)
+const AppAccountTokensRoute = AppAccountTokensRouteImport.update({
+  id: '/tokens',
+  path: '/tokens',
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountSessionsRoute = AppAccountSessionsRouteImport.update({
+  id: '/sessions',
+  path: '/sessions',
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountSecurityRoute = AppAccountSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountProfileRoute = AppAccountProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppAccountNotificationsRoute = AppAccountNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => AppAccountRoute,
+} as any)
+const AppOrgNotificationsRoute = AppOrgNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => AppOrgRoute,
 } as any)
 const AppOrgNewProjectRoute = AppOrgNewProjectRouteImport.update({
@@ -145,6 +223,11 @@ const AppOrgCreateRoute = AppOrgCreateRouteImport.update({
   path: '/create',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgAssistantRoute = AppOrgAssistantRouteImport.update({
+  id: '/assistant',
+  path: '/assistant',
+  getParentRoute: () => AppOrgRoute,
+} as any)
 const AppOrgDashboardsIndexRoute = AppOrgDashboardsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -153,6 +236,11 @@ const AppOrgDashboardsIndexRoute = AppOrgDashboardsIndexRouteImport.update({
 const AppOrgProjectIndexRoute = AppOrgProjectIndexRouteImport.update({
   id: '/$project/',
   path: '/$project/',
+  getParentRoute: () => AppOrgRoute,
+} as any)
+const AppOrgTemplateTplRoute = AppOrgTemplateTplRouteImport.update({
+  id: '/template/$tpl',
+  path: '/template/$tpl',
   getParentRoute: () => AppOrgRoute,
 } as any)
 const AppOrgSettingsTemplatesRoute = AppOrgSettingsTemplatesRouteImport.update({
@@ -170,6 +258,11 @@ const AppOrgSettingsGeneralRoute = AppOrgSettingsGeneralRouteImport.update({
   path: '/settings/general',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgSettingsCellsRoute = AppOrgSettingsCellsRouteImport.update({
+  id: '/settings/cells',
+  path: '/settings/cells',
+  getParentRoute: () => AppOrgRoute,
+} as any)
 const AppOrgSettingsAuditRoute = AppOrgSettingsAuditRouteImport.update({
   id: '/settings/audit',
   path: '/settings/audit',
@@ -180,6 +273,12 @@ const AppOrgSettingsApiKeysRoute = AppOrgSettingsApiKeysRouteImport.update({
   path: '/settings/api-keys',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgNewProjectTemplatesRoute =
+  AppOrgNewProjectTemplatesRouteImport.update({
+    id: '/new-project_/templates',
+    path: '/new-project/templates',
+    getParentRoute: () => AppOrgRoute,
+  } as any)
 const AppOrgDashboardsPostgresHealthRoute =
   AppOrgDashboardsPostgresHealthRouteImport.update({
     id: '/postgres-health',
@@ -243,11 +342,43 @@ const AppOrgBillingInvoicesRoute = AppOrgBillingInvoicesRouteImport.update({
   path: '/billing/invoices',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgAssistantInsightsRoute = AppOrgAssistantInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
+  getParentRoute: () => AppOrgAssistantRoute,
+} as any)
+const AppOrgAssistantCapabilitiesRoute =
+  AppOrgAssistantCapabilitiesRouteImport.update({
+    id: '/capabilities',
+    path: '/capabilities',
+    getParentRoute: () => AppOrgAssistantRoute,
+  } as any)
+const AppOrgAssistantAskRoute = AppOrgAssistantAskRouteImport.update({
+  id: '/ask',
+  path: '/ask',
+  getParentRoute: () => AppOrgAssistantRoute,
+} as any)
+const AppOrgAssistantActivityRoute = AppOrgAssistantActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => AppOrgAssistantRoute,
+} as any)
 const AppOrgProjectObserveRoute = AppOrgProjectObserveRouteImport.update({
   id: '/$project/observe',
   path: '/$project/observe',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgProjectNewEnvRoute = AppOrgProjectNewEnvRouteImport.update({
+  id: '/$project/new-env',
+  path: '/$project/new-env',
+  getParentRoute: () => AppOrgRoute,
+} as any)
+const AppOrgProjectEnvironmentsRoute =
+  AppOrgProjectEnvironmentsRouteImport.update({
+    id: '/$project/environments',
+    path: '/$project/environments',
+    getParentRoute: () => AppOrgRoute,
+  } as any)
 const AppOrgProjectDeployRoute = AppOrgProjectDeployRouteImport.update({
   id: '/$project/deploy',
   path: '/$project/deploy',
@@ -269,6 +400,12 @@ const AppOrgSettingsPoliciesNewRoute =
   AppOrgSettingsPoliciesNewRouteImport.update({
     id: '/settings/policies/new',
     path: '/settings/policies/new',
+    getParentRoute: () => AppOrgRoute,
+  } as any)
+const AppOrgSettingsPoliciesAiAssistantRoute =
+  AppOrgSettingsPoliciesAiAssistantRouteImport.update({
+    id: '/settings/policies/ai-assistant',
+    path: '/settings/policies/ai-assistant',
     getParentRoute: () => AppOrgRoute,
   } as any)
 const AppOrgProjectSvcServiceRoute = AppOrgProjectSvcServiceRouteImport.update({
@@ -336,6 +473,12 @@ const AppOrgProjectObserveAlertsRoute =
     path: '/alerts',
     getParentRoute: () => AppOrgProjectObserveRoute,
   } as any)
+const AppOrgProjectInstancesProductRoute =
+  AppOrgProjectInstancesProductRouteImport.update({
+    id: '/$project/instances/$product',
+    path: '/$project/instances/$product',
+    getParentRoute: () => AppOrgRoute,
+  } as any)
 const AppOrgProjectDeployPreviewsRoute =
   AppOrgProjectDeployPreviewsRouteImport.update({
     id: '/previews',
@@ -353,16 +496,124 @@ const AppOrgProjectSvcServiceIndexRoute =
     path: '/',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
+const AppOrgProjectSvcServiceTablesRoute =
+  AppOrgProjectSvcServiceTablesRouteImport.update({
+    id: '/tables',
+    path: '/tables',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceSqlEditorRoute =
+  AppOrgProjectSvcServiceSqlEditorRouteImport.update({
+    id: '/sql-editor',
+    path: '/sql-editor',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceShellRoute =
+  AppOrgProjectSvcServiceShellRouteImport.update({
+    id: '/shell',
+    path: '/shell',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceSettingsRoute =
+  AppOrgProjectSvcServiceSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceSchedulesRoute =
+  AppOrgProjectSvcServiceSchedulesRouteImport.update({
+    id: '/schedules',
+    path: '/schedules',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceScalingRoute =
+  AppOrgProjectSvcServiceScalingRouteImport.update({
+    id: '/scaling',
+    path: '/scaling',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceObjectsRoute =
+  AppOrgProjectSvcServiceObjectsRouteImport.update({
+    id: '/objects',
+    path: '/objects',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceMetricsRoute =
+  AppOrgProjectSvcServiceMetricsRouteImport.update({
+    id: '/metrics',
+    path: '/metrics',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceMessagesRoute =
+  AppOrgProjectSvcServiceMessagesRouteImport.update({
+    id: '/messages',
+    path: '/messages',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceLogsRoute =
+  AppOrgProjectSvcServiceLogsRouteImport.update({
+    id: '/logs',
+    path: '/logs',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceLifecycleRoute =
+  AppOrgProjectSvcServiceLifecycleRouteImport.update({
+    id: '/lifecycle',
+    path: '/lifecycle',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
 const AppOrgProjectSvcServiceInsightsRoute =
   AppOrgProjectSvcServiceInsightsRouteImport.update({
     id: '/insights',
     path: '/insights',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
+const AppOrgProjectSvcServiceDomainsRoute =
+  AppOrgProjectSvcServiceDomainsRouteImport.update({
+    id: '/domains',
+    path: '/domains',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceDeploymentsRoute =
+  AppOrgProjectSvcServiceDeploymentsRouteImport.update({
+    id: '/deployments',
+    path: '/deployments',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceDataBrowserRoute =
+  AppOrgProjectSvcServiceDataBrowserRouteImport.update({
+    id: '/data-browser',
+    path: '/data-browser',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceCliRoute =
+  AppOrgProjectSvcServiceCliRouteImport.update({
+    id: '/cli',
+    path: '/cli',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
 const AppOrgProjectSvcServiceBranchesRoute =
   AppOrgProjectSvcServiceBranchesRouteImport.update({
     id: '/branches',
     path: '/branches',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceBindingsRoute =
+  AppOrgProjectSvcServiceBindingsRouteImport.update({
+    id: '/bindings',
+    path: '/bindings',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceBackupsRoute =
+  AppOrgProjectSvcServiceBackupsRouteImport.update({
+    id: '/backups',
+    path: '/backups',
+    getParentRoute: () => AppOrgProjectSvcServiceRoute,
+  } as any)
+const AppOrgProjectSvcServiceAiRoute =
+  AppOrgProjectSvcServiceAiRouteImport.update({
+    id: '/ai',
+    path: '/ai',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
 
@@ -373,17 +624,32 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/$org': typeof AppOrgRouteWithChildren
+  '/account': typeof AppAccountRouteWithChildren
+  '/welcome': typeof AppWelcomeRoute
   '/invite/$inviteId': typeof InviteInviteIdRoute
   '/onboarding/connect': typeof OnboardingConnectRoute
   '/onboarding/org': typeof OnboardingOrgRoute
   '/onboarding/project': typeof OnboardingProjectRoute
   '/onboarding/team': typeof OnboardingTeamRoute
+  '/$org/assistant': typeof AppOrgAssistantRouteWithChildren
   '/$org/create': typeof AppOrgCreateRoute
   '/$org/dashboards': typeof AppOrgDashboardsRouteWithChildren
   '/$org/new-project': typeof AppOrgNewProjectRoute
+  '/$org/notifications': typeof AppOrgNotificationsRoute
+  '/account/notifications': typeof AppAccountNotificationsRoute
+  '/account/profile': typeof AppAccountProfileRoute
+  '/account/security': typeof AppAccountSecurityRoute
+  '/account/sessions': typeof AppAccountSessionsRoute
+  '/account/tokens': typeof AppAccountTokensRoute
   '/$org/': typeof AppOrgIndexRoute
   '/$org/$project/deploy': typeof AppOrgProjectDeployRouteWithChildren
+  '/$org/$project/environments': typeof AppOrgProjectEnvironmentsRoute
+  '/$org/$project/new-env': typeof AppOrgProjectNewEnvRoute
   '/$org/$project/observe': typeof AppOrgProjectObserveRouteWithChildren
+  '/$org/assistant/activity': typeof AppOrgAssistantActivityRoute
+  '/$org/assistant/ask': typeof AppOrgAssistantAskRoute
+  '/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
+  '/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
   '/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -396,15 +662,19 @@ export interface FileRoutesByFullPath {
   '/$org/dashboards/layouts': typeof AppOrgDashboardsLayoutsRoute
   '/$org/dashboards/mine': typeof AppOrgDashboardsMineRoute
   '/$org/dashboards/postgres-health': typeof AppOrgDashboardsPostgresHealthRoute
+  '/$org/new-project/templates': typeof AppOrgNewProjectTemplatesRoute
   '/$org/settings/api-keys': typeof AppOrgSettingsApiKeysRoute
   '/$org/settings/audit': typeof AppOrgSettingsAuditRoute
+  '/$org/settings/cells': typeof AppOrgSettingsCellsRoute
   '/$org/settings/general': typeof AppOrgSettingsGeneralRoute
   '/$org/settings/members': typeof AppOrgSettingsMembersRoute
   '/$org/settings/templates': typeof AppOrgSettingsTemplatesRoute
+  '/$org/template/$tpl': typeof AppOrgTemplateTplRoute
   '/$org/$project/': typeof AppOrgProjectIndexRoute
   '/$org/dashboards/': typeof AppOrgDashboardsIndexRoute
   '/$org/$project/deploy/$dep': typeof AppOrgProjectDeployDepRoute
   '/$org/$project/deploy/previews': typeof AppOrgProjectDeployPreviewsRoute
+  '/$org/$project/instances/$product': typeof AppOrgProjectInstancesProductRoute
   '/$org/$project/observe/alerts': typeof AppOrgProjectObserveAlertsRoute
   '/$org/$project/observe/events': typeof AppOrgProjectObserveEventsRoute
   '/$org/$project/observe/health': typeof AppOrgProjectObserveHealthRoute
@@ -416,11 +686,30 @@ export interface FileRoutesByFullPath {
   '/$org/$project/settings/members': typeof AppOrgProjectSettingsMembersRoute
   '/$org/$project/settings/policies': typeof AppOrgProjectSettingsPoliciesRoute
   '/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceRouteWithChildren
+  '/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
   '/$org/$project/deploy/': typeof AppOrgProjectDeployIndexRoute
   '/$org/settings/policies/': typeof AppOrgSettingsPoliciesIndexRoute
+  '/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
+  '/$org/$project/svc/$service/backups': typeof AppOrgProjectSvcServiceBackupsRoute
+  '/$org/$project/svc/$service/bindings': typeof AppOrgProjectSvcServiceBindingsRoute
   '/$org/$project/svc/$service/branches': typeof AppOrgProjectSvcServiceBranchesRoute
+  '/$org/$project/svc/$service/cli': typeof AppOrgProjectSvcServiceCliRoute
+  '/$org/$project/svc/$service/data-browser': typeof AppOrgProjectSvcServiceDataBrowserRoute
+  '/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
+  '/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
+  '/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
+  '/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
+  '/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
+  '/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
+  '/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
+  '/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
+  '/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
+  '/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
+  '/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
+  '/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
+  '/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
   '/$org/$project/svc/$service/': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRoutesByTo {
@@ -429,15 +718,30 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/account': typeof AppAccountRouteWithChildren
+  '/welcome': typeof AppWelcomeRoute
   '/invite/$inviteId': typeof InviteInviteIdRoute
   '/onboarding/connect': typeof OnboardingConnectRoute
   '/onboarding/org': typeof OnboardingOrgRoute
   '/onboarding/project': typeof OnboardingProjectRoute
   '/onboarding/team': typeof OnboardingTeamRoute
+  '/$org/assistant': typeof AppOrgAssistantRouteWithChildren
   '/$org/create': typeof AppOrgCreateRoute
   '/$org/new-project': typeof AppOrgNewProjectRoute
+  '/$org/notifications': typeof AppOrgNotificationsRoute
+  '/account/notifications': typeof AppAccountNotificationsRoute
+  '/account/profile': typeof AppAccountProfileRoute
+  '/account/security': typeof AppAccountSecurityRoute
+  '/account/sessions': typeof AppAccountSessionsRoute
+  '/account/tokens': typeof AppAccountTokensRoute
   '/$org': typeof AppOrgIndexRoute
+  '/$org/$project/environments': typeof AppOrgProjectEnvironmentsRoute
+  '/$org/$project/new-env': typeof AppOrgProjectNewEnvRoute
   '/$org/$project/observe': typeof AppOrgProjectObserveRouteWithChildren
+  '/$org/assistant/activity': typeof AppOrgAssistantActivityRoute
+  '/$org/assistant/ask': typeof AppOrgAssistantAskRoute
+  '/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
+  '/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
   '/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -450,15 +754,19 @@ export interface FileRoutesByTo {
   '/$org/dashboards/layouts': typeof AppOrgDashboardsLayoutsRoute
   '/$org/dashboards/mine': typeof AppOrgDashboardsMineRoute
   '/$org/dashboards/postgres-health': typeof AppOrgDashboardsPostgresHealthRoute
+  '/$org/new-project/templates': typeof AppOrgNewProjectTemplatesRoute
   '/$org/settings/api-keys': typeof AppOrgSettingsApiKeysRoute
   '/$org/settings/audit': typeof AppOrgSettingsAuditRoute
+  '/$org/settings/cells': typeof AppOrgSettingsCellsRoute
   '/$org/settings/general': typeof AppOrgSettingsGeneralRoute
   '/$org/settings/members': typeof AppOrgSettingsMembersRoute
   '/$org/settings/templates': typeof AppOrgSettingsTemplatesRoute
+  '/$org/template/$tpl': typeof AppOrgTemplateTplRoute
   '/$org/$project': typeof AppOrgProjectIndexRoute
   '/$org/dashboards': typeof AppOrgDashboardsIndexRoute
   '/$org/$project/deploy/$dep': typeof AppOrgProjectDeployDepRoute
   '/$org/$project/deploy/previews': typeof AppOrgProjectDeployPreviewsRoute
+  '/$org/$project/instances/$product': typeof AppOrgProjectInstancesProductRoute
   '/$org/$project/observe/alerts': typeof AppOrgProjectObserveAlertsRoute
   '/$org/$project/observe/events': typeof AppOrgProjectObserveEventsRoute
   '/$org/$project/observe/health': typeof AppOrgProjectObserveHealthRoute
@@ -469,11 +777,30 @@ export interface FileRoutesByTo {
   '/$org/$project/settings/git': typeof AppOrgProjectSettingsGitRoute
   '/$org/$project/settings/members': typeof AppOrgProjectSettingsMembersRoute
   '/$org/$project/settings/policies': typeof AppOrgProjectSettingsPoliciesRoute
+  '/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
   '/$org/$project/deploy': typeof AppOrgProjectDeployIndexRoute
   '/$org/settings/policies': typeof AppOrgSettingsPoliciesIndexRoute
+  '/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
+  '/$org/$project/svc/$service/backups': typeof AppOrgProjectSvcServiceBackupsRoute
+  '/$org/$project/svc/$service/bindings': typeof AppOrgProjectSvcServiceBindingsRoute
   '/$org/$project/svc/$service/branches': typeof AppOrgProjectSvcServiceBranchesRoute
+  '/$org/$project/svc/$service/cli': typeof AppOrgProjectSvcServiceCliRoute
+  '/$org/$project/svc/$service/data-browser': typeof AppOrgProjectSvcServiceDataBrowserRoute
+  '/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
+  '/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
+  '/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
+  '/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
+  '/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
+  '/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
+  '/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
+  '/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
+  '/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
+  '/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
+  '/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
+  '/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
+  '/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
   '/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRoutesById {
@@ -485,17 +812,32 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/_app/$org': typeof AppOrgRouteWithChildren
+  '/_app/account': typeof AppAccountRouteWithChildren
+  '/_app/welcome': typeof AppWelcomeRoute
   '/invite/$inviteId': typeof InviteInviteIdRoute
   '/onboarding/connect': typeof OnboardingConnectRoute
   '/onboarding/org': typeof OnboardingOrgRoute
   '/onboarding/project': typeof OnboardingProjectRoute
   '/onboarding/team': typeof OnboardingTeamRoute
+  '/_app/$org/assistant': typeof AppOrgAssistantRouteWithChildren
   '/_app/$org/create': typeof AppOrgCreateRoute
   '/_app/$org/dashboards': typeof AppOrgDashboardsRouteWithChildren
   '/_app/$org/new-project': typeof AppOrgNewProjectRoute
+  '/_app/$org/notifications': typeof AppOrgNotificationsRoute
+  '/_app/account/notifications': typeof AppAccountNotificationsRoute
+  '/_app/account/profile': typeof AppAccountProfileRoute
+  '/_app/account/security': typeof AppAccountSecurityRoute
+  '/_app/account/sessions': typeof AppAccountSessionsRoute
+  '/_app/account/tokens': typeof AppAccountTokensRoute
   '/_app/$org/': typeof AppOrgIndexRoute
   '/_app/$org/$project/deploy': typeof AppOrgProjectDeployRouteWithChildren
+  '/_app/$org/$project/environments': typeof AppOrgProjectEnvironmentsRoute
+  '/_app/$org/$project/new-env': typeof AppOrgProjectNewEnvRoute
   '/_app/$org/$project/observe': typeof AppOrgProjectObserveRouteWithChildren
+  '/_app/$org/assistant/activity': typeof AppOrgAssistantActivityRoute
+  '/_app/$org/assistant/ask': typeof AppOrgAssistantAskRoute
+  '/_app/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
+  '/_app/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
   '/_app/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/_app/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/_app/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -508,15 +850,19 @@ export interface FileRoutesById {
   '/_app/$org/dashboards/layouts': typeof AppOrgDashboardsLayoutsRoute
   '/_app/$org/dashboards/mine': typeof AppOrgDashboardsMineRoute
   '/_app/$org/dashboards/postgres-health': typeof AppOrgDashboardsPostgresHealthRoute
+  '/_app/$org/new-project_/templates': typeof AppOrgNewProjectTemplatesRoute
   '/_app/$org/settings/api-keys': typeof AppOrgSettingsApiKeysRoute
   '/_app/$org/settings/audit': typeof AppOrgSettingsAuditRoute
+  '/_app/$org/settings/cells': typeof AppOrgSettingsCellsRoute
   '/_app/$org/settings/general': typeof AppOrgSettingsGeneralRoute
   '/_app/$org/settings/members': typeof AppOrgSettingsMembersRoute
   '/_app/$org/settings/templates': typeof AppOrgSettingsTemplatesRoute
+  '/_app/$org/template/$tpl': typeof AppOrgTemplateTplRoute
   '/_app/$org/$project/': typeof AppOrgProjectIndexRoute
   '/_app/$org/dashboards/': typeof AppOrgDashboardsIndexRoute
   '/_app/$org/$project/deploy/$dep': typeof AppOrgProjectDeployDepRoute
   '/_app/$org/$project/deploy/previews': typeof AppOrgProjectDeployPreviewsRoute
+  '/_app/$org/$project/instances/$product': typeof AppOrgProjectInstancesProductRoute
   '/_app/$org/$project/observe/alerts': typeof AppOrgProjectObserveAlertsRoute
   '/_app/$org/$project/observe/events': typeof AppOrgProjectObserveEventsRoute
   '/_app/$org/$project/observe/health': typeof AppOrgProjectObserveHealthRoute
@@ -528,11 +874,30 @@ export interface FileRoutesById {
   '/_app/$org/$project/settings/members': typeof AppOrgProjectSettingsMembersRoute
   '/_app/$org/$project/settings/policies': typeof AppOrgProjectSettingsPoliciesRoute
   '/_app/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceRouteWithChildren
+  '/_app/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/_app/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
   '/_app/$org/$project/deploy/': typeof AppOrgProjectDeployIndexRoute
   '/_app/$org/settings/policies/': typeof AppOrgSettingsPoliciesIndexRoute
+  '/_app/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
+  '/_app/$org/$project/svc/$service/backups': typeof AppOrgProjectSvcServiceBackupsRoute
+  '/_app/$org/$project/svc/$service/bindings': typeof AppOrgProjectSvcServiceBindingsRoute
   '/_app/$org/$project/svc/$service/branches': typeof AppOrgProjectSvcServiceBranchesRoute
+  '/_app/$org/$project/svc/$service/cli': typeof AppOrgProjectSvcServiceCliRoute
+  '/_app/$org/$project/svc/$service/data-browser': typeof AppOrgProjectSvcServiceDataBrowserRoute
+  '/_app/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
+  '/_app/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/_app/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
+  '/_app/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
+  '/_app/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
+  '/_app/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
+  '/_app/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
+  '/_app/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
+  '/_app/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
+  '/_app/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
+  '/_app/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
+  '/_app/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
+  '/_app/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
+  '/_app/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
   '/_app/$org/$project/svc/$service/': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRouteTypes {
@@ -544,17 +909,32 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/$org'
+    | '/account'
+    | '/welcome'
     | '/invite/$inviteId'
     | '/onboarding/connect'
     | '/onboarding/org'
     | '/onboarding/project'
     | '/onboarding/team'
+    | '/$org/assistant'
     | '/$org/create'
     | '/$org/dashboards'
     | '/$org/new-project'
+    | '/$org/notifications'
+    | '/account/notifications'
+    | '/account/profile'
+    | '/account/security'
+    | '/account/sessions'
+    | '/account/tokens'
     | '/$org/'
     | '/$org/$project/deploy'
+    | '/$org/$project/environments'
+    | '/$org/$project/new-env'
     | '/$org/$project/observe'
+    | '/$org/assistant/activity'
+    | '/$org/assistant/ask'
+    | '/$org/assistant/capabilities'
+    | '/$org/assistant/insights'
     | '/$org/billing/invoices'
     | '/$org/billing/overview'
     | '/$org/billing/payment'
@@ -567,15 +947,19 @@ export interface FileRouteTypes {
     | '/$org/dashboards/layouts'
     | '/$org/dashboards/mine'
     | '/$org/dashboards/postgres-health'
+    | '/$org/new-project/templates'
     | '/$org/settings/api-keys'
     | '/$org/settings/audit'
+    | '/$org/settings/cells'
     | '/$org/settings/general'
     | '/$org/settings/members'
     | '/$org/settings/templates'
+    | '/$org/template/$tpl'
     | '/$org/$project/'
     | '/$org/dashboards/'
     | '/$org/$project/deploy/$dep'
     | '/$org/$project/deploy/previews'
+    | '/$org/$project/instances/$product'
     | '/$org/$project/observe/alerts'
     | '/$org/$project/observe/events'
     | '/$org/$project/observe/health'
@@ -587,11 +971,30 @@ export interface FileRouteTypes {
     | '/$org/$project/settings/members'
     | '/$org/$project/settings/policies'
     | '/$org/$project/svc/$service'
+    | '/$org/settings/policies/ai-assistant'
     | '/$org/settings/policies/new'
     | '/$org/$project/deploy/'
     | '/$org/settings/policies/'
+    | '/$org/$project/svc/$service/ai'
+    | '/$org/$project/svc/$service/backups'
+    | '/$org/$project/svc/$service/bindings'
     | '/$org/$project/svc/$service/branches'
+    | '/$org/$project/svc/$service/cli'
+    | '/$org/$project/svc/$service/data-browser'
+    | '/$org/$project/svc/$service/deployments'
+    | '/$org/$project/svc/$service/domains'
     | '/$org/$project/svc/$service/insights'
+    | '/$org/$project/svc/$service/lifecycle'
+    | '/$org/$project/svc/$service/logs'
+    | '/$org/$project/svc/$service/messages'
+    | '/$org/$project/svc/$service/metrics'
+    | '/$org/$project/svc/$service/objects'
+    | '/$org/$project/svc/$service/scaling'
+    | '/$org/$project/svc/$service/schedules'
+    | '/$org/$project/svc/$service/settings'
+    | '/$org/$project/svc/$service/shell'
+    | '/$org/$project/svc/$service/sql-editor'
+    | '/$org/$project/svc/$service/tables'
     | '/$org/$project/svc/$service/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -600,15 +1003,30 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/account'
+    | '/welcome'
     | '/invite/$inviteId'
     | '/onboarding/connect'
     | '/onboarding/org'
     | '/onboarding/project'
     | '/onboarding/team'
+    | '/$org/assistant'
     | '/$org/create'
     | '/$org/new-project'
+    | '/$org/notifications'
+    | '/account/notifications'
+    | '/account/profile'
+    | '/account/security'
+    | '/account/sessions'
+    | '/account/tokens'
     | '/$org'
+    | '/$org/$project/environments'
+    | '/$org/$project/new-env'
     | '/$org/$project/observe'
+    | '/$org/assistant/activity'
+    | '/$org/assistant/ask'
+    | '/$org/assistant/capabilities'
+    | '/$org/assistant/insights'
     | '/$org/billing/invoices'
     | '/$org/billing/overview'
     | '/$org/billing/payment'
@@ -621,15 +1039,19 @@ export interface FileRouteTypes {
     | '/$org/dashboards/layouts'
     | '/$org/dashboards/mine'
     | '/$org/dashboards/postgres-health'
+    | '/$org/new-project/templates'
     | '/$org/settings/api-keys'
     | '/$org/settings/audit'
+    | '/$org/settings/cells'
     | '/$org/settings/general'
     | '/$org/settings/members'
     | '/$org/settings/templates'
+    | '/$org/template/$tpl'
     | '/$org/$project'
     | '/$org/dashboards'
     | '/$org/$project/deploy/$dep'
     | '/$org/$project/deploy/previews'
+    | '/$org/$project/instances/$product'
     | '/$org/$project/observe/alerts'
     | '/$org/$project/observe/events'
     | '/$org/$project/observe/health'
@@ -640,11 +1062,30 @@ export interface FileRouteTypes {
     | '/$org/$project/settings/git'
     | '/$org/$project/settings/members'
     | '/$org/$project/settings/policies'
+    | '/$org/settings/policies/ai-assistant'
     | '/$org/settings/policies/new'
     | '/$org/$project/deploy'
     | '/$org/settings/policies'
+    | '/$org/$project/svc/$service/ai'
+    | '/$org/$project/svc/$service/backups'
+    | '/$org/$project/svc/$service/bindings'
     | '/$org/$project/svc/$service/branches'
+    | '/$org/$project/svc/$service/cli'
+    | '/$org/$project/svc/$service/data-browser'
+    | '/$org/$project/svc/$service/deployments'
+    | '/$org/$project/svc/$service/domains'
     | '/$org/$project/svc/$service/insights'
+    | '/$org/$project/svc/$service/lifecycle'
+    | '/$org/$project/svc/$service/logs'
+    | '/$org/$project/svc/$service/messages'
+    | '/$org/$project/svc/$service/metrics'
+    | '/$org/$project/svc/$service/objects'
+    | '/$org/$project/svc/$service/scaling'
+    | '/$org/$project/svc/$service/schedules'
+    | '/$org/$project/svc/$service/settings'
+    | '/$org/$project/svc/$service/shell'
+    | '/$org/$project/svc/$service/sql-editor'
+    | '/$org/$project/svc/$service/tables'
     | '/$org/$project/svc/$service'
   id:
     | '__root__'
@@ -655,17 +1096,32 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/_app/$org'
+    | '/_app/account'
+    | '/_app/welcome'
     | '/invite/$inviteId'
     | '/onboarding/connect'
     | '/onboarding/org'
     | '/onboarding/project'
     | '/onboarding/team'
+    | '/_app/$org/assistant'
     | '/_app/$org/create'
     | '/_app/$org/dashboards'
     | '/_app/$org/new-project'
+    | '/_app/$org/notifications'
+    | '/_app/account/notifications'
+    | '/_app/account/profile'
+    | '/_app/account/security'
+    | '/_app/account/sessions'
+    | '/_app/account/tokens'
     | '/_app/$org/'
     | '/_app/$org/$project/deploy'
+    | '/_app/$org/$project/environments'
+    | '/_app/$org/$project/new-env'
     | '/_app/$org/$project/observe'
+    | '/_app/$org/assistant/activity'
+    | '/_app/$org/assistant/ask'
+    | '/_app/$org/assistant/capabilities'
+    | '/_app/$org/assistant/insights'
     | '/_app/$org/billing/invoices'
     | '/_app/$org/billing/overview'
     | '/_app/$org/billing/payment'
@@ -678,15 +1134,19 @@ export interface FileRouteTypes {
     | '/_app/$org/dashboards/layouts'
     | '/_app/$org/dashboards/mine'
     | '/_app/$org/dashboards/postgres-health'
+    | '/_app/$org/new-project_/templates'
     | '/_app/$org/settings/api-keys'
     | '/_app/$org/settings/audit'
+    | '/_app/$org/settings/cells'
     | '/_app/$org/settings/general'
     | '/_app/$org/settings/members'
     | '/_app/$org/settings/templates'
+    | '/_app/$org/template/$tpl'
     | '/_app/$org/$project/'
     | '/_app/$org/dashboards/'
     | '/_app/$org/$project/deploy/$dep'
     | '/_app/$org/$project/deploy/previews'
+    | '/_app/$org/$project/instances/$product'
     | '/_app/$org/$project/observe/alerts'
     | '/_app/$org/$project/observe/events'
     | '/_app/$org/$project/observe/health'
@@ -698,11 +1158,30 @@ export interface FileRouteTypes {
     | '/_app/$org/$project/settings/members'
     | '/_app/$org/$project/settings/policies'
     | '/_app/$org/$project/svc/$service'
+    | '/_app/$org/settings/policies/ai-assistant'
     | '/_app/$org/settings/policies/new'
     | '/_app/$org/$project/deploy/'
     | '/_app/$org/settings/policies/'
+    | '/_app/$org/$project/svc/$service/ai'
+    | '/_app/$org/$project/svc/$service/backups'
+    | '/_app/$org/$project/svc/$service/bindings'
     | '/_app/$org/$project/svc/$service/branches'
+    | '/_app/$org/$project/svc/$service/cli'
+    | '/_app/$org/$project/svc/$service/data-browser'
+    | '/_app/$org/$project/svc/$service/deployments'
+    | '/_app/$org/$project/svc/$service/domains'
     | '/_app/$org/$project/svc/$service/insights'
+    | '/_app/$org/$project/svc/$service/lifecycle'
+    | '/_app/$org/$project/svc/$service/logs'
+    | '/_app/$org/$project/svc/$service/messages'
+    | '/_app/$org/$project/svc/$service/metrics'
+    | '/_app/$org/$project/svc/$service/objects'
+    | '/_app/$org/$project/svc/$service/scaling'
+    | '/_app/$org/$project/svc/$service/schedules'
+    | '/_app/$org/$project/svc/$service/settings'
+    | '/_app/$org/$project/svc/$service/shell'
+    | '/_app/$org/$project/svc/$service/sql-editor'
+    | '/_app/$org/$project/svc/$service/tables'
     | '/_app/$org/$project/svc/$service/'
   fileRoutesById: FileRoutesById
 }
@@ -799,6 +1278,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InviteInviteIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/welcome': {
+      id: '/_app/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof AppWelcomeRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/account': {
+      id: '/_app/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/$org': {
       id: '/_app/$org'
       path: '/$org'
@@ -811,6 +1304,48 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/$org/'
       preLoaderRoute: typeof AppOrgIndexRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/account/tokens': {
+      id: '/_app/account/tokens'
+      path: '/tokens'
+      fullPath: '/account/tokens'
+      preLoaderRoute: typeof AppAccountTokensRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    '/_app/account/sessions': {
+      id: '/_app/account/sessions'
+      path: '/sessions'
+      fullPath: '/account/sessions'
+      preLoaderRoute: typeof AppAccountSessionsRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    '/_app/account/security': {
+      id: '/_app/account/security'
+      path: '/security'
+      fullPath: '/account/security'
+      preLoaderRoute: typeof AppAccountSecurityRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    '/_app/account/profile': {
+      id: '/_app/account/profile'
+      path: '/profile'
+      fullPath: '/account/profile'
+      preLoaderRoute: typeof AppAccountProfileRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    '/_app/account/notifications': {
+      id: '/_app/account/notifications'
+      path: '/notifications'
+      fullPath: '/account/notifications'
+      preLoaderRoute: typeof AppAccountNotificationsRouteImport
+      parentRoute: typeof AppAccountRoute
+    }
+    '/_app/$org/notifications': {
+      id: '/_app/$org/notifications'
+      path: '/notifications'
+      fullPath: '/$org/notifications'
+      preLoaderRoute: typeof AppOrgNotificationsRouteImport
       parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/new-project': {
@@ -834,6 +1369,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgCreateRouteImport
       parentRoute: typeof AppOrgRoute
     }
+    '/_app/$org/assistant': {
+      id: '/_app/$org/assistant'
+      path: '/assistant'
+      fullPath: '/$org/assistant'
+      preLoaderRoute: typeof AppOrgAssistantRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
     '/_app/$org/dashboards/': {
       id: '/_app/$org/dashboards/'
       path: '/'
@@ -846,6 +1388,13 @@ declare module '@tanstack/react-router' {
       path: '/$project'
       fullPath: '/$org/$project/'
       preLoaderRoute: typeof AppOrgProjectIndexRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/$org/template/$tpl': {
+      id: '/_app/$org/template/$tpl'
+      path: '/template/$tpl'
+      fullPath: '/$org/template/$tpl'
+      preLoaderRoute: typeof AppOrgTemplateTplRouteImport
       parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/settings/templates': {
@@ -869,6 +1418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgSettingsGeneralRouteImport
       parentRoute: typeof AppOrgRoute
     }
+    '/_app/$org/settings/cells': {
+      id: '/_app/$org/settings/cells'
+      path: '/settings/cells'
+      fullPath: '/$org/settings/cells'
+      preLoaderRoute: typeof AppOrgSettingsCellsRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
     '/_app/$org/settings/audit': {
       id: '/_app/$org/settings/audit'
       path: '/settings/audit'
@@ -881,6 +1437,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/api-keys'
       fullPath: '/$org/settings/api-keys'
       preLoaderRoute: typeof AppOrgSettingsApiKeysRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/$org/new-project_/templates': {
+      id: '/_app/$org/new-project_/templates'
+      path: '/new-project/templates'
+      fullPath: '/$org/new-project/templates'
+      preLoaderRoute: typeof AppOrgNewProjectTemplatesRouteImport
       parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/dashboards/postgres-health': {
@@ -967,11 +1530,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgBillingInvoicesRouteImport
       parentRoute: typeof AppOrgRoute
     }
+    '/_app/$org/assistant/insights': {
+      id: '/_app/$org/assistant/insights'
+      path: '/insights'
+      fullPath: '/$org/assistant/insights'
+      preLoaderRoute: typeof AppOrgAssistantInsightsRouteImport
+      parentRoute: typeof AppOrgAssistantRoute
+    }
+    '/_app/$org/assistant/capabilities': {
+      id: '/_app/$org/assistant/capabilities'
+      path: '/capabilities'
+      fullPath: '/$org/assistant/capabilities'
+      preLoaderRoute: typeof AppOrgAssistantCapabilitiesRouteImport
+      parentRoute: typeof AppOrgAssistantRoute
+    }
+    '/_app/$org/assistant/ask': {
+      id: '/_app/$org/assistant/ask'
+      path: '/ask'
+      fullPath: '/$org/assistant/ask'
+      preLoaderRoute: typeof AppOrgAssistantAskRouteImport
+      parentRoute: typeof AppOrgAssistantRoute
+    }
+    '/_app/$org/assistant/activity': {
+      id: '/_app/$org/assistant/activity'
+      path: '/activity'
+      fullPath: '/$org/assistant/activity'
+      preLoaderRoute: typeof AppOrgAssistantActivityRouteImport
+      parentRoute: typeof AppOrgAssistantRoute
+    }
     '/_app/$org/$project/observe': {
       id: '/_app/$org/$project/observe'
       path: '/$project/observe'
       fullPath: '/$org/$project/observe'
       preLoaderRoute: typeof AppOrgProjectObserveRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/$org/$project/new-env': {
+      id: '/_app/$org/$project/new-env'
+      path: '/$project/new-env'
+      fullPath: '/$org/$project/new-env'
+      preLoaderRoute: typeof AppOrgProjectNewEnvRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/$org/$project/environments': {
+      id: '/_app/$org/$project/environments'
+      path: '/$project/environments'
+      fullPath: '/$org/$project/environments'
+      preLoaderRoute: typeof AppOrgProjectEnvironmentsRouteImport
       parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/$project/deploy': {
@@ -1000,6 +1605,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/policies/new'
       fullPath: '/$org/settings/policies/new'
       preLoaderRoute: typeof AppOrgSettingsPoliciesNewRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
+    '/_app/$org/settings/policies/ai-assistant': {
+      id: '/_app/$org/settings/policies/ai-assistant'
+      path: '/settings/policies/ai-assistant'
+      fullPath: '/$org/settings/policies/ai-assistant'
+      preLoaderRoute: typeof AppOrgSettingsPoliciesAiAssistantRouteImport
       parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/$project/svc/$service': {
@@ -1079,6 +1691,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgProjectObserveAlertsRouteImport
       parentRoute: typeof AppOrgProjectObserveRoute
     }
+    '/_app/$org/$project/instances/$product': {
+      id: '/_app/$org/$project/instances/$product'
+      path: '/$project/instances/$product'
+      fullPath: '/$org/$project/instances/$product'
+      preLoaderRoute: typeof AppOrgProjectInstancesProductRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
     '/_app/$org/$project/deploy/previews': {
       id: '/_app/$org/$project/deploy/previews'
       path: '/previews'
@@ -1100,11 +1719,116 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgProjectSvcServiceIndexRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
+    '/_app/$org/$project/svc/$service/tables': {
+      id: '/_app/$org/$project/svc/$service/tables'
+      path: '/tables'
+      fullPath: '/$org/$project/svc/$service/tables'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceTablesRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/sql-editor': {
+      id: '/_app/$org/$project/svc/$service/sql-editor'
+      path: '/sql-editor'
+      fullPath: '/$org/$project/svc/$service/sql-editor'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceSqlEditorRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/shell': {
+      id: '/_app/$org/$project/svc/$service/shell'
+      path: '/shell'
+      fullPath: '/$org/$project/svc/$service/shell'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceShellRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/settings': {
+      id: '/_app/$org/$project/svc/$service/settings'
+      path: '/settings'
+      fullPath: '/$org/$project/svc/$service/settings'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceSettingsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/schedules': {
+      id: '/_app/$org/$project/svc/$service/schedules'
+      path: '/schedules'
+      fullPath: '/$org/$project/svc/$service/schedules'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceSchedulesRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/scaling': {
+      id: '/_app/$org/$project/svc/$service/scaling'
+      path: '/scaling'
+      fullPath: '/$org/$project/svc/$service/scaling'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceScalingRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/objects': {
+      id: '/_app/$org/$project/svc/$service/objects'
+      path: '/objects'
+      fullPath: '/$org/$project/svc/$service/objects'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceObjectsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/metrics': {
+      id: '/_app/$org/$project/svc/$service/metrics'
+      path: '/metrics'
+      fullPath: '/$org/$project/svc/$service/metrics'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceMetricsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/messages': {
+      id: '/_app/$org/$project/svc/$service/messages'
+      path: '/messages'
+      fullPath: '/$org/$project/svc/$service/messages'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceMessagesRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/logs': {
+      id: '/_app/$org/$project/svc/$service/logs'
+      path: '/logs'
+      fullPath: '/$org/$project/svc/$service/logs'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceLogsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/lifecycle': {
+      id: '/_app/$org/$project/svc/$service/lifecycle'
+      path: '/lifecycle'
+      fullPath: '/$org/$project/svc/$service/lifecycle'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceLifecycleRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
     '/_app/$org/$project/svc/$service/insights': {
       id: '/_app/$org/$project/svc/$service/insights'
       path: '/insights'
       fullPath: '/$org/$project/svc/$service/insights'
       preLoaderRoute: typeof AppOrgProjectSvcServiceInsightsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/domains': {
+      id: '/_app/$org/$project/svc/$service/domains'
+      path: '/domains'
+      fullPath: '/$org/$project/svc/$service/domains'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceDomainsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/deployments': {
+      id: '/_app/$org/$project/svc/$service/deployments'
+      path: '/deployments'
+      fullPath: '/$org/$project/svc/$service/deployments'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceDeploymentsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/data-browser': {
+      id: '/_app/$org/$project/svc/$service/data-browser'
+      path: '/data-browser'
+      fullPath: '/$org/$project/svc/$service/data-browser'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceDataBrowserRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/cli': {
+      id: '/_app/$org/$project/svc/$service/cli'
+      path: '/cli'
+      fullPath: '/$org/$project/svc/$service/cli'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceCliRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
     '/_app/$org/$project/svc/$service/branches': {
@@ -1114,8 +1838,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgProjectSvcServiceBranchesRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
+    '/_app/$org/$project/svc/$service/bindings': {
+      id: '/_app/$org/$project/svc/$service/bindings'
+      path: '/bindings'
+      fullPath: '/$org/$project/svc/$service/bindings'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceBindingsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/backups': {
+      id: '/_app/$org/$project/svc/$service/backups'
+      path: '/backups'
+      fullPath: '/$org/$project/svc/$service/backups'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceBackupsRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
+    '/_app/$org/$project/svc/$service/ai': {
+      id: '/_app/$org/$project/svc/$service/ai'
+      path: '/ai'
+      fullPath: '/$org/$project/svc/$service/ai'
+      preLoaderRoute: typeof AppOrgProjectSvcServiceAiRouteImport
+      parentRoute: typeof AppOrgProjectSvcServiceRoute
+    }
   }
 }
+
+interface AppOrgAssistantRouteChildren {
+  AppOrgAssistantActivityRoute: typeof AppOrgAssistantActivityRoute
+  AppOrgAssistantAskRoute: typeof AppOrgAssistantAskRoute
+  AppOrgAssistantCapabilitiesRoute: typeof AppOrgAssistantCapabilitiesRoute
+  AppOrgAssistantInsightsRoute: typeof AppOrgAssistantInsightsRoute
+}
+
+const AppOrgAssistantRouteChildren: AppOrgAssistantRouteChildren = {
+  AppOrgAssistantActivityRoute: AppOrgAssistantActivityRoute,
+  AppOrgAssistantAskRoute: AppOrgAssistantAskRoute,
+  AppOrgAssistantCapabilitiesRoute: AppOrgAssistantCapabilitiesRoute,
+  AppOrgAssistantInsightsRoute: AppOrgAssistantInsightsRoute,
+}
+
+const AppOrgAssistantRouteWithChildren = AppOrgAssistantRoute._addFileChildren(
+  AppOrgAssistantRouteChildren,
+)
 
 interface AppOrgDashboardsRouteChildren {
   AppOrgDashboardsDashIdRoute: typeof AppOrgDashboardsDashIdRoute
@@ -1177,15 +1940,56 @@ const AppOrgProjectObserveRouteWithChildren =
   AppOrgProjectObserveRoute._addFileChildren(AppOrgProjectObserveRouteChildren)
 
 interface AppOrgProjectSvcServiceRouteChildren {
+  AppOrgProjectSvcServiceAiRoute: typeof AppOrgProjectSvcServiceAiRoute
+  AppOrgProjectSvcServiceBackupsRoute: typeof AppOrgProjectSvcServiceBackupsRoute
+  AppOrgProjectSvcServiceBindingsRoute: typeof AppOrgProjectSvcServiceBindingsRoute
   AppOrgProjectSvcServiceBranchesRoute: typeof AppOrgProjectSvcServiceBranchesRoute
+  AppOrgProjectSvcServiceCliRoute: typeof AppOrgProjectSvcServiceCliRoute
+  AppOrgProjectSvcServiceDataBrowserRoute: typeof AppOrgProjectSvcServiceDataBrowserRoute
+  AppOrgProjectSvcServiceDeploymentsRoute: typeof AppOrgProjectSvcServiceDeploymentsRoute
+  AppOrgProjectSvcServiceDomainsRoute: typeof AppOrgProjectSvcServiceDomainsRoute
   AppOrgProjectSvcServiceInsightsRoute: typeof AppOrgProjectSvcServiceInsightsRoute
+  AppOrgProjectSvcServiceLifecycleRoute: typeof AppOrgProjectSvcServiceLifecycleRoute
+  AppOrgProjectSvcServiceLogsRoute: typeof AppOrgProjectSvcServiceLogsRoute
+  AppOrgProjectSvcServiceMessagesRoute: typeof AppOrgProjectSvcServiceMessagesRoute
+  AppOrgProjectSvcServiceMetricsRoute: typeof AppOrgProjectSvcServiceMetricsRoute
+  AppOrgProjectSvcServiceObjectsRoute: typeof AppOrgProjectSvcServiceObjectsRoute
+  AppOrgProjectSvcServiceScalingRoute: typeof AppOrgProjectSvcServiceScalingRoute
+  AppOrgProjectSvcServiceSchedulesRoute: typeof AppOrgProjectSvcServiceSchedulesRoute
+  AppOrgProjectSvcServiceSettingsRoute: typeof AppOrgProjectSvcServiceSettingsRoute
+  AppOrgProjectSvcServiceShellRoute: typeof AppOrgProjectSvcServiceShellRoute
+  AppOrgProjectSvcServiceSqlEditorRoute: typeof AppOrgProjectSvcServiceSqlEditorRoute
+  AppOrgProjectSvcServiceTablesRoute: typeof AppOrgProjectSvcServiceTablesRoute
   AppOrgProjectSvcServiceIndexRoute: typeof AppOrgProjectSvcServiceIndexRoute
 }
 
 const AppOrgProjectSvcServiceRouteChildren: AppOrgProjectSvcServiceRouteChildren =
   {
+    AppOrgProjectSvcServiceAiRoute: AppOrgProjectSvcServiceAiRoute,
+    AppOrgProjectSvcServiceBackupsRoute: AppOrgProjectSvcServiceBackupsRoute,
+    AppOrgProjectSvcServiceBindingsRoute: AppOrgProjectSvcServiceBindingsRoute,
     AppOrgProjectSvcServiceBranchesRoute: AppOrgProjectSvcServiceBranchesRoute,
+    AppOrgProjectSvcServiceCliRoute: AppOrgProjectSvcServiceCliRoute,
+    AppOrgProjectSvcServiceDataBrowserRoute:
+      AppOrgProjectSvcServiceDataBrowserRoute,
+    AppOrgProjectSvcServiceDeploymentsRoute:
+      AppOrgProjectSvcServiceDeploymentsRoute,
+    AppOrgProjectSvcServiceDomainsRoute: AppOrgProjectSvcServiceDomainsRoute,
     AppOrgProjectSvcServiceInsightsRoute: AppOrgProjectSvcServiceInsightsRoute,
+    AppOrgProjectSvcServiceLifecycleRoute:
+      AppOrgProjectSvcServiceLifecycleRoute,
+    AppOrgProjectSvcServiceLogsRoute: AppOrgProjectSvcServiceLogsRoute,
+    AppOrgProjectSvcServiceMessagesRoute: AppOrgProjectSvcServiceMessagesRoute,
+    AppOrgProjectSvcServiceMetricsRoute: AppOrgProjectSvcServiceMetricsRoute,
+    AppOrgProjectSvcServiceObjectsRoute: AppOrgProjectSvcServiceObjectsRoute,
+    AppOrgProjectSvcServiceScalingRoute: AppOrgProjectSvcServiceScalingRoute,
+    AppOrgProjectSvcServiceSchedulesRoute:
+      AppOrgProjectSvcServiceSchedulesRoute,
+    AppOrgProjectSvcServiceSettingsRoute: AppOrgProjectSvcServiceSettingsRoute,
+    AppOrgProjectSvcServiceShellRoute: AppOrgProjectSvcServiceShellRoute,
+    AppOrgProjectSvcServiceSqlEditorRoute:
+      AppOrgProjectSvcServiceSqlEditorRoute,
+    AppOrgProjectSvcServiceTablesRoute: AppOrgProjectSvcServiceTablesRoute,
     AppOrgProjectSvcServiceIndexRoute: AppOrgProjectSvcServiceIndexRoute,
   }
 
@@ -1195,11 +1999,15 @@ const AppOrgProjectSvcServiceRouteWithChildren =
   )
 
 interface AppOrgRouteChildren {
+  AppOrgAssistantRoute: typeof AppOrgAssistantRouteWithChildren
   AppOrgCreateRoute: typeof AppOrgCreateRoute
   AppOrgDashboardsRoute: typeof AppOrgDashboardsRouteWithChildren
   AppOrgNewProjectRoute: typeof AppOrgNewProjectRoute
+  AppOrgNotificationsRoute: typeof AppOrgNotificationsRoute
   AppOrgIndexRoute: typeof AppOrgIndexRoute
   AppOrgProjectDeployRoute: typeof AppOrgProjectDeployRouteWithChildren
+  AppOrgProjectEnvironmentsRoute: typeof AppOrgProjectEnvironmentsRoute
+  AppOrgProjectNewEnvRoute: typeof AppOrgProjectNewEnvRoute
   AppOrgProjectObserveRoute: typeof AppOrgProjectObserveRouteWithChildren
   AppOrgBillingInvoicesRoute: typeof AppOrgBillingInvoicesRoute
   AppOrgBillingOverviewRoute: typeof AppOrgBillingOverviewRoute
@@ -1207,27 +2015,36 @@ interface AppOrgRouteChildren {
   AppOrgBillingPlansRoute: typeof AppOrgBillingPlansRoute
   AppOrgBillingQuotasRoute: typeof AppOrgBillingQuotasRoute
   AppOrgBillingUsageRoute: typeof AppOrgBillingUsageRoute
+  AppOrgNewProjectTemplatesRoute: typeof AppOrgNewProjectTemplatesRoute
   AppOrgSettingsApiKeysRoute: typeof AppOrgSettingsApiKeysRoute
   AppOrgSettingsAuditRoute: typeof AppOrgSettingsAuditRoute
+  AppOrgSettingsCellsRoute: typeof AppOrgSettingsCellsRoute
   AppOrgSettingsGeneralRoute: typeof AppOrgSettingsGeneralRoute
   AppOrgSettingsMembersRoute: typeof AppOrgSettingsMembersRoute
   AppOrgSettingsTemplatesRoute: typeof AppOrgSettingsTemplatesRoute
+  AppOrgTemplateTplRoute: typeof AppOrgTemplateTplRoute
   AppOrgProjectIndexRoute: typeof AppOrgProjectIndexRoute
+  AppOrgProjectInstancesProductRoute: typeof AppOrgProjectInstancesProductRoute
   AppOrgProjectSettingsGeneralRoute: typeof AppOrgProjectSettingsGeneralRoute
   AppOrgProjectSettingsGitRoute: typeof AppOrgProjectSettingsGitRoute
   AppOrgProjectSettingsMembersRoute: typeof AppOrgProjectSettingsMembersRoute
   AppOrgProjectSettingsPoliciesRoute: typeof AppOrgProjectSettingsPoliciesRoute
   AppOrgProjectSvcServiceRoute: typeof AppOrgProjectSvcServiceRouteWithChildren
+  AppOrgSettingsPoliciesAiAssistantRoute: typeof AppOrgSettingsPoliciesAiAssistantRoute
   AppOrgSettingsPoliciesNewRoute: typeof AppOrgSettingsPoliciesNewRoute
   AppOrgSettingsPoliciesIndexRoute: typeof AppOrgSettingsPoliciesIndexRoute
 }
 
 const AppOrgRouteChildren: AppOrgRouteChildren = {
+  AppOrgAssistantRoute: AppOrgAssistantRouteWithChildren,
   AppOrgCreateRoute: AppOrgCreateRoute,
   AppOrgDashboardsRoute: AppOrgDashboardsRouteWithChildren,
   AppOrgNewProjectRoute: AppOrgNewProjectRoute,
+  AppOrgNotificationsRoute: AppOrgNotificationsRoute,
   AppOrgIndexRoute: AppOrgIndexRoute,
   AppOrgProjectDeployRoute: AppOrgProjectDeployRouteWithChildren,
+  AppOrgProjectEnvironmentsRoute: AppOrgProjectEnvironmentsRoute,
+  AppOrgProjectNewEnvRoute: AppOrgProjectNewEnvRoute,
   AppOrgProjectObserveRoute: AppOrgProjectObserveRouteWithChildren,
   AppOrgBillingInvoicesRoute: AppOrgBillingInvoicesRoute,
   AppOrgBillingOverviewRoute: AppOrgBillingOverviewRoute,
@@ -1235,17 +2052,23 @@ const AppOrgRouteChildren: AppOrgRouteChildren = {
   AppOrgBillingPlansRoute: AppOrgBillingPlansRoute,
   AppOrgBillingQuotasRoute: AppOrgBillingQuotasRoute,
   AppOrgBillingUsageRoute: AppOrgBillingUsageRoute,
+  AppOrgNewProjectTemplatesRoute: AppOrgNewProjectTemplatesRoute,
   AppOrgSettingsApiKeysRoute: AppOrgSettingsApiKeysRoute,
   AppOrgSettingsAuditRoute: AppOrgSettingsAuditRoute,
+  AppOrgSettingsCellsRoute: AppOrgSettingsCellsRoute,
   AppOrgSettingsGeneralRoute: AppOrgSettingsGeneralRoute,
   AppOrgSettingsMembersRoute: AppOrgSettingsMembersRoute,
   AppOrgSettingsTemplatesRoute: AppOrgSettingsTemplatesRoute,
+  AppOrgTemplateTplRoute: AppOrgTemplateTplRoute,
   AppOrgProjectIndexRoute: AppOrgProjectIndexRoute,
+  AppOrgProjectInstancesProductRoute: AppOrgProjectInstancesProductRoute,
   AppOrgProjectSettingsGeneralRoute: AppOrgProjectSettingsGeneralRoute,
   AppOrgProjectSettingsGitRoute: AppOrgProjectSettingsGitRoute,
   AppOrgProjectSettingsMembersRoute: AppOrgProjectSettingsMembersRoute,
   AppOrgProjectSettingsPoliciesRoute: AppOrgProjectSettingsPoliciesRoute,
   AppOrgProjectSvcServiceRoute: AppOrgProjectSvcServiceRouteWithChildren,
+  AppOrgSettingsPoliciesAiAssistantRoute:
+    AppOrgSettingsPoliciesAiAssistantRoute,
   AppOrgSettingsPoliciesNewRoute: AppOrgSettingsPoliciesNewRoute,
   AppOrgSettingsPoliciesIndexRoute: AppOrgSettingsPoliciesIndexRoute,
 }
@@ -1253,12 +2076,36 @@ const AppOrgRouteChildren: AppOrgRouteChildren = {
 const AppOrgRouteWithChildren =
   AppOrgRoute._addFileChildren(AppOrgRouteChildren)
 
+interface AppAccountRouteChildren {
+  AppAccountNotificationsRoute: typeof AppAccountNotificationsRoute
+  AppAccountProfileRoute: typeof AppAccountProfileRoute
+  AppAccountSecurityRoute: typeof AppAccountSecurityRoute
+  AppAccountSessionsRoute: typeof AppAccountSessionsRoute
+  AppAccountTokensRoute: typeof AppAccountTokensRoute
+}
+
+const AppAccountRouteChildren: AppAccountRouteChildren = {
+  AppAccountNotificationsRoute: AppAccountNotificationsRoute,
+  AppAccountProfileRoute: AppAccountProfileRoute,
+  AppAccountSecurityRoute: AppAccountSecurityRoute,
+  AppAccountSessionsRoute: AppAccountSessionsRoute,
+  AppAccountTokensRoute: AppAccountTokensRoute,
+}
+
+const AppAccountRouteWithChildren = AppAccountRoute._addFileChildren(
+  AppAccountRouteChildren,
+)
+
 interface AppRouteChildren {
   AppOrgRoute: typeof AppOrgRouteWithChildren
+  AppAccountRoute: typeof AppAccountRouteWithChildren
+  AppWelcomeRoute: typeof AppWelcomeRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppOrgRoute: AppOrgRouteWithChildren,
+  AppAccountRoute: AppAccountRouteWithChildren,
+  AppWelcomeRoute: AppWelcomeRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

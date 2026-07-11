@@ -3,7 +3,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";
 import { Metric } from "@/design-system/metric";
@@ -179,6 +181,57 @@ function describeEvent(e: Event): React.ReactNode {
   }
 }
 
+/** E1 · Empty project — nothing here yet, by design; shown when zero services exist. */
+function EmptyProject({ org, project, env }: { org: string; project: string; env: string }) {
+  return (
+    <>
+      <Card dashed className="flex flex-col items-center gap-3 py-14">
+        <Glyph id="s-hex" />
+        <div className="text-[14px] font-semibold">Nothing here yet — by design</div>
+        <p className="max-w-[440px] text-center text-[11.5px] leading-relaxed text-ink3">
+          Add your first service or start from a template. You'll see the monthly estimate before
+          anything exists, and backups, metrics and alerts come included.
+        </p>
+        <div className="flex gap-2">
+          <Link to="/$org/create" params={{ org }} search={{ env }}>
+            <Btn variant="p">
+              <Icon id="s-plus" />
+              Add service
+            </Btn>
+          </Link>
+          <Btn variant="s" disabled disabledReason="Templates gallery (C5) — see New project">
+            Start from template
+          </Btn>
+        </div>
+        <Copybit>{`steloit db create db-main --project ${project}`}</Copybit>
+      </Card>
+      <div className="grid grid-cols-3 gap-3.5">
+        <Card className="flex flex-col gap-2 p-4">
+          <div className="text-[12.5px] font-semibold">No deployments yet</div>
+          <p className="text-[11.5px] leading-relaxed text-ink3">
+            Connect a repo and every push becomes an immutable release.
+          </p>
+          <span className="mono mt-auto text-[10.5px] text-ink3">steloit init</span>
+        </Card>
+        <Card className="flex flex-col gap-2 p-4">
+          <div className="text-[12.5px] font-semibold">Nothing to observe</div>
+          <p className="text-[11.5px] leading-relaxed text-ink3">
+            Dashboards, logs and default alerts appear with your first service — no setup.
+          </p>
+          <span className="mt-auto text-[10.5px] text-ink3">included, not configured</span>
+        </Card>
+        <Card className="flex flex-col gap-2 p-4">
+          <div className="text-[12.5px] font-semibold">No branches yet</div>
+          <p className="text-[11.5px] leading-relaxed text-ink3">
+            Database branches unlock once PostgreSQL exists — one per preview, in seconds.
+          </p>
+          <span className="mono mt-auto text-[10.5px] text-ink3">steloit db branch create</span>
+        </Card>
+      </div>
+    </>
+  );
+}
+
 function ProjectOverview() {
   const { org, project } = Route.useParams();
   const { env } = Route.useSearch();
@@ -234,126 +287,141 @@ function ProjectOverview() {
           </Link>
         </Pghead>
 
-        {/* Vitals — the four telemetry cells are frame-fixed canon (W3: the
+        {!services.isPending && svcList.length === 0 ? (
+          <EmptyProject org={org} project={project} env={env} />
+        ) : (
+          <>
+            {/* Vitals — the four telemetry cells are frame-fixed canon (W3: the
             incident numbers); the env-scoped metrics live under Observe; per-project vitals stay frame-fixed. */}
-        <div className="grid grid-cols-5 gap-3">
-          <Metric label="Requests" value="214/s" note="+6% vs yesterday" />
-          <Metric label="p95" value="812 ms" tone="warn" note="SLO 800 ms · ▲ since #142" />
-          <Metric label="Error rate" value="0.4%" note="30 m window" />
-          <Metric label="Queue depth" value="12" tone="warn" note="DLQ 2 · order.paid" />
-          <Metric
-            label="Cost"
-            mono
-            value={`${mtd !== undefined ? fmtMoney(mtd) : "$0"} mtd`}
-            note={`${fmtMoney(estCents)}/mo est · of org ${orgForecast !== undefined ? fmtMoney(orgForecast) : "…"}`}
-          />
-        </div>
+            <div className="grid grid-cols-5 gap-3">
+              <Metric label="Requests" value="214/s" note="+6% vs yesterday" />
+              <Metric label="p95" value="812 ms" tone="warn" note="SLO 800 ms · ▲ since #142" />
+              <Metric label="Error rate" value="0.4%" note="30 m window" />
+              <Metric label="Queue depth" value="12" tone="warn" note="DLQ 2 · order.paid" />
+              <Metric
+                label="Cost"
+                mono
+                value={`${mtd !== undefined ? fmtMoney(mtd) : "$0"} mtd`}
+                note={`${fmtMoney(estCents)}/mo est · of org ${orgForecast !== undefined ? fmtMoney(orgForecast) : "…"}`}
+              />
+            </div>
 
-        <div className="grid grid-cols-4 gap-3">
-          {(environments.data ?? []).map((e) => {
-            const flagged = (e.policy_flags ?? []).length > 0;
-            const isHome = e.name === "production";
-            return (
-              <Card
-                key={e.id}
-                className={cn("flex flex-col gap-1.5 p-3", flagged && "border-warn/40")}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-[12.5px] font-semibold">{e.name}</span>
-                  {isHome ? <Pill tone="mut">home</Pill> : null}
-                  {flagged ? <Pill tone="warn">policy-flagged</Pill> : null}
-                </div>
-                <div className="mono text-[13px]">{fmtMoney(e.monthly_cost_cents ?? 0)}/mo</div>
-                <div className="text-[10.5px] text-ink3">
-                  {e.region.replace("/", " · ")} · {svcList.length} services
-                  {e.name === "production" && degraded > 0 ? " · 1 alert firing" : ""}
-                  {e.kind === "preview" && e.expires_at ? " · expires in 5 d · marco" : ""}
-                </div>
-              </Card>
-            );
-          })}
-          <Card dashed className="flex flex-col items-center justify-center gap-1 p-3">
-            <span className="text-[12.5px] font-medium text-ink2">⊕ New environment</span>
-            <span className="text-[10.5px] text-ink3">or manage via the env crumb ▾</span>
-          </Card>
-        </div>
-
-        <div className="flex gap-3.5">
-          <Topology services={svcList} bindings={allBindings} env={env} />
-          <div className="flex w-[352px] shrink-0 flex-col gap-3">
-            <Card className="flex flex-col gap-2.5 p-3.5">
-              <Eyebrow className="text-warn">Needs attention · 4</Eyebrow>
-              <div className="flex items-center gap-2 text-[11.5px]">
-                <span className="flex-1">
-                  <b>api</b> p95 812 ms — 4 min after deploy #142
-                </span>
-                <Link to="/$org/$project/observe/health" params={{ org, project }} search={{ env }}>
-                  <Btn variant="s" className="h-6 px-2 text-[10.5px]">
-                    Observe
-                  </Btn>
-                </Link>
-              </div>
-              <div className="flex items-center gap-2 text-[11.5px]">
-                <span className="flex-1">
-                  <b>jobs</b>: 2 dead letters · <span className="mono">"receipt": null</span>
-                </span>
-                <Btn
-                  variant="s"
-                  className="h-6 px-2 text-[10.5px]"
-                  disabled
-                  disabledReason="The queue DLQ view (D8) lands in Phase 3"
+            <div className="grid grid-cols-4 gap-3">
+              {(environments.data ?? []).map((e) => {
+                const flagged = (e.policy_flags ?? []).length > 0;
+                const isHome = e.name === "production";
+                return (
+                  <Card
+                    key={e.id}
+                    className={cn("flex flex-col gap-1.5 p-3", flagged && "border-warn/40")}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12.5px] font-semibold">{e.name}</span>
+                      {isHome ? <Pill tone="mut">home</Pill> : null}
+                      {flagged ? <Pill tone="warn">policy-flagged</Pill> : null}
+                    </div>
+                    <div className="mono text-[13px]">{fmtMoney(e.monthly_cost_cents ?? 0)}/mo</div>
+                    <div className="text-[10.5px] text-ink3">
+                      {e.region.replace("/", " · ")} · {svcList.length} services
+                      {e.name === "production" && degraded > 0 ? " · 1 alert firing" : ""}
+                      {e.kind === "preview" && e.expires_at ? " · expires in 5 d · marco" : ""}
+                    </div>
+                  </Card>
+                );
+              })}
+              <Link to="/$org/$project/new-env" params={{ org, project }}>
+                <Card
+                  dashed
+                  className="flex h-full flex-col items-center justify-center gap-1 p-3 hover:border-ink3"
                 >
-                  Open DLQ
-                </Btn>
-              </div>
-              <div className="flex items-center gap-2 text-[11.5px]">
-                <span className="flex-1">
-                  branch <span className="mono">preview/pr-142</span> flagged by{" "}
-                  <span className="mono">branch-data-masking</span>
-                </span>
-                <Btn
-                  variant="gh"
-                  className="h-6 px-2 text-[10.5px]"
-                  disabled
-                  disabledReason="Policies land in Phase 3"
-                >
-                  Policy
-                </Btn>
-              </div>
-              <div className="flex items-center gap-2 text-[11.5px]">
-                <span className="flex-1">
-                  assistant drafted <span className="mono">prp_7c31a2</span> — the index fix
-                </span>
-                <Link
-                  to="/$org/$project/svc/$service/insights"
-                  params={{ org, project, service: "db-main" }}
-                  search={{ env }}
-                >
-                  <Btn variant="p" className="h-6 px-2 text-[10.5px]">
-                    Review
-                  </Btn>
-                </Link>
-              </div>
-            </Card>
-            <Card className="flex flex-col gap-2 p-3.5">
-              <Eyebrow>Latest events</Eyebrow>
-              {latestEvents.map((e) => (
-                <div key={e.id} className="flex gap-2.5 text-[11.5px]">
-                  <span className="mono text-ink3">{fmtTime(e.at)}</span>
-                  <span className="text-ink2">{describeEvent(e)}</span>
-                </div>
-              ))}
-              <Link
-                to="/$org/$project/observe/events"
-                params={{ org, project }}
-                search={{ env }}
-                className="border-hair border-t pt-2 text-[11px] font-medium text-steel"
-              >
-                All events → Observe
+                  <span className="text-[12.5px] font-medium text-ink2">⊕ New environment</span>
+                  <span className="text-[10.5px] text-ink3">or manage via the env crumb ▾</span>
+                </Card>
               </Link>
-            </Card>
-          </div>
-        </div>
+            </div>
+
+            <div className="flex gap-3.5">
+              <Topology services={svcList} bindings={allBindings} env={env} />
+              <div className="flex w-[352px] shrink-0 flex-col gap-3">
+                <Card className="flex flex-col gap-2.5 p-3.5">
+                  <Eyebrow className="text-warn">Needs attention · 4</Eyebrow>
+                  <div className="flex items-center gap-2 text-[11.5px]">
+                    <span className="flex-1">
+                      <b>api</b> p95 812 ms — 4 min after deploy #142
+                    </span>
+                    <Link
+                      to="/$org/$project/observe/health"
+                      params={{ org, project }}
+                      search={{ env }}
+                    >
+                      <Btn variant="s" className="h-6 px-2 text-[10.5px]">
+                        Observe
+                      </Btn>
+                    </Link>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11.5px]">
+                    <span className="flex-1">
+                      <b>jobs</b>: 2 dead letters · <span className="mono">"receipt": null</span>
+                    </span>
+                    <Btn
+                      variant="s"
+                      className="h-6 px-2 text-[10.5px]"
+                      disabled
+                      disabledReason="The queue DLQ view (D8) lands in Phase 3"
+                    >
+                      Open DLQ
+                    </Btn>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11.5px]">
+                    <span className="flex-1">
+                      branch <span className="mono">preview/pr-142</span> flagged by{" "}
+                      <span className="mono">branch-data-masking</span>
+                    </span>
+                    <Btn
+                      variant="gh"
+                      className="h-6 px-2 text-[10.5px]"
+                      disabled
+                      disabledReason="Policies land in Phase 3"
+                    >
+                      Policy
+                    </Btn>
+                  </div>
+                  <div className="flex items-center gap-2 text-[11.5px]">
+                    <span className="flex-1">
+                      assistant drafted <span className="mono">prp_7c31a2</span> — the index fix
+                    </span>
+                    <Link
+                      to="/$org/$project/svc/$service/insights"
+                      params={{ org, project, service: "db-main" }}
+                      search={{ env }}
+                    >
+                      <Btn variant="p" className="h-6 px-2 text-[10.5px]">
+                        Review
+                      </Btn>
+                    </Link>
+                  </div>
+                </Card>
+                <Card className="flex flex-col gap-2 p-3.5">
+                  <Eyebrow>Latest events</Eyebrow>
+                  {latestEvents.map((e) => (
+                    <div key={e.id} className="flex gap-2.5 text-[11.5px]">
+                      <span className="mono text-ink3">{fmtTime(e.at)}</span>
+                      <span className="text-ink2">{describeEvent(e)}</span>
+                    </div>
+                  ))}
+                  <Link
+                    to="/$org/$project/observe/events"
+                    params={{ org, project }}
+                    search={{ env }}
+                    className="border-hair border-t pt-2 text-[11px] font-medium text-steel"
+                  >
+                    All events → Observe
+                  </Link>
+                </Card>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

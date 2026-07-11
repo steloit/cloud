@@ -1,5 +1,5 @@
 import { Icon } from "@/design-system/icon";
-import { Nfoot, NitDisabled, NitLink, Nsec, Snav } from "./snav";
+import { Nfoot, NitLink, Nsec, Snav } from "./snav";
 
 /**
  * Snav variant D — the settings plane (ADR-012: org admin behind the gear).
@@ -15,6 +15,7 @@ export type SettingsActive =
   | "audit"
   | "o-policies"
   | "api-keys"
+  | "cells"
   | "templates"
   | "b-overview"
   | "b-usage"
@@ -90,7 +91,13 @@ export function SnavSettings({
         label="API keys"
         on={active === "api-keys"}
       />
-      <NitDisabled label="Cells" count="2" reason="Cells (X2) land in Phase 4" />
+      <NitLink
+        to="/$org/settings/cells"
+        params={o}
+        label="Cells"
+        count="2"
+        on={active === "cells"}
+      />
       <NitLink
         to="/$org/settings/templates"
         params={o}

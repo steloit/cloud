@@ -6,6 +6,7 @@ import type {
   Deployment,
   Environment,
   Event,
+  Insight,
   Invite,
   InvitePublic,
   Invoice,
@@ -14,6 +15,7 @@ import type {
   PaymentMethod,
   Policy,
   Project,
+  Proposal,
   Quota,
   Service,
   Subscription,
@@ -50,6 +52,8 @@ export const trace = section<Trace>("trace");
 export const alertRules = section<AlertRule[]>("alert_rules");
 export const events = section<Event[]>("events");
 export const billingOverview = section<Record<string, unknown>>("billing_overview");
+export const insightsAndProposals =
+  section<Array<{ insight: Insight; proposal: Proposal }>>("insights_and_proposals");
 export const quotas = section<Quota[]>("quotas");
 export const templates = section<Template[]>("templates");
 export const cells = section<Cell[]>("cells");
@@ -428,6 +432,32 @@ export const policies: Policy[] = [
     last_change_event: "evt_mfa1…",
     violation_count_30d: 0,
   },
+];
+
+/**
+ * Canon domains/lifecycle-rules/schedules — frame-fixed from D21/D15/D17/S5
+ * (fixtures.json has no sections for these; finding).
+ */
+export const domains = [
+  {
+    id: "dom_api_primary",
+    domain: "api.acme-store.com",
+    status: "issued" as const,
+    records: [
+      { type: "CNAME" as const, name: "api", value: "svc-1aa508.edge.steloit.app", verified: true },
+    ],
+    cert_expires_at: "2026-09-01T00:00:00+05:30",
+  },
+];
+
+export const lifecycleRules = [
+  { id: "rule_tmp_expire", prefix: "tmp/", action: "expire" as const, after_days: 7 },
+  { id: "rule_originals_cold", prefix: "originals/", action: "tier_cold" as const, after_days: 90 },
+];
+
+export const schedules = [
+  { id: "sch_receipts", name: "receipts-daily", cron: "0 2 * * *", tz: "Asia/Kolkata" },
+  { id: "sch_cleanup", name: "cleanup-tmp", cron: "0 * * * *", tz: "Asia/Kolkata" },
 ];
 
 export function findOrg(orgParam: string): Org | undefined {

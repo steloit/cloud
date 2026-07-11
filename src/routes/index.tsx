@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
     if (!authed) throw redirect({ to: "/login", search: { returnTo: location.href } });
     const orgs = await queryClient.fetchQuery(listMyOrgsOptions());
     const first = orgs.data?.[0];
-    if (!first) throw redirect({ to: "/onboarding/org" });
+    if (!first) throw redirect({ to: "/welcome" });
     throw redirect({ to: "/$org", params: { org: first.slug } });
   },
   component: () => null,

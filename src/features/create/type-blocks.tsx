@@ -1,17 +1,28 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { Banner } from "@/design-system/banner";
+import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Icon } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
-import { Pill } from "@/design-system/pill";
+import { Dot, Pill } from "@/design-system/pill";
 import { cn } from "@/lib/utils";
 
 /**
- * C2/C3/C9–C12 · The per-product type blocks — states of the ONE create
+ * C2/C3/C7/C9–C12 · The per-product type blocks — states of the ONE create
  * surface (ADR-014). Same skeleton every time: name → type block → bindings
  * → included defaults; the estimate rail reads the props-up BlockState.
  */
 
-export type CreatableProduct = "postgres" | "valkey" | "storage" | "queue" | "web" | "worker";
+export type CreatableProduct =
+  | "postgres"
+  | "valkey"
+  | "storage"
+  | "queue"
+  | "web"
+  | "worker"
+  | "gpu-worker";
 
 export interface EstimateLineItem {
   label: string;
@@ -79,6 +90,13 @@ export const TYPE_BLOCKS: Record<CreatableProduct, TypeBlockDef> = {
     hsubSuffix: " · background jobs & schedules",
     footer:
       "A worker that mostly sleeps mostly costs nothing — previews inherit this and round to $0.",
+  },
+  "gpu-worker": {
+    label: "GPU Worker",
+    h1: "New GPU Worker",
+    hsubSuffix: "",
+    footer:
+      "The exception is part of the estimate — the physics never shows up as a billing surprise.",
   },
 };
 
@@ -858,6 +876,145 @@ function WorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
   );
 }
 
+/* ---------- gpu-worker · C7 (region exception) ---------- */
+
+/** C7 · only regions where the product exists — sorted by distance from the env. */
+const GPU_REGIONS = [
+  { id: "aws/ap-southeast-1", title: "aws · ap-southeast-1", sub: "Singapore · +34 ms to env" },
+  { id: "gcp/asia-northeast1", title: "gcp · asia-northeast1", sub: "Tokyo · +71 ms to env" },
+  { id: "aws/us-east-1", title: "aws · us-east-1", sub: "N. Virginia · +192 ms to env" },
+];
+
+const GPU_SIZE_A10 = {
+  id: "A10",
+  label: "A10 · scale-to-zero · $88",
+  line: "A10 · scale-to-zero",
+  price: 88,
+};
+const GPU_SIZES = [GPU_SIZE_A10, { id: "A100", label: "A100 · $310", line: "A100", price: 310 }];
+
+function GpuWorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
+  const [name, setName] = useState("gpu-encoder");
+  const [region, setRegion] = useState("aws/ap-southeast-1");
+  const [size, setSize] = useState("A10");
+  const [bindJobs, setBindJobs] = useState(true);
+
+  const sz = GPU_SIZES.find((s) => s.id === size) ?? GPU_SIZE_A10;
+  const total = sz.price + (bindJobs ? 3 : 0);
+
+  useBlockSync(onChange, {
+    name,
+    lines: [
+      { label: sz.line, amount: usd(sz.price) },
+      ...(bindJobs ? [{ label: "Cross-region egress est.", amount: "~$3" }] : []),
+    ],
+    totalLabel: usd(total),
+    buttonLabel: `Create ${name} — ${usd(total)}/mo est.`,
+    cli: `steloit gpu create ${name} --region ${region}`,
+    shape: { size, region, scale_to_zero: size === "A10" },
+    bindings: bindJobs ? [{ target: "jobs", scope: "read_write" as const }] : [],
+  });
+
+  return (
+    <>
+      <Banner tone="warn">
+        GPU Worker isn't available in <b>aws · ap-south-1</b> yet — choose one of the regions where
+        it runs. This instance will be a <b>cross-region exception</b>, marked in the topology.
+      </Banner>
+      <NameCard value={name} onChange={setName} />
+      <Card className="flex flex-col gap-2.5 p-4">
+        <Flabel>
+          Region{" "}
+          <span className="font-normal text-ink3">
+            only where this product exists — sorted by distance from your environment
+          </span>
+        </Flabel>
+        <ChoiceCards
+          options={GPU_REGIONS.map((r) => ({
+            id: r.id,
+            title: r.title,
+            sub: r.sub,
+            subMono: true,
+          }))}
+          value={region}
+          onPick={setRegion}
+        />
+        <div className="flex items-center gap-2 text-[11px]">
+          <Pill tone="ok">
+            permitted by org policy <span className="mono">allowed-regions-apac</span>
+          </Pill>
+          <span className="text-ink3">us-east-1 would require an Admin policy exception</span>
+        </div>
+        <div className="flex items-center gap-2.5 rounded-[9px] border border-hair border-dashed px-3 py-2.5">
+          <Icon id="s-globe" className="h-[13px] w-[13px] text-ink3" />
+          <span className="text-[11px] text-ink2">
+            <b>aws · ap-south-1</b> — your home region — doesn't have GPU Worker yet.
+          </span>
+          <span className="sp" />
+          <Btn
+            variant="s"
+            className="h-6 px-2 text-[10.5px]"
+            onClick={() => toast.success("Request recorded — you'll be notified")}
+          >
+            Request it here
+          </Btn>
+          <span className="text-[10px] text-ink3">
+            you'll be notified · this instance gets a one-click move home
+          </span>
+        </div>
+      </Card>
+      <Card className="flex flex-col gap-2 p-4">
+        <Flabel>What cross-region means here — stated, not discovered later</Flabel>
+        <div className="flex flex-col gap-2 text-[11.5px] leading-relaxed text-ink2">
+          <div className="flex gap-2.5">
+            <Dot tone="warn" />
+            <span>
+              Binding <span className="mono">gpu-encoder → jobs</span> crosses regions:{" "}
+              <b className="text-ink1">+34 ms per call</b> and{" "}
+              <b className="text-ink1">egress $0.02/GB</b> (≈ $3/mo at current queue volume).
+            </span>
+          </div>
+          <div className="flex gap-2.5">
+            <Dot tone="warn" />
+            <span>
+              The environment's private network extends via encrypted peering — still private, but
+              this edge renders <b className="text-ink1">dashed with a globe mark</b> in the
+              topology (W3).
+            </span>
+          </div>
+          <div className="flex gap-2.5">
+            <Dot tone="ok" />
+            <span>
+              When GPU Worker reaches ap-south-1, the console will propose a{" "}
+              <b className="text-ink1">move home</b> — one click, downtime-free, logged.
+            </span>
+          </div>
+        </div>
+      </Card>
+      <Card className="flex flex-col gap-2.5 p-4">
+        <Flabel>Size &amp; bindings</Flabel>
+        <div className="flex items-center gap-4">
+          <Chips
+            options={GPU_SIZES.map((s) => ({ label: s.label }))}
+            isOn={(l) => l === sz.label}
+            onPick={(l) => setSize(GPU_SIZES.find((s) => s.label === l)?.id ?? "A10")}
+          />
+          <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+            <input
+              type="checkbox"
+              checked={bindJobs}
+              onChange={() => setBindJobs((v) => !v)}
+              className="accent-steel"
+            />
+            <Icon id="s-queue" className="h-[13px] w-[13px] text-ink3" />
+            jobs <Pill tone="st">consume</Pill> <Pill tone="warn">cross-region</Pill>
+          </label>
+        </div>
+      </Card>
+    </>
+  );
+}
+
 /* ---------- dispatcher ---------- */
 
 export function TypeBlock({
@@ -880,5 +1037,7 @@ export function TypeBlock({
       return <QueueBlock onChange={onChange} />;
     case "worker":
       return <WorkerBlock onChange={onChange} />;
+    case "gpu-worker":
+      return <GpuWorkerBlock onChange={onChange} />;
   }
 }

@@ -120,7 +120,9 @@ function ProjectsHome() {
             title="Projects"
             sub={
               projects.data
-                ? `${projects.data.length} projects · ${billing.data?.forecast_cents !== undefined ? fmtMoney(billing.data.forecast_cents) : "…"} this month across the organization`
+                ? projects.data.length === 0
+                  ? "Your organization is ready — nothing is provisioned, nothing is billing"
+                  : `${projects.data.length} projects · ${billing.data?.forecast_cents !== undefined ? fmtMoney(billing.data.forecast_cents) : "…"} this month across the organization`
                 : "Loading…"
             }
           >
@@ -138,20 +140,66 @@ function ProjectsHome() {
               ))}
             </div>
           ) : (projects.data ?? []).length === 0 ? (
-            <Card dashed className="flex flex-col items-center gap-3 py-14">
-              <Glyph id="s-hex" />
-              <div className="text-[13px] font-medium">
-                Projects are free — services are priced.
+            // E5 · Zero projects — the org's front door before anything exists.
+            <>
+              <Card dashed className="flex flex-col items-center gap-3 py-14">
+                <Glyph id="s-hex" />
+                <div className="text-[14px] font-semibold">Create your first project</div>
+                <p className="max-w-[440px] text-center text-[11.5px] leading-relaxed text-ink3">
+                  A project is your application. Describe what you're building and review a
+                  recommended stack — with the monthly estimate shown before anything exists.
+                </p>
+                <div className="flex gap-2">
+                  <Btn
+                    variant="p"
+                    onClick={() => navigate({ to: "/$org/new-project", params: { org } })}
+                  >
+                    <Icon id="s-plus" />
+                    New project
+                  </Btn>
+                  <Btn
+                    variant="s"
+                    disabled
+                    disabledReason="Templates gallery (C5) — see New project"
+                  >
+                    Start from template
+                  </Btn>
+                </div>
+                <Copybit>steloit project create my-app</Copybit>
+              </Card>
+              <div className="grid grid-cols-3 gap-3.5">
+                <Card className="flex flex-col gap-2 p-4">
+                  <div className="text-[12.5px] font-semibold">What's a project?</div>
+                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                    Services, environments, deployments and cost all roll up to it — one picture of
+                    your whole app, no vendor seams.
+                  </p>
+                </Card>
+                <Card className="flex flex-col gap-2 p-4">
+                  <div className="text-[12.5px] font-semibold">Invite your team</div>
+                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                    Teammates get roles, not passwords — every action lands in the audit log.
+                  </p>
+                  <Link
+                    to="/$org/settings/members"
+                    params={{ org }}
+                    className="mt-auto text-[11px] font-medium text-steel"
+                  >
+                    Invite members → Settings
+                  </Link>
+                </Card>
+                <Card className="flex flex-col gap-2 p-4">
+                  <div className="text-[12.5px] font-semibold">Prefer IaC?</div>
+                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                    The Terraform provider maps 1:1 to the same primitives — define the project in
+                    code instead.
+                  </p>
+                  <span className="mono mt-auto text-[10.5px] text-ink3">
+                    terraform init · provider "steloit"
+                  </span>
+                </Card>
               </div>
-              <Btn
-                variant="p"
-                onClick={() => navigate({ to: "/$org/new-project", params: { org } })}
-              >
-                <Icon id="s-plus" />
-                New project
-              </Btn>
-              <Copybit>steloit project create my-app</Copybit>
-            </Card>
+            </>
           ) : (
             <div className="grid grid-cols-2 gap-3.5">
               {(projects.data ?? []).map((p) => (
