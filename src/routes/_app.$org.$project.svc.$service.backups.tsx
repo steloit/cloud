@@ -31,9 +31,7 @@ function BackupsPage() {
     return (
       <main className="main">
         <div className="pgpad !overflow-y-auto">
-          <Card className="p-4 text-[12px] text-ink2">
-            This tab belongs to PostgreSQL instances.
-          </Card>
+          <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
         </div>
       </main>
     );
@@ -58,24 +56,22 @@ function BackupsPage() {
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex items-center gap-2.5">
             <Pill tone="ok">continuous · PITR</Pill>
-            <span className="text-[11.5px] text-ink2">
+            <span className="text-11p5 text-ink2">
               Restore to <b>any second</b> in the last 7 days
             </span>
             <span className="flex-1" />
-            <span className="mono text-[11px] text-ink3">WAL lag 0.8s</span>
+            <span className="mono text-11 text-ink3">WAL lag 0.8s</span>
           </div>
 
           <div className="flex flex-col gap-1">
-            <div className="mono pl-[72%] text-[10px] text-steel">
-              Jul 5 · 14:00 — pre-deploy #142
-            </div>
+            <div className="mono pl-[72%] text-10 text-steel">Jul 5 · 14:00 — pre-deploy #142</div>
             <div className="relative h-2 rounded-full border border-hair bg-surface2">
               <span
                 className="absolute top-[-3px] h-3 w-[3px] rounded-sm bg-steel"
                 style={{ left: "72%" }}
               />
             </div>
-            <div className="mono flex justify-between text-[10px] text-ink3">
+            <div className="mono flex justify-between text-10 text-ink3">
               <span>Jun 29</span>
               <span>now</span>
             </div>
@@ -85,7 +81,7 @@ function BackupsPage() {
             <Btn variant="p" disabled disabledReason={NO_ENDPOINT}>
               Restore to a new branch…
             </Btn>
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-10p5 text-ink3">
               restores always land in a branch — production is never overwritten in place
             </span>
           </div>
@@ -105,9 +101,9 @@ function BackupsPage() {
             <tbody>
               {SNAPSHOTS.map(([id, taken, size]) => (
                 <tr key={id}>
-                  <td className="mono text-[11px]">{id}</td>
+                  <td className="mono text-11">{id}</td>
                   <td className="text-ink2">{taken}</td>
-                  <td className="mono text-[11px]">{size}</td>
+                  <td className="mono text-11">{size}</td>
                   <td>
                     <Pill tone="ok">restore-tested</Pill>
                   </td>
@@ -115,7 +111,7 @@ function BackupsPage() {
                     <span className="flex justify-end">
                       <Btn
                         variant="s"
-                        className="h-6 px-2.5 text-[10.5px]"
+                        className="h-6 px-2.5 text-10p5"
                         disabled
                         disabledReason={NO_ENDPOINT}
                       >
@@ -131,7 +127,7 @@ function BackupsPage() {
 
         <Card className="flex items-center gap-3 p-4">
           <Icon id="s-shield" className="h-4 w-4 shrink-0 text-ink3" />
-          <p className="text-[11.5px] text-ink2">
+          <p className="text-11p5 text-ink2">
             Last restore drill: <b>Jul 2</b> → branch{" "}
             <span className="mono">restore-drill-jul</span> · verified in <b>4m 12s</b> · a backup
             you haven't restored is a rumor.

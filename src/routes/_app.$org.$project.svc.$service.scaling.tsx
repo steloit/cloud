@@ -101,14 +101,14 @@ function ScalingPage() {
 
         <div className="grid grid-cols-3 gap-3">
           <Card className="flex flex-col gap-1 p-3.5">
-            <b className="text-[12.5px]">Fixed</b>
-            <span className="text-[11px] leading-relaxed text-ink3">
+            <b className="text-12p5">Fixed</b>
+            <span className="text-11 leading-relaxed text-ink3">
               Exactly N instances. Predictable cost, no reaction to traffic.
             </span>
           </Card>
           <Card className="flex flex-col gap-1 border-steel p-3.5">
-            <b className="text-[12.5px]">Autoscale</b>
-            <span className="text-[11px] leading-relaxed text-ink3">
+            <b className="text-12p5">Autoscale</b>
+            <span className="text-11 leading-relaxed text-ink3">
               A floor for reliability, a ceiling for cost, a signal in between.
             </span>
           </Card>
@@ -116,7 +116,7 @@ function ScalingPage() {
             className="flex flex-col gap-1 p-3.5 opacity-55"
             title="For workers & previews — an HTTP service keeps a floor so first requests never cold-start."
           >
-            <b className="text-[12.5px]">Scale to zero</b>
+            <b className="text-12p5">Scale to zero</b>
           </Card>
         </div>
 
@@ -136,7 +136,7 @@ function ScalingPage() {
             ))}
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-[11px] text-ink3">
+            <span className="text-11 text-ink3">
               drag the floor and ceiling handles — solid is paid always, dashed is paid only when
               traffic asks
             </span>
@@ -158,8 +158,8 @@ function ScalingPage() {
               ))}
             </div>
           </div>
-          <div className="text-[12px]">Scale up after 1 min — Scale down after 5 min</div>
-          <p className="text-[11px] text-ink3">
+          <div className="text-12">Scale up after 1 min — Scale down after 5 min</div>
+          <p className="text-11 text-ink3">
             up fast, down slow — flapping is treated as a bug, and the defaults encode that
           </p>
         </Card>
@@ -169,17 +169,17 @@ function ScalingPage() {
           <div className="grid grid-cols-3 gap-3">
             {COST_ROWS.map((row) => (
               <div key={row.label} className="flex items-baseline gap-2">
-                <span className="text-[11.5px] text-ink3">{row.label}</span>
-                <span className="mono text-[13px] font-semibold">{row.value}</span>
-                <span className="text-[10.5px] text-ink3">{row.note}</span>
+                <span className="text-11p5 text-ink3">{row.label}</span>
+                <span className="mono text-13 font-semibold">{row.value}</span>
+                <span className="text-10p5 text-ink3">{row.note}</span>
               </div>
             ))}
           </div>
-          <p className="text-[11.5px] leading-relaxed text-ink2">
+          <p className="text-11p5 leading-relaxed text-ink2">
             Last 30 days on this range would have cost $47.20 — the range shows up in the project
             estimate as $28–84, never as a surprise.
           </p>
-          <p className="border-hair border-t pt-2.5 text-[11px] leading-relaxed text-ink3">
+          <p className="border-hair border-t pt-2.5 text-11 leading-relaxed text-ink3">
             Raising the ceiling never restarts anything; raising the size of instances does — that
             lives in Settings and states its blast radius there.
           </p>
@@ -188,10 +188,10 @@ function ScalingPage() {
         <Card className="flex flex-col gap-2.5 p-4">
           <div className="flex items-center gap-3">
             <Eyebrow>Last 24 h on this configuration</Eyebrow>
-            <span className="mono text-[10.5px] text-ink3">
+            <span className="mono text-10p5 text-ink3">
               ━ instances · ━ requests · band = floor↔ceiling
             </span>
-            <span className="ml-auto text-[10.5px] text-ink3">
+            <span className="ml-auto text-10p5 text-ink3">
               every scale event is annotated in Observe
             </span>
           </div>
@@ -199,13 +199,13 @@ function ScalingPage() {
             <MetricChart
               series={toSeries(metrics.data)}
               markers={toMarkers(metrics.data)}
-              height={140}
+              size="md"
             />
-            <span className="mono absolute top-1 right-2 text-[9.5px] text-ink3">ceiling 6</span>
-            <span className="mono absolute right-2 bottom-6 text-[9.5px] text-ink3">floor 2</span>
+            <span className="mono absolute top-1 right-2 text-10 text-ink3">ceiling 6</span>
+            <span className="mono absolute right-2 bottom-6 text-10 text-ink3">floor 2</span>
           </div>
-          <div className="mono text-[10.5px] text-ink3">◆ deploy #142 — cpu, not traffic</div>
-          <div className="mono text-[10.5px] text-ink2">
+          <div className="mono text-10p5 text-ink3">◆ deploy #142 — cpu, not traffic</div>
+          <div className="mono text-10p5 text-ink2">
             2 → 3 with lunch traffic · 3 → 4 after #142 (the slow query burns CPU — fixing the index
             is cheaper than the extra instance)
           </div>
@@ -240,7 +240,7 @@ function ScalingPage() {
             >
               Apply changes
             </Btn>
-            <span className="text-[10.5px] text-ink3">no restart · effective now · logged</span>
+            <span className="text-10p5 text-ink3">no restart · effective now · logged</span>
           </div>
         </Card>
       </div>

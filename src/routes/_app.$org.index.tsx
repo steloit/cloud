@@ -50,8 +50,8 @@ function ProjectCard({
       >
         <div className="flex items-start gap-2.5">
           <div className="flex-1">
-            <div className="text-[13.5px] font-semibold">{project.name}</div>
-            <div className="mono mt-0.5 text-[10.5px] text-ink3">
+            <div className="text-13 font-semibold">{project.name}</div>
+            <div className="mono mt-0.5 text-10p5 text-ink3">
               {org}/{project.name} · {regionLabel(homeRegion)}
             </div>
           </div>
@@ -73,7 +73,7 @@ function ProjectCard({
             <span className="ml">this month</span>
           </span>
         </div>
-        <div className="mt-auto flex items-center gap-2 border-hair border-t pt-2.5 text-[11px] text-ink3">
+        <div className="mt-auto flex items-center gap-2 border-hair border-t pt-2.5 text-11 text-ink3">
           {project.last_deployment?.id ? (
             <>
               <span className="mono text-ink2">
@@ -144,8 +144,8 @@ function ProjectsHome() {
             <>
               <Card dashed className="flex flex-col items-center gap-3 py-14">
                 <Glyph id="s-hex" />
-                <div className="text-[14px] font-semibold">Create your first project</div>
-                <p className="max-w-[440px] text-center text-[11.5px] leading-relaxed text-ink3">
+                <div className="text-14 font-semibold">Create your first project</div>
+                <p className="max-w-[440px] text-center text-11p5 leading-relaxed text-ink3">
                   A project is your application. Describe what you're building and review a
                   recommended stack — with the monthly estimate shown before anything exists.
                 </p>
@@ -169,32 +169,32 @@ function ProjectsHome() {
               </Card>
               <div className="grid grid-cols-3 gap-3.5">
                 <Card className="flex flex-col gap-2 p-4">
-                  <div className="text-[12.5px] font-semibold">What's a project?</div>
-                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                  <div className="text-12p5 font-semibold">What's a project?</div>
+                  <p className="text-11p5 leading-relaxed text-ink3">
                     Services, environments, deployments and cost all roll up to it — one picture of
                     your whole app, no vendor seams.
                   </p>
                 </Card>
                 <Card className="flex flex-col gap-2 p-4">
-                  <div className="text-[12.5px] font-semibold">Invite your team</div>
-                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                  <div className="text-12p5 font-semibold">Invite your team</div>
+                  <p className="text-11p5 leading-relaxed text-ink3">
                     Teammates get roles, not passwords — every action lands in the audit log.
                   </p>
                   <Link
                     to="/$org/settings/members"
                     params={{ org }}
-                    className="mt-auto text-[11px] font-medium text-steel"
+                    className="mt-auto text-11 font-medium text-steel"
                   >
                     Invite members → Settings
                   </Link>
                 </Card>
                 <Card className="flex flex-col gap-2 p-4">
-                  <div className="text-[12.5px] font-semibold">Prefer IaC?</div>
-                  <p className="text-[11.5px] leading-relaxed text-ink3">
+                  <div className="text-12p5 font-semibold">Prefer IaC?</div>
+                  <p className="text-11p5 leading-relaxed text-ink3">
                     The Terraform provider maps 1:1 to the same primitives — define the project in
                     code instead.
                   </p>
-                  <span className="mono mt-auto text-[10.5px] text-ink3">
+                  <span className="mono mt-auto text-10p5 text-ink3">
                     terraform init · provider "steloit"
                   </span>
                 </Card>
@@ -214,7 +214,7 @@ function ProjectsHome() {
             </div>
           )}
 
-          <div className="mt-auto flex items-center gap-2.5 text-[11.5px] text-ink3">
+          <div className="mt-auto flex items-center gap-2.5 text-11p5 text-ink3">
             Everything here is one command away:
             <Copybit>steloit project list</Copybit>
           </div>

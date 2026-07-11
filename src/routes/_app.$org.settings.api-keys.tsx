@@ -146,8 +146,8 @@ function ApiKeysPage() {
                   const d = DISPLAY[k.name];
                   return (
                     <tr key={k.id} className={cn(d?.stale && "opacity-60")}>
-                      <td className="mono text-[11.5px]">{k.name}</td>
-                      <td className="mono text-[11px] text-ink3">{k.prefix}</td>
+                      <td className="mono text-11p5">{k.name}</td>
+                      <td className="mono text-11 text-ink3">{k.prefix}</td>
                       <td>{d?.scope ?? k.scope}</td>
                       <td className="text-ink2">{d?.created ?? "—"}</td>
                       <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
@@ -173,7 +173,7 @@ function ApiKeysPage() {
             </table>
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             The secret is shown once at creation — Steloit stores a hash. Keys are scoped
             least-privilege, usage is visible above, staleness is flagged, and every create /
             use-after-long-idle / revoke is an audit event.

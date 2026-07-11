@@ -83,7 +83,7 @@ function StoreDetail({ org }: { org: string }) {
             <div className="hsub">Full commerce stack · 1.2k deploys · updated 2 weeks ago</div>
           </div>
         </div>
-        <p className="text-[12.5px] leading-relaxed text-ink2">
+        <p className="text-12p5 leading-relaxed text-ink2">
           Catalog, users and orders on PostgreSQL; session carts on Valkey; product images in Object
           Storage; order processing and receipts through a Queue consumed by a worker. Example
           TypeScript app included, deployable on first push.
@@ -107,9 +107,9 @@ function StoreDetail({ org }: { org: string }) {
                       <b>{s.name}</b>
                     </span>
                   </td>
-                  <td className="mono text-[11px] text-ink2">{s.type}</td>
-                  <td className="text-[11px] text-ink2">{s.why}</td>
-                  <td className="mono text-[11px]">{s.cost}</td>
+                  <td className="mono text-11 text-ink2">{s.type}</td>
+                  <td className="text-11 text-ink2">{s.why}</td>
+                  <td className="mono text-11">{s.cost}</td>
                 </tr>
               ))}
             </tbody>
@@ -130,11 +130,9 @@ function StoreDetail({ org }: { org: string }) {
           <Eyebrow>Estimated monthly cost</Eyebrow>
           <div className="mono text-[28px] font-semibold tracking-[-0.5px]">
             $184
-            <span className="ml-1.5 text-[11px] font-normal text-ink3">
-              /month · production only
-            </span>
+            <span className="ml-1.5 text-11 font-normal text-ink3">/month · production only</span>
           </div>
-          <p className="mt-1 border-hair border-t pt-2.5 text-[10.5px] leading-relaxed text-ink3">
+          <p className="mt-1 border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
             You'll review and edit every service in the guided flow before confirming — the template
             only pre-fills it.
           </p>
@@ -157,7 +155,7 @@ function StoreDetail({ org }: { org: string }) {
         <div className="flex justify-center">
           <Copybit>steloit init --template store</Copybit>
         </div>
-        <Card className="p-3 text-[10.5px] leading-relaxed text-ink3">
+        <Card className="p-3 text-10p5 leading-relaxed text-ink3">
           Example code: <span className="mono text-ink2">github.com/steloit/templates/store</span> ·
           TypeScript · MIT. Forked into your repo on create.
         </Card>
@@ -196,10 +194,10 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   const refresh = useMutation(refreshTemplateMutation());
   const queryClient = useQueryClient();
 
-  if (template.isLoading) return <div className="text-[11.5px] text-ink3">Loading template…</div>;
+  if (template.isLoading) return <div className="text-11p5 text-ink3">Loading template…</div>;
   if (!template.data) {
     return (
-      <Card dashed className="max-w-[560px] p-6 text-[12px] text-ink2">
+      <Card dashed className="max-w-[560px] p-6 text-12 text-ink2">
         Template <span className="mono">{tpl}</span> wasn't found. Gallery detail exists only for{" "}
         <b>store</b> — org templates are listed under Settings → Templates.
       </Card>
@@ -281,7 +279,7 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
                   <td>
                     <Btn
                       variant="gh"
-                      className="h-6 px-2 text-[10.5px]"
+                      className="h-6 px-2 text-10p5"
                       disabled
                       disabledReason="Shape editing lands with template versioning"
                     >
@@ -306,7 +304,7 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
             <span className="mono text-[16px] font-semibold">
               {fmtMoney(t.monthly_estimate_cents ?? 0)}
             </span>
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-10p5 text-ink3">
               /mo at today's prices — every consumer still sees the full estimate before anything
               provisions
             </span>
@@ -316,28 +314,34 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
       <div className="flex w-[300px] shrink-0 flex-col gap-3">
         <Card className="flex flex-col gap-1.5 p-3.5">
           <Eyebrow>What's captured</Eyebrow>
-          <div className="text-[11.5px] text-ok">✓ Service shapes, versions, extensions</div>
-          <div className="text-[11.5px] text-ok">✓ Binding graph — as placeholders</div>
-          <div className="text-[11.5px] text-ok">✓ Lifecycle rules, schedules, alerts</div>
-          <div className="text-[11.5px] text-err">
+          <div className="flex items-center gap-1 text-11p5 text-ok">
+            <Icon id="s-check" className="h-[11px] w-[11px]" /> Service shapes, versions, extensions
+          </div>
+          <div className="flex items-center gap-1 text-11p5 text-ok">
+            <Icon id="s-check" className="h-[11px] w-[11px]" /> Binding graph — as placeholders
+          </div>
+          <div className="flex items-center gap-1 text-11p5 text-ok">
+            <Icon id="s-check" className="h-[11px] w-[11px]" /> Lifecycle rules, schedules, alerts
+          </div>
+          <div className="text-11p5 text-err">
             ✗ <b>Never:</b> secrets, data, keys — re-minted per create
           </div>
         </Card>
         <Card className="flex flex-col gap-1.5 p-3.5">
           <Eyebrow>Used by · informational</Eyebrow>
-          <p className="text-[11.5px] text-ink2">initech (Mar 2) · borealis/starter (Mar 22).</p>
-          <p className="text-[10.5px] text-ink3">
+          <p className="text-11p5 text-ink2">initech (Mar 2) · borealis/starter (Mar 22).</p>
+          <p className="text-10p5 text-ink3">
             Copies, not links — editing v{t.version} changes neither.
           </p>
         </Card>
         <Card className="flex flex-col gap-1.5 p-3.5">
           <Eyebrow>Settings</Eyebrow>
-          <div className="flex justify-between text-[11.5px]">
+          <div className="flex justify-between text-11p5">
             <span className="text-ink3">Visibility</span>
             <Pill tone={t.visibility === "org" ? "st" : "mut"}>{t.visibility}</Pill>
           </div>
-          <div className="text-[11.5px] text-ink3">Rename · Delete…</div>
-          <div className="mono text-[10.5px] text-ink3">{t.id}</div>
+          <div className="text-11p5 text-ink3">Rename · Delete…</div>
+          <div className="mono text-10p5 text-ink3">{t.id}</div>
         </Card>
       </div>
     </div>

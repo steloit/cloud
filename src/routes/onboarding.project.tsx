@@ -57,7 +57,7 @@ function OnboardingProjectPage() {
         <div>
           <Flabel htmlFor="project-name">Project name</Flabel>
           <Inp id="project-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <div className="mono mt-1.5 text-[10.5px] text-ink3">
+          <div className="mono mt-1.5 text-10p5 text-ink3">
             {org}/{name || "…"} · environments default to aws · ap-south-1 (from Acme) — change
             anytime
           </div>
@@ -76,13 +76,13 @@ function OnboardingProjectPage() {
                   starter === s.key && "border-steel",
                 )}
               >
-                <span className="text-[12.5px] font-semibold">{s.name}</span>
-                <span className="text-[10.5px] leading-snug text-ink3">{s.desc}</span>
-                <span className="mono text-[10.5px] text-ink2">{s.price}</span>
+                <span className="text-12p5 font-semibold">{s.name}</span>
+                <span className="text-10p5 leading-snug text-ink3">{s.desc}</span>
+                <span className="mono text-10p5 text-ink2">{s.price}</span>
               </button>
             ))}
           </div>
-          <div className="mt-1.5 text-[10.5px] text-ink3">
+          <div className="mt-1.5 text-10p5 text-ink3">
             All templates → in the console; each opens a full estimate before anything is
             provisioned.
           </div>
@@ -100,7 +100,7 @@ function OnboardingProjectPage() {
           <Link
             to="/onboarding/connect"
             search={{ org, project: name }}
-            className="text-[11.5px] font-medium text-ink3 hover:text-ink1"
+            className="text-11p5 font-medium text-ink3 hover:text-ink1"
           >
             Skip for now — straight to the console
           </Link>

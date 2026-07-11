@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Icon } from "@/design-system/icon";
+import { Dot } from "@/design-system/pill";
 import { errorMessage } from "@/lib/api";
 
 /**
@@ -30,7 +31,7 @@ export function NetworkLossBanner() {
       <span className="flex-1">
         Connection lost — retrying in 3s. Your unsaved changes are kept locally.
       </span>
-      <Btn variant="s" className="h-6 px-2 text-[10.5px]" onClick={() => window.location.reload()}>
+      <Btn variant="s" className="h-6 px-2 text-10p5" onClick={() => window.location.reload()}>
         Retry now
       </Btn>
     </div>
@@ -62,7 +63,7 @@ export function PermissionDenied({
       <h1 className="h1">
         You need {need} on ecommerce to {page}
       </h1>
-      <p className="text-[12.5px] leading-relaxed text-ink2">
+      <p className="text-12p5 leading-relaxed text-ink2">
         You're signed in as <b>{role}</b>. Developers can operate services but not change their
         configuration. Admins on this project: {granters}.
       </p>
@@ -78,7 +79,7 @@ export function PermissionDenied({
           Back to overview
         </Btn>
       </div>
-      <div className="mono text-[10.5px] text-ink3">
+      <div className="mono text-10p5 text-ink3">
         required: {permission} · denial logged as evt_91aa…
       </div>
     </Card>
@@ -100,10 +101,10 @@ export function ApiFailureCard({
   return (
     <Card className="flex flex-col gap-2.5 border-err/45 p-4">
       <div className="flex items-center gap-2">
-        <span className="dot err" />
-        <b className="text-[13px]">{title}</b>
+        <Dot tone="err" />
+        <b className="text-13">{title}</b>
       </div>
-      <div className="mono text-[10.5px] text-ink3">
+      <div className="mono text-10p5 text-ink3">
         {requestLine} · {errorMessage(error)}
       </div>
       <div className="flex gap-2.5">

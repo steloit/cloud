@@ -39,8 +39,6 @@ const TYPE_CHIPS: Array<{ id: TypeChip; label: string }> = [
 const PROPOSAL_SEARCH = { env: "production", proposal: "prp_7c31a2" };
 
 function ToneDot({ tone }: { tone: NotificationRow["tone"] }) {
-  if (tone === "none") return <span className="dot" style={{ background: "var(--hair)" }} />;
-  if (tone === "ai") return <span className="dot" style={{ background: "var(--assist)" }} />;
   return <Dot tone={tone} />;
 }
 
@@ -111,10 +109,10 @@ function GenericDetail({ row, org }: { row: NotificationRow; org: string }) {
     <Card className="flex flex-1 flex-col gap-3 p-5">
       <div className="flex items-center gap-2.5">
         <ToneDot tone={row.tone} />
-        <span className="text-[14px] font-semibold">{row.title}</span>
+        <span className="text-14 font-semibold">{row.title}</span>
       </div>
-      <div className="mono text-[11px] text-ink3">{row.meta}</div>
-      {row.meta2 ? <div className="mono text-[11px] text-ink3">{row.meta2}</div> : null}
+      <div className="mono text-11 text-ink3">{row.meta}</div>
+      {row.meta2 ? <div className="mono text-11 text-ink3">{row.meta2}</div> : null}
       <div>{link}</div>
     </Card>
   );
@@ -126,14 +124,14 @@ function P95Detail({ org }: { org: string }) {
     <Card className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-5">
       <div className="flex items-center gap-2.5">
         <Dot tone="warn" />
-        <span className="text-[14px] font-semibold">api p95 crossed 800 ms</span>
+        <span className="text-14 font-semibold">api p95 crossed 800 ms</span>
         <span className="flex-1" />
         <Pill tone="warn">still firing · 41 min</Pill>
       </div>
-      <div className="mono text-[11px] text-ink3">
+      <div className="mono text-11 text-ink3">
         alert p95-slo · ecommerce / production · fired 14:02 · evt_9d21c4
       </div>
-      <p className="text-[12px] leading-relaxed text-ink2">
+      <p className="text-12 leading-relaxed text-ink2">
         p95 latency reached 812 ms against a threshold of 800 ms, four minutes after deploy #142.
         The assistant traced the regression to an unindexed query on{" "}
         <span className="mono">orders</span> and drafted proposal{" "}
@@ -145,14 +143,14 @@ function P95Detail({ org }: { org: string }) {
         markers={toMarkers(p95.data)}
         unit="ms"
         tone="warn"
-        height={150}
+        size="lg"
       />
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="chip">deploy #142</span>
         <span className="chip">slow query · 642 ms</span>
         <span className="chip">prp_7c31a2</span>
         <span className="chip">jobs · 2 dead letters</span>
-        <span className="text-[10.5px] text-ink3">correlated on the shared timeline</span>
+        <span className="text-10p5 text-ink3">correlated on the shared timeline</span>
       </div>
       <div className="flex flex-wrap gap-2">
         <Link
@@ -184,7 +182,7 @@ function P95Detail({ org }: { org: string }) {
           <Btn variant="s">Alert settings</Btn>
         </Link>
       </div>
-      <div className="mt-auto flex flex-col gap-1 border-hair border-t pt-3 text-[10.5px] text-ink3">
+      <div className="mt-auto flex flex-col gap-1 border-hair border-t pt-3 text-10p5 text-ink3">
         <span>Delivered: in-app · email priya@acme.dev</span>
         <span>Escalation: pages on-call if unacked 15 min (production policy)</span>
         <span>Silences are logged with actor + duration</span>
@@ -233,8 +231,8 @@ function NotificationsInbox() {
               <ToneDot tone={r.tone} />
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[12px] font-medium leading-snug">{r.title}</span>
-              <span className="mono truncate text-[10.5px] text-ink3">{r.meta}</span>
+              <span className="text-12 font-medium leading-snug">{r.title}</span>
+              <span className="mono truncate text-10p5 text-ink3">{r.meta}</span>
             </span>
             {isUnread(r, readIds) ? (
               <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-steel" />
@@ -311,7 +309,7 @@ function NotificationsInbox() {
               {dayGroup("Today", today)}
               {dayGroup("Yesterday", yesterday)}
             </div>
-            <div className="border-hair border-t px-3.5 py-2 text-[10.5px] text-ink3">
+            <div className="border-hair border-t px-3.5 py-2 text-10p5 text-ink3">
               j/k move · e read · s silence · retained 90 d
             </div>
           </Card>

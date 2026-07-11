@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Flabel, Inp } from "@/design-system/inp";
+import { Drawer } from "@/design-system/overlay";
 import { Stlab } from "@/design-system/pill";
 import {
   type AlertCondition,
@@ -106,123 +107,13 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim dismiss mirrors Esc
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Cancel is the keyboard path
-    <div className="fixed inset-0 z-40 bg-[rgba(6,9,12,0.44)]" onClick={onClose}>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click only stops scrim dismiss */}
-      <div
-        className="absolute top-0 right-0 flex h-full w-[424px] flex-col border-hair border-l bg-surface shadow-e2"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="New alert rule"
-      >
-        <div className="flex items-start gap-3 border-hair border-b px-5 py-4">
-          <div>
-            <div className="text-[14px] font-semibold">New alert rule</div>
-            <div className="mono mt-0.5 text-[10.5px] text-ink3">
-              ecommerce / production · fires through Observe
-            </div>
-          </div>
-          <button
-            type="button"
-            className="ml-auto text-[13px] text-ink3 hover:text-ink1"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
-          <div>
-            <Flabel htmlFor="rule-query">Query · pre-filled from Metrics ⚑</Flabel>
-            <Inp
-              id="rule-query"
-              className="mono"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="flex items-end gap-2.5">
-            <div className="flex-1">
-              <Flabel htmlFor="rule-condition">Condition</Flabel>
-              <Inp
-                id="rule-condition"
-                className="mono"
-                value={conditionText}
-                onChange={(e) => setConditionText(e.target.value)}
-              />
-            </div>
-            <div>
-              <Flabel htmlFor="rule-window">Window</Flabel>
-              <select
-                id="rule-window"
-                className="inp"
-                value={windowLabel}
-                onChange={(e) => setWindowLabel(e.target.value as WindowLabel)}
-              >
-                {WINDOW_LABELS.map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Flabel>Route to</Flabel>
-            <div className="chiprow">
-              {ROUTE_CHIPS.map((r) => (
-                <button
-                  key={r.key}
-                  type="button"
-                  className={cn("chip", routes.includes(r.key) && "on")}
-                  aria-pressed={routes.includes(r.key)}
-                  onClick={() =>
-                    setRoutes((prev) =>
-                      prev.includes(r.key) ? prev.filter((k) => k !== r.key) : [...prev, r.key],
-                    )
-                  }
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Flabel aside={<Stlab tone="ok">ran just now</Stlab>}>Backtest — last 7 days</Flabel>
-            <div className="logwell">
-              {firing ? (
-                <>
-                  <div>
-                    would have fired {firings.length}× — {fmtFiredAt(firing.at)} · p95{" "}
-                    {firing.value} ms (the checkout incident)
-                  </div>
-                  {/* Second line frame-fixed — the backtest response carries firings only. */}
-                  <div className="t">quiet otherwise · median p95 318 ms</div>
-                </>
-              ) : backtest.isPending || backtest.isIdle ? (
-                <div className="t">running backtest…</div>
-              ) : (
-                <div className="t">no firings in the last 7 days</div>
-              )}
-            </div>
-            <p className="text-[10.5px] text-ink3">
-              A backtest is how you tune a threshold without a week of false pages.
-            </p>
-          </div>
-
-          <Card className="p-3.5 text-[11px] leading-relaxed text-ink2">
-            Fires through Observe like everything else — same bell, same email rules, your quiet
-            hours (P6) respected for routing, never for recording.
-          </Card>
-        </div>
-
-        <div className="flex items-center gap-2 border-hair border-t px-5 py-3.5">
-          <span className="mono text-[10.5px] text-ink3">Rule 7 · production</span>
+    <Drawer
+      title="New alert rule"
+      sub="ecommerce / production · fires through Observe"
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mono text-10p5 text-ink3">Rule 7 · production</span>
           <span className="flex-1" />
           <Btn variant="s" onClick={onClose}>
             Cancel
@@ -230,8 +121,94 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
           <Btn variant="p" onClick={submit}>
             Create rule
           </Btn>
+        </>
+      }
+    >
+      <div>
+        <Flabel htmlFor="rule-query">Query · pre-filled from Metrics ⚑</Flabel>
+        <Inp
+          id="rule-query"
+          className="mono"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="flex items-end gap-2.5">
+        <div className="flex-1">
+          <Flabel htmlFor="rule-condition">Condition</Flabel>
+          <Inp
+            id="rule-condition"
+            className="mono"
+            value={conditionText}
+            onChange={(e) => setConditionText(e.target.value)}
+          />
+        </div>
+        <div>
+          <Flabel htmlFor="rule-window">Window</Flabel>
+          <select
+            id="rule-window"
+            className="inp"
+            value={windowLabel}
+            onChange={(e) => setWindowLabel(e.target.value as WindowLabel)}
+          >
+            {WINDOW_LABELS.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
-    </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Route to</Flabel>
+        <div className="chiprow">
+          {ROUTE_CHIPS.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              className={cn("chip", routes.includes(r.key) && "on")}
+              aria-pressed={routes.includes(r.key)}
+              onClick={() =>
+                setRoutes((prev) =>
+                  prev.includes(r.key) ? prev.filter((k) => k !== r.key) : [...prev, r.key],
+                )
+              }
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Flabel aside={<Stlab tone="ok">ran just now</Stlab>}>Backtest — last 7 days</Flabel>
+        <div className="logwell">
+          {firing ? (
+            <>
+              <div>
+                would have fired {firings.length}× — {fmtFiredAt(firing.at)} · p95 {firing.value} ms
+                (the checkout incident)
+              </div>
+              {/* Second line frame-fixed — the backtest response carries firings only. */}
+              <div className="t">quiet otherwise · median p95 318 ms</div>
+            </>
+          ) : backtest.isPending || backtest.isIdle ? (
+            <div className="t">running backtest…</div>
+          ) : (
+            <div className="t">no firings in the last 7 days</div>
+          )}
+        </div>
+        <p className="text-10p5 text-ink3">
+          A backtest is how you tune a threshold without a week of false pages.
+        </p>
+      </div>
+
+      <Card className="p-3.5 text-11 leading-relaxed text-ink2">
+        Fires through Observe like everything else — same bell, same email rules, your quiet hours
+        (P6) respected for routing, never for recording.
+      </Card>
+    </Drawer>
   );
 }

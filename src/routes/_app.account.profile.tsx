@@ -21,8 +21,8 @@ function ProfilePage() {
         <Card className="flex items-center gap-4 p-4">
           <span className="uav !h-14 !w-14 text-[18px]">PS</span>
           <div className="flex-1">
-            <div className="text-[13.5px] font-semibold">{name}</div>
-            <div className="mono mt-0.5 text-[10.5px] text-ink3">usr_2ka91f · joined Mar 2026</div>
+            <div className="text-13 font-semibold">{name}</div>
+            <div className="mono mt-0.5 text-10p5 text-ink3">usr_2ka91f · joined Mar 2026</div>
           </div>
           <Btn variant="s" disabled disabledReason="Avatar upload lands in Phase 5">
             Change photo
@@ -40,10 +40,10 @@ function ProfilePage() {
             </Flabel>
             <Inp id="pf-email" className="mono" value={email} readOnly />
           </div>
-          <div className="flex items-center gap-2.5 border-hair border-t pt-3 text-[11.5px] text-ink3">
+          <div className="flex items-center gap-2.5 border-hair border-t pt-3 text-11p5 text-ink3">
             <Pill tone="ok">MFA enabled · passkey + TOTP</Pill>
             <span>Last sign-in: today 09:02 · Bengaluru, IN</span>
-            <Link to="/account/security" className="ml-auto text-[11px] font-medium text-steel">
+            <Link to="/account/security" className="ml-auto text-11 font-medium text-steel">
               Manage in Security →
             </Link>
           </div>
@@ -64,7 +64,7 @@ function ProfilePage() {
                 <td>
                   <span className="flex items-center gap-2.5">
                     <span
-                      className="cav flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-[9px] font-bold text-white"
+                      className="cav flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-10 font-bold text-white"
                       style={{ background: "linear-gradient(135deg,#E36C4B,#B34A2E)" }}
                     >
                       A
@@ -75,7 +75,7 @@ function ProfilePage() {
                 <td>
                   <Pill tone="st">Admin</Pill>
                 </td>
-                <td className="mono text-[11.5px] text-ink2">Mar 2026</td>
+                <td className="mono text-11p5 text-ink2">Mar 2026</td>
                 <td className="text-right">
                   <Btn
                     variant="gh"
@@ -93,8 +93,8 @@ function ProfilePage() {
 
         <Card className="flex max-w-[560px] items-center gap-4 border-err/45 p-4">
           <div className="flex-1">
-            <div className="text-[13px] font-semibold">Delete account</div>
-            <div className="mt-1 text-[11.5px] leading-relaxed text-ink3">
+            <div className="text-13 font-semibold">Delete account</div>
+            <div className="mt-1 text-11p5 leading-relaxed text-ink3">
               Requires leaving or transferring every organization first. Irreversible after the
               14-day grace period.
             </div>

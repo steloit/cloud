@@ -55,7 +55,7 @@ function MetricsPage() {
         </div>
 
         {tab !== "Compute" ? (
-          <p className="text-[11.5px] text-ink3">This category's panes land with more telemetry</p>
+          <p className="text-11p5 text-ink3">This category's panes land with more telemetry</p>
         ) : (
           <>
             <div className="flex items-center gap-3">
@@ -65,12 +65,10 @@ function MetricsPage() {
 
             <Card className="flex flex-col gap-2.5 p-4">
               <div className="flex items-center gap-2.5">
-                <span className="text-[12.5px] font-semibold">api · p95 latency</span>
+                <span className="text-12p5 font-semibold">api · p95 latency</span>
                 <Pill tone="warn">812 ms · +37% vs yesterday</Pill>
                 <span className="flex-1" />
-                <span className="text-[10.5px] text-ink3">
-                  split by: route ▾ · ghost = yesterday
-                </span>
+                <span className="text-10p5 text-ink3">split by: route ▾ · ghost = yesterday</span>
               </div>
               {p95.isError ? (
                 <ApiFailureCard
@@ -86,25 +84,25 @@ function MetricsPage() {
                 markers={toMarkers(p95.data)}
                 unit="ms"
                 tone="warn"
-                height={170}
+                size="lg"
               />
-              <div className="flex items-center gap-4 text-[11px]">
+              <div className="flex items-center gap-4 text-11">
                 <span className="text-ink2">— GET /orders (the regression)</span>
                 <span className="text-steel">— all other routes</span>
               </div>
               <div className="flex items-center gap-2 border-hair border-t pt-2.5">
-                <span className="text-[10.5px] text-ink3">
+                <span className="text-10p5 text-ink3">
                   brush to zoom — the range updates every tab
                 </span>
                 <span className="flex-1" />
                 <Link to="/$org/$project/observe/logs" params={linkParams} search={search}>
-                  <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+                  <Btn variant="s" className="h-6 px-2.5 text-10p5">
                     Logs for this range →
                   </Btn>
                 </Link>
                 <Btn
                   variant="s"
-                  className="h-6 px-2.5 text-[10.5px]"
+                  className="h-6 px-2.5 text-10p5"
                   disabled
                   disabledReason="The rule drawer (U8) lands in Phase 3"
                 >
@@ -116,33 +114,31 @@ function MetricsPage() {
             <div className="grid grid-cols-3 gap-3.5">
               <Card className="flex flex-col gap-1.5 p-3.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11.5px] font-medium text-ink2">
-                    Error rate · all services
-                  </span>
+                  <span className="text-11p5 font-medium text-ink2">Error rate · all services</span>
                   <span className="flex-1" />
-                  <span className="mono text-[12px]">0.4%</span>
+                  <span className="mono text-12">0.4%</span>
                 </div>
-                <MetricChart series={toSeries(errorRate.data)} tone="steel" height={64} />
+                <MetricChart series={toSeries(errorRate.data)} tone="steel" size="sm" />
               </Card>
               <Card className="flex flex-col gap-1.5 p-3.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11.5px] font-medium text-ink2">jobs · queue depth</span>
+                  <span className="text-11p5 font-medium text-ink2">jobs · queue depth</span>
                   <span className="flex-1" />
-                  <span className="mono text-[12px] text-warn">12 ▲</span>
+                  <span className="mono text-12 text-warn">12 ▲</span>
                 </div>
-                <MetricChart series={toSeries(queueDepth.data)} tone="warn" height={64} />
+                <MetricChart series={toSeries(queueDepth.data)} tone="warn" size="sm" />
               </Card>
               <Card className="flex flex-col gap-1.5 p-3.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11.5px] font-medium text-ink2">db-main · connections</span>
+                  <span className="text-11p5 font-medium text-ink2">db-main · connections</span>
                   <span className="flex-1" />
-                  <span className="mono text-[12px] text-warn">192/200</span>
+                  <span className="mono text-12 text-warn">192/200</span>
                 </div>
-                <MetricChart series={toSeries(connections.data)} tone="warn" height={64} />
+                <MetricChart series={toSeries(connections.data)} tone="warn" size="sm" />
               </Card>
             </div>
 
-            <div className="flex flex-col gap-1 text-[10.5px] text-ink3">
+            <div className="flex flex-col gap-1 text-10p5 text-ink3">
               <span>Every pane is a query — ⋯ copies it for CLI and alerts.</span>
               <span>Raw 15 d · downsampled 13 mo.</span>
               <span>

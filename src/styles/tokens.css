@@ -21,6 +21,8 @@
   --page: #07090b;
   --e1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.25);
   --e2: 0 10px 32px rgba(0, 0, 0, 0.5);
+  /* Overlay scrim — spec'd fixed in both themes (same value the gallery uses). */
+  --scrim: rgba(6, 9, 12, 0.44);
 }
 /* Light theme — class swap only, zero component forks (spec §1.1). Values extracted verbatim from the gallery's .light block. */
 .light {

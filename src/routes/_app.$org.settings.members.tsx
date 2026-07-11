@@ -7,6 +7,7 @@ import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
 import { useOrgs } from "@/features/org/hooks";
 import { useChangeRole, useMembers, useRemoveMember } from "@/features/settings/hooks";
@@ -115,11 +116,11 @@ function OrgMembersPage() {
           <div className="flex gap-3.5">
             <Card className="flex flex-1 flex-col gap-2 p-4">
               <div className="flex items-center gap-2">
-                <span className="text-ok">✓</span>
-                <b className="text-[13px]">SAML SSO · enabled</b>
+                <Icon id="s-check" className="h-3 w-3 text-ok" />
+                <b className="text-13">SAML SSO · enabled</b>
                 <Pill tone="st">Business</Pill>
               </div>
-              <p className="text-[12px] leading-relaxed text-ink2">
+              <p className="text-12 leading-relaxed text-ink2">
                 via Okta — enforced for all members. A Business capability, in use: this is what the
                 far side of a gate looks like.
               </p>
@@ -135,10 +136,10 @@ function OrgMembersPage() {
             </Card>
             <Card dashed className="flex flex-1 flex-col gap-2 p-4">
               <div className="flex items-center gap-2">
-                <b className="text-[13px]">Audit log streaming &amp; export</b>
+                <b className="text-13">Audit log streaming &amp; export</b>
                 <Pill tone="mut">🔒 Enterprise</Pill>
               </div>
-              <p className="text-[12px] leading-relaxed text-ink2">
+              <p className="text-12 leading-relaxed text-ink2">
                 Stream every org event to your SIEM and export the full audit trail. Gated because
                 it's compliance-grade governance — an org-wide capability priced with the Enterprise
                 contract, not a per-user toggle.
@@ -148,12 +149,12 @@ function OrgMembersPage() {
                 <Link to="/$org/billing/plans" params={{ org }}>
                   <Btn variant="gh">Compare plans (B5)</Btn>
                 </Link>
-                <span className="text-[10.5px] text-ink3">
+                <span className="text-10p5 text-ink3">
                   Not an Owner? This button asks one for you instead.
                 </span>
               </div>
             </Card>
-            <Card className="flex w-[240px] shrink-0 flex-col gap-1.5 p-4 text-[11.5px] text-ink2">
+            <Card className="flex w-[240px] shrink-0 flex-col gap-1.5 p-4 text-11p5 text-ink2">
               <Eyebrow>The gating rules</Eyebrow>
               <span>Visible, never hidden.</span>
               <span>Explained — why it's gated.</span>
@@ -183,7 +184,7 @@ function OrgMembersPage() {
                     <tr key={m.id}>
                       <td>
                         <b>{name.toLowerCase()}</b>{" "}
-                        <span className="mono text-[11px] text-ink3">{m.email}</span>
+                        <span className="mono text-11 text-ink3">{m.email}</span>
                       </td>
                       <td>{d?.role ?? m.role}</td>
                       <td>{d?.projects ?? "—"}</td>
@@ -191,7 +192,7 @@ function OrgMembersPage() {
                       <td className="text-ink2">{d?.lastActive ?? "—"}</td>
                       <td>
                         {d?.ownerLocked ? (
-                          <span className="text-[11px] text-ink3">owner</span>
+                          <span className="text-11 text-ink3">owner</span>
                         ) : (
                           <span className="relative flex items-center justify-end gap-2">
                             <Btn
@@ -229,7 +230,7 @@ function OrgMembersPage() {
                     and carry no dev-3 invite id, so this pending row renders statically. */}
                 <tr className="opacity-70">
                   <td>
-                    <span className="mono text-[11.5px]">dev-3@acme.dev</span>
+                    <span className="mono text-11p5">dev-3@acme.dev</span>
                   </td>
                   <td>
                     <Pill tone="mut">invited · Member</Pill>
@@ -259,7 +260,7 @@ function OrgMembersPage() {
           </div>
 
           <Card className="flex items-center gap-3 p-3.5">
-            <div className="text-[11.5px] text-ink2">
+            <div className="text-11p5 text-ink2">
               Removing a member revokes sessions and personal tokens immediately; resources they own
               are flagged, never silently reassigned.
             </div>

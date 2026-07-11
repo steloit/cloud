@@ -110,7 +110,7 @@ export function GatewayModelsTab(_props: TabProps) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-ink3">
+      <p className="text-11 text-ink3">
         Aliases are the contract: swapping an upstream behind <span className="mono">fast</span>{" "}
         never touches a consumer. "Why it's here" notes are representative — X1 specs the model
         table without per-row rationale (finding).
@@ -169,7 +169,7 @@ export function GatewayRoutesTab(_props: TabProps) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-ink3">
+      <p className="text-11 text-ink3">
         Route names and splits are representative — X1 says "4 models behind 3 routes" without
         naming them (finding). Weight changes apply without a restart and land in the audit log.
       </p>
@@ -242,7 +242,7 @@ export function GatewayUsageTab(_props: TabProps) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-ink3">
+      <p className="text-11 text-ink3">
         Per-model splits are representative reconciliations of X1's totals (18.2M tokens · $34 mtd)
         — the frame specs totals only (finding). Unit prices are printed here, not discovered on the
         invoice.
@@ -294,7 +294,7 @@ export function GatewayPoliciesTab({ org, project }: TabProps) {
           </tbody>
         </table>
       </div>
-      <Card className="p-3.5 text-[11.5px] leading-relaxed text-ink3">
+      <Card className="p-3.5 text-11p5 leading-relaxed text-ink3">
         Gateway <b>tokens</b> are infrastructure and meter regardless of the{" "}
         <span className="mono">ai-assistant</span> policy; that switch governs the Assistant's
         surfaces (AI3), not this service. Rows are live from the org rulebook — this page adds no
@@ -354,7 +354,7 @@ export function GatewayKeysTab({ project, env }: TabProps) {
                   <span className="flex gap-2">
                     <Btn
                       variant="gh"
-                      className="h-6 px-2 text-[10.5px]"
+                      className="h-6 px-2 text-10p5"
                       disabled
                       disabledReason="No rotate endpoint in the spec — spec change first (finding)"
                     >
@@ -362,7 +362,7 @@ export function GatewayKeysTab({ project, env }: TabProps) {
                     </Btn>
                     <Btn
                       variant="gh"
-                      className="h-6 px-2 text-[10.5px] text-err"
+                      className="h-6 px-2 text-10p5 text-err"
                       disabled
                       disabledReason="Bindings need a canon gateway service (X1 finding)"
                     >
@@ -386,7 +386,7 @@ export function GatewayKeysTab({ project, env }: TabProps) {
         </span>
         <Copybit>POST https://gw.acme-store.com/v1/chat</Copybit>
       </div>
-      <p className="text-[11px] text-ink3">
+      <p className="text-11 text-ink3">
         Same contract as every binding (D11): consumers never see a key; the binding injects and
         refreshes it. Rotation: 90 d automatic (org policy{" "}
         <span className="mono">credential-rotation</span>).
@@ -408,7 +408,7 @@ export function GatewaySettingsTab(_props: TabProps) {
       />
       <Card className="flex flex-col gap-3 p-4">
         <Eyebrow>Endpoint & cache</Eyebrow>
-        <div className="grid grid-cols-3 gap-4 text-[12px]">
+        <div className="grid grid-cols-3 gap-4 text-12">
           <div>
             <div className="flabel">Endpoint</div>
             <div className="inp mono">gw.acme-store.com</div>
@@ -435,7 +435,7 @@ export function GatewaySettingsTab(_props: TabProps) {
           </Btn>
           <Pill tone="err">exemplar — not a billed service</Pill>
         </div>
-        <p className="text-[11px] text-ink3">
+        <p className="text-11 text-ink3">
           When a canon gateway exists, deletion follows the U6 grammar: dependents named, typed
           confirm, final state kept.
         </p>

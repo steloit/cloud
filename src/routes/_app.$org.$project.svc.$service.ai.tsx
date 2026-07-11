@@ -232,7 +232,7 @@ function DismissLogged({ insightId, prp }: { insightId: string; prp: string }) {
         <>
           <Inp
             placeholder="Reason — logged"
-            className="h-8 w-[200px] text-[11px]"
+            className="h-8 w-[200px] text-11"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -304,7 +304,7 @@ function ProposalPanel({
           </div>
           <div>
             <Eyebrow>Reasoning</Eyebrow>
-            <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink2">{frame.reasoning}</p>
+            <p className="mt-1.5 text-11p5 leading-relaxed text-ink2">{frame.reasoning}</p>
           </div>
           <div>
             <Eyebrow>{frame.changeLabel}</Eyebrow>
@@ -312,7 +312,7 @@ function ProposalPanel({
           </div>
           <div>
             <Eyebrow>Impact</Eyebrow>
-            <div className="mt-1.5 text-[11px] text-ink2">{frame.impact}</div>
+            <div className="mt-1.5 text-11 text-ink2">{frame.impact}</div>
           </div>
         </div>
         <div className="mt-auto flex items-center gap-2 border-hair border-t p-[12px_16px]">
@@ -359,7 +359,7 @@ function ProposalPanel({
             </>
           )}
           <DismissLogged insightId={frame.insightId} prp={frame.prp} />
-          <span className="ml-auto text-[10.5px] text-ink3">
+          <span className="ml-auto text-10p5 text-ink3">
             Applied as <b>you, via assistant</b> — same permissions, same audit
           </span>
         </div>
@@ -368,7 +368,7 @@ function ProposalPanel({
       <div className="flex w-[300px] shrink-0 flex-col gap-3">
         <Card className="flex flex-col gap-1.5 p-3.5">
           <Eyebrow>The four laws, here</Eyebrow>
-          <div className="flex flex-col gap-1.5 text-[11px] leading-normal text-ink2">
+          <div className="flex flex-col gap-1.5 text-11 leading-normal text-ink2">
             <div>
               <b className="text-assist">Suggest</b> — I drafted this; you apply it
             </div>
@@ -385,7 +385,7 @@ function ProposalPanel({
         </Card>
         <Card className="flex flex-col gap-1.5 p-3.5">
           <Eyebrow>Same pattern, every product</Eyebrow>
-          <p className="text-[11px] leading-relaxed text-ink3">
+          <p className="text-11 leading-relaxed text-ink3">
             Identical to the PostgreSQL index proposal (W10) and the others — one visual +
             interaction grammar for every AI recommendation.
           </p>
@@ -432,9 +432,9 @@ function ServiceAiPage() {
           <Card className="flex max-w-[560px] flex-col gap-2 p-4">
             <div className="flex items-center gap-2">
               <Glyph id="s-ai" />
-              <b className="text-[12.5px]">No AI recommendation for {service} right now</b>
+              <b className="text-12p5">No AI recommendation for {service} right now</b>
             </div>
-            <p className="text-[11.5px] leading-relaxed text-ink2">
+            <p className="text-11p5 leading-relaxed text-ink2">
               The assistant only surfaces a proposal when the evidence supports one — nothing is
               generated to fill the page. When one exists it renders here in the same grammar as
               every other product: evidence → reasoning → proposed change → impact → your apply.

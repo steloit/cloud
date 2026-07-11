@@ -46,9 +46,7 @@ function TablesPage() {
     return (
       <main className="main">
         <div className="pgpad !overflow-y-auto">
-          <Card className="p-4 text-[12px] text-ink2">
-            This tab belongs to PostgreSQL instances.
-          </Card>
+          <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
         </div>
       </main>
     );
@@ -100,26 +98,26 @@ function TablesPage() {
             <tbody>
               {ROWS.map(([id, customer, total, status, giftCard, created]) => (
                 <tr key={id}>
-                  <td className="mono text-[11px]">{id}</td>
-                  <td className="mono text-[11px]">{customer}</td>
-                  <td className="mono text-[11px]">{total}</td>
+                  <td className="mono text-11">{id}</td>
+                  <td className="mono text-11">{customer}</td>
+                  <td className="mono text-11">{total}</td>
                   <td>
                     <Pill tone="warn">{status}</Pill>
                   </td>
-                  <td className="mono text-[11px] text-ink3">{giftCard ?? "NULL"}</td>
-                  <td className="mono text-[11px] text-ink2">{created}</td>
+                  <td className="mono text-11 text-ink3">{giftCard ?? "NULL"}</td>
+                  <td className="mono text-11 text-ink2">{created}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="flex items-center gap-2.5 text-[11px] text-ink3">
+        <div className="flex items-center gap-2.5 text-11 text-ink3">
           <span className="mono">rows 1–6 of 1,204,318</span>
-          <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+          <Btn variant="s" className="h-6 px-2.5 text-10p5">
             ← Prev
           </Btn>
-          <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+          <Btn variant="s" className="h-6 px-2.5 text-10p5">
             Next →
           </Btn>
           <span className="flex-1" />

@@ -3,15 +3,16 @@ import type { ServiceStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export type PillTone = "ok" | "warn" | "err" | "st" | "ai" | "mut";
-export type DotTone = "ok" | "warn" | "err" | "prov" | "sus";
+/** none = read/neutral (hair) · ai = assistant provenance (assist). */
+export type DotTone = "ok" | "warn" | "err" | "prov" | "sus" | "none" | "ai";
 
 /** Pills always carry text — never color-only (16-qa). */
 export function Pill({ tone, children }: { tone: PillTone; children: ReactNode }) {
   return <span className={cn("pill", tone)}>{children}</span>;
 }
 
-export function Dot({ tone }: { tone: DotTone }) {
-  return <span className={cn("dot", tone)} />;
+export function Dot({ tone, className }: { tone: DotTone; className?: string }) {
+  return <span className={cn("dot", tone, className)} />;
 }
 
 /** Status label: dot + words, the six-mark vocabulary paired with text. */
@@ -25,7 +26,9 @@ export function Stlab({ tone, children }: { tone: DotTone; children: ReactNode }
           ? "text-err"
           : tone === "prov"
             ? "text-prov"
-            : "text-ink3";
+            : tone === "ai"
+              ? "text-assist"
+              : "text-ink3";
   return (
     <span className={cn("stlab", color)}>
       <Dot tone={tone} />

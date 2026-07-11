@@ -37,7 +37,7 @@ function AssistantBubble({ children }: { children: ReactNode }) {
         <Icon id="s-ai" className="h-3 w-3 text-assist" />
       </span>
       <div
-        className="flex-1 rounded-[12px_12px_12px_3px] border p-[11px_13px] text-[11.5px] leading-relaxed text-ink1"
+        className="flex-1 rounded-[12px_12px_12px_3px] border p-[11px_13px] text-11p5 leading-relaxed text-ink1"
         style={{
           background: "color-mix(in srgb, var(--assist) 4%, var(--surface))",
           borderColor: "color-mix(in srgb, var(--assist) 28%, var(--hair))",
@@ -52,7 +52,7 @@ function AssistantBubble({ children }: { children: ReactNode }) {
 function UserBubble({ children }: { children: ReactNode }) {
   return (
     <div className="my-2 flex justify-end">
-      <div className="max-w-[76%] rounded-[12px_12px_3px_12px] border border-hair bg-surface2 p-[9px_12px] text-[11.5px] text-ink1">
+      <div className="max-w-[76%] rounded-[12px_12px_3px_12px] border border-hair bg-surface2 p-[9px_12px] text-11p5 text-ink1">
         {children}
       </div>
     </div>
@@ -68,9 +68,9 @@ function seedMessages(org: string): ChatMsg[] {
       body: (
         <>
           Your <b>api</b> p95 crossed 800 ms at 14:02, four minutes after deploy{" "}
-          <span className="mono text-[10.5px]">#142</span>. I traced it to an unindexed query on{" "}
-          <span className="mono text-[10.5px]">orders</span> — a sequential scan over 1.2M rows
-          taking 642 ms.
+          <span className="mono text-10p5">#142</span>. I traced it to an unindexed query on{" "}
+          <span className="mono text-10p5">orders</span> — a sequential scan over 1.2M rows taking
+          642 ms.
           <div className="chiprow mt-2">
             <Pill tone="ai">3 sources</Pill>
             <Pill tone="st">p95 812ms</Pill>
@@ -81,10 +81,10 @@ function seedMessages(org: string): ChatMsg[] {
             style={{ borderColor: "color-mix(in srgb, var(--assist) 28%, var(--hair))" }}
           >
             <div className="mb-1.5 flex items-center gap-1.5">
-              <b className="text-[10.5px]">Proposed fix</b>
+              <b className="text-10p5">Proposed fix</b>
               <Pill tone="ai">prp_7c31a2</Pill>
             </div>
-            <div className="mono rounded-[5px] bg-mono-bg p-[7px_9px] text-[10px] text-ink1">
+            <div className="mono rounded-[5px] bg-mono-bg p-[7px_9px] text-10 text-ink1">
               CREATE INDEX CONCURRENTLY idx_orders_customer_created ON orders (customer_id,
               created_at);
             </div>
@@ -94,7 +94,7 @@ function seedMessages(org: string): ChatMsg[] {
                 params={{ org, project: "ecommerce", service: "db-main" }}
                 search={W10_SEARCH}
               >
-                <Btn variant="s" className="h-6 border-assist text-[10px] text-assist">
+                <Btn variant="s" className="h-6 border-assist text-10 text-assist">
                   Review proposal (W10)
                 </Btn>
               </Link>
@@ -109,10 +109,10 @@ function seedMessages(org: string): ChatMsg[] {
       role: "assistant",
       body: (
         <>
-          No — <span className="mono text-[10.5px]">CONCURRENTLY</span> builds without an exclusive
+          No — <span className="mono text-10p5">CONCURRENTLY</span> builds without an exclusive
           lock, so reads and writes keep flowing. ~40 s on 1.2M rows. Written as migration{" "}
-          <span className="mono text-[10.5px]">0142</span>, reversible via{" "}
-          <span className="mono text-[10.5px]">DROP INDEX</span>. I won't run it — you approve it in
+          <span className="mono text-10p5">0142</span>, reversible via{" "}
+          <span className="mono text-10p5">DROP INDEX</span>. I won't run it — you approve it in
           Deploy.
         </>
       ),
@@ -178,25 +178,25 @@ function AskPage() {
           {/* conversation rail */}
           <Card className="flex w-[262px] shrink-0 flex-col overflow-hidden p-0">
             <div className="border-hair border-b p-[11px_12px]">
-              <Inp placeholder="Search conversations" className="h-8 text-[11px]" />
+              <Inp placeholder="Search conversations" className="h-8 text-11" />
             </div>
             <div className="flex-1 overflow-auto p-2">
               <div className="nsec pl-1.5">Today</div>
               <div className="cursor-pointer rounded-lg bg-steel-tint p-[8px_10px]">
-                <div className="truncate text-[11.5px] font-medium text-ink1">
+                <div className="truncate text-11p5 font-medium text-ink1">
                   Why is my database slow?
                 </div>
-                <div className="mt-0.5 text-[9px] text-ink3">2 follow-ups · 14:12</div>
+                <div className="mt-0.5 text-10 text-ink3">2 follow-ups · 14:12</div>
               </div>
               <div className="cursor-pointer rounded-lg p-[8px_10px]">
-                <div className="truncate text-[11.5px] text-ink2">Cheaper config for staging</div>
-                <div className="mt-0.5 text-[9px] text-ink3">11:40</div>
+                <div className="truncate text-11p5 text-ink2">Cheaper config for staging</div>
+                <div className="mt-0.5 text-10 text-ink3">11:40</div>
               </div>
               <div className="nsec mt-2 pl-1.5">Earlier this week</div>
               {EARLIER_THREADS.map((t) => (
                 <div key={t.title} className="cursor-pointer rounded-lg p-[8px_10px]">
-                  <div className="truncate text-[11.5px] text-ink2">{t.title}</div>
-                  <div className="mt-0.5 text-[9px] text-ink3">{t.when}</div>
+                  <div className="truncate text-11p5 text-ink2">{t.title}</div>
+                  <div className="mt-0.5 text-10 text-ink3">{t.when}</div>
                 </div>
               ))}
             </div>
@@ -206,8 +206,8 @@ function AskPage() {
           <Card className="flex min-w-0 flex-1 flex-col overflow-hidden p-0">
             <div className="flex items-center gap-2.5 border-hair border-b p-[11px_15px]">
               <div className="flex-1">
-                <div className="text-[12.5px] font-semibold">Why is my database slow?</div>
-                <div className="text-[9px] text-ink3">
+                <div className="text-12p5 font-semibold">Why is my database slow?</div>
+                <div className="text-10 text-ink3">
                   started 14:12 · reads metrics, logs, traces within your permissions
                 </div>
               </div>
@@ -224,7 +224,7 @@ function AskPage() {
             <div className="flex items-center gap-2 border-hair border-t p-[11px_14px]">
               <Inp
                 placeholder="Reply — or “turn this into a proposal”…"
-                className="h-9 flex-1 text-[11.5px]"
+                className="h-9 flex-1 text-11p5"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -258,10 +258,10 @@ function AskPage() {
               <div className="rounded-[9px] border border-hair p-[11px_12px]">
                 <div className="mb-1 flex items-center gap-1.5">
                   <Pill tone="ai">proposal</Pill>
-                  <span className="mono text-[8.5px] text-ink3">prp_7c31a2</span>
+                  <span className="mono text-10 text-ink3">prp_7c31a2</span>
                 </div>
-                <div className="text-[10.5px] font-medium text-ink1">Add index to orders</div>
-                <div className="mt-0.5 text-[9.5px] text-ink3">p95 812 → 431 ms</div>
+                <div className="text-10p5 font-medium text-ink1">Add index to orders</div>
+                <div className="mt-0.5 text-10 text-ink3">p95 812 → 431 ms</div>
                 <div className="mt-2">
                   <Link
                     to="/$org/$project/svc/$service/insights"
@@ -270,7 +270,7 @@ function AskPage() {
                   >
                     <Btn
                       variant="s"
-                      className="h-6 w-full justify-center border-assist text-[9.5px] text-assist"
+                      className="h-6 w-full justify-center border-assist text-10 text-assist"
                     >
                       Review
                     </Btn>

@@ -85,12 +85,12 @@ function BranchesPage() {
               style={{ paddingLeft: i === 0 ? 16 : 34 }}
             >
               <Icon id="s-branch" className="h-3.5 w-3.5 text-ink3" />
-              <b className="mono text-[12.5px]">{b.name}</b>
+              <b className="mono text-12p5">{b.name}</b>
               <Pill tone={b.pill.tone}>{b.pill.label}</Pill>
-              <span className="flex-1 text-[11.5px] text-ink3">{b.desc}</span>
-              {b.cost ? <span className="mono text-[11.5px]">{b.cost}</span> : null}
+              <span className="flex-1 text-11p5 text-ink3">{b.desc}</span>
+              {b.cost ? <span className="mono text-11p5">{b.cost}</span> : null}
               <Stlab tone={b.status.tone}>{b.status.label}</Stlab>
-              <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+              <Btn variant="s" className="h-6 px-2.5 text-10p5">
                 Open
               </Btn>
             </div>
@@ -100,7 +100,7 @@ function BranchesPage() {
         <div className="grid grid-cols-2 gap-3.5">
           <Card className="flex flex-col gap-2 p-4">
             <Eyebrow>Why branches</Eyebrow>
-            <p className="text-[12px] leading-relaxed text-ink2">
+            <p className="text-12 leading-relaxed text-ink2">
               Every preview environment gets a <b>real copy of production data</b> in seconds,
               isolated and disposable. Restores are rehearsed the same way: restore into a branch,
               verify, promote — disaster recovery you can practice.

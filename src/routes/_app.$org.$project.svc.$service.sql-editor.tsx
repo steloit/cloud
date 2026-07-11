@@ -40,9 +40,7 @@ function SqlEditorPage() {
     return (
       <main className="main">
         <div className="pgpad !overflow-y-auto">
-          <Card className="p-4 text-[12px] text-ink2">
-            This tab belongs to PostgreSQL instances.
-          </Card>
+          <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
         </div>
       </main>
     );
@@ -98,7 +96,7 @@ function SqlEditorPage() {
           <>
             <div className="flex items-center gap-2.5">
               <Pill tone="ok">8 rows</Pill>
-              <span className="mono text-[11.5px] text-warn">642 ms</span>
+              <span className="mono text-11p5 text-warn">642 ms</span>
               <Pill tone="warn">plan: Seq Scan on orders</Pill>
               <span className="flex-1" />
               <Link
@@ -128,13 +126,13 @@ function SqlEditorPage() {
                 <tbody>
                   {RESULT_ROWS.map(([id, customer, total, status, created]) => (
                     <tr key={id}>
-                      <td className="mono text-[11px]">{id}</td>
-                      <td className="mono text-[11px]">{customer}</td>
-                      <td className="mono text-[11px]">{total}</td>
+                      <td className="mono text-11">{id}</td>
+                      <td className="mono text-11">{customer}</td>
+                      <td className="mono text-11">{total}</td>
                       <td>
                         <Pill tone={STATUS_TONE[status] ?? "mut"}>{status}</Pill>
                       </td>
-                      <td className="mono text-[11px] text-ink2">{created}</td>
+                      <td className="mono text-11 text-ink2">{created}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -143,7 +141,7 @@ function SqlEditorPage() {
           </>
         ) : null}
 
-        <p className="text-[10.5px] text-ink3">
+        <p className="text-10p5 text-ink3">
           Writes require a read-write role and run against the selected target — pointing the editor
           at a branch is one dropdown, so experiments never touch production.
         </p>

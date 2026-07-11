@@ -154,8 +154,8 @@ function TokensPage() {
                 const armed = armedId === t.id;
                 return (
                   <tr key={t.id}>
-                    <td className="mono text-[11.5px]">{t.name}</td>
-                    <td className="mono text-[11px] text-ink3">{t.prefix}</td>
+                    <td className="mono text-11p5">{t.name}</td>
+                    <td className="mono text-11 text-ink3">{t.prefix}</td>
                     <td>{d?.scope ?? <Pill tone="mut">{t.scope}</Pill>}</td>
                     <td className="text-ink2">{d?.created ?? "—"}</td>
                     <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
@@ -177,7 +177,7 @@ function TokensPage() {
           </table>
         </div>
 
-        <p className="max-w-[640px] text-[11px] leading-relaxed text-ink3">
+        <p className="max-w-[640px] text-11 leading-relaxed text-ink3">
           Shown once, hash stored — same contract as org API keys (G8), different identity: these
           are you; those are the org's robots. If Acme removes you, every personal token dies with
           the membership.

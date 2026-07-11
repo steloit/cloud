@@ -46,24 +46,22 @@ function CostUsage() {
             <span className="mono text-[19px] font-semibold">
               {billing.data ? fmtMoney(billing.data.mtd_cents ?? 0) : "…"}
             </span>
-            <span className="text-[10.5px] text-ink3">$72.42 resources + $99 plan</span>
+            <span className="text-10p5 text-ink3">$72.42 resources + $99 plan</span>
             <Spark series={toSeries(requests.data)} />
           </Card>
           <Card className="flex flex-col gap-1.5 p-3.5">
             <Eyebrow>Forecast · Jul</Eyebrow>
             <span className="mono text-[19px] font-semibold">
               {billing.data ? fmtMoney(billing.data.forecast_cents ?? 0) : "…"}{" "}
-              <span className="text-[11px] font-normal text-ink3">± $6</span>
+              <span className="text-11 font-normal text-ink3">± $6</span>
             </span>
-            <span className="text-[10.5px] text-ink3">same arithmetic as every sidebar</span>
+            <span className="text-10p5 text-ink3">same arithmetic as every sidebar</span>
             <Spark series={toSeries(requests.data)} />
           </Card>
           <Card className="flex flex-col gap-1.5 p-3.5">
             <Eyebrow>Egress · included</Eyebrow>
             <span className="mono text-[19px] font-semibold text-warn">87%</span>
-            <span className="text-[10.5px] text-ink3">
-              87 of 100 GB — the B8 warning, as a widget
-            </span>
+            <span className="text-10p5 text-ink3">87 of 100 GB — the B8 warning, as a widget</span>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface2">
               <div className="h-full rounded-full bg-warn" style={{ width: "87%" }} />
             </div>
@@ -72,16 +70,16 @@ function CostUsage() {
 
         <div className="grid grid-cols-2 gap-3.5">
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">By project · trend</span>
+            <span className="text-12p5 font-semibold">By project · trend</span>
             <Spark series={toSeries(requests.data)} width={200} height={36} />
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-10p5 text-ink3">
               ecommerce $208 · analytics $96 · internal $41 · mobile-api $38
             </span>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Anomaly watch</span>
+            <span className="text-12p5 font-semibold">Anomaly watch</span>
             <span className="mono text-[19px] font-semibold text-ok">✓ quiet</span>
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-10p5 text-ink3">
               nothing unusual — assets egress spike explained by the gift-card launch
             </span>
           </Card>

@@ -49,12 +49,10 @@ function DashboardTemplates() {
           {LAYOUTS.map((layout) => (
             <Card key={layout.name} className="flex flex-col gap-2 p-3.5">
               <div className="flex items-center gap-2">
-                <span className="text-[12.5px] font-semibold">{layout.name}</span>
-                <span className="mono ml-auto text-[10.5px] text-ink3">
-                  {layout.widgets} widgets
-                </span>
+                <span className="text-12p5 font-semibold">{layout.name}</span>
+                <span className="mono ml-auto text-10p5 text-ink3">{layout.widgets} widgets</span>
               </div>
-              <div className="flex-1 text-[11px] leading-relaxed text-ink2">{layout.desc}</div>
+              <div className="flex-1 text-11 leading-relaxed text-ink2">{layout.desc}</div>
               <div>
                 <Btn variant="s" disabled disabledReason="Instantiation lands in Phase 4">
                   Use layout
@@ -64,7 +62,7 @@ function DashboardTemplates() {
           ))}
         </div>
 
-        <div className="mt-auto text-[10.5px] text-ink3">
+        <div className="mt-auto text-10p5 text-ink3">
           Instantiating never provisions anything — a dashboard reads, it doesn't create. Personas
           differ; that's the point of five layouts instead of one.
         </div>

@@ -1,9 +1,10 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
 import { Icon } from "@/design-system/icon";
 import { Inp } from "@/design-system/inp";
+import { useOverlay } from "@/design-system/overlay";
 import { Dot, Pill } from "@/design-system/pill";
 import { errorMessage } from "@/lib/api";
 import { useUIStore } from "@/lib/store";
@@ -36,7 +37,7 @@ const ATTACHED: Record<
     icon: "s-chip",
     title: (
       <>
-        Valkey eviction → <span className="mono text-[10px]">allkeys-lru</span>
+        Valkey eviction → <span className="mono text-10">allkeys-lru</span>
       </>
     ),
     sub: "prp_ca11e0 · cache · awaiting review",
@@ -71,7 +72,7 @@ function AssistantBubble({ children }: { children: ReactNode }) {
         <Icon id="s-ai" className="h-[11px] w-[11px] text-assist" />
       </span>
       <div
-        className="flex-1 rounded-[11px_11px_11px_3px] border p-[10px_12px] text-[11.5px] leading-relaxed text-ink1"
+        className="flex-1 rounded-[11px_11px_11px_3px] border p-[10px_12px] text-11p5 leading-relaxed text-ink1"
         style={{
           background: "color-mix(in srgb, var(--assist) 5%, var(--surface))",
           borderColor: "color-mix(in srgb, var(--assist) 28%, var(--hair))",
@@ -86,7 +87,7 @@ function AssistantBubble({ children }: { children: ReactNode }) {
 function UserBubble({ children }: { children: ReactNode }) {
   return (
     <div className="my-2 flex justify-end">
-      <div className="max-w-[80%] rounded-[11px_11px_3px_11px] border border-hair bg-surface2 p-[8px_11px] text-[11.5px] text-ink1">
+      <div className="max-w-[80%] rounded-[11px_11px_3px_11px] border border-hair bg-surface2 p-[8px_11px] text-11p5 text-ink1">
         {children}
       </div>
     </div>
@@ -115,9 +116,9 @@ function DrawerConversation({ org, attached }: { org: string; attached: string |
               <>
                 <div>
                   Short answer: an unindexed lookup on{" "}
-                  <span className="mono text-[10.5px]">orders</span> after deploy{" "}
-                  <span className="mono text-[10.5px]">#142</span>. p95 hit 812 ms; the scan alone
-                  is 642 ms.
+                  <span className="mono text-10p5">orders</span> after deploy{" "}
+                  <span className="mono text-10p5">#142</span>. p95 hit 812 ms; the scan alone is
+                  642 ms.
                 </div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   <Pill tone="ai">3 sources</Pill>
@@ -131,12 +132,12 @@ function DrawerConversation({ org, attached }: { org: string; attached: string |
                     search={W10_SEARCH}
                     onClick={close}
                   >
-                    <Btn variant="s" className="h-6 border-assist text-[10px] text-assist">
+                    <Btn variant="s" className="h-6 border-assist text-10 text-assist">
                       See the fix (W10)
                     </Btn>
                   </Link>
                   <Link to="/$org/assistant/ask" params={{ org }} onClick={close}>
-                    <Btn variant="gh" className="h-6 text-[10px]">
+                    <Btn variant="gh" className="h-6 text-10">
                       Open full Assistant ⤢
                     </Btn>
                   </Link>
@@ -181,7 +182,7 @@ function DrawerConversation({ org, attached }: { org: string; attached: string |
         <div className="flex items-center gap-2">
           <Inp
             placeholder="Ask about api / production…"
-            className="h-8 flex-1 text-[11px]"
+            className="h-8 flex-1 text-11"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -197,7 +198,7 @@ function DrawerConversation({ org, attached }: { org: string; attached: string |
             Send
           </Btn>
         </div>
-        <div className="mt-1.5 text-center text-[9px] text-ink3">
+        <div className="mt-1.5 text-center text-10 text-ink3">
           Same conversation expands to the full <b>Assistant</b> page — nothing is lost.
         </div>
       </div>
@@ -212,12 +213,19 @@ export function AssistantDrawer() {
   const params = useParams({ strict: false }) as { org?: string };
   const org = params.org ?? "acme";
 
+  // Deliberate exception to the Drawer recipe: the assistant is a persistent
+  // side panel (AI1) — no scrim, the page stays interactive beside it. Esc
+  // still closes; Tab is NOT trapped so the page remains reachable.
+  const panel = useRef<HTMLElement>(null);
+  useOverlay(panel, open ? close : undefined, { trap: false });
+
   if (!open) return null;
   const banner = attached ? ATTACHED[attached] : undefined;
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-40 flex w-[396px] flex-col border-hair border-l bg-surface shadow-e2"
+      ref={panel}
+      className="fixed inset-y-0 right-0 z-40 flex w-[424px] flex-col border-hair border-l bg-surface shadow-e2"
       aria-label="Assistant"
     >
       <div className="flex items-center gap-2 border-hair border-b p-[12px_15px]">
@@ -225,8 +233,8 @@ export function AssistantDrawer() {
           <Icon id="s-ai" className="h-3 w-3 text-assist" />
         </span>
         <div className="flex-1">
-          <div className="text-[12.5px] font-semibold text-ink1">Assistant</div>
-          <div className="text-[9px] text-ink3">quick help · doesn't act on its own</div>
+          <div className="text-12p5 font-semibold text-ink1">Assistant</div>
+          <div className="text-10 text-ink3">quick help · doesn't act on its own</div>
         </div>
         <Link
           to="/$org/assistant/ask"
@@ -250,11 +258,11 @@ export function AssistantDrawer() {
 
       <div className="flex items-center gap-2 border-hair border-b bg-steel-tint p-[8px_13px]">
         <Dot tone="ok" />
-        <span className="text-[10px] text-ink2">
+        <span className="text-10 text-ink2">
           Context: <b>api</b> · ecommerce / production
         </span>
         <span className="sp flex-1" />
-        <span className="text-[9px] text-steel">change ▾</span>
+        <span className="text-10 text-steel">change ▾</span>
       </div>
 
       {banner ? (
@@ -264,19 +272,19 @@ export function AssistantDrawer() {
         >
           <div className="mb-1.5 flex items-center gap-1.5">
             <Icon id="s-ai" className="h-[11px] w-[11px] text-assist" />
-            <span className="text-[9px] font-semibold uppercase tracking-[.05em] text-assist">
+            <span className="text-10 font-semibold uppercase tracking-[.05em] text-assist">
               Attached insight
             </span>
             <span className="sp flex-1" />
-            <span className="text-[9px] text-ink3">1 of 3 open ▾</span>
+            <span className="text-10 text-ink3">1 of 3 open ▾</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="glyph h-5 w-5">
               <Icon id={banner.icon} className="h-2.5 w-2.5" />
             </span>
             <div className="flex-1">
-              <div className="text-[11px] font-medium text-ink1">{banner.title}</div>
-              <div className="text-[9px] text-ink3">{banner.sub}</div>
+              <div className="text-11 font-medium text-ink1">{banner.title}</div>
+              <div className="text-10 text-ink3">{banner.sub}</div>
             </div>
             <Link
               to={
@@ -288,7 +296,7 @@ export function AssistantDrawer() {
               search={{ env: "production" }}
               onClick={close}
             >
-              <Btn variant="gh" className="h-[22px] text-[9.5px]">
+              <Btn variant="gh" className="h-[22px] text-10">
                 View
               </Btn>
             </Link>

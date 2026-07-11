@@ -95,7 +95,7 @@ function OnboardingTeamPage() {
               Add
             </Btn>
           </div>
-          <div className="mt-1.5 text-[10.5px] text-ink3">
+          <div className="mt-1.5 text-10p5 text-ink3">
             or paste multiple emails separated by commas — roles default to Developer
           </div>
         </div>
@@ -115,8 +115,8 @@ function OnboardingTeamPage() {
                   className="flex items-center gap-2.5 rounded-lg border border-hair px-3 py-2"
                 >
                   <span className="uav">{invite.email.slice(0, 1).toUpperCase()}</span>
-                  <span className="mono flex-1 text-[11.5px]">{invite.email}</span>
-                  <span className="text-[11.5px] text-ink2">{invite.role} ▾</span>
+                  <span className="mono flex-1 text-11p5">{invite.email}</span>
+                  <span className="text-11p5 text-ink2">{invite.role} ▾</span>
                   <button
                     type="button"
                     className="icb h-6 w-6"
@@ -138,7 +138,7 @@ function OnboardingTeamPage() {
           <Link
             to="/onboarding/project"
             search={{ org }}
-            className="text-[11.5px] font-medium text-ink3 hover:text-ink1"
+            className="text-11p5 font-medium text-ink3 hover:text-ink1"
           >
             Skip — I'll invite people later
           </Link>

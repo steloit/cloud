@@ -64,9 +64,9 @@ function facetRows(record: Record<string, number> | undefined, fallback: FacetRo
 function FacetSection({ title, rows }: { title: string; rows: FacetRow[] }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="text-[10px] font-semibold text-ink3 uppercase tracking-wide">{title}</div>
+      <div className="text-10 font-semibold text-ink3 uppercase tracking-wide">{title}</div>
       {rows.map((row) => (
-        <div key={row.label} className="flex items-center gap-2 text-[11px]">
+        <div key={row.label} className="flex items-center gap-2 text-11">
           <span className="flex-1 truncate text-ink2">{row.label}</span>
           <span
             className={
@@ -167,7 +167,7 @@ function LogRow({
             <Pill tone="st">trace tr_8814 → api</Pill>
             <Btn
               variant="gh"
-              className="h-5 px-2 text-[10px]"
+              className="h-5 px-2 text-10"
               disabled
               disabledReason="Log context windows land in Phase 3"
             >
@@ -175,7 +175,7 @@ function LogRow({
             </Btn>
             <Btn
               variant="gh"
-              className="h-5 px-2 text-[10px]"
+              className="h-5 px-2 text-10"
               disabled
               disabledReason="The queue DLQ view (D8) lands in Phase 3"
             >
@@ -183,7 +183,7 @@ function LogRow({
             </Btn>
             <Btn
               variant="gh"
-              className="h-5 px-2 text-[10px]"
+              className="h-5 px-2 text-10"
               disabled
               disabledReason="The rule drawer (U8) lands in Phase 3"
             >
@@ -214,7 +214,7 @@ function LogsPage() {
           <div className="w-[360px]">
             <Inp className="mono" defaultValue="env:production level:warn+ since:13:30" />
           </div>
-          <span className="text-[10.5px] text-ink3">
+          <span className="text-10p5 text-ink3">
             — same language as ⌘K, the CLI, and alert rules
           </span>
           <span className="flex-1" />
@@ -226,9 +226,9 @@ function LogsPage() {
 
         <Card className="flex flex-col gap-1.5 p-3.5">
           <div className="flex items-center gap-2">
-            <span className="text-[11.5px] font-medium text-ink2">Volume</span>
+            <span className="text-11p5 font-medium text-ink2">Volume</span>
             <span className="flex-1" />
-            <span className="text-[10.5px] text-ink3">the spike is the navigation</span>
+            <span className="text-10p5 text-ink3">the spike is the navigation</span>
           </div>
           <Histogram buckets={logs.data?.histogram ?? []} />
         </Card>
@@ -238,7 +238,7 @@ function LogsPage() {
             <FacetSection title="Service" rows={facetRows(facets?.source, CANON_SERVICE_FACETS)} />
             <FacetSection title="Level" rows={facetRows(facets?.level, CANON_LEVEL_FACETS)} />
             <FacetSection title="Route" rows={CANON_ROUTE_FACETS} />
-            <p className="border-hair border-t pt-2 text-[10px] text-ink3">
+            <p className="border-hair border-t pt-2 text-10 text-ink3">
               facets are computed on the result, so they're always clickable truths
             </p>
           </Card>
@@ -254,7 +254,7 @@ function LogsPage() {
                 />
               ))}
             </div>
-            <p className="text-[10.5px] text-ink3">
+            <p className="text-10p5 text-ink3">
               j/k move · e expand · c context · one trace id stitches api → jobs → db — the same
               incident from three services, one stream
             </p>

@@ -1,6 +1,9 @@
 import { Link } from "@tanstack/react-router";
+import { useRef } from "react";
 import { Btn } from "@/design-system/btn";
 import { Icon } from "@/design-system/icon";
+import { Kbd } from "@/design-system/kbd";
+import { useOverlay } from "@/design-system/overlay";
 import { Dot, Pill } from "@/design-system/pill";
 import { cn } from "@/lib/utils";
 import {
@@ -26,8 +29,6 @@ export function useUnreadCount(): number {
 const PROPOSAL_SEARCH = { env: "production", proposal: "prp_7c31a2" };
 
 function ToneDot({ tone }: { tone: NotificationRow["tone"] }) {
-  if (tone === "none") return <span className="dot" style={{ background: "var(--hair)" }} />;
-  if (tone === "ai") return <span className="dot" style={{ background: "var(--assist)" }} />;
   return <Dot tone={tone} />;
 }
 
@@ -38,21 +39,19 @@ function Row({ row, org, unread }: { row: NotificationRow; org: string; unread: 
         <ToneDot tone={row.tone} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-[12px] font-medium leading-snug">{row.title}</span>
-        <span className="mono truncate text-[10.5px] text-ink3">{row.meta}</span>
-        {row.meta2 ? (
-          <span className="mono truncate text-[10.5px] text-ink3">{row.meta2}</span>
-        ) : null}
+        <span className="text-12 font-medium leading-snug">{row.title}</span>
+        <span className="mono truncate text-10p5 text-ink3">{row.meta}</span>
+        {row.meta2 ? <span className="mono truncate text-10p5 text-ink3">{row.meta2}</span> : null}
         {row.id === "n-approval" ? (
           <span className="mt-1.5 flex gap-2">
             <Link to="/$org/settings/policies" params={{ org }}>
-              <Btn variant="s" className="h-6 px-2 text-[10.5px]">
+              <Btn variant="s" className="h-6 px-2 text-10p5">
                 Review request
               </Btn>
             </Link>
             <Btn
               variant="gh"
-              className="h-6 px-2 text-[10.5px]"
+              className="h-6 px-2 text-10p5"
               disabled
               disabledReason="Approval threads land in Phase 5"
             >
@@ -67,7 +66,7 @@ function Row({ row, org, unread }: { row: NotificationRow; org: string; unread: 
               params={{ org, project: "ecommerce", service: "db-main" }}
               search={PROPOSAL_SEARCH}
             >
-              <Btn variant="a" className="h-6 px-2 text-[10.5px]">
+              <Btn variant="a" className="h-6 px-2 text-10p5">
                 Review proposal
               </Btn>
             </Link>
@@ -85,8 +84,8 @@ function CaughtUp({ org }: { org: string }) {
       <span className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-ok-tint">
         <Icon id="s-check" className="h-[15px] w-[15px] text-ok" />
       </span>
-      <div className="text-[13px] font-semibold">You're caught up</div>
-      <p className="text-[11.5px] leading-relaxed text-ink3">
+      <div className="text-13 font-semibold">You're caught up</div>
+      <p className="text-11p5 leading-relaxed text-ink3">
         Nothing needs you. Alerts, assistant proposals, approval requests and lifecycle events
         (ready · failed · renewed) will land here — the moment one does, the bell gets its dot back.
       </p>
@@ -96,17 +95,17 @@ function CaughtUp({ org }: { org: string }) {
           params={{ org, project: "ecommerce" }}
           search={{ env: "production" }}
         >
-          <Btn variant="s" className="h-7 px-2.5 text-[11px]">
+          <Btn variant="s" className="h-7 px-2.5 text-11">
             Review alert rules
           </Btn>
         </Link>
         <Link to="/account/notifications">
-          <Btn variant="s" className="h-7 px-2.5 text-[11px]">
+          <Btn variant="s" className="h-7 px-2.5 text-11">
             Delivery settings
           </Btn>
         </Link>
       </div>
-      <div className="mt-1 flex w-full items-center gap-2 border-hair border-t pt-3 text-[10.5px] text-ink3">
+      <div className="mt-1 flex w-full items-center gap-2 border-hair border-t pt-3 text-10p5 text-ink3">
         <span>Silence ≠ health — that's what Observe is for</span>
         <span className="ml-auto mono">history kept 90 d</span>
       </div>
@@ -126,6 +125,8 @@ export function BellPanel({
   const readIds = useNotificationsStore((s) => s.readIds);
   const markAllRead = useNotificationsStore((s) => s.markAllRead);
   const unread = NOTIFICATIONS.filter((n) => isUnread(n, readIds)).length;
+  const panel = useRef<HTMLDivElement>(null);
+  useOverlay(panel, open ? onClose : undefined, { trap: false });
 
   if (!open) return null;
 
@@ -151,17 +152,20 @@ export function BellPanel({
         aria-label="Close notifications"
         onClick={onClose}
       />
+      {/* Popover recipe (not the 424 drawer): anchored card, transparent
+          click-away, Esc closes, Tab not trapped. */}
       <div
+        ref={panel}
         className="card fixed top-[54px] right-4 z-50 flex w-[404px] flex-col overflow-hidden shadow-e2"
         role="dialog"
         aria-label="Notifications"
       >
         <div className="flex items-center gap-2 px-4 py-3">
-          <span className="text-[13px] font-semibold">Notifications</span>
+          <span className="text-13 font-semibold">Notifications</span>
           {unread > 0 ? <Pill tone="warn">{unread} unread</Pill> : null}
           <span className="flex-1" />
           {unread > 0 ? (
-            <Btn variant="gh" className="h-6 px-2 text-[10.5px]" onClick={markAllRead}>
+            <Btn variant="gh" className="h-6 px-2 text-10p5" onClick={markAllRead}>
               Mark all read
             </Btn>
           ) : null}
@@ -185,12 +189,14 @@ export function BellPanel({
               {section("Yesterday", yesterday)}
             </div>
             <div className="flex items-center gap-2 border-hair border-t px-4 py-2.5">
-              <span className="text-[10.5px] text-ink3">↑↓ move · ↵ open · e mark read</span>
+              <span className="flex items-center gap-1 text-10p5 text-ink3">
+                <Kbd>↑↓</Kbd> move · <Kbd>↵</Kbd> open · <Kbd>e</Kbd> mark read
+              </span>
               <span className="flex-1" />
               <Link
                 to="/$org/notifications"
                 params={{ org }}
-                className="text-[11px] font-medium text-steel"
+                className="text-11 font-medium text-steel"
                 onClick={onClose}
               >
                 View all →

@@ -83,9 +83,7 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
           <span className="chip border-dashed">compare: prev hour</span>
         </div>
         <span className="flex-1" />
-        <span className="text-[10.5px] text-ink3">
-          ◆ deploys · ◇ scale — one timeline with Observe
-        </span>
+        <span className="text-10p5 text-ink3">◆ deploys · ◇ scale — one timeline with Observe</span>
       </div>
 
       <div className="tabrow">
@@ -102,7 +100,7 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
       </div>
 
       {pane !== "Overview" ? (
-        <p className="text-[11.5px] text-ink3">
+        <p className="text-11p5 text-ink3">
           The {pane} pane needs command-level telemetry the canon lacks — Overview is live.
         </p>
       ) : (
@@ -121,10 +119,10 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
 
           <Card className="flex flex-col gap-2.5 p-4">
             <div className="flex items-center gap-2.5">
-              <span className="text-[12.5px] font-semibold">Hit ratio</span>
-              <span className="text-[10.5px] text-ink3">threshold &lt; 95% → alert</span>
+              <span className="text-12p5 font-semibold">Hit ratio</span>
+              <span className="text-10p5 text-ink3">threshold &lt; 95% → alert</span>
               <span className="flex-1" />
-              <span className="mono text-[10.5px] text-ink2">
+              <span className="mono text-10p5 text-ink2">
                 ◆ api deploy #142 · brief dip: new keys
               </span>
             </div>
@@ -133,9 +131,9 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
               threshold={95}
               markers={toMarkers(hitRate.data)}
               unit="%"
-              height={150}
+              size="lg"
             />
-            <div className="border-hair border-t pt-2.5 text-[10.5px] text-ink3">
+            <div className="border-hair border-t pt-2.5 text-10p5 text-ink3">
               brush: 13:40 → now · a deploy that cold-starts the cache is expected — a decay without
               one is not
             </div>
@@ -144,30 +142,30 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
           <div className="grid grid-cols-2 gap-3.5">
             <Card className="flex flex-col gap-2 p-3.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11.5px] font-medium text-ink2">Memory vs eviction line</span>
+                <span className="text-11p5 font-medium text-ink2">Memory vs eviction line</span>
                 <span className="flex-1" />
-                <span className="mono text-[12px]">612 MB</span>
+                <span className="mono text-12">612 MB</span>
               </div>
-              <MetricChart series={toSeries(memoryProxy.data)} tone="steel" height={72} />
-              <span className="text-[10.5px] text-ink3">
+              <MetricChart series={toSeries(memoryProxy.data)} tone="steel" size="sm" />
+              <span className="text-10p5 text-ink3">
                 612 MB of 1 GB — headroom before allkeys-lru engages · frag ratio 1.03
               </span>
             </Card>
             <Card className="flex flex-col gap-2 p-3.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11.5px] font-medium text-ink2">Ops by command class</span>
+                <span className="text-11p5 font-medium text-ink2">Ops by command class</span>
                 <span className="flex-1" />
-                <span className="text-[10.5px] text-ink3">━ reads · ━ writes</span>
+                <span className="text-10p5 text-ink3">━ reads · ━ writes</span>
               </div>
-              <MetricChart series={toSeries(opsProxy.data)} tone="ok" height={72} />
-              <span className="text-[10.5px] text-ink3">
+              <MetricChart series={toSeries(opsProxy.data)} tone="ok" size="sm" />
+              <span className="text-10p5 text-ink3">
                 read-heavy shape fits cache mode — the assistant flags a drift toward writes as a
                 mode-fit question
               </span>
             </Card>
           </div>
 
-          <div className="flex items-center gap-2.5 text-[10.5px] text-ink3">
+          <div className="flex items-center gap-2.5 text-10p5 text-ink3">
             <span>raw 15 d · downsampled 13 mo · every pane is a query:</span>
             <Copybit>steloit metrics query cache 'hit_ratio' --since 1h</Copybit>
           </div>
@@ -209,7 +207,7 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
             Switch to Durable…
           </Btn>
         </div>
-        <p className="text-[11.5px] leading-relaxed text-ink2">
+        <p className="text-11p5 leading-relaxed text-ink2">
           stated before apply: +$6/mo · AOF persistence · one restart (~10 s) · existing keys
           preserved
         </p>
@@ -249,7 +247,7 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
           <Btn variant="dgr" disabled disabledReason="No flush endpoint in the spec (finding)">
             FLUSHALL…
           </Btn>
-          <p className="text-[11px] leading-relaxed text-ink3">
+          <p className="text-11 leading-relaxed text-ink3">
             requires write-unlock + typing the instance name · 41k keys · api will cold-start its
             cache — hit ratio dips are expected and annotated in Observe
           </p>

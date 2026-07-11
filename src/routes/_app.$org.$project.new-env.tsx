@@ -141,7 +141,7 @@ function NewEnvironmentPage() {
                 onChange={(e) => setName(e.target.value)}
                 className="foc"
               />
-              <div className="mono mt-1.5 text-[10.5px] text-ink3">
+              <div className="mono mt-1.5 text-10p5 text-ink3">
                 for the US client launch · promotions can target this environment like any other
               </div>
             </Card>
@@ -202,14 +202,14 @@ function NewEnvironmentPage() {
                           </span>
                           <span className="flex-1">
                             <span className="flex items-center gap-2">
-                              <b className="text-[12px]">{c.name}</b>
+                              <b className="text-12">{c.name}</b>
                               <Pill tone="mut">customer {prov}</Pill>
                             </span>
-                            <span className="mono mt-0.5 block text-[9.5px] text-ink3">
+                            <span className="mono mt-0.5 block text-10 text-ink3">
                               {c.region.replace("/", " · ")} · customer {prov} · healthy
                             </span>
                           </span>
-                          <span className="mono text-[9.5px] text-ink3">
+                          <span className="mono text-10 text-ink3">
                             {CELL_DISPLAY[c.id]?.latency ?? ""}
                           </span>
                           {on ? (
@@ -245,12 +245,10 @@ function NewEnvironmentPage() {
                           </span>
                           <span className="flex-1">
                             <span className="flex items-center gap-2">
-                              <b className={cn("text-[12px]", on && "text-steel")}>{m.title}</b>
+                              <b className={cn("text-12", on && "text-steel")}>{m.title}</b>
                               <Pill tone="mut">managed</Pill>
                             </span>
-                            <span className="mono mt-0.5 block text-[9.5px] text-ink3">
-                              {m.sub}
-                            </span>
+                            <span className="mono mt-0.5 block text-10 text-ink3">{m.sub}</span>
                           </span>
                           {on ? (
                             <Icon id="s-check" className="h-[13px] w-[13px] text-steel" />
@@ -262,14 +260,14 @@ function NewEnvironmentPage() {
                 </>
               ) : null}
 
-              <div className="flex items-center gap-2 text-[11px]">
+              <div className="flex items-center gap-2 text-11">
                 <Pill tone="ok">
                   permitted — policy <span className="mono">allowed-regions</span> expanded by asha
                   for the US launch
                 </Pill>
-                <span className="mono text-[9.5px] text-ink3">evt_44be… · yesterday</span>
+                <span className="mono text-10 text-ink3">evt_44be… · yesterday</span>
               </div>
-              <p className="border-hair border-t pt-2.5 text-[10px] leading-relaxed text-ink3">
+              <p className="border-hair border-t pt-2.5 text-10 leading-relaxed text-ink3">
                 One combined list, distance-sorted, filterable — a customer cell is just a region
                 whose hardware you own. Policy <span className="mono">allowed-regions</span> can
                 restrict this list (a restricted target shows disabled with the policy named),
@@ -290,10 +288,10 @@ function NewEnvironmentPage() {
                   )}
                   style={shape === "clone" ? { background: "var(--steel-tint)" } : undefined}
                 >
-                  <b className={cn("text-[12.5px]", shape === "clone" && "text-steel")}>
+                  <b className={cn("text-12p5", shape === "clone" && "text-steel")}>
                     Clone production's shape
                   </b>
-                  <span className="text-[10.5px] leading-relaxed text-ink2">
+                  <span className="text-10p5 leading-relaxed text-ink2">
                     All 7 services, bindings re-wired inside the new region, scaled to{" "}
                     <span className="mono">S</span> by default — promote to full scale when the
                     client goes live.
@@ -309,10 +307,8 @@ function NewEnvironmentPage() {
                   )}
                   style={shape === "empty" ? { background: "var(--steel-tint)" } : undefined}
                 >
-                  <b className={cn("text-[12.5px]", shape === "empty" && "text-steel")}>
-                    Start empty
-                  </b>
-                  <span className="text-[10.5px] leading-relaxed text-ink2">
+                  <b className={cn("text-12p5", shape === "empty" && "text-steel")}>Start empty</b>
+                  <span className="text-10p5 leading-relaxed text-ink2">
                     Add services one by one — the environment exists as a boundary first.
                   </span>
                 </button>
@@ -337,7 +333,7 @@ function NewEnvironmentPage() {
                     Branch from production
                   </button>
                 </div>
-                <p className="mt-2 text-[10.5px] leading-relaxed text-ink3">
+                <p className="mt-2 text-10p5 leading-relaxed text-ink3">
                   Branching across regions works — initial copy is a one-time{" "}
                   <span className="mono">21.4 GB · ~$0.43</span> egress, then deltas. For a US
                   client, an empty schema usually respects data residency better.
@@ -345,7 +341,7 @@ function NewEnvironmentPage() {
               </div>
             </Card>
 
-            <div className="flex items-center gap-3.5 text-[11px]">
+            <div className="flex items-center gap-3.5 text-11">
               <Pill tone="ok">no cross-region bindings — everything co-located ✓</Pill>
               <span className="text-ink3">
                 this is why the stack moves, not one instance: no torn topology, no egress tax on
@@ -355,7 +351,7 @@ function NewEnvironmentPage() {
 
             <Card className="flex items-center gap-3 px-4 py-3">
               <Dot tone="ok" />
-              <span className="flex-1 text-[11px] text-ink2">
+              <span className="flex-1 text-11 text-ink2">
                 After the target, everything is the same: services clone at their shapes, bindings
                 re-wire, the estimate builds. <b>The developer never learns a second workflow.</b>
               </span>
@@ -368,14 +364,14 @@ function NewEnvironmentPage() {
                 <Eyebrow className="text-steel">Estimate · into {targetCell.name}</Eyebrow>
                 <div className="mono text-[22px] font-semibold tracking-[-0.5px]">
                   {totalLabel}
-                  <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                  <span className="ml-1 text-11 font-normal text-ink3">/mo</span>
                 </div>
-                <p className="text-[10.5px] leading-relaxed text-ink2">
+                <p className="text-10p5 leading-relaxed text-ink2">
                   {shape === "clone" ? "Clone of production at S scale. " : ""}On a customer cell
                   you pay Steloit's <b>control-plane fee</b>; compute &amp; storage bill to{" "}
                   <b>your</b> cloud account, not ours.
                 </p>
-                <div className="flex flex-col gap-1 border-hair border-t pt-2 text-[10px] text-ink3">
+                <div className="flex flex-col gap-1 border-hair border-t pt-2 text-10 text-ink3">
                   <div className="flex justify-between">
                     <span>Steloit control plane</span>
                     <span className="mono">{totalLabel}/mo</span>
@@ -391,7 +387,7 @@ function NewEnvironmentPage() {
                 <Eyebrow>Estimated monthly cost</Eyebrow>
                 <div className="mono text-[28px] font-semibold tracking-[-0.5px]">
                   {totalLabel}
-                  <span className="ml-1.5 text-[11px] font-normal text-ink3">
+                  <span className="ml-1.5 text-11 font-normal text-ink3">
                     {shape === "clone"
                       ? "/month · cloned shape at S"
                       : "/month · empty — services priced as you add them"}
@@ -404,14 +400,14 @@ function NewEnvironmentPage() {
                       { label: "api + worker · S", amount: "$17" },
                       { label: "cache, jobs, assets · S", amount: "$8" },
                     ].map((line) => (
-                      <div key={line.label} className="flex justify-between text-[11.5px]">
+                      <div key={line.label} className="flex justify-between text-11p5">
                         <span className="text-ink2">{line.label}</span>
                         <span className="mono">{line.amount}</span>
                       </div>
                     ))}
                   </div>
                 ) : null}
-                <p className="mt-1 border-hair border-t pt-2.5 text-[10.5px] leading-relaxed text-ink3">
+                <p className="mt-1 border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
                   Rolls up as its own line —{" "}
                   <b className="text-ink2">per-client cost is free accounting</b> when the client is
                   an environment (or project).
@@ -421,7 +417,7 @@ function NewEnvironmentPage() {
             {targetCell ? (
               <Card className="flex flex-col gap-1.5 p-4">
                 <Eyebrow>Inherited, unchanged</Eyebrow>
-                <div className="flex flex-col gap-1.5 text-[10.5px] text-ink2">
+                <div className="flex flex-col gap-1.5 text-10p5 text-ink2">
                   <div>
                     Private networking &amp; IP allowlists → <span className="mono">Network</span>{" "}
                     on the cell
@@ -455,7 +451,7 @@ function NewEnvironmentPage() {
             <div className="flex justify-center">
               <Copybit>{cli}</Copybit>
             </div>
-            <Card className="p-3 text-[10.5px] leading-relaxed text-ink3">
+            <Card className="p-3 text-10p5 leading-relaxed text-ink3">
               Region hierarchy:{" "}
               <b className="text-ink2">
                 org = prefill · environment = home · instance = inherit, exception by C7

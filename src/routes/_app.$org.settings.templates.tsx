@@ -137,10 +137,8 @@ function TemplatesPage() {
                   return (
                     <tr key={t.id}>
                       <td>
-                        <span className="mono text-[11.5px]">{t.name}</span>
-                        {d?.sub ? (
-                          <div className="mt-0.5 text-[10.5px] text-ink3">{d.sub}</div>
-                        ) : null}
+                        <span className="mono text-11p5">{t.name}</span>
+                        {d?.sub ? <div className="mt-0.5 text-10p5 text-ink3">{d.sub}</div> : null}
                       </td>
                       <td className="text-ink2">{d?.contents ?? "—"}</td>
                       <td className="mono">{fmtMoney(t.monthly_estimate_cents ?? 0)}</td>
@@ -173,7 +171,7 @@ function TemplatesPage() {
             </table>
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Secrets are never inside a template. Bindings are captured as placeholders and re-minted
             per consumer at create — same rule as everywhere. Official templates (store,
             internal-tools…) live in the gallery and are managed by Steloit.

@@ -75,7 +75,7 @@ function CellCard({ cell }: { cell: Cell }) {
         <span className="glyph h-[26px] w-[26px]">
           <Icon id="s-globe" className="!h-[13px] !w-[13px]" />
         </span>
-        <b className="text-[13px]">{cell.name}</b>
+        <b className="text-13">{cell.name}</b>
         <Pill tone="mut">customer {prov}</Pill>
         <span className="sp" />
         {cell.status === "upgrade_available" ? (
@@ -84,11 +84,11 @@ function CellCard({ cell }: { cell: Cell }) {
           <Pill tone={healthy ? "ok" : "warn"}>{cell.status.replace("_", " ")}</Pill>
         )}
       </div>
-      <div className="mono text-[9.5px] text-ink3">
+      <div className="mono text-10 text-ink3">
         {cell.region.replace("/", " · ")}
         {d ? ` · ${d.identity}` : ""}
       </div>
-      <div className="flex gap-3.5 border-hair border-t pt-2.5 text-[10px] text-ink2">
+      <div className="flex gap-3.5 border-hair border-t pt-2.5 text-10 text-ink2">
         <span>
           {envCount} environment{envCount === 1 ? "" : "s"} deployed here
         </span>
@@ -103,16 +103,16 @@ function CellCard({ cell }: { cell: Cell }) {
       <div className="flex gap-1.5">
         <Btn
           variant="s"
-          className={cn("h-6 px-2 text-[10px]", d?.primaryWarn && "text-warn")}
+          className={cn("h-6 px-2 text-10", d?.primaryWarn && "text-warn")}
           disabled
           disabledReason={OPS_REASON}
         >
           {d?.primaryAction ?? "Health & upgrades"}
         </Btn>
-        <Btn variant="gh" className="h-6 px-2 text-[10px]" disabled disabledReason={OPS_REASON}>
+        <Btn variant="gh" className="h-6 px-2 text-10" disabled disabledReason={OPS_REASON}>
           Network
         </Btn>
-        <Btn variant="gh" className="h-6 px-2 text-[10px]" disabled disabledReason={OPS_REASON}>
+        <Btn variant="gh" className="h-6 px-2 text-10" disabled disabledReason={OPS_REASON}>
           Support access
         </Btn>
       </div>
@@ -160,12 +160,10 @@ function CellsPage() {
           <div ref={connectRef}>
             <Card className="flex flex-col overflow-hidden p-0">
               <div className="flex items-center gap-2.5 border-hair border-b px-4 py-2.5">
-                <b className="text-[12.5px]">Connect a new cloud</b>
+                <b className="text-12p5">Connect a new cloud</b>
                 <Pill tone="st">in progress</Pill>
                 <span className="sp" />
-                <span className="mono text-[9.5px] text-ink3">
-                  Acme APAC Cell · aws · ap-south-1
-                </span>
+                <span className="mono text-10 text-ink3">Acme APAC Cell · aws · ap-south-1</span>
               </div>
               <div className="flex">
                 <div className="flex w-[230px] shrink-0 flex-col gap-1 border-hair border-r p-3.5">
@@ -179,25 +177,31 @@ function CellsPage() {
                     >
                       <span
                         className={cn(
-                          "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px]",
-                          s.state === "done" && "bg-ok text-[#0B0E11]",
-                          s.state === "active" && "bg-prov text-[#0B0E11]",
+                          "inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-10",
+                          s.state === "done" && "bg-ok text-canvas",
+                          s.state === "active" && "bg-prov text-canvas",
                           s.state === "todo" && "border border-hair text-ink3",
                         )}
                       >
-                        {s.state === "done" ? "✓" : s.state === "active" ? "●" : i + 1}
+                        {s.state === "done" ? (
+                          <Icon id="s-check" className="h-2.5 w-2.5" />
+                        ) : s.state === "active" ? (
+                          "●"
+                        ) : (
+                          i + 1
+                        )}
                       </span>
                       <div>
-                        <div className="text-[11px] text-ink1">{s.title}</div>
-                        <div className="text-[8.5px] text-ink3">{s.sub}</div>
+                        <div className="text-11 text-ink1">{s.title}</div>
+                        <div className="text-10 text-ink3">{s.sub}</div>
                       </div>
                     </div>
                   ))}
                 </div>
                 <div className="flex flex-1 flex-col gap-2.5 p-4">
                   <div>
-                    <b className="text-[12.5px]">Cross-account trust</b>
-                    <div className="mt-1 text-[10.5px] leading-relaxed text-ink3">
+                    <b className="text-12p5">Cross-account trust</b>
+                    <div className="mt-1 text-10p5 leading-relaxed text-ink3">
                       Run one CloudFormation stack — it creates a scoped role Steloit assumes. No
                       static keys ever leave your account; trust is an external-ID-guarded
                       assume-role.
@@ -205,17 +209,17 @@ function CellsPage() {
                   </div>
                   <Card className="flex flex-col gap-1.5 bg-surface2 p-3">
                     <Eyebrow>Prerequisites — validated before anything provisions</Eyebrow>
-                    <div className="flex items-start gap-2 text-[10.5px] text-ink2">
+                    <div className="flex items-start gap-2 text-10p5 text-ink2">
                       <Dot tone="ok" />
                       <span>
                         Region ap-south-1 enabled · service quotas sufficient (vCPU 64/128)
                       </span>
                     </div>
-                    <div className="flex items-start gap-2 text-[10.5px] text-ink2">
+                    <div className="flex items-start gap-2 text-10p5 text-ink2">
                       <Dot tone="ok" />
                       <span>No SCP blocks on required services (EKS, RDS, S3, VPC)</span>
                     </div>
-                    <div className="flex items-start gap-2 text-[10.5px] text-ink2">
+                    <div className="flex items-start gap-2 text-10p5 text-ink2">
                       <Dot tone="warn" />
                       <span>
                         Dedicated VPC recommended — we can create one, or attach yours in the
@@ -228,7 +232,7 @@ function CellsPage() {
                     ExternalId=ex_9f2a
                   </Copybit>
                   <div className="flex items-center gap-2.5">
-                    <span className="mono text-[9.5px] text-ink3">
+                    <span className="mono text-10 text-ink3">
                       waiting for stack CREATE_COMPLETE — auto-detected via the trust role
                     </span>
                     <span className="sp" />
@@ -245,7 +249,7 @@ function CellsPage() {
             </Card>
           </div>
 
-          <p className="text-[10px] leading-relaxed text-ink3">
+          <p className="text-10 leading-relaxed text-ink3">
             A cell is <b>Infrastructure</b>, governed by existing primitives: an{" "}
             <span className="mono">allowed-regions</span> Policy (G7) can permit or forbid deploying
             production into a customer cell exactly as it gates a managed region — no BYOC-specific

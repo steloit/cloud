@@ -91,12 +91,12 @@ function describeEvent(e: Event): EventLine {
 function EventRow({ event }: { event: Event }) {
   const line = describeEvent(event);
   return (
-    <div className="flex items-center gap-2.5 border-hair border-b py-2 text-[11.5px] last:border-b-0">
+    <div className="flex items-center gap-2.5 border-hair border-b py-2 text-11p5 last:border-b-0">
       <span className="mono text-ink3">{fmtTime(event.at)}</span>
       <span className="w-4 text-center text-ink2">{kindGlyph(event.kind)}</span>
       <span className="min-w-0 flex-1 truncate text-ink2">{line.text}</span>
       <Pill tone={line.pill.tone}>{line.pill.label}</Pill>
-      {line.actor ? <span className="mono text-[10.5px] text-ink3">{line.actor}</span> : null}
+      {line.actor ? <span className="mono text-10p5 text-ink3">{line.actor}</span> : null}
     </div>
   );
 }
@@ -152,7 +152,7 @@ function EventsPage() {
               ))}
             </>
           ) : null}
-          <div className="flex flex-col gap-1 border-hair border-t pt-2.5 text-[10.5px] text-ink3">
+          <div className="flex flex-col gap-1 border-hair border-t pt-2.5 text-10p5 text-ink3">
             <span>
               This stream is the spine — every ◆ ◇ ⬖ marker on every chart is one of these rows.
             </span>
@@ -164,7 +164,7 @@ function EventsPage() {
 
         <Card className="flex items-center gap-2.5 p-3.5">
           <Dot tone="warn" />
-          <span className="flex-1 text-[11.5px] text-ink2">
+          <span className="flex-1 text-11p5 text-ink2">
             Correlation strip: select any two events to overlay their window in Metrics — "#142 →
             p95" took four minutes to prove by hand once; now it's two clicks.
           </span>

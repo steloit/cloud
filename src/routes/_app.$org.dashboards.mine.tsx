@@ -131,7 +131,7 @@ function DashTable({ org, rows }: { org: string; rows: Row[] }) {
                 ) : (
                   <span className="mono font-medium">{row.name}</span>
                 )}
-                {row.sub ? <div className="text-[10.5px] text-ink3">{row.sub}</div> : null}
+                {row.sub ? <div className="text-10p5 text-ink3">{row.sub}</div> : null}
               </td>
               <td>
                 <Pill tone={row.scopeTone}>{row.scope}</Pill>
@@ -213,7 +213,7 @@ function MyDashboards() {
         <Eyebrow>Shared with you · 4</Eyebrow>
         <DashTable org={org} rows={SHARED} />
 
-        <div className="mt-auto text-[10.5px] text-ink3">
+        <div className="mt-auto text-10p5 text-ink3">
           Shared dashboards are live for everyone — an edit is an edit for all viewers, logged in
           the audit trail. Duplicate to riff privately.
         </div>

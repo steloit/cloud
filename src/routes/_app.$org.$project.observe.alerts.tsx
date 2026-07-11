@@ -102,7 +102,7 @@ function AlertsPage() {
         </div>
 
         {tab === "history" || tab === "silences" ? (
-          <p className="text-[11.5px] text-ink3">
+          <p className="text-11p5 text-ink3">
             {tab === "history" ? "History lands in Phase 3" : "Silences land in Phase 3"}
           </p>
         ) : (
@@ -129,8 +129,8 @@ function AlertsPage() {
 
         <div className="grid grid-cols-2 gap-3.5">
           <Card className="flex flex-col gap-2 p-4">
-            <div className="text-[12px] font-semibold">New rule</div>
-            <p className="text-[11.5px] text-ink3">
+            <div className="text-12 font-semibold">New rule</div>
+            <p className="text-11p5 text-ink3">
               opens the rule drawer — ⚑ buttons on Metrics &amp; Logs land there pre-filled
             </p>
             <div>
@@ -143,7 +143,7 @@ function AlertsPage() {
             <span className="pt-1">
               <Dot tone="ok" />
             </span>
-            <p className="text-[11.5px] leading-relaxed text-ink2">
+            <p className="text-11p5 leading-relaxed text-ink2">
               Anything findable is alertable — rules fire into the inbox (N2); delivery is each
               person's (P6), escalation is org policy, and every silence is logged with actor +
               duration.

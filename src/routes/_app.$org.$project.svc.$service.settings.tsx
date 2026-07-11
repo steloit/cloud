@@ -61,7 +61,7 @@ function SettingsTab() {
     ) : svc.product === "ai-gateway" ? (
       <GatewaySettingsTab {...props} />
     ) : (
-      <Card className="p-4 text-[12px] text-ink2">
+      <Card className="p-4 text-12 text-ink2">
         Settings for {svc.product} land in a later phase.
       </Card>
     );

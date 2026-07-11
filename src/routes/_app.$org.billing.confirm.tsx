@@ -64,10 +64,10 @@ function ConfirmPlanPage() {
               ].map(([k, v]) => (
                 <div key={k} className="fieldrow">
                   <span className="k">{k}</span>
-                  <span className="mono text-[12px]">{v}</span>
+                  <span className="mono text-12">{v}</span>
                 </div>
               ))}
-              <p className="border-hair border-t pt-2.5 text-[11.5px] leading-relaxed text-ink2">
+              <p className="border-hair border-t pt-2.5 text-11p5 leading-relaxed text-ink2">
                 Mid-cycle changes, stated once: upgrades apply immediately and the difference is
                 prorated to your anchor; downgrades apply at the next anchor so you keep what you
                 paid for. Seats added mid-cycle prorate the same way.
@@ -86,13 +86,13 @@ function ConfirmPlanPage() {
             </Card>
             <div className="flex w-[320px] shrink-0 flex-col gap-3">
               <Card className="flex flex-col gap-1.5 p-3.5">
-                <b className="text-[12.5px]">What changes right now</b>
-                <p className="text-[11.5px] leading-relaxed text-ink2">
+                <b className="text-12p5">What changes right now</b>
+                <p className="text-11p5 leading-relaxed text-ink2">
                   Nothing in your projects — you already had Pro capabilities on trial. The only
                   change is the charge and the anchor date.
                 </p>
               </Card>
-              <Card className="p-3.5 text-[11.5px] leading-relaxed text-ink3">
+              <Card className="p-3.5 text-11p5 leading-relaxed text-ink3">
                 Cancel anytime — the plan runs to the anchor you paid through, then drops to Free by
                 the written rules (B12). No refunds needed because nothing bills ahead of use except
                 the flat fee.

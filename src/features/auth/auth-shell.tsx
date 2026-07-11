@@ -22,12 +22,12 @@ export function AuthShell({ children }: { children: ReactNode }) {
             <br />
             Infinite possibilities.
           </h2>
-          <p className="mt-4 max-w-[380px] text-[13px] leading-relaxed text-[#9AA6B2]">
+          <p className="mt-4 max-w-[380px] text-13 leading-relaxed text-[#9AA6B2]">
             Postgres, cache, storage, queues and compute — provisioned in minutes, monitored from
             the first second, priced before they exist.
           </p>
         </div>
-        <div className="mono text-[11px] text-[#5C6773]">
+        <div className="mono text-11 text-[#5C6773]">
           $ steloit project create · time-to-first-connection &lt; 5 min
         </div>
       </aside>

@@ -56,14 +56,14 @@ function ProjectMembersPage() {
       role: "Admin",
       source: <Pill tone="mut">inherited · org Owner</Pill>,
       lastActive: "yesterday",
-      action: <span className="text-[11px] text-ink3">managed at org</span>,
+      action: <span className="text-11 text-ink3">managed at org</span>,
     },
     {
-      member: <span className="mono text-[11.5px]">dev-3@acme.dev</span>,
+      member: <span className="mono text-11p5">dev-3@acme.dev</span>,
       role: "invited · Developer",
       source: "—",
       lastActive: "pending 2 d",
-      action: <span className="text-[11px] text-ink3">—</span>,
+      action: <span className="text-11 text-ink3">—</span>,
       invited: true,
     },
   ];
@@ -117,11 +117,11 @@ function ProjectMembersPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-2.5 p-4">
             <Eyebrow>Roles</Eyebrow>
-            <div className="text-[11.5px]">
+            <div className="text-11p5">
               <b>Admin</b>
               <span className="text-ink2"> — everything incl. deletes &amp; policies</span>
             </div>
-            <div className="text-[11.5px]">
+            <div className="text-11p5">
               <b>Developer</b>
               <span className="text-ink2">
                 {" "}
@@ -129,13 +129,13 @@ function ProjectMembersPage() {
                 this rule working)
               </span>
             </div>
-            <div className="text-[11.5px]">
+            <div className="text-11p5">
               <b>Viewer</b>
               <span className="text-ink2"> — read-only, no secrets</span>
             </div>
           </Card>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Role changes apply on next request — no re-login — and land in the audit log with before
             → after.
           </p>

@@ -43,12 +43,12 @@ function ForgotPasswordPage() {
         </Btn>
       </form>
       {sent ? (
-        <Card className="border-ok p-3.5 text-[12px] leading-relaxed text-ink2">
+        <Card className="border-ok p-3.5 text-12 leading-relaxed text-ink2">
           If an account exists for {email || "that address"}, a reset link is on its way. It expires
           in 30 minutes.
         </Card>
       ) : null}
-      <div className="text-center text-[11.5px]">
+      <div className="text-center text-11p5">
         <Link to="/login" className="font-medium text-steel">
           ← Back to sign in
         </Link>

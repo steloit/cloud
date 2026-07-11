@@ -56,7 +56,7 @@ function MessagesPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             Messages are a Queue surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -91,7 +91,7 @@ function MessagesPage() {
         </div>
 
         {tab !== "Dead letters · 2" ? (
-          <p className="text-[11.5px] text-ink3">
+          <p className="text-11p5 text-ink3">
             The ready and in-flight lists need a messages endpoint the spec lacks (finding) — dead
             letters carry the incident today.
           </p>
@@ -103,7 +103,7 @@ function MessagesPage() {
                 Observe.
               </span>
               <Link to="/$org/$project/observe/events" params={{ org, project }} search={{ env }}>
-                <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+                <Btn variant="s" className="h-6 px-2.5 text-10p5">
                   Open in Observe →
                 </Btn>
               </Link>
@@ -170,7 +170,7 @@ function MessagesPage() {
               >
                 Discard…
               </Btn>
-              <span className="text-[10.5px] text-ink3">
+              <span className="text-10p5 text-ink3">
                 Redrive after the fix ships — both actions are logged with the actor and reason.
               </span>
             </div>

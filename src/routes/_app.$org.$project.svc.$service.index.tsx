@@ -181,8 +181,8 @@ function DbMainOverview(ctx: OverviewCtx) {
         <Card className="flex flex-1 flex-col gap-2.5 p-4">
           <Eyebrow className="text-warn">Needs attention</Eyebrow>
           <div className="flex items-baseline gap-2.5">
-            <b className="text-[13px]">Slow query since deploy #142</b>
-            <span className="mono text-[10.5px] text-ink3">14:02 · traced</span>
+            <b className="text-13">Slow query since deploy #142</b>
+            <span className="mono text-10p5 text-ink3">14:02 · traced</span>
           </div>
           <div className="logwell">
             SELECT * FROM orders WHERE customer_id = $1 … · <span className="lv-w">642 ms</span> ·
@@ -204,7 +204,7 @@ function DbMainOverview(ctx: OverviewCtx) {
               <Btn variant="s">Query Insights</Btn>
             </Link>
           </div>
-          <div className="flex gap-5 border-hair border-t pt-2.5 text-[11px] text-ink3">
+          <div className="flex gap-5 border-hair border-t pt-2.5 text-11 text-ink3">
             <span>
               <b className="text-ink1">4</b> branches
             </span>
@@ -238,16 +238,16 @@ function DbMainOverview(ctx: OverviewCtx) {
           search={{ env }}
         >
           <Card className="flex h-full flex-col gap-1 p-3.5 hover:border-ink3">
-            <b className="text-[12.5px]">New branch</b>
-            <span className="text-[10.5px] text-ink3">instant copy-on-write</span>
+            <b className="text-12p5">New branch</b>
+            <span className="text-10p5 text-ink3">instant copy-on-write</span>
           </Card>
         </Link>
         <Card
           className="flex flex-col gap-1 p-3.5 opacity-55"
           title="Restore (D5) lands in Phase 3"
         >
-          <b className="text-[12.5px]">Restore to branch…</b>
-          <span className="text-[10.5px] text-ink3">never in place</span>
+          <b className="text-12p5">Restore to branch…</b>
+          <span className="text-10p5 text-ink3">never in place</span>
         </Card>
         <Link
           to="/$org/$project/svc/$service/insights"
@@ -255,16 +255,16 @@ function DbMainOverview(ctx: OverviewCtx) {
           search={{ env }}
         >
           <Card className="flex h-full flex-col gap-1 p-3.5 hover:border-ink3">
-            <b className="text-[12.5px]">Query Insights</b>
-            <span className="text-[10.5px] text-ink3">find the 642 ms</span>
+            <b className="text-12p5">Query Insights</b>
+            <span className="text-10p5 text-ink3">find the 642 ms</span>
           </Card>
         </Link>
         <Card
           className="flex flex-col gap-1 p-3.5 opacity-55"
           title="Bindings (D11/U2) land in Phase 3"
         >
-          <b className="text-[12.5px]">New binding</b>
-          <span className="text-[10.5px] text-ink3">least-privilege</span>
+          <b className="text-12p5">New binding</b>
+          <span className="text-10p5 text-ink3">least-privilege</span>
         </Card>
       </div>
     </>
@@ -299,7 +299,7 @@ function overviewFor(ctx: OverviewCtx) {
       return <WorkerOverview {...ctx} />;
     default:
       return (
-        <Card className="p-4 text-[12px] text-ink2">
+        <Card className="p-4 text-12 text-ink2">
           The {svc.product} overview lands in a later phase.
         </Card>
       );

@@ -97,7 +97,7 @@ function PlansPage() {
                         </Btn>
                         <Pill tone="err">blocked</Pill>
                       </span>
-                      <span className="text-[10.5px] text-ink3">
+                      <span className="text-10p5 text-ink3">
                         12 members &gt; 3 · 4 projects &gt; 1
                       </span>
                     </div>
@@ -114,7 +114,7 @@ function PlansPage() {
                         </Btn>
                         <Pill tone="err">blocked</Pill>
                       </span>
-                      <span className="text-[10.5px] text-ink3">
+                      <span className="text-10p5 text-ink3">
                         12 members &gt; 5 · 2 cells need Business
                       </span>
                     </div>
@@ -137,7 +137,7 @@ function PlansPage() {
             </table>
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Infrastructure (databases, caches, storage, compute, AI Gateway tokens) is pay-as-you-go
             on every tier and never appears in this table. Never gated on any plan: TLS, backups,
             MFA, policies, alerts, dunning protections, deleting your own data.

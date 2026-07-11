@@ -7,6 +7,7 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart, Spark } from "@/design-system/chart";
 import { Flabel, Inp } from "@/design-system/inp";
+import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import { useDashboard } from "@/features/dashboards/hooks";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
@@ -60,11 +61,11 @@ function WidgetShell({
     >
       <div className="flex items-center gap-2">
         {editing ? (
-          <span className="mono cursor-grab text-[11px] text-ink3" title="Drag to rearrange">
+          <span className="mono cursor-grab text-11 text-ink3" title="Drag to rearrange">
             ⋮⋮
           </span>
         ) : null}
-        <span className="text-[12.5px] font-semibold">{TITLES[widget.id] ?? widget.query}</span>
+        <span className="text-12p5 font-semibold">{TITLES[widget.id] ?? widget.query}</span>
         <span className="flex-1" />
         {editing ? (
           <Btn
@@ -95,7 +96,7 @@ function MetricWidget({ widget }: { widget: Widget }) {
       markers={isP95 ? toMarkers(metrics.data) : undefined}
       unit={isP95 ? "ms" : ""}
       tone={widget.source === "logs" ? "warn" : "steel"}
-      height={130}
+      size="md"
     />
   );
 }
@@ -108,7 +109,7 @@ function StatWidget({ widget, org }: { widget: Widget; org: string }) {
         <span className="mono text-[19px] font-semibold">
           {billing.data ? fmtMoney(billing.data.mtd_cents ?? 0) : "…"}
         </span>
-        <span className="text-[10.5px] text-ink3">
+        <span className="text-10p5 text-ink3">
           a Billing widget beside metrics — the reason this isn't under Observe
         </span>
       </>
@@ -130,7 +131,7 @@ function ListWidget() {
   return (
     <div className="flex flex-col gap-1">
       {rows.map((d) => (
-        <span key={d.id} className="mono text-[11px] text-ink2">
+        <span key={d.id} className="mono text-11 text-ink2">
           {lines[d.number ?? 0]}
         </span>
       ))}
@@ -189,85 +190,13 @@ function AddWidgetDrawer({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim dismiss mirrors Esc
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Cancel is the keyboard path
-    <div className="fixed inset-0 z-40 bg-[rgba(6,9,12,0.44)]" onClick={onClose}>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click only stops scrim dismiss */}
-      <div
-        className="absolute top-0 right-0 flex h-full w-[424px] flex-col border-hair border-l bg-surface shadow-e2"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Add widget"
-      >
-        <div className="border-hair border-b px-5 py-4">
-          <div className="text-[14px] font-semibold">Add widget</div>
-          <div className="mono mt-0.5 text-[10.5px] text-ink3">
-            checkout-health · any plane, one grid
-          </div>
-        </div>
-
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
-          <div className="flex flex-col gap-1.5">
-            <Flabel>Source</Flabel>
-            <div className="chiprow">
-              {SOURCES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  className={cn("chip", source === s && "on")}
-                  onClick={() => setSource(s)}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <Flabel htmlFor="widget-query">Query</Flabel>
-            <Inp
-              id="widget-query"
-              className="mono"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Flabel>Visualization</Flabel>
-            <div className="chiprow">
-              {VIZES.map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  className={cn("chip", viz === v && "on")}
-                  onClick={() => setViz(v)}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Card className="flex flex-col gap-2 p-3.5">
-            <div className="flex items-center gap-2">
-              <span className="text-[12.5px] font-semibold">Preview</span>
-              <Pill tone="ok">live</Pill>
-            </div>
-            <Spark series={toSeries(preview.data)} tone="warn" width={200} height={36} />
-            <span className="mono text-[11px] text-ink2">
-              95% — the assistant's open insight, now on your grid
-            </span>
-          </Card>
-
-          <Card className="p-3.5 text-[11px] leading-relaxed text-ink2">
-            Or skip this drawer entirely: the ⚑ Add to dashboard button on any chart in Metrics,
-            Logs or Billing lands here pre-filled — same grammar as alert rules (U8).
-          </Card>
-        </div>
-
-        <div className="flex items-center gap-2 border-hair border-t px-5 py-3.5">
-          <span className="text-[10.5px] text-ink3">Widget 7 · reads only, never provisions</span>
+    <Drawer
+      title="Add widget"
+      sub="checkout-health · any plane, one grid"
+      onClose={onClose}
+      footer={
+        <>
+          <span className="text-10p5 text-ink3">Widget 7 · reads only, never provisions</span>
           <span className="flex-1" />
           <Btn variant="s" onClick={onClose}>
             Cancel
@@ -275,9 +204,67 @@ function AddWidgetDrawer({ onClose }: { onClose: () => void }) {
           <Btn variant="p" onClick={submit}>
             Add widget
           </Btn>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Source</Flabel>
+        <div className="chiprow">
+          {SOURCES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={cn("chip", source === s && "on")}
+              onClick={() => setSource(s)}
+            >
+              {s}
+            </button>
+          ))}
         </div>
       </div>
-    </div>
+
+      <div>
+        <Flabel htmlFor="widget-query">Query</Flabel>
+        <Inp
+          id="widget-query"
+          className="mono"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Visualization</Flabel>
+        <div className="chiprow">
+          {VIZES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={cn("chip", viz === v && "on")}
+              onClick={() => setViz(v)}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Card className="flex flex-col gap-2 p-3.5">
+        <div className="flex items-center gap-2">
+          <span className="text-12p5 font-semibold">Preview</span>
+          <Pill tone="ok">live</Pill>
+        </div>
+        <Spark series={toSeries(preview.data)} tone="warn" width={200} height={36} />
+        <span className="mono text-11 text-ink2">
+          95% — the assistant's open insight, now on your grid
+        </span>
+      </Card>
+
+      <Card className="p-3.5 text-11 leading-relaxed text-ink2">
+        Or skip this drawer entirely: the ⚑ Add to dashboard button on any chart in Metrics, Logs or
+        Billing lands here pre-filled — same grammar as alert rules (U8).
+      </Card>
+    </Drawer>
   );
 }
 
@@ -294,7 +281,7 @@ function DashboardDetail() {
       <main className="main">
         <div className="pgpad">
           <Card dashed className="flex flex-col items-center gap-3 py-14">
-            <div className="text-[13px] font-medium">
+            <div className="text-13 font-medium">
               No dashboard named {dashId} — check My dashboards.
             </div>
             <Link to="/$org/dashboards/mine" params={{ org }}>
@@ -349,7 +336,7 @@ function DashboardDetail() {
           {editing ? (
             <button
               type="button"
-              className="card col-span-4 flex min-h-[90px] items-center justify-center border-dashed bg-transparent text-[12px] text-ink3 hover:border-ink3"
+              className="card col-span-4 flex min-h-[90px] items-center justify-center border-dashed bg-transparent text-12 text-ink3 hover:border-ink3"
               onClick={() => setDrawerOpen(true)}
             >
               + Add widget

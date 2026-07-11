@@ -10,7 +10,7 @@ export function OnboardingShell({ step, children }: { step: number; children: Re
     <div className="flex min-h-screen flex-col items-center gap-8 bg-canvas px-6 py-12">
       <div className="flex items-center gap-2.5">
         <Icon id="s-hex" className="h-[22px] w-[22px] text-steel" />
-        <span className="text-[14px] font-semibold">Steloit</span>
+        <span className="text-14 font-semibold">Steloit</span>
       </div>
       <Steps labels={ONBOARDING_STEPS} current={step} />
       <div className="w-full max-w-[520px]">{children}</div>

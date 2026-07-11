@@ -1,14 +1,15 @@
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";
+import { Scrim, useOverlay } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import { useProjects } from "@/features/projects/hooks";
 import { useServices } from "@/features/services/hooks";
 import { errorMessage, rollbackDeploymentMutation } from "@/lib/api";
-import { usePaletteOpen, useSetPaletteOpen } from "@/lib/store";
+import { usePaletteOpen, useSetPaletteOpen, useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,7 +30,15 @@ interface PaletteItem {
 
 export function CommandPalette() {
   const open = usePaletteOpen();
+  if (!open) return null;
+  // Mounted only while open so useOverlay's document-level Esc listener and
+  // focus trap exist only while the palette does; state resets by remount.
+  return <Palette />;
+}
+
+function Palette() {
   const setOpen = useSetPaletteOpen();
+  const openAssistant = useUIStore((s) => s.openAssistant);
   const navigate = useNavigate();
   const params = useParams({ strict: false }) as { org?: string; project?: string };
   const org = params.org ?? "acme";
@@ -40,16 +49,10 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [armed, setArmed] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (open) {
-      setQuery("");
-      setSelected(0);
-      setArmed(null);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [open]);
+  const close = () => setOpen(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useOverlay(panelRef, close);
 
   const items = useMemo<PaletteItem[]>(() => {
     const project = params.project ?? "ecommerce";
@@ -216,20 +219,18 @@ export function CommandPalette() {
                 </span>
               </>
             ),
-            run: () => toast("The assistant drawer lands in Phase 3."),
+            run: () => openAssistant(),
             keywords: "should i roll back api ask",
           },
         ]
       : [];
 
     return [...actions, ...jump, ...ask];
-  }, [projects.data, services.data, params.project, org, navigate, query, rollback]);
+  }, [projects.data, services.data, params.project, org, navigate, query, rollback, openAssistant]);
 
   const q = query.trim().toLowerCase();
   const visible = q ? items.filter((i) => i.keywords.toLowerCase().includes(q)) : items;
   const sections = ["Actions", "Jump to", "Ask the assistant"] as const;
-
-  if (!open) return null;
 
   const flat = sections.flatMap((s) => visible.filter((i) => i.section === s));
 
@@ -243,14 +244,11 @@ export function CommandPalette() {
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim dismiss mirrors Esc
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Esc handled on the input
-    <div
-      className="fixed inset-0 z-40 flex items-start justify-center bg-[rgba(6,9,12,0.44)] pt-[15vh]"
-      onClick={() => setOpen(false)}
-    >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc/arrows are handled on the input; this click only stops scrim dismiss */}
+    <Scrim onDismiss={close} className="flex items-start justify-center pt-[15vh]">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click-stop only, so the scrim doesn't dismiss; Esc/Tab handled by useOverlay */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: click-stop only */}
       <div
+        ref={panelRef}
         className="w-[640px] overflow-hidden rounded-xl border border-hair bg-surface shadow-e2"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
@@ -259,8 +257,9 @@ export function CommandPalette() {
         <div className="flex items-center gap-2.5 border-hair border-b px-4 py-3">
           <Icon id="s-search" className="h-4 w-4 text-ink3" />
           <input
-            ref={inputRef}
-            className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-ink3"
+            // biome-ignore lint/a11y/noAutofocus: W7 — the palette exists to type into; useOverlay honors [autofocus]
+            autoFocus
+            className="flex-1 bg-transparent text-13 outline-none placeholder:text-ink3"
             placeholder="Jump, act, or ask…"
             value={query}
             onChange={(e) => {
@@ -269,7 +268,6 @@ export function CommandPalette() {
               setArmed(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Escape") setOpen(false);
               if (e.key === "ArrowDown") {
                 e.preventDefault();
                 setSelected((s) => Math.min(s + 1, flat.length - 1));
@@ -307,9 +305,9 @@ export function CommandPalette() {
                       onClick={() => activate(item)}
                     >
                       <span className="flex-1">
-                        <span className="block text-[12.5px]">{item.title}</span>
+                        <span className="block text-12p5">{item.title}</span>
                         {item.sub ? (
-                          <span className="mt-0.5 block text-[10.5px] leading-snug text-ink3">
+                          <span className="mt-0.5 block text-10p5 leading-snug text-ink3">
                             {item.sub}
                           </span>
                         ) : null}
@@ -327,26 +325,23 @@ export function CommandPalette() {
             );
           })}
           {flat.length === 0 ? (
-            <div className="px-3 py-6 text-center text-[12px] text-ink3">
+            <div className="px-3 py-6 text-center text-12 text-ink3">
               Nothing matches — try a service name, or ask the assistant.
             </div>
           ) : null}
         </div>
-        <div className="flex items-center gap-3 border-hair border-t px-4 py-2.5 text-[10.5px] text-ink3">
+        <div className="flex items-center gap-3 border-hair border-t px-4 py-2.5 text-10p5 text-ink3">
           <span>
             <Kbd>↑↓</Kbd> navigate
           </span>
           <span>
             <Kbd>↵</Kbd> select
           </span>
-          <span>
-            <Kbd>tab</Kbd> ask
-          </span>
           <span className="ml-auto">
             destructive actions always confirm — palette speed never removes designed friction
           </span>
         </div>
       </div>
-    </div>
+    </Scrim>
   );
 }

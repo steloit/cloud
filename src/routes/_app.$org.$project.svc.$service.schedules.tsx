@@ -52,7 +52,7 @@ function SchedulesPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             Schedules are a Queue and Worker surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -111,7 +111,7 @@ function SchedulesPage() {
                         <span className="flex justify-end gap-2">
                           <Btn
                             variant="s"
-                            className="h-6 px-2.5 text-[10.5px]"
+                            className="h-6 px-2.5 text-10p5"
                             disabled
                             disabledReason="No per-schedule resource in the spec (finding)"
                           >
@@ -119,7 +119,7 @@ function SchedulesPage() {
                           </Btn>
                           <Btn
                             variant="s"
-                            className="h-6 px-2.5 text-[10.5px]"
+                            className="h-6 px-2.5 text-10p5"
                             disabled
                             disabledReason="No per-schedule resource in the spec (finding)"
                           >
@@ -135,7 +135,7 @@ function SchedulesPage() {
           </div>
         </Card>
 
-        <p className="text-[10.5px] leading-relaxed text-ink3">
+        <p className="text-10p5 leading-relaxed text-ink3">
           A schedule that doesn't fire is an alert, not a silence — missed runs page through Observe
           like any other failure. Payload templates support{" "}
           <span className="mono">{"{{date}}"}</span> interpolation.

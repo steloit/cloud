@@ -124,7 +124,7 @@ function SaveTemplatePage() {
             <Card className="flex flex-col p-4">
               <div className="mb-2 flex items-baseline gap-2.5">
                 <Eyebrow>Include services</Eyebrow>
-                <span className="text-[10.5px] text-ink3">
+                <span className="text-10p5 text-ink3">
                   {selected.length} of {SERVICES.length} selected
                 </span>
               </div>
@@ -144,12 +144,12 @@ function SaveTemplatePage() {
                     }
                   />
                   <Icon id={PRODUCT_ICON[svc.product]} className="h-3.5 w-3.5 text-ink3" />
-                  <b className="text-[12.5px]">{svc.name}</b>
-                  <span className="text-[11px] text-ink3">{svc.desc}</span>
-                  <span className="mono ml-auto text-[11.5px]">{fmtMoney(svc.cents)}</span>
+                  <b className="text-12p5">{svc.name}</b>
+                  <span className="text-11 text-ink3">{svc.desc}</span>
+                  <span className="mono ml-auto text-11p5">{fmtMoney(svc.cents)}</span>
                 </label>
               ))}
-              <p className="mt-2.5 text-[11px] leading-relaxed text-ink3">
+              <p className="mt-2.5 text-11 leading-relaxed text-ink3">
                 Bindings between selected services are kept as placeholders; a binding to an
                 excluded service (api → db-main) becomes a <b>required input</b> the consumer wires
                 at create.
@@ -157,7 +157,7 @@ function SaveTemplatePage() {
             </Card>
             <Card className="flex items-start gap-3 p-4">
               <Icon id="s-key" className="mt-0.5 h-4 w-4 shrink-0 text-ink2" />
-              <p className="text-[12px] leading-relaxed text-ink2">
+              <p className="text-12 leading-relaxed text-ink2">
                 <b>Secrets, data and keys are never captured.</b> Every consumer gets fresh
                 credentials, minted at create — the template is a recipe, not a pantry.
               </p>
@@ -168,9 +168,9 @@ function SaveTemplatePage() {
               <Eyebrow>Instantiation estimate</Eyebrow>
               <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
                 {fmtMoney(totalCents)}
-                <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                <span className="ml-1 text-11 font-normal text-ink3">/mo</span>
               </div>
-              <p className="text-[10.5px] leading-relaxed text-ink3">
+              <p className="text-10p5 leading-relaxed text-ink3">
                 What creating from this template costs at today's prices — shown here so the
                 template carries its price from birth, like every template in the gallery (A8).
               </p>
@@ -190,7 +190,7 @@ function SaveTemplatePage() {
                 Cancel
               </Btn>
               <Copybit>{`steloit template save ${name || "checkout-stack"} --from ecommerce/production --services ${selected.map((s) => s.name).join(",")}`}</Copybit>
-              <p className="text-[10.5px] leading-relaxed text-ink3">
+              <p className="text-10p5 leading-relaxed text-ink3">
                 Saving creates the asset only — nothing provisions, nothing bills. Manage it under
                 Settings → Templates (T1).
               </p>

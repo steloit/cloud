@@ -29,12 +29,12 @@ function OnboardingConnectPage() {
               <Copybit>npm i -g steloit</Copybit>
               <Copybit>steloit login</Copybit>
             </div>
-            <div className="mono text-[10.5px] text-ok">✓ laptop-cli connected just now</div>
-            <div className="text-[10.5px] text-ink3">device token · manage under your profile</div>
+            <div className="mono text-10p5 text-ok">✓ laptop-cli connected just now</div>
+            <div className="text-10p5 text-ink3">device token · manage under your profile</div>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
             <Eyebrow>Git</Eyebrow>
-            <p className="text-[12px] leading-relaxed text-ink2">
+            <p className="text-12 leading-relaxed text-ink2">
               Deploy on push, previews per PR. One org-level app — you pick the repos, no per-repo
               tokens.
             </p>
@@ -44,11 +44,11 @@ function OnboardingConnectPage() {
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
             <Eyebrow>Just the console</Eyebrow>
-            <p className="text-[12px] leading-relaxed text-ink2">
+            <p className="text-12 leading-relaxed text-ink2">
               Everything — creating, observing, deploying — works in the browser. Connect tools
               whenever they earn it.
             </p>
-            <div className="mono text-[10.5px] text-ink3">⌘K gets you anywhere</div>
+            <div className="mono text-10p5 text-ink3">⌘K gets you anywhere</div>
           </Card>
         </div>
         <Btn

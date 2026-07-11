@@ -21,7 +21,7 @@ function MetricsTab() {
     ) : svc.product === "valkey" ? (
       <ValkeyMetricsTab {...props} />
     ) : (
-      <Card className="p-4 text-[12px] text-ink2">
+      <Card className="p-4 text-12 text-ink2">
         Metrics for {svc.product} follow the D9 grammar — the gallery has no dedicated frame; this
         pane lands with per-product telemetry.
       </Card>

@@ -143,7 +143,7 @@ function AuditLogPage() {
             </table>
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Audit events are append-only and retained per org policy · assistant-applied changes
             always carry the approving human's identity.
           </p>

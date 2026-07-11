@@ -28,8 +28,8 @@ function ProjectGitPage() {
           <Card className="flex max-w-[760px] items-center gap-3.5 p-4">
             <Glyph id="s-branch" />
             <div>
-              <div className="text-[13px] font-semibold">GitHub · Acme</div>
-              <div className="text-[11px] text-ink3">
+              <div className="text-13 font-semibold">GitHub · Acme</div>
+              <div className="text-11 text-ink3">
                 installed by asha · scoped to 3 repositories · webhooks healthy
               </div>
             </div>
@@ -58,9 +58,9 @@ function ProjectGitPage() {
               </thead>
               <tbody>
                 <tr>
-                  <td className="mono text-[11.5px]">api</td>
-                  <td className="mono text-[11.5px] text-ink2">acme/store</td>
-                  <td className="mono text-[11.5px] text-ink2">main</td>
+                  <td className="mono text-11p5">api</td>
+                  <td className="mono text-11p5 text-ink2">acme/store</td>
+                  <td className="mono text-11p5 text-ink2">main</td>
                   <td>
                     <Pill tone="st">on push</Pill>
                   </td>
@@ -69,9 +69,9 @@ function ProjectGitPage() {
                   </td>
                 </tr>
                 <tr>
-                  <td className="mono text-[11.5px]">worker</td>
-                  <td className="mono text-[11.5px] text-ink2">acme/store</td>
-                  <td className="mono text-[11.5px] text-ink2">main</td>
+                  <td className="mono text-11p5">worker</td>
+                  <td className="mono text-11p5 text-ink2">acme/store</td>
+                  <td className="mono text-11p5 text-ink2">main</td>
                   <td>
                     <Pill tone="st">on push</Pill>
                   </td>
@@ -80,9 +80,9 @@ function ProjectGitPage() {
                   </td>
                 </tr>
                 <tr>
-                  <td className="mono text-[11.5px]">admin</td>
-                  <td className="mono text-[11.5px] text-ink2">acme/admin</td>
-                  <td className="mono text-[11.5px] text-ink2">main</td>
+                  <td className="mono text-11p5">admin</td>
+                  <td className="mono text-11p5 text-ink2">acme/admin</td>
+                  <td className="mono text-11p5 text-ink2">main</td>
                   <td>
                     <Pill tone="st">on push</Pill>
                   </td>
@@ -96,7 +96,7 @@ function ProjectGitPage() {
 
           <Card className="flex max-w-[760px] flex-col gap-3 p-4">
             <Eyebrow>Disconnect</Eyebrow>
-            <div className="text-[12px] text-ink2">
+            <div className="text-12 text-ink2">
               Disconnecting stops deploys but never touches running services — the last built images
               keep serving.
             </div>

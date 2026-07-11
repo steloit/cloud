@@ -23,7 +23,7 @@ const LAST_CHANGED: Record<string, string> = {
 function policyRow(p: Policy, inherited: boolean) {
   return (
     <tr key={p.id}>
-      <td className="mono text-[11.5px]">{p.key}</td>
+      <td className="mono text-11p5">{p.key}</td>
       <td className="text-ink2">{p.description}</td>
       <td>
         {inherited ? <Pill tone="mut">inherited · org</Pill> : <Pill tone="st">project</Pill>}
@@ -31,7 +31,7 @@ function policyRow(p: Policy, inherited: boolean) {
       <td>
         <Pill tone="st">enforce</Pill>
       </td>
-      <td className="mono text-[11px] text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
+      <td className="mono text-11 text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
     </tr>
   );
 }
@@ -84,7 +84,7 @@ function ProjectPoliciesPage() {
             </table>
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Inherited rows are managed at the organization (G7). Every policy is versioned; every
             change and every triggered denial is an audit event — the same trail W12 shows.
           </p>

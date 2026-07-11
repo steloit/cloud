@@ -32,7 +32,7 @@ interface CtxProps {
 const menuContentClass =
   "z-50 min-w-[240px] rounded-xl border border-hair bg-surface p-1 shadow-e2";
 const menuItemClass =
-  "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] font-medium outline-none data-[highlighted]:bg-surface2";
+  "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 font-medium outline-none data-[highlighted]:bg-surface2";
 
 export function Ctx({
   orgs,
@@ -82,7 +82,7 @@ export function Ctx({
               >
                 <span className="flex-1">
                   <span className="block">{o.name}</span>
-                  <span className="text-[10.5px] text-ink3">
+                  <span className="text-10p5 text-ink3">
                     {o.plan === "business"
                       ? "Business · 4 projects · $482/mo"
                       : "Free · 0 projects"}
@@ -92,7 +92,7 @@ export function Ctx({
               </DropdownMenu.Item>
             ))}
             <DropdownMenu.Separator className="my-1 h-px bg-hair" />
-            <div className="px-3 py-2 text-[10.5px] text-ink3">
+            <div className="px-3 py-2 text-10p5 text-ink3">
               switching lands on the org's projects home <Kbd>↵</Kbd>
             </div>
           </DropdownMenu.Content>
@@ -127,7 +127,7 @@ export function Ctx({
                   >
                     <Dot tone={healthDotTone(p.health ?? "ok")} />
                     <span className="flex-1">{p.name}</span>
-                    <span className="mono text-[10.5px] text-ink3">
+                    <span className="mono text-10p5 text-ink3">
                       {fmtMoneyPerMonth(p.monthly_cost_cents ?? 0)}
                     </span>
                     {p.id === project.id && (
@@ -136,7 +136,7 @@ export function Ctx({
                   </DropdownMenu.Item>
                 ))}
                 <DropdownMenu.Separator className="my-1 h-px bg-hair" />
-                <div className="px-3 py-2 text-[10.5px] text-ink3">
+                <div className="px-3 py-2 text-10p5 text-ink3">
                   switching keeps your surface — overview stays overview
                 </div>
               </DropdownMenu.Content>
@@ -169,7 +169,7 @@ export function Ctx({
                         }
                       >
                         <span className="flex-1">{e.name}</span>
-                        <span className="mono text-[10.5px] text-ink3">
+                        <span className="mono text-10p5 text-ink3">
                           {fmtMoneyPerMonth(e.monthly_cost_cents ?? 0)}
                         </span>
                         {e.name === env && <Icon id="s-check" className="h-3.5 w-3.5 text-steel" />}
@@ -244,8 +244,8 @@ export function Ctx({
             <div className="flex items-center gap-2.5 border-hair border-b px-3 py-2.5">
               <span className="uav">{session ? initialsOf(session.name) : "?"}</span>
               <span>
-                <span className="block text-[12.5px] font-semibold">{session?.name}</span>
-                <span className="mono block text-[10.5px] text-ink3">{session?.email}</span>
+                <span className="block text-12p5 font-semibold">{session?.name}</span>
+                <span className="mono block text-10p5 text-ink3">{session?.email}</span>
               </span>
             </div>
             <DropdownMenu.Item
@@ -280,7 +280,7 @@ export function Ctx({
               </a>
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-hair" />
-            <div className="flex items-center gap-2.5 px-3 py-2 text-[12.5px]">
+            <div className="flex items-center gap-2.5 px-3 py-2 text-12p5">
               <Dot tone="ok" />
               All systems normal
             </div>

@@ -4,6 +4,7 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Icon } from "@/design-system/icon";
 import { Dot, Stlab } from "@/design-system/pill";
 import { useRollback } from "@/features/deploy/hooks";
 import { useServices } from "@/features/services/hooks";
@@ -125,7 +126,7 @@ function DeploymentsPage() {
           }
         >
           <Btn variant="s" onClick={() => rollback.mutate({ path: { dep: "dep_142" } })}>
-            ↶ Roll back to #141
+            <Icon id="s-undo" className="h-3 w-3" /> Roll back to #141
           </Btn>
         </Pghead>
 
@@ -171,13 +172,13 @@ function DeploymentsPage() {
           <Eyebrow>Instances</Eyebrow>
           <div className="flex items-center gap-5">
             {INSTANCES.map((i) => (
-              <span key={i} className="mono flex items-center gap-1.5 text-[11.5px]">
+              <span key={i} className="mono flex items-center gap-1.5 text-11p5">
                 <Dot tone="ok" />
                 {i}
               </span>
             ))}
           </div>
-          <p className="text-[11px] leading-relaxed text-ink3">
+          <p className="text-11 leading-relaxed text-ink3">
             rollout replaces instances one at a time behind the health check — traffic never sees a
             gap
           </p>

@@ -38,23 +38,23 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
 
       <Card className="flex flex-col gap-2.5 p-4">
         <Eyebrow>Build &amp; runtime</Eyebrow>
-        <div className="flex items-center gap-2.5 text-[12px]">
+        <div className="flex items-center gap-2.5 text-12">
           <span className="w-28 text-ink3">Source</span>
           <span className="mono">acme/store · main</span>
           <Pill tone="mut">org Git</Pill>
         </div>
-        <div className="flex items-center gap-2.5 text-[12px]">
+        <div className="flex items-center gap-2.5 text-12">
           <span className="w-28 text-ink3">Dockerfile</span>
           <span className="mono">./Dockerfile</span>
         </div>
-        <div className="flex items-center gap-2.5 text-[12px]">
+        <div className="flex items-center gap-2.5 text-12">
           <span className="w-28 text-ink3">Health check</span>
           <span className="mono">GET /healthz · 5 s</span>
         </div>
       </Card>
 
       <Card className="flex flex-col gap-2.5 p-4">
-        <div className="text-[12px] font-semibold">
+        <div className="text-12 font-semibold">
           Custom environment variables — non-secret config only — secrets arrive via bindings, not
           here
         </div>
@@ -86,7 +86,7 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
             </tbody>
           </table>
         </div>
-        <p className="text-[11px] leading-relaxed text-ink3">
+        <p className="text-11 leading-relaxed text-ink3">
           Pasting something that looks like a secret triggers a block with a pointer to Bindings —
           the console refuses to become a .env file.
         </p>
@@ -104,7 +104,7 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
           </Btn>
           <Pill tone="warn">serving 214 req/s on api.acme-store.com</Pill>
         </div>
-        <p className="text-[11px] leading-relaxed text-ink2">
+        <p className="text-11 leading-relaxed text-ink2">
           live-traffic deletes require the domain to be detached first, then type-to-confirm — 3
           outbound bindings are revoked with it
         </p>

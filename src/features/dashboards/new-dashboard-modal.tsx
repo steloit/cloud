@@ -3,6 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
 import { Flabel, Inp } from "@/design-system/inp";
+import { Modal, ModalHead } from "@/design-system/overlay";
 import { createDashboardMutation, type Visibility } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -62,90 +63,77 @@ export function NewDashboardModal({ org, onClose }: { org: string; onClose: () =
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim dismiss mirrors Esc
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Cancel is the keyboard path
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(6,9,12,0.44)]"
-      onClick={onClose}
-    >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click only stops scrim dismiss */}
-      <div
-        className="flex w-[460px] flex-col gap-4 rounded-xl border border-hair bg-surface p-5 shadow-e2"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="New dashboard"
-      >
-        <div className="text-[14px] font-semibold">New dashboard</div>
+    <Modal label="New dashboard" onClose={onClose}>
+      <ModalHead title="New dashboard" />
 
-        <div>
-          <Flabel htmlFor="dash-name">Name</Flabel>
-          <Inp id="dash-name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
+      <div>
+        <Flabel htmlFor="dash-name">Name</Flabel>
+        <Inp id="dash-name" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Flabel>Scope — what it ranges over</Flabel>
-          <div className="chiprow">
-            {SCOPES.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={cn("chip", scope === s && "on")}
-                onClick={() => setScope(s)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          <div className="text-[10.5px] text-ink3">
-            Project-scoped is born filtered — it inherits the crumb's environment filter and the
-            project's permissions.
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Flabel>Visibility — who can see it</Flabel>
-          <div className="chiprow">
-            {VISIBILITIES.map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={cn("chip", visibility === v && "on")}
-                onClick={() => setVisibility(v)}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <Flabel>Start from</Flabel>
-          {STARTS.map((s) => (
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Scope — what it ranges over</Flabel>
+        <div className="chiprow">
+          {SCOPES.map((s) => (
             <button
-              key={s.key}
+              key={s}
               type="button"
-              className={cn(
-                "card p-3 text-left",
-                start === s.key ? "border-steel" : "hover:border-ink3",
-              )}
-              onClick={() => setStart(s.key)}
-              aria-pressed={start === s.key}
+              className={cn("chip", scope === s && "on")}
+              onClick={() => setScope(s)}
             >
-              <div className="text-[12.5px] font-medium">{s.name}</div>
-              <div className="mt-0.5 text-[11px] text-ink3">{s.desc}</div>
+              {s}
             </button>
           ))}
         </div>
-
-        <div className="flex items-center justify-end gap-2 border-hair border-t pt-3.5">
-          <Btn variant="s" onClick={onClose}>
-            Cancel
-          </Btn>
-          <Btn variant="p" onClick={submit}>
-            Create dashboard
-          </Btn>
+        <div className="text-10p5 text-ink3">
+          Project-scoped is born filtered — it inherits the crumb's environment filter and the
+          project's permissions.
         </div>
       </div>
-    </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Visibility — who can see it</Flabel>
+        <div className="chiprow">
+          {VISIBILITIES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={cn("chip", visibility === v && "on")}
+              onClick={() => setVisibility(v)}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Start from</Flabel>
+        {STARTS.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            className={cn(
+              "card p-3 text-left",
+              start === s.key ? "border-steel" : "hover:border-ink3",
+            )}
+            onClick={() => setStart(s.key)}
+            aria-pressed={start === s.key}
+          >
+            <div className="text-12p5 font-medium">{s.name}</div>
+            <div className="mt-0.5 text-11 text-ink3">{s.desc}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 border-hair border-t pt-3.5">
+        <Btn variant="s" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="p" onClick={submit}>
+          Create dashboard
+        </Btn>
+      </div>
+    </Modal>
   );
 }

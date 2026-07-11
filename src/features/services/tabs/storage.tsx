@@ -26,7 +26,7 @@ function ToggleRow({ label, title }: { label: string; title?: string }) {
       <span aria-hidden="true" className="relative h-[18px] w-8 shrink-0 rounded-full bg-steel">
         <span className="absolute top-[2px] left-[16px] h-[14px] w-[14px] rounded-full bg-white" />
       </span>
-      <span className="text-[12px] text-ink2">
+      <span className="text-12 text-ink2">
         {label}
         <span className="sr-only"> — on</span>
       </span>
@@ -60,16 +60,16 @@ export function StorageSettingsTab({ svc, env }: TabProps) {
             Request public CDN…
           </Btn>
         </div>
-        <p className="text-[11.5px] leading-relaxed text-ink2">
+        <p className="text-11p5 leading-relaxed text-ink2">
           routes to an Admin — org policy <span className="mono">public-buckets</span> requires
           named approval; the grant, if made, is an audit event
         </p>
         <div className="flex flex-col gap-2.5 border-hair border-t pt-3">
-          <div className="flex items-center justify-between text-[12px]">
+          <div className="flex items-center justify-between text-12">
             <span className="text-ink2">Signed URL default expiry</span>
             <span className="mono">15 min</span>
           </div>
-          <div className="flex items-center justify-between text-[12px]">
+          <div className="flex items-center justify-between text-12">
             <span className="text-ink2">CORS origins</span>
             <span className="flex items-center gap-2">
               <span className="mono">acme-store.com</span>
@@ -92,7 +92,7 @@ export function StorageSettingsTab({ svc, env }: TabProps) {
           </Btn>
           <Pill tone="err">blocked — 1.21 M objects and 2 bindings</Pill>
         </div>
-        <p className="text-[11px] leading-relaxed text-ink3">
+        <p className="text-11 leading-relaxed text-ink3">
           empty the bucket (or let lifecycle drain it), detach bindings, then type the name — there
           is no force-delete on 48 GB of customer images
         </p>

@@ -95,11 +95,11 @@ function CapabilitiesPage() {
                 <span className="glyph">
                   <Icon id={cap.icon} />
                 </span>
-                <b className="text-[13px]">{cap.title}</b>
+                <b className="text-13">{cap.title}</b>
               </div>
-              <p className="text-[12px] leading-relaxed text-ink2">{cap.desc}</p>
+              <p className="text-12 leading-relaxed text-ink2">{cap.desc}</p>
               <div className="mt-auto flex items-center gap-2.5">
-                <span className="text-[10.5px] text-ink3">{cap.where}</span>
+                <span className="text-10p5 text-ink3">{cap.where}</span>
                 <span className="ml-auto">
                   {cap.action.to ? (
                     <Link
@@ -111,7 +111,7 @@ function CapabilitiesPage() {
                       }}
                       search={cap.action.search}
                     >
-                      <Btn variant="s" className="h-6 px-2.5 text-[10.5px]">
+                      <Btn variant="s" className="h-6 px-2.5 text-10p5">
                         {cap.action.label}
                       </Btn>
                     </Link>
@@ -123,7 +123,7 @@ function CapabilitiesPage() {
         </div>
         <Card className="flex items-center gap-3 p-3.5">
           <Icon id="s-shield" className="h-4 w-4 shrink-0 text-ink2" />
-          <p className="text-[11.5px] leading-relaxed text-ink2">
+          <p className="text-11p5 leading-relaxed text-ink2">
             The Assistant never performs IAM, secrets, network or destructive actions directly — it
             explains or drafts, and you execute through the standard workflow. Every capability can
             be turned off org-wide in{" "}

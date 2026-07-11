@@ -1,7 +1,8 @@
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
-import { Pill } from "@/design-system/pill";
+import { Icon } from "@/design-system/icon";
+import { Dot, Pill } from "@/design-system/pill";
 import type { Service } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +26,13 @@ export function ProvisioningView({ svc, env }: { svc: Service; env: string }) {
         {steps.map((step) => {
           const status = step.status ?? "pending";
           return (
-            <div key={step.step} className="flex items-center gap-3 text-[12.5px]">
+            <div key={step.step} className="flex items-center gap-3 text-12p5">
               {status === "done" ? (
-                <span className="text-ok">✓</span>
+                <Icon id="s-check" className="h-3 w-3 text-ok" />
               ) : status === "active" ? (
-                <span className="dot prov" />
+                <Dot tone="prov" />
               ) : (
-                <span className="dot sus" />
+                <Dot tone="sus" />
               )}
               <span
                 className={cn(
@@ -41,8 +42,9 @@ export function ProvisioningView({ svc, env }: { svc: Service; env: string }) {
               >
                 {step.step}
               </span>
-              <span className="mono ml-auto text-[10.5px] text-ink3">
-                {STEP_NOTES[step.step ?? ""] ?? (status === "done" ? "✓" : "")}
+              <span className="mono ml-auto text-10p5 text-ink3">
+                {STEP_NOTES[step.step ?? ""] ??
+                  (status === "done" ? <Icon id="s-check" className="h-[11px] w-[11px]" /> : "")}
               </span>
             </div>
           );
@@ -51,14 +53,14 @@ export function ProvisioningView({ svc, env }: { svc: Service; env: string }) {
       <div className="grid grid-cols-2 gap-3.5">
         <Card className="flex flex-col gap-2 p-4">
           <Eyebrow>While you wait</Eyebrow>
-          <p className="text-[12px] text-ink2">
+          <p className="text-12 text-ink2">
             Your connect command is ready — it will work the moment status flips:
           </p>
           <Copybit>{`steloit db connect ${svc.name} --env ${env}`}</Copybit>
         </Card>
         <Card className="flex flex-col gap-2 p-4">
           <Eyebrow>Billing</Eyebrow>
-          <p className="text-[12px] leading-relaxed text-ink2">
+          <p className="text-12 leading-relaxed text-ink2">
             <b>Nothing has billed yet.</b> Metering begins at <Pill tone="ok">ready</Pill>. If
             provisioning fails, nothing ever bills — and the failure lands in the audit log with a
             reason.

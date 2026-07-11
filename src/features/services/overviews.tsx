@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Copybit } from "@/design-system/copybit";
-import { Pill } from "@/design-system/pill";
+import { Dot, Pill } from "@/design-system/pill";
 import { type Binding, errorMessage, rollbackDeploymentMutation, type Service } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
 import {
@@ -78,7 +78,7 @@ export function ValkeyOverview({ svc, projectTotalCents, consumers, nameOf }: Ov
       />
       <div className="flex gap-3.5">
         <RightNow mood="Activity">
-          <p className="text-[12px] text-ink2">
+          <p className="text-12 text-ink2">
             41.2k keys · read-heavy 10:1 — a shape that fits cache mode
           </p>
           <div className="flex h-2 overflow-hidden rounded-full" aria-hidden="true">
@@ -86,7 +86,7 @@ export function ValkeyOverview({ svc, projectTotalCents, consumers, nameOf }: Ov
             <span className="bg-ok" style={{ width: "22%" }} />
             <span className="bg-surface2" style={{ width: "10%" }} />
           </div>
-          <div className="mono text-[10.5px] text-ink3">session:* 68% · cart:* 22% · other 10%</div>
+          <div className="mono text-10p5 text-ink3">session:* 68% · cart:* 22% · other 10%</div>
           <FloorStrip>
             <span>p99 cmd 0.8 ms</span>
             <span>84 clients</span>
@@ -168,7 +168,7 @@ export function StorageOverview({ projectTotalCents, consumers, nameOf }: Overvi
       />
       <div className="flex gap-3.5">
         <RightNow mood="Activity">
-          <div className="flex flex-col gap-2 text-[11.5px] text-ink2">
+          <div className="flex flex-col gap-2 text-11p5 text-ink2">
             <div className="flex gap-2.5">
               <span className="mono text-ink3">14:02</span>
               <span>
@@ -263,10 +263,8 @@ export function QueueOverview({ svc, projectTotalCents, consumers, nameOf }: Ove
         <RightNow mood="Needs attention">
           <div className="rounded-lg border border-warn/40 bg-warn-tint/40 p-3">
             <div className="flex items-baseline gap-2.5">
-              <b className="text-[12.5px] text-warn">● 2 messages dead-lettered</b>
-              <span className="mono text-[10.5px] text-ink3">
-                14:03 · one minute after deploy #142
-              </span>
+              <b className="text-12p5 text-warn">● 2 messages dead-lettered</b>
+              <span className="mono text-10p5 text-ink3">14:03 · one minute after deploy #142</span>
             </div>
             <div className="logwell mt-2">
               order.paid · TypeError: receiptUrl undefined · payload has{" "}
@@ -382,10 +380,10 @@ export function WebOverview({
           <div className="rounded-lg border border-warn/40 bg-warn-tint/40 p-3">
             <div className="flex items-center gap-2.5">
               <Pill tone="st">#142</Pill>
-              <b className="text-[12.5px]">feat: gift cards at checkout</b>
-              <span className="mono text-[10.5px] text-ink3">priya · 13:58 · 8f31c02</span>
+              <b className="text-12p5">feat: gift cards at checkout</b>
+              <span className="mono text-10p5 text-ink3">priya · 13:58 · 8f31c02</span>
             </div>
-            <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink2">
+            <p className="mt-1.5 text-11p5 leading-relaxed text-ink2">
               p95 crossed 800 ms at 14:02 — diagnosis points at the database, not this code.
             </p>
             <div className="mt-2.5 flex gap-2.5">
@@ -488,18 +486,18 @@ export function WorkerOverview({ svc, projectTotalCents, uses, nameOf }: Overvie
       />
       <div className="flex gap-3.5">
         <RightNow mood="Activity">
-          <div className="flex flex-col gap-2 text-[11.5px]">
+          <div className="flex flex-col gap-2 text-11p5">
             <div className="flex items-center gap-3">
               <b>receipts-daily</b>
               <span className="mono text-ink3">0 2 * * *</span>
               <Pill tone="ok">ok · 02:00 · 3m 41s</Pill>
-              <span className="ml-auto text-[10.5px] text-ink3">next 11 h</span>
+              <span className="ml-auto text-10p5 text-ink3">next 11 h</span>
             </div>
             <div className="flex items-center gap-3">
               <b>cleanup-tmp</b>
               <span className="mono text-ink3">0 * * * *</span>
               <Pill tone="ok">ok · 14:00 · 12s</Pill>
-              <span className="ml-auto text-[10.5px] text-ink3">next 37 m</span>
+              <span className="ml-auto text-10p5 text-ink3">next 37 m</span>
             </div>
           </div>
           <FloorStrip>
@@ -588,10 +586,10 @@ export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameO
         <RightNow mood="Activity">
           <div className="flex flex-1 flex-col items-center justify-center gap-2.5 rounded-lg border border-hair border-dashed p-6 text-center">
             <span className="glyph">
-              <span className="dot prov" />
+              <Dot tone="prov" />
             </span>
-            <b className="text-[13px]">Nothing yet</b>
-            <p className="max-w-[420px] text-[11.5px] leading-relaxed text-ink3">
+            <b className="text-13">Nothing yet</b>
+            <p className="max-w-[420px] text-11p5 leading-relaxed text-ink3">
               This instance is 6 minutes old. First queries, slow-query findings, deploy markers and
               alerts will land here — the panel turns amber only when something needs you.
             </p>
@@ -679,8 +677,8 @@ export function InternalToolsDbOverview({ svc, org, project }: OverviewCtx) {
       />
       <RightNow mood="Activity">
         <div className="flex flex-col gap-2">
-          <b className="text-[12.5px]">Why the rail is short here</b>
-          <p className="text-[12px] leading-relaxed text-ink2">
+          <b className="text-12p5">Why the rail is short here</b>
+          <p className="text-12 leading-relaxed text-ink2">
             This project uses{" "}
             <b>PostgreSQL and Object Storage — so the rail shows exactly those two</b>, plus + to
             grow. The rail is never a catalog of everything Steloit sells; it is the shape of{" "}

@@ -318,6 +318,12 @@ body {
   width: 8px;
   height: 8px;
 }
+.dot.none {
+  background: var(--hair);
+}
+.dot.ai {
+  background: var(--assist);
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);

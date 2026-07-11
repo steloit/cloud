@@ -139,7 +139,7 @@ function NewProjectPage() {
                     <Icon id="s-chevd" className="h-[11px] w-[11px]" />
                   </span>
                 </div>
-                <div className="mono text-[10.5px] text-ink3">
+                <div className="mono text-10p5 text-ink3">
                   {org}/{name || "…"} · a production environment is created by default
                 </div>
               </Card>
@@ -187,11 +187,11 @@ function NewProjectPage() {
                       />
                     </button>
                     <div className="flex-1">
-                      <span className="text-[12.5px] font-semibold">{row.name}</span>
-                      <span className="mono ml-2 text-[10.5px] text-ink3">{row.sub}</span>
-                      <div className="mt-0.5 text-[11px] leading-snug text-ink3">{row.reason}</div>
+                      <span className="text-12p5 font-semibold">{row.name}</span>
+                      <span className="mono ml-2 text-10p5 text-ink3">{row.sub}</span>
+                      <div className="mt-0.5 text-11 leading-snug text-ink3">{row.reason}</div>
                     </div>
-                    <span className="mono text-[12px] text-ink1">
+                    <span className="mono text-12 text-ink1">
                       {row.key === "assets" ? "~" : ""}
                       {fmtMoney(rowCents(row))}/mo
                     </span>
@@ -199,7 +199,7 @@ function NewProjectPage() {
                 ))}
                 <button
                   type="button"
-                  className="mt-2 flex items-center gap-2 text-[12px] font-medium text-steel"
+                  className="mt-2 flex items-center gap-2 text-12 font-medium text-steel"
                 >
                   <Icon id="s-plus" className="h-3.5 w-3.5" />
                   Add another service
@@ -217,7 +217,7 @@ function NewProjectPage() {
                 <Link to="/$org/settings/templates/new" params={{ org }}>
                   <Btn variant="s">Save as template instead (T3)</Btn>
                 </Link>
-                <span className="flex items-center gap-2 text-[11px] text-ink3">
+                <span className="flex items-center gap-2 text-11 text-ink3">
                   or:{" "}
                   <Copybit>{`steloit project create ${name || "ecommerce"} --template store`}</Copybit>
                 </span>
@@ -229,7 +229,7 @@ function NewProjectPage() {
                 <Eyebrow>Estimated monthly cost</Eyebrow>
                 <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
                   {fmtMoney(totalCents)}
-                  <span className="ml-1 text-[11px] font-normal text-ink3">
+                  <span className="ml-1 text-11 font-normal text-ink3">
                     /month · production only
                   </span>
                 </div>
@@ -244,7 +244,7 @@ function NewProjectPage() {
                     const row = RECOMMENDED.find((r) => r.key === line.key);
                     if (!row || !enabled[line.key]) return null;
                     return (
-                      <div key={line.key} className="flex justify-between text-[11.5px]">
+                      <div key={line.key} className="flex justify-between text-11p5">
                         <span className="text-ink2">{line.label}</span>
                         <span className="mono">
                           {line.key === "assets" ? "~" : ""}
@@ -254,12 +254,12 @@ function NewProjectPage() {
                     );
                   })}
                 </div>
-                <p className="mt-1 border-hair border-t pt-2.5 text-[10.5px] leading-relaxed text-ink3">
+                <p className="mt-1 border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
                   Estimates update as you edit. Nothing exists — and nothing bills — until you
                   confirm. Backups, metrics, logs and alerts are included, not add-ons.
                 </p>
               </Card>
-              <Card className="border-assist/40 p-4 text-[11.5px] leading-relaxed text-ink2">
+              <Card className="border-assist/40 p-4 text-11p5 leading-relaxed text-ink2">
                 Bindings will be pre-wired: <b>api → db-main, cache, assets</b> ·{" "}
                 <b>worker → jobs, db-main</b>. Each gets least-privilege credentials, rotated
                 automatically.

@@ -107,7 +107,7 @@ function QuotasPage() {
                         <Pill tone={q.type === "hard" ? "st" : "mut"}>{q.type}</Pill>
                       </td>
                       <td className="mono text-ink2">{q.price_beyond ?? "—"}</td>
-                      <td className="text-[12px] text-ink2">{q.at_limit}</td>
+                      <td className="text-12 text-ink2">{q.at_limit}</td>
                     </tr>
                   );
                 })}
@@ -117,7 +117,7 @@ function QuotasPage() {
 
           <div className="grid grid-cols-2 gap-3.5">
             <Card className="p-4">
-              <p className="text-[12px] text-ink2">
+              <p className="text-12 text-ink2">
                 Soft limits never break production. (AI Gateway tokens are infrastructure — metered
                 like any resource, not a plan quota.) Egress, events, AI requests, builds and seats
                 keep working past the line and meter as overage — the limit is a billing threshold,
@@ -125,7 +125,7 @@ function QuotasPage() {
               </p>
             </Card>
             <Card className="p-4">
-              <p className="text-[12px] text-ink2">
+              <p className="text-12 text-ink2">
                 Hard limits fail loudly and early. Previews queue with a stated reason; the API
                 returns 429 with Retry-After. You're warned at 80% (B8) before either happens.
               </p>

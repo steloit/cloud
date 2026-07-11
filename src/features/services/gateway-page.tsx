@@ -95,13 +95,13 @@ export function GatewayOverview({ nameOf: _nameOf }: OverviewCtx) {
               </tbody>
             </table>
           </div>
-          <p className="text-[11.5px] text-ink3">
+          <p className="text-11p5 text-ink3">
             Scaling is <b>weights &amp; fallbacks</b>, not instance counts — so no ×n rail badge and
             no instance switcher (SW3).
           </p>
           <Card className="flex flex-col gap-2 p-4">
             <Eyebrow>Why it's a Service, not a new primitive</Eyebrow>
-            <p className="text-[11.5px] leading-relaxed text-ink2">
+            <p className="text-11p5 leading-relaxed text-ink2">
               It satisfies the Service primitive (GOV-002). It differs only in <b>cardinality</b>:
               one endpoint, config-shaped.
             </p>

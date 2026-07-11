@@ -45,7 +45,7 @@ function LifecyclePage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             Lifecycle rules are an Object Storage surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -99,7 +99,7 @@ function LifecyclePage() {
                         <span className="flex justify-end gap-2">
                           <Btn
                             variant="s"
-                            className="h-6 px-2.5 text-[10.5px]"
+                            className="h-6 px-2.5 text-10p5"
                             disabled
                             disabledReason="No per-rule resource in the spec (finding)"
                           >
@@ -107,7 +107,7 @@ function LifecyclePage() {
                           </Btn>
                           <Btn
                             variant="s"
-                            className="h-6 px-2.5 text-[10.5px]"
+                            className="h-6 px-2.5 text-10p5"
                             disabled
                             disabledReason="No per-rule resource in the spec (finding)"
                           >
@@ -123,7 +123,7 @@ function LifecyclePage() {
           </div>
         </Card>
 
-        <p className="text-[10.5px] leading-relaxed text-ink3">
+        <p className="text-10p5 leading-relaxed text-ink3">
           Rules never race versioning: with versioning on, "delete" writes a delete marker; hard
           removal follows the 30 d soft-delete window.
         </p>

@@ -189,7 +189,7 @@ function DescribeToProvision({
         <Card className="flex flex-col gap-2.5 border-assist/40 p-4">
           <div className="flex items-center gap-3">
             <Glyph id="s-ai" />
-            <span className="flex-1 text-[12px] leading-relaxed text-ink2">
+            <span className="flex-1 text-12 leading-relaxed text-ink2">
               Not sure what you need? Describe what you're building and the assistant suggests a set
               — you approve every line.
             </span>
@@ -198,14 +198,14 @@ function DescribeToProvision({
           <Inp
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="text-[12px]"
+            className="text-12"
             aria-label="Describe what you're building"
           />
           <div className="flex items-center gap-2">
             <Btn variant="a" onClick={onSuggest}>
               Suggest a setup
             </Btn>
-            <span className="mono text-[9px] text-ink3">
+            <span className="mono text-10 text-ink3">
               nothing is created — you get a reviewable set
             </span>
           </div>
@@ -218,9 +218,7 @@ function DescribeToProvision({
             <Eyebrow className="m-0">Suggested for your description</Eyebrow>
             <Pill tone="ai">4 services · each explainable</Pill>
             <span className="sp flex-1" />
-            <span className="mono text-[9px] text-ink3">
-              toggle any off — estimate updates live
-            </span>
+            <span className="mono text-10 text-ink3">toggle any off — estimate updates live</span>
           </div>
           <div className="flex flex-col gap-2">
             {AI1_SUGGESTIONS.map((s) => {
@@ -244,14 +242,14 @@ function DescribeToProvision({
                   <Glyph id={s.icon} />
                   <span className="flex-1">
                     <span className="flex items-center gap-2">
-                      <b className="text-[12px]">{s.name}</b>
-                      <span className="mono text-[9.5px] text-ink3">{s.tag}</span>
+                      <b className="text-12">{s.name}</b>
+                      <span className="mono text-10 text-ink3">{s.tag}</span>
                     </span>
-                    <span className="mt-0.5 block text-[10.5px] text-ink2">
+                    <span className="mt-0.5 block text-10p5 text-ink2">
                       <span className="text-assist">Why:</span> {s.why}
                     </span>
                   </span>
-                  <span className="mono text-[11px] text-ink2">${s.price}</span>
+                  <span className="mono text-11 text-ink2">${s.price}</span>
                 </button>
               );
             })}
@@ -367,7 +365,7 @@ function CreatePage() {
                 </button>
               </div>
               <span className="sp" />
-              <span className="mono text-[10.5px] text-ink3">
+              <span className="mono text-10p5 text-ink3">
                 ⌘K "add {type}" lands here preselected
               </span>
             </div>
@@ -384,18 +382,18 @@ function CreatePage() {
                   <Eyebrow>Estimated monthly cost</Eyebrow>
                   <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
                     {block?.totalLabel ?? "—"}
-                    <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                    <span className="ml-1 text-11 font-normal text-ink3">/mo</span>
                   </div>
                   <div className="mt-1 flex flex-col gap-1.5">
                     {(block?.lines ?? []).map((line) => (
-                      <div key={line.label} className="flex justify-between text-[11.5px]">
+                      <div key={line.label} className="flex justify-between text-11p5">
                         <span className="text-ink2">{line.label}</span>
                         <span className="mono">{line.amount}</span>
                       </div>
                     ))}
                   </div>
                   {def.footer ? (
-                    <p className="mt-1 border-hair border-t pt-2.5 text-[10.5px] leading-relaxed text-ink3">
+                    <p className="mt-1 border-hair border-t pt-2.5 text-10p5 leading-relaxed text-ink3">
                       {def.footer}
                     </p>
                   ) : null}
@@ -418,14 +416,14 @@ function CreatePage() {
                   ) : null}
                 </Card>
                 {type === "valkey" ? (
-                  <Card className="p-4 text-[11.5px] leading-relaxed text-ink2">
+                  <Card className="p-4 text-11p5 leading-relaxed text-ink2">
                     The same skeleton serves every product: name → type block → bindings → included
                     defaults → estimate → confirm. Storage adds bucket policy; Queue adds delivery &
                     DLQ; Compute adds repo & health checks.
                   </Card>
                 ) : null}
                 {type === "gpu-worker" ? (
-                  <Card className="p-4 text-[10.5px] leading-relaxed text-ink3">
+                  <Card className="p-4 text-10p5 leading-relaxed text-ink3">
                     Region model:{" "}
                     <b className="text-ink2">
                       env sets the home · instances inherit · exceptions are explicit
@@ -460,12 +458,12 @@ function CreatePage() {
                       onClick={() => pick(p.type)}
                       className="card flex flex-col gap-1.5 p-3 text-left hover:border-ink3"
                     >
-                      <span className="flex items-center gap-2 text-[12.5px] font-semibold">
+                      <span className="flex items-center gap-2 text-12p5 font-semibold">
                         <Glyph id={p.icon} />
                         {p.name}
                       </span>
-                      <span className="text-[10.5px] leading-snug text-ink3">{p.desc}</span>
-                      <span className="mono text-[10.5px] text-ink2">{p.price}</span>
+                      <span className="text-10p5 leading-snug text-ink3">{p.desc}</span>
+                      <span className="mono text-10p5 text-ink2">{p.price}</span>
                     </button>
                   ))}
                 </div>
@@ -475,20 +473,20 @@ function CreatePage() {
                     onClick={() => pick("gpu-worker")}
                     className="card flex flex-col gap-1.5 p-3 text-left hover:border-ink3"
                   >
-                    <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+                    <span className="flex items-center gap-1.5 text-12p5 font-semibold">
                       GPU Worker <Pill tone="st">beta</Pill>
                     </span>
                     <span className="self-start">
                       <Pill tone="warn">not in ap-south-1 yet — request it (C7)</Pill>
                     </span>
-                    <span className="text-[10.5px] leading-snug text-ink3">Batch GPU jobs.</span>
-                    <span className="mono text-[10.5px] text-ink2">
+                    <span className="text-10p5 leading-snug text-ink3">Batch GPU jobs.</span>
+                    <span className="mono text-10p5 text-ink2">
                       from $88/mo · nearest cell aws · ap-southeast-1 (+34 ms)
                     </span>
                   </button>
                   <Card dashed className="col-span-2 flex flex-col gap-1.5 p-3">
-                    <span className="text-[12.5px] font-semibold">Start from a template</span>
-                    <span className="text-[10.5px] leading-snug text-ink3">
+                    <span className="text-12p5 font-semibold">Start from a template</span>
+                    <span className="text-10p5 leading-snug text-ink3">
                       saas-starter $96 · docs-site $14 · store $184 — whole stacks, each opening a
                       full estimate first.
                     </span>
@@ -513,26 +511,23 @@ function CreatePage() {
                         </Eyebrow>
                         <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
                           ${total}
-                          <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                          <span className="ml-1 text-11 font-normal text-ink3">/mo</span>
                         </div>
                         <div className="mt-1 flex flex-col gap-1.5">
                           {on.map((s) => (
-                            <div key={s.key} className="flex justify-between text-[11.5px]">
+                            <div key={s.key} className="flex justify-between text-11p5">
                               <span className="text-ink2">{s.name}</span>
                               <span className="mono">${s.price}</span>
                             </div>
                           ))}
                           {off.map((s) => (
-                            <div
-                              key={s.key}
-                              className="flex justify-between text-[11.5px] opacity-50"
-                            >
+                            <div key={s.key} className="flex justify-between text-11p5 opacity-50">
                               <span className="text-ink2">{s.name} · off</span>
                               <span className="mono">+${s.price}</span>
                             </div>
                           ))}
                         </div>
-                        <p className="mt-1 border-hair border-t pt-2.5 text-[10px] leading-relaxed text-ink3">
+                        <p className="mt-1 border-hair border-t pt-2.5 text-10 leading-relaxed text-ink3">
                           The assistant proposed; you decide. Nothing provisions until you confirm —{" "}
                           <b>billing starts at ready, not now</b>.
                         </p>
@@ -547,7 +542,7 @@ function CreatePage() {
                         <Btn variant="s" className="justify-center" onClick={() => setAi1(null)}>
                           Clear suggestion
                         </Btn>
-                        <p className="text-center text-[9.5px] leading-relaxed text-ink3">
+                        <p className="text-center text-10 leading-relaxed text-ink3">
                           Law 1: AI suggests, you decide. Law 2: every "Why" is shown. This whole
                           panel is off if your org disabled AI (P-policy).
                         </p>
@@ -559,15 +554,15 @@ function CreatePage() {
                     <Eyebrow>Estimate</Eyebrow>
                     <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
                       $0
-                      <span className="ml-1 text-[11px] font-normal text-ink3">/mo</span>
+                      <span className="ml-1 text-11 font-normal text-ink3">/mo</span>
                     </div>
-                    <p className="text-[11.5px] leading-relaxed text-ink2">
+                    <p className="text-11p5 leading-relaxed text-ink2">
                       Nothing exists yet. Pick a product and the estimate builds as you configure —
                       billing starts only at ready, never at click.
                     </p>
                     <div className="mt-1 flex flex-col gap-1.5 border-hair border-t pt-2.5">
                       {C1_STEPS.map((step) => (
-                        <div key={step} className="text-[11.5px] text-ink2">
+                        <div key={step} className="text-11p5 text-ink2">
                           {step}
                         </div>
                       ))}

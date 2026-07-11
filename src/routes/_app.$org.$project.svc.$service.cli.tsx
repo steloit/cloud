@@ -24,7 +24,7 @@ function CliPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             The CLI Console is a Valkey surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -90,7 +90,7 @@ function CliPage() {
           </div>
           <div className="flex items-center gap-3 border-hair border-t pt-2.5">
             <Pill tone="mut">every command → audit log</Pill>
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-10p5 text-ink3">
               ↑ history · tab completes keys · same session grammar as{" "}
               <span className="mono">steloit valkey cli</span>
             </span>

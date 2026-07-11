@@ -117,10 +117,10 @@ function DeploymentsPage() {
             <Card className="flex-1 bg-surface2 p-3">
               <div className="flex items-center gap-2">
                 <Dot tone="ok" />
-                <b className="text-[12.5px]">staging</b>
-                <span className="mono ml-auto text-[12px]">#143</span>
+                <b className="text-12p5">staging</b>
+                <span className="mono ml-auto text-12">#143</span>
               </div>
-              <div className="mt-1.5 text-[11px] text-ink3">
+              <div className="mt-1.5 text-11 text-ink3">
                 fix/orders-query · checks 4/4 ✓ · soaked 9 min
               </div>
             </Card>
@@ -132,15 +132,15 @@ function DeploymentsPage() {
               >
                 <Btn variant="p">Promoting →</Btn>
               </Link>
-              <span className="mono text-[10.5px] text-prov">canary 33% · gates healthy</span>
+              <span className="mono text-10p5 text-prov">canary 33% · gates healthy</span>
             </div>
             <Card className="flex-1 bg-surface2 p-3">
               <div className="flex items-center gap-2">
                 <Dot tone="warn" />
-                <b className="text-[12.5px]">production</b>
-                <span className="mono ml-auto text-[12px]">#142 → #143</span>
+                <b className="text-12p5">production</b>
+                <span className="mono ml-auto text-12">#142 → #143</span>
               </div>
-              <div className="mt-1.5 text-[11px] text-ink3">
+              <div className="mt-1.5 text-11 text-ink3">
                 #142 live · p95 alert open · #143 carries the index fix
               </div>
             </Card>
@@ -203,7 +203,7 @@ function DeploymentsPage() {
           </table>
         </div>
 
-        <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-ink3">
+        <div className="flex flex-col gap-1.5 text-11 leading-relaxed text-ink3">
           <p>
             Rollback = redeploy of the previous image, same gates, &lt; 60 s. Database migrations
             don't auto-revert — expand-contract keeps old code compatible, and each migration states

@@ -92,17 +92,17 @@ export function ConnectPanel({
       <Eyebrow>{consumersEyebrow}</Eyebrow>
       <div className="flex flex-col gap-1.5">
         {consumers.map((c) => (
-          <div key={`${c.name}-${c.note}`} className="flex items-center gap-2 text-[11.5px]">
+          <div key={`${c.name}-${c.note}`} className="flex items-center gap-2 text-11p5">
             <Icon id={c.icon} className="h-3.5 w-3.5 text-ink3" />
             <b>{c.name}</b>
             <Pill tone={c.pill.tone}>{c.pill.label}</Pill>
             {c.extraPill ? <Pill tone={c.extraPill.tone}>{c.extraPill.label}</Pill> : null}
-            <span className="ml-auto text-[10.5px] text-ink3">{c.note}</span>
+            <span className="ml-auto text-10p5 text-ink3">{c.note}</span>
           </div>
         ))}
       </div>
       {children}
-      <p className="border-hair border-t pt-2 text-[10.5px] leading-relaxed text-ink3">{footer}</p>
+      <p className="border-hair border-t pt-2 text-10p5 leading-relaxed text-ink3">{footer}</p>
     </Card>
   );
 }
@@ -131,8 +131,8 @@ export function ActRow({ tiles }: { tiles: ActTile[] }) {
             title={disabled ? t.disabledReason : undefined}
             onClick={t.onClick}
           >
-            <b className={cn("text-[12.5px]", t.danger && "text-err")}>{t.title}</b>
-            <span className="text-[10.5px] text-ink3">{t.sub}</span>
+            <b className={cn("text-12p5", t.danger && "text-err")}>{t.title}</b>
+            <span className="text-10p5 text-ink3">{t.sub}</span>
           </Card>
         );
       })}
@@ -143,7 +143,7 @@ export function ActRow({ tiles }: { tiles: ActTile[] }) {
 /** Ambient facts strip at the bottom of a Right-now panel. */
 export function FloorStrip({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1.5 border-hair border-t pt-2.5 text-[10.5px] text-ink3">
+    <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1.5 border-hair border-t pt-2.5 text-10p5 text-ink3">
       {children}
     </div>
   );

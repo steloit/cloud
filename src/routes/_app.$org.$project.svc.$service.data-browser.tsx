@@ -64,7 +64,7 @@ function DataBrowserPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             Data Browser is a Valkey surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -123,19 +123,19 @@ function DataBrowserPage() {
                   k.selected && "bg-steel-tint",
                 )}
               >
-                <span className="mono flex-1 truncate text-[11.5px]">{k.key}</span>
+                <span className="mono flex-1 truncate text-11p5">{k.key}</span>
                 <Pill tone="mut">{k.type}</Pill>
-                <span className="mono text-[10.5px] text-ink3">{k.ttl}</span>
+                <span className="mono text-10p5 text-ink3">{k.ttl}</span>
               </div>
             ))}
           </Card>
 
           <Card className="flex flex-1 flex-col gap-3 self-start p-4">
             <div className="flex items-center gap-2.5">
-              <b className="mono text-[13px]">session:u_8241</b>
+              <b className="mono text-13">session:u_8241</b>
               <Pill tone="mut">hash</Pill>
-              <span className="mono text-[11px] text-ink3">TTL 24m 12s</span>
-              <span className="mono text-[11px] text-ink3">2.1 KB</span>
+              <span className="mono text-11 text-ink3">TTL 24m 12s</span>
+              <span className="mono text-11 text-ink3">2.1 KB</span>
             </div>
             <div className="tblwrap">
               <table className="tbl">
@@ -174,7 +174,7 @@ function DataBrowserPage() {
                 Delete key
               </Btn>
             </div>
-            <p className="text-[10.5px] text-ink3">
+            <p className="text-10p5 text-ink3">
               Deletes and TTL edits require read-write · logged to the audit stream
             </p>
           </Card>

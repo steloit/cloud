@@ -104,7 +104,7 @@ function AiAssistantPolicyPage() {
                   type="button"
                   aria-pressed={enforcement === seg}
                   className={cn(
-                    "cursor-pointer px-[18px] py-2 text-[12px] text-ink2",
+                    "cursor-pointer px-[18px] py-2 text-12 text-ink2",
                     i > 0 && "border-hair border-l",
                     enforcement === seg && "bg-ok-tint font-semibold text-ok",
                   )}
@@ -114,7 +114,7 @@ function AiAssistantPolicyPage() {
                 </button>
               ))}
             </div>
-            <div className="mt-2.5 text-[10.5px] leading-relaxed text-ink2">
+            <div className="mt-2.5 text-10p5 leading-relaxed text-ink2">
               <b className="text-ok">Enabled</b> — AI is available to everyone in the org;
               individual projects may opt out.{" "}
               <span className="text-ink3">
@@ -128,9 +128,9 @@ function AiAssistantPolicyPage() {
             <Card className="flex flex-1 flex-col p-4">
               <div className="mb-1.5 flex items-center gap-2">
                 <Icon id="s-ai" className="h-[13px] w-[13px] text-assist" />
-                <b className="text-[11.5px]">Turning this off hides</b>
+                <b className="text-11p5">Turning this off hides</b>
               </div>
-              <div className="mb-2 text-[9.5px] text-ink3">
+              <div className="mb-2 text-10 text-ink3">
                 Every AI surface disappears at once — no half-states.
               </div>
               {HIDES.map((row) => (
@@ -141,8 +141,8 @@ function AiAssistantPolicyPage() {
                   <span className="glyph h-[22px] w-[22px]">
                     <Icon id={row.icon} className="h-[11px] w-[11px]" />
                   </span>
-                  <span className="flex-1 text-[11px] text-ink1">{row.label}</span>
-                  <span className="mono text-[8.5px] text-ink3">{row.ref}</span>
+                  <span className="flex-1 text-11 text-ink1">{row.label}</span>
+                  <span className="mono text-10 text-ink3">{row.ref}</span>
                 </div>
               ))}
             </Card>
@@ -150,9 +150,9 @@ function AiAssistantPolicyPage() {
             <Card className="flex flex-1 flex-col p-4">
               <div className="mb-1.5 flex items-center gap-2">
                 <Icon id="s-shield" className="h-[13px] w-[13px] text-ok" />
-                <b className="text-[11.5px]">It never affects</b>
+                <b className="text-11p5">It never affects</b>
               </div>
-              <div className="mb-2 text-[9.5px] text-ink3">
+              <div className="mb-2 text-10 text-ink3">
                 The platform is whole without AI — nothing here changes.
               </div>
               {NEVER_AFFECTS.map((row) => (
@@ -161,7 +161,7 @@ function AiAssistantPolicyPage() {
                   className="flex items-center gap-2 border-hair border-b py-[7px] last:border-b-0"
                 >
                   <Icon id="s-check" className="h-[13px] w-[13px] text-ok" />
-                  <span className="flex-1 text-[11px] text-ink1">{row.label}</span>
+                  <span className="flex-1 text-11 text-ink1">{row.label}</span>
                   <Icon id={row.icon} className="h-3 w-3 text-ink3" />
                 </div>
               ))}
@@ -170,7 +170,7 @@ function AiAssistantPolicyPage() {
             <div className="flex w-[280px] shrink-0 flex-col gap-3">
               <Card className="border-warn/35 p-3.5">
                 <Eyebrow className="mb-2">If you disable now</Eyebrow>
-                <div className="flex flex-col gap-1.5 text-[10.5px] text-ink2">
+                <div className="flex flex-col gap-1.5 text-10p5 text-ink2">
                   <div className="flex justify-between">
                     <span>Members affected</span>
                     <b>12</b>
@@ -188,13 +188,13 @@ function AiAssistantPolicyPage() {
                     <b className="text-ok">none</b>
                   </div>
                 </div>
-                <div className="mt-2.5 border-hair border-t pt-2 text-[9.5px] text-ink3">
+                <div className="mt-2.5 border-hair border-t pt-2 text-10 text-ink3">
                   Applied changes stay applied. Re-enabling restores every surface instantly.
                 </div>
               </Card>
               <Card className="p-3.5">
                 <Eyebrow className="mb-2">Per-project overrides</Eyebrow>
-                <div className="flex flex-col gap-1.5 text-[10.5px]">
+                <div className="flex flex-col gap-1.5 text-10p5">
                   {OVERRIDES.map((o) => (
                     <div key={o.project} className="flex justify-between">
                       <span className="text-ink2">{o.project}</span>
@@ -202,19 +202,19 @@ function AiAssistantPolicyPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-2 text-[9px] text-ink3">
+                <div className="mt-2 text-10 text-ink3">
                   Project admins set these under the project's Policies.
                 </div>
               </Card>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 border-hair border-t pt-2.5 text-[10px] text-ink3">
+          <div className="flex items-center gap-2 border-hair border-t pt-2.5 text-10 text-ink3">
             <Icon id="s-doc" className="h-3 w-3" />
             <span>
               Enabled since org creation · last reviewed by <b>asha</b> Mar 3 (
-              <span className="mono text-[9px]">evt_31c0</span>). Changes take effect immediately
-              and are audited. Owner or Admin required.
+              <span className="mono text-10">evt_31c0</span>). Changes take effect immediately and
+              are audited. Owner or Admin required.
             </span>
           </div>
         </div>

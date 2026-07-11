@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Btn } from "@/design-system/btn";
+import { Icon } from "@/design-system/icon";
+import { useOverlay } from "@/design-system/overlay";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,26 +36,34 @@ export function WelcomeWidget() {
   const [selected, setSelected] = useState("API / backend");
   const [done, setDone] = useState(false);
 
-  if (!visible) return null;
-
   const dismiss = () => {
     localStorage.removeItem(PENDING_KEY);
     localStorage.setItem(DONE_KEY, "1");
     setVisible(false);
   };
 
+  // Popover recipe: Esc dismisses, Tab not trapped. bottom-16 clears the
+  // bottom-right Toaster (mount-collision finding).
+  const panel = useRef<HTMLDivElement>(null);
+  useOverlay(panel, visible ? dismiss : undefined, { trap: false });
+
+  if (!visible) return null;
+
   return (
-    <div className="card fixed right-4 bottom-4 z-40 flex w-[340px] flex-col gap-3 p-4 shadow-e2">
+    <div
+      ref={panel}
+      className="card fixed right-4 bottom-16 z-40 flex w-[340px] flex-col gap-3 p-4 shadow-e2"
+    >
       <div className="flex items-center gap-2.5">
-        <b className="text-[13px]">Welcome to Steloit 🎉</b>
-        <span className="mono text-[10px] text-ink3">2 of 4 · all optional</span>
+        <b className="text-13">Welcome to Steloit 🎉</b>
+        <span className="mono text-10 text-ink3">2 of 4 · all optional</span>
         <button
           type="button"
           className="icb ml-auto h-6 w-6"
           aria-label="Dismiss"
           onClick={dismiss}
         >
-          ✕
+          <Icon id="s-x" className="h-3 w-3" />
         </button>
       </div>
       <div className="flex gap-1.5" aria-hidden="true">
@@ -65,10 +75,10 @@ export function WelcomeWidget() {
         ))}
       </div>
       {done ? (
-        <p className="text-[12px] text-ink2">Thanks — that's all we'll ask.</p>
+        <p className="text-12 text-ink2">Thanks — that's all we'll ask.</p>
       ) : (
         <>
-          <div className="text-[12.5px] font-medium">What are you planning to build?</div>
+          <div className="text-12p5 font-medium">What are you planning to build?</div>
           <div className="flex flex-wrap gap-1.5">
             {CHIPS.map((chip) => (
               <button
@@ -84,16 +94,16 @@ export function WelcomeWidget() {
         </>
       )}
       <div className="flex items-center gap-2 border-hair border-t pt-2.5">
-        <span className="text-[10px] text-ink3">
+        <span className="text-10 text-ink3">
           Informs roadmap — never billing or support priority
         </span>
         <span className="ml-auto flex gap-2">
-          <Btn variant="gh" className="h-6 px-2 text-[11px]" onClick={dismiss}>
+          <Btn variant="gh" className="h-6 px-2 text-11" onClick={dismiss}>
             Skip
           </Btn>
           <Btn
             variant="p"
-            className="h-6 px-2 text-[11px]"
+            className="h-6 px-2 text-11"
             onClick={() => (done ? dismiss() : setDone(true))}
           >
             {done ? "Done" : "Next →"}

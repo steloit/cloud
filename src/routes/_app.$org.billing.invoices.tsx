@@ -103,8 +103,8 @@ function InvoicesPage() {
               <Card className="flex min-w-0 flex-1 flex-col gap-3 p-4">
                 <div className="flex items-start gap-2">
                   <div>
-                    <div className="text-[13.5px] font-semibold">{invoiceTitle(selected)}</div>
-                    <div className="mt-0.5 text-[11px] text-ink3">
+                    <div className="text-13 font-semibold">{invoiceTitle(selected)}</div>
+                    <div className="mt-0.5 text-11 text-ink3">
                       {selected.id === "inv_2026_06"
                         ? "Jun 1 – Jun 30, 2026 · finalized Jul 1 00:00 UTC"
                         : selected.period}
@@ -127,7 +127,7 @@ function InvoicesPage() {
                   {lines.map((l) => (
                     <div
                       key={l.description}
-                      className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-[12.5px]"
+                      className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5"
                     >
                       <span>{l.description}</span>
                       <span className="mono">{fmtMoney(l.cents ?? 0)}</span>
@@ -136,23 +136,23 @@ function InvoicesPage() {
                   {/* The FRAME's own subtotal ($344.92) does not equal the sum of its
                       printed lines ($414.92) — rendered from data, arithmetic defect
                       flagged as a finding (the taxed total doesn't reconcile either). */}
-                  <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-[12.5px]">
+                  <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5">
                     <span className="text-ink3">Subtotal</span>
                     <span className="mono">{fmtMoney(subtotal)}</span>
                   </div>
                   {selected.tax ? (
-                    <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-[12.5px]">
+                    <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5">
                       <span className="text-ink3">GST 18% · GSTIN 29ABCDE1234F1Z5</span>
                       <span className="mono">{fmtMoney(selected.tax.cents ?? 0)}</span>
                     </div>
                   ) : null}
-                  <div className="flex items-baseline justify-between gap-3 py-2 text-[12.5px] font-semibold">
+                  <div className="flex items-baseline justify-between gap-3 py-2 text-12p5 font-semibold">
                     <span>Total</span>
                     <span className="mono">{fmtMoney(selected.total_cents)}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 text-[11.5px]">
+                <div className="flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 text-11p5">
                   <Pill tone="ok">paid</Pill>
                   Visa ·· 4412 · charged Jul 1 09:00 IST · receipt emailed to invoices@acme.dev
                 </div>
@@ -160,7 +160,7 @@ function InvoicesPage() {
             ) : null}
           </div>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Every line expands to the usage rows behind it (B2 · Usage keeps them queryable forever)
             — an invoice is data, not just a PDF. Disputes: open from the line, not from support
             roulette.

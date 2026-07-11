@@ -89,7 +89,7 @@ function QueryInsightsList({ openProposal }: { openProposal: () => void }) {
           <span className="mono">prp_7c31a2</span>.
         </span>
         <span className="flex-1" />
-        <Btn variant="s" className="h-6 px-2.5 text-[10.5px]" onClick={openProposal}>
+        <Btn variant="s" className="h-6 px-2.5 text-10p5" onClick={openProposal}>
           View proposal →
         </Btn>
       </Banner>
@@ -114,11 +114,11 @@ function QueryInsightsList({ openProposal }: { openProposal: () => void }) {
                 style={row.regressed ? { background: "var(--warn-tint)" } : undefined}
                 onClick={row.regressed ? openProposal : undefined}
               >
-                <td className="mono text-[11px]">{row.query}</td>
-                <td className="mono text-[11px]">{row.calls}</td>
-                <td className={cn("mono text-[11px]", row.regressed && "text-warn")}>{row.mean}</td>
-                <td className={cn("mono text-[11px]", row.regressed && "text-warn")}>{row.p95}</td>
-                <td className="mono text-[11px]">{row.total}</td>
+                <td className="mono text-11">{row.query}</td>
+                <td className="mono text-11">{row.calls}</td>
+                <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.mean}</td>
+                <td className={cn("mono text-11", row.regressed && "text-warn")}>{row.p95}</td>
+                <td className="mono text-11">{row.total}</td>
                 <td>{row.plan ? <Pill tone={row.plan.tone}>{row.plan.label}</Pill> : "—"}</td>
               </tr>
             ))}
@@ -126,7 +126,7 @@ function QueryInsightsList({ openProposal }: { openProposal: () => void }) {
         </table>
       </div>
 
-      <p className="text-[10.5px] text-ink3">
+      <p className="text-10p5 text-ink3">
         Click a row for the full plan, sampled parameters, and history. EXPLAIN runs against a
         branch, never production.
       </p>
@@ -181,7 +181,7 @@ function ProposalView({ service, env }: { service: string; env: string }) {
             </div>
             <div>
               <Eyebrow>Reasoning</Eyebrow>
-              <p className="mt-1.5 text-[12px] leading-relaxed text-ink2">
+              <p className="mt-1.5 text-12 leading-relaxed text-ink2">
                 Deploy <span className="mono">#142</span> made this query hot on every gift-card
                 page load. <span className="mono">orders.customer_id</span> has no index, so each
                 call scans 1.2M rows, holding connections long enough to saturate the pool — the
@@ -205,7 +205,7 @@ function ProposalView({ service, env }: { service: string; env: string }) {
                 </div>
               </div>
             </div>
-            <div className="flex gap-5 text-[11.5px]">
+            <div className="flex gap-5 text-11p5">
               <span>
                 Predicted: <b>642 ms → ~4 ms</b>
               </span>
@@ -226,7 +226,7 @@ function ProposalView({ service, env }: { service: string; env: string }) {
               <Btn variant="gh" disabled disabledReason="The assistant apply path lands in Phase 3">
                 Dismiss (logged)
               </Btn>
-              <span className="ml-auto text-[10.5px] text-ink3">
+              <span className="ml-auto text-10p5 text-ink3">
                 Applied changes are audited as <b>you, via assistant</b> — same permissions, same
                 confirmations.
               </span>
@@ -243,22 +243,22 @@ function ProposalView({ service, env }: { service: string; env: string }) {
               "Reads broadly, writes narrowly — within your permissions only.",
               "Optional — an org Policy can turn this panel off entirely.",
             ].map((law) => (
-              <div key={law} className="flex gap-2 text-[11.5px] text-ink2">
-                <span className="text-ok">✓</span>
+              <div key={law} className="flex gap-2 text-11p5 text-ink2">
+                <Icon id="s-check" className="h-3 w-3 text-ok" />
                 {law}
               </div>
             ))}
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
             <Eyebrow>Suggested path</Eyebrow>
-            <p className="text-[11.5px] leading-relaxed text-ink2">
+            <p className="text-11p5 leading-relaxed text-ink2">
               1 · Apply in <span className="mono">preview/pr-142</span> branch · 2 · Verify plan
               flips to Index Scan · 3 · Promote migration with deploy{" "}
               <span className="mono">#143</span>
             </p>
           </Card>
           <Card className="p-3.5">
-            <p className="text-[11.5px] leading-relaxed text-ink3">
+            <p className="text-11p5 leading-relaxed text-ink3">
               Never proposed one-click: IAM, secrets, network exposure, deletions. Those the
               assistant only <i>describes how</i> to do.
             </p>

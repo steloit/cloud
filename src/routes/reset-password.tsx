@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
+import { Icon } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
 import { AuthShell, AuthTitle } from "@/features/auth/auth-shell";
 import { cn } from "@/lib/utils";
@@ -74,17 +75,20 @@ function ResetPasswordPage() {
             error={error}
           />
         </div>
-        <ul className="flex flex-col gap-1 text-[11.5px]">
+        <ul className="flex flex-col gap-1 text-11p5">
           {checks.map((c) => (
-            <li key={c.label} className={c.pass ? "text-ok" : "text-ink3"}>
-              ✓ {c.label}
+            <li
+              key={c.label}
+              className={cn("flex items-center gap-1.5", c.pass ? "text-ok" : "text-ink3")}
+            >
+              <Icon id={c.pass ? "s-check" : "s-x"} className="h-[11px] w-[11px]" /> {c.label}
             </li>
           ))}
         </ul>
         <Btn variant="p" type="submit" className="w-full justify-center">
           Reset password
         </Btn>
-        <div className="text-center text-[11px] text-ink3">
+        <div className="text-center text-11 text-ink3">
           You'll be signed out of all other sessions.
         </div>
       </form>

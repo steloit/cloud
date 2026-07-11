@@ -42,7 +42,7 @@ function OrgGeneralPage() {
             <div>
               <Flabel htmlFor="org-region">Default home region</Flabel>
               <Inp id="org-region" className="mono" defaultValue="aws · ap-south-1" readOnly />
-              <div className="mt-1.5 text-[10.5px] text-ink3">
+              <div className="mt-1.5 text-10p5 text-ink3">
                 prefill for new environments — never a constraint
               </div>
             </div>
@@ -50,7 +50,7 @@ function OrgGeneralPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-3 p-4">
             <Eyebrow>Ownership</Eyebrow>
-            <div className="text-[12px] text-ink2">
+            <div className="text-12 text-ink2">
               asha is the owner. Transfer requires the new owner to accept — it never happens to
               someone.
             </div>
@@ -73,7 +73,7 @@ function OrgGeneralPage() {
               </Btn>
               <Pill tone="err">blocked — 4 projects, 12 members, active subscription</Pill>
             </div>
-            <div className="text-[10.5px] text-ink3">
+            <div className="text-10p5 text-ink3">
               delete or transfer every project first; the final invoice closes the account, and
               audit history is exported before erasure
             </div>

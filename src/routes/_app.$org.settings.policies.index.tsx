@@ -95,14 +95,14 @@ function OrgPoliciesPage() {
                   <tr key={p.id}>
                     <td>
                       <span className="flex items-center gap-2">
-                        <span className="mono text-[11.5px]">{p.key}</span>
+                        <span className="mono text-11p5">{p.key}</span>
                         {p.key === "ai-assistant" ? <Pill tone="ai">AI</Pill> : null}
                       </span>
                     </td>
                     <td className="text-ink2">{p.description}</td>
                     <td className="text-ink2">{SCOPE_LABELS[p.key] ?? "organization"}</td>
                     <td>{enforcementPill(p.enforcement)}</td>
-                    <td className="mono text-[11px] text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
+                    <td className="mono text-11 text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -113,7 +113,7 @@ function OrgPoliciesPage() {
             <div>
               <Pill tone="ai">Law 4</Pill>
             </div>
-            <div className="text-[11.5px] leading-relaxed text-ink2">
+            <div className="text-11p5 leading-relaxed text-ink2">
               Set ai-assistant to disabled and every AI surface disappears — the Assistant page, ⌘K
               "ask", describe-to-provision (AI1), and the per-product panels. No workflow breaks:
               the create grid, Observe, Deploy and manual tuning all keep working exactly as before.
@@ -122,7 +122,7 @@ function OrgPoliciesPage() {
             </div>
           </Card>
 
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Enforcement modes: warn (allowed, logged, nagged) → enforce (denied with the policy
             named — E3's 403 grammar). Projects may tighten these; nothing below the org may loosen
             them.

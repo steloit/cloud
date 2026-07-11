@@ -78,8 +78,8 @@ function PrebuiltCard({ org, item }: { org: string; item: (typeof PREBUILT)[numb
     >
       <Glyph id={item.icon} />
       <div>
-        <div className="text-[12.5px] font-semibold">{item.name}</div>
-        <div className="text-[10.5px] text-ink3">{item.sub}</div>
+        <div className="text-12p5 font-semibold">{item.name}</div>
+        <div className="text-10p5 text-ink3">{item.sub}</div>
       </div>
     </Card>
   );
@@ -120,34 +120,34 @@ function DashboardsHome() {
           <Link to="/$org/dashboards/$dashId" params={{ org, dashId: "checkout-health" }}>
             <Card className="flex h-full flex-col gap-2 p-3.5 hover:border-ink3">
               <div className="flex items-center gap-2">
-                <span className="text-[12.5px] font-semibold">checkout-health</span>
+                <span className="text-12p5 font-semibold">checkout-health</span>
                 <Pill tone="mut">personal</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
               <Spark series={toSeries(p95.data)} />
-              <span className="mono text-[11px] text-ok">p95 396 ms · DLQ 0</span>
+              <span className="mono text-11 text-ok">p95 396 ms · DLQ 0</span>
             </Card>
           </Link>
           <Link to="/$org/dashboards/infrastructure" params={{ org }}>
             <Card className="flex h-full flex-col gap-2 p-3.5 hover:border-ink3">
               <div className="flex items-center gap-2">
-                <span className="text-[12.5px] font-semibold">Infrastructure</span>
+                <span className="text-12p5 font-semibold">Infrastructure</span>
                 <Pill tone="st">pre-built</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
               <Spark series={toSeries(requests.data)} tone="ok" />
-              <span className="mono text-[11px] text-ok">all green · 7 services</span>
+              <span className="mono text-11 text-ok">all green · 7 services</span>
             </Card>
           </Link>
           <Link to="/$org/dashboards/cost-usage" params={{ org }}>
             <Card className="flex h-full flex-col gap-2 p-3.5 hover:border-ink3">
               <div className="flex items-center gap-2">
-                <span className="text-[12.5px] font-semibold">Cost & Usage</span>
+                <span className="text-12p5 font-semibold">Cost & Usage</span>
                 <Pill tone="st">pre-built</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
               <Spark series={toSeries(requests.data)} />
-              <span className="mono text-[11px] text-ink2">
+              <span className="mono text-11 text-ink2">
                 MTD {billing.data ? fmtMoney(billing.data.mtd_cents ?? 0) : "…"} →{" "}
                 {billing.data ? fmtMoney(billing.data.forecast_cents ?? 0) : "…"}
               </span>
@@ -162,7 +162,7 @@ function DashboardsHome() {
           ))}
         </div>
 
-        <div className="mt-auto text-[10.5px] text-ink3">
+        <div className="mt-auto text-10p5 text-ink3">
           Pre-built dashboards are views, not files — they update as services come and go. Customize
           one and it forks into a copy under My dashboards.
         </div>

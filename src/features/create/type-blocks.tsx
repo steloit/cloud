@@ -147,7 +147,7 @@ function NameCard({
     <Card className="flex flex-col p-4">
       <Flabel htmlFor="svc-name">Instance name</Flabel>
       <Inp id="svc-name" value={value} onChange={(e) => onChange(e.target.value)} className="foc" />
-      {sublabel ? <div className="mono mt-1.5 text-[10.5px] text-ink3">{sublabel}</div> : null}
+      {sublabel ? <div className="mono mt-1.5 text-10p5 text-ink3">{sublabel}</div> : null}
     </Card>
   );
 }
@@ -162,7 +162,7 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Helper({ children }: { children: React.ReactNode }) {
-  return <div className="text-[10.5px] leading-relaxed text-ink3">{children}</div>;
+  return <div className="text-10p5 leading-relaxed text-ink3">{children}</div>;
 }
 
 interface ChipOpt {
@@ -239,11 +239,11 @@ function ChoiceCards({
             o.dimmed && "opacity-75",
           )}
         >
-          <span className="text-[12.5px] font-semibold">{o.title}</span>
-          <span className={cn("text-[10.5px] leading-snug text-ink3", o.subMono && "mono")}>
+          <span className="text-12p5 font-semibold">{o.title}</span>
+          <span className={cn("text-10p5 leading-snug text-ink3", o.subMono && "mono")}>
             {o.sub}
           </span>
-          {o.price ? <span className="mono text-[10.5px] text-ink2">{o.price}</span> : null}
+          {o.price ? <span className="mono text-10p5 text-ink2">{o.price}</span> : null}
         </button>
       ))}
     </div>
@@ -271,7 +271,7 @@ function Toggle({ on, onToggle, label }: { on: boolean; onToggle: () => void; la
           )}
         />
       </button>
-      <span className="text-[12px] text-ink2">{label}</span>
+      <span className="text-12 text-ink2">{label}</span>
     </div>
   );
 }
@@ -299,9 +299,9 @@ function BindingsCard({
             onChange={() => onToggle(r.target)}
             className="accent-steel"
           />
-          <span className="mono text-[12px] font-semibold">{r.target}</span>
-          {r.scope ? <span className="text-[11px] text-ink2">{r.scope}</span> : null}
-          {r.note ? <span className="text-[11px] text-ink3">{r.note}</span> : null}
+          <span className="mono text-12 font-semibold">{r.target}</span>
+          {r.scope ? <span className="text-11 text-ink2">{r.scope}</span> : null}
+          {r.note ? <span className="text-11 text-ink3">{r.note}</span> : null}
           {r.mutedPill ? <Pill tone="mut">{r.mutedPill}</Pill> : null}
         </label>
       ))}
@@ -438,7 +438,7 @@ function PostgresBlock({ onChange }: { onChange: (s: BlockState) => void }) {
               className="max-w-[140px]"
               aria-label="Storage"
             />
-            <span className="mono text-[10.5px] text-ink3">auto-grows · $0.50/GB</span>
+            <span className="mono text-10p5 text-ink3">auto-grows · $0.50/GB</span>
           </div>
         </Group>
         <Toggle
@@ -525,7 +525,7 @@ function ValkeyBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           <Inp
             value={eviction}
             onChange={(e) => setEviction(e.target.value)}
-            className="mono max-w-[220px] text-[12px]"
+            className="mono max-w-[220px] text-12"
             aria-label="Eviction"
           />
         </Group>
@@ -596,8 +596,8 @@ function WebBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           <Helper>via the org's Git integration — no per-service tokens</Helper>
           <div className="fieldrow">
             <span className="flex items-center gap-2.5">
-              <span className="font-semibold text-[12px]">acme/admin</span>
-              <span className="mono text-[11px] text-ink3">branch main</span>
+              <span className="font-semibold text-12">acme/admin</span>
+              <span className="mono text-11 text-ink3">branch main</span>
             </span>
             <Pill tone="ok">Dockerfile detected</Pill>
           </div>
@@ -606,7 +606,7 @@ function WebBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           <Inp
             value={health}
             onChange={(e) => setHealth(e.target.value)}
-            className="mono max-w-[220px] text-[12px]"
+            className="mono max-w-[220px] text-12"
             aria-label="Health check"
           />
         </Group>
@@ -780,7 +780,7 @@ function QueueBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           <Inp
             value={retries}
             onChange={(e) => setRetries(e.target.value)}
-            className="mono max-w-[260px] text-[12px]"
+            className="mono max-w-[260px] text-12"
             aria-label="Retries"
           />
         </Group>
@@ -852,10 +852,10 @@ function WorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
         <Group label="Source & command">
           <div className="fieldrow">
             <span className="flex items-center gap-2.5">
-              <span className="font-semibold text-[12px]">acme/store</span>
-              <span className="mono text-[11px] text-ink3">same repo as api · branch main</span>
+              <span className="font-semibold text-12">acme/store</span>
+              <span className="mono text-11 text-ink3">same repo as api · branch main</span>
             </span>
-            <span className="mono text-[11px] text-ink2">node workers/mailer.js</span>
+            <span className="mono text-11 text-ink2">node workers/mailer.js</span>
           </div>
         </Group>
         <Group label="Trigger">
@@ -939,7 +939,7 @@ function GpuWorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
           value={region}
           onPick={setRegion}
         />
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-11">
           <Pill tone="ok">
             permitted by org policy <span className="mono">allowed-regions-apac</span>
           </Pill>
@@ -947,25 +947,25 @@ function GpuWorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
         </div>
         <div className="flex items-center gap-2.5 rounded-[9px] border border-hair border-dashed px-3 py-2.5">
           <Icon id="s-globe" className="h-[13px] w-[13px] text-ink3" />
-          <span className="text-[11px] text-ink2">
+          <span className="text-11 text-ink2">
             <b>aws · ap-south-1</b> — your home region — doesn't have GPU Worker yet.
           </span>
           <span className="sp" />
           <Btn
             variant="s"
-            className="h-6 px-2 text-[10.5px]"
+            className="h-6 px-2 text-10p5"
             onClick={() => toast.success("Request recorded — you'll be notified")}
           >
             Request it here
           </Btn>
-          <span className="text-[10px] text-ink3">
+          <span className="text-10 text-ink3">
             you'll be notified · this instance gets a one-click move home
           </span>
         </div>
       </Card>
       <Card className="flex flex-col gap-2 p-4">
         <Flabel>What cross-region means here — stated, not discovered later</Flabel>
-        <div className="flex flex-col gap-2 text-[11.5px] leading-relaxed text-ink2">
+        <div className="flex flex-col gap-2 text-11p5 leading-relaxed text-ink2">
           <div className="flex gap-2.5">
             <Dot tone="warn" />
             <span>
@@ -999,7 +999,7 @@ function GpuWorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
             isOn={(l) => l === sz.label}
             onPick={(l) => setSize(GPU_SIZES.find((s) => s.label === l)?.id ?? "A10")}
           />
-          <label className="flex cursor-pointer items-center gap-2 text-[12px]">
+          <label className="flex cursor-pointer items-center gap-2 text-12">
             <input
               type="checkbox"
               checked={bindJobs}

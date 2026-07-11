@@ -176,7 +176,7 @@ function UsagePage() {
 
           {showMath ? (
             <Card className="flex flex-col gap-3 p-4">
-              <div className="text-[12.5px] font-semibold">The math, in the open</div>
+              <div className="text-12p5 font-semibold">The math, in the open</div>
               {/* Frame says "by Apr 1" / "April invoice" inside a July context —
                   source inconsistency, rendered against the fixtures' July cycle. */}
               <div className="logwell">
@@ -186,12 +186,12 @@ function UsagePage() {
                   {"driver  assets bucket · 71% of egress · spiked with the gift-card launch"}
                 </div>
               </div>
-              <p className="text-[12px]">
+              <p className="text-12">
                 Honest recommendation: do nothing. ~$1.62 of overage is the cheapest option — no
                 plan change pays for itself here. If the spike is unwanted, the driver is assets: a
                 CDN cache rule would cut it (the assistant drafted one — prp_eg41c7, optional).
               </p>
-              <p className="border-hair border-t pt-2.5 text-[11px] text-ink3">
+              <p className="border-hair border-t pt-2.5 text-11 text-ink3">
                 Upgrade prompts here are calculators, not sales — the console recommends a plan only
                 when the math favors you, and shows the math either way.
               </p>
@@ -223,7 +223,7 @@ function UsagePage() {
                         <td>
                           <div className="font-medium">{d?.label ?? key}</div>
                           {d?.sub ? (
-                            <div className="mt-0.5 text-[10.5px] text-ink3">{d.sub}</div>
+                            <div className="mt-0.5 text-10p5 text-ink3">{d.sub}</div>
                           ) : null}
                         </td>
                         <td className="mono text-ink2">{d ? d.included(m) : (m.included ?? 0)}</td>
@@ -239,7 +239,7 @@ function UsagePage() {
                       {branch ? (
                         <tr>
                           <td className="pl-7">
-                            <span className="flex items-center gap-2 text-[12px] text-ink2">
+                            <span className="flex items-center gap-2 text-12 text-ink2">
                               ↳ {branch.label}
                               {branch.note ? <Pill tone="mut">{branch.note}</Pill> : null}
                             </span>
@@ -265,7 +265,7 @@ function UsagePage() {
             </table>
           </div>
 
-          <div className="flex flex-col gap-1 text-[11px] text-ink3">
+          <div className="flex flex-col gap-1 text-11 text-ink3">
             <p>
               Meters update within ~5 min of consumption — the invoice is this table, frozen on the
               1st.

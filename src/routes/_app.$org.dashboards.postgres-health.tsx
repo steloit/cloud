@@ -131,20 +131,20 @@ function PostgresHealth() {
 
         <div className="grid grid-cols-2 gap-3.5">
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Connections · fleet</span>
-            <MetricChart series={toSeries(connections.data)} tone="warn" height={110} />
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-12p5 font-semibold">Connections · fleet</span>
+            <MetricChart series={toSeries(connections.data)} tone="warn" size="md" />
+            <span className="text-10p5 text-ink3">
               db-main nearing its 200 limit — the same signal the product page shows
             </span>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">p95 query time</span>
-            <MetricChart series={toSeries(p95.data)} tone="steel" height={110} unit="ms" />
-            <span className="text-[10.5px] text-ink3">per instance · overlaid</span>
+            <span className="text-12p5 font-semibold">p95 query time</span>
+            <MetricChart series={toSeries(p95.data)} tone="steel" size="md" unit="ms" />
+            <span className="text-10p5 text-ink3">per instance · overlaid</span>
           </Card>
         </div>
 
-        <div className="mt-auto text-[10.5px] text-ink3">
+        <div className="mt-auto text-10p5 text-ink3">
           Depth stays on the product pages — Open → jumps to the instance. This view exists for the
           question they can't answer: how is the fleet?
         </div>

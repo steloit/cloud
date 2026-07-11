@@ -54,7 +54,7 @@ function OnboardingOrgPage() {
               error={error}
               autoFocus
             />
-            <div className="mono mt-1.5 text-[10.5px] text-ink3">
+            <div className="mono mt-1.5 text-10p5 text-ink3">
               steloit.app/{slug || "…"} · slug is permanent
             </div>
           </div>
@@ -63,7 +63,7 @@ function OnboardingOrgPage() {
             <div className="inp" id="region">
               aws · ap-south-1 · Mumbai
             </div>
-            <div className="mt-1.5 text-[10.5px] text-ink3">
+            <div className="mt-1.5 text-10p5 text-ink3">
               Default for new environments — overridable per environment, and later per cell.
             </div>
           </div>
@@ -76,7 +76,7 @@ function OnboardingOrgPage() {
             Continue → Invite your team
           </Btn>
         </form>
-        <div className="flex items-center gap-2 text-[11px] text-ink3">
+        <div className="flex items-center gap-2 text-11 text-ink3">
           Prefer the terminal?
           <Copybit>{`steloit org create ${slug || "acme"} --region aws/ap-south-1`}</Copybit>
         </div>

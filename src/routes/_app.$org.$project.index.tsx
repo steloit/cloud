@@ -133,7 +133,7 @@ function Topology({
           );
         })}
       </div>
-      <p className="mt-2 text-[10.5px] text-ink3">
+      <p className="mt-2 text-10p5 text-ink3">
         Nodes are the rail's services; click one to enter its domain. The amber path is today's
         incident: ◆ #142 13:58 → p95 14:02 → dead letters 14:03.
       </p>
@@ -187,8 +187,8 @@ function EmptyProject({ org, project, env }: { org: string; project: string; env
     <>
       <Card dashed className="flex flex-col items-center gap-3 py-14">
         <Glyph id="s-hex" />
-        <div className="text-[14px] font-semibold">Nothing here yet — by design</div>
-        <p className="max-w-[440px] text-center text-[11.5px] leading-relaxed text-ink3">
+        <div className="text-14 font-semibold">Nothing here yet — by design</div>
+        <p className="max-w-[440px] text-center text-11p5 leading-relaxed text-ink3">
           Add your first service or start from a template. You'll see the monthly estimate before
           anything exists, and backups, metrics and alerts come included.
         </p>
@@ -207,25 +207,25 @@ function EmptyProject({ org, project, env }: { org: string; project: string; env
       </Card>
       <div className="grid grid-cols-3 gap-3.5">
         <Card className="flex flex-col gap-2 p-4">
-          <div className="text-[12.5px] font-semibold">No deployments yet</div>
-          <p className="text-[11.5px] leading-relaxed text-ink3">
+          <div className="text-12p5 font-semibold">No deployments yet</div>
+          <p className="text-11p5 leading-relaxed text-ink3">
             Connect a repo and every push becomes an immutable release.
           </p>
-          <span className="mono mt-auto text-[10.5px] text-ink3">steloit init</span>
+          <span className="mono mt-auto text-10p5 text-ink3">steloit init</span>
         </Card>
         <Card className="flex flex-col gap-2 p-4">
-          <div className="text-[12.5px] font-semibold">Nothing to observe</div>
-          <p className="text-[11.5px] leading-relaxed text-ink3">
+          <div className="text-12p5 font-semibold">Nothing to observe</div>
+          <p className="text-11p5 leading-relaxed text-ink3">
             Dashboards, logs and default alerts appear with your first service — no setup.
           </p>
-          <span className="mt-auto text-[10.5px] text-ink3">included, not configured</span>
+          <span className="mt-auto text-10p5 text-ink3">included, not configured</span>
         </Card>
         <Card className="flex flex-col gap-2 p-4">
-          <div className="text-[12.5px] font-semibold">No branches yet</div>
-          <p className="text-[11.5px] leading-relaxed text-ink3">
+          <div className="text-12p5 font-semibold">No branches yet</div>
+          <p className="text-11p5 leading-relaxed text-ink3">
             Database branches unlock once PostgreSQL exists — one per preview, in seconds.
           </p>
-          <span className="mono mt-auto text-[10.5px] text-ink3">steloit db branch create</span>
+          <span className="mono mt-auto text-10p5 text-ink3">steloit db branch create</span>
         </Card>
       </div>
     </>
@@ -316,12 +316,12 @@ function ProjectOverview() {
                     className={cn("flex flex-col gap-1.5 p-3", flagged && "border-warn/40")}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-[12.5px] font-semibold">{e.name}</span>
+                      <span className="text-12p5 font-semibold">{e.name}</span>
                       {isHome ? <Pill tone="mut">home</Pill> : null}
                       {flagged ? <Pill tone="warn">policy-flagged</Pill> : null}
                     </div>
-                    <div className="mono text-[13px]">{fmtMoney(e.monthly_cost_cents ?? 0)}/mo</div>
-                    <div className="text-[10.5px] text-ink3">
+                    <div className="mono text-13">{fmtMoney(e.monthly_cost_cents ?? 0)}/mo</div>
+                    <div className="text-10p5 text-ink3">
                       {e.region.replace("/", " · ")} · {svcList.length} services
                       {e.name === "production" && degraded > 0 ? " · 1 alert firing" : ""}
                       {e.kind === "preview" && e.expires_at ? " · expires in 5 d · marco" : ""}
@@ -334,8 +334,8 @@ function ProjectOverview() {
                   dashed
                   className="flex h-full flex-col items-center justify-center gap-1 p-3 hover:border-ink3"
                 >
-                  <span className="text-[12.5px] font-medium text-ink2">⊕ New environment</span>
-                  <span className="text-[10.5px] text-ink3">or manage via the env crumb ▾</span>
+                  <span className="text-12p5 font-medium text-ink2">⊕ New environment</span>
+                  <span className="text-10p5 text-ink3">or manage via the env crumb ▾</span>
                 </Card>
               </Link>
             </div>
@@ -345,7 +345,7 @@ function ProjectOverview() {
               <div className="flex w-[352px] shrink-0 flex-col gap-3">
                 <Card className="flex flex-col gap-2.5 p-3.5">
                   <Eyebrow className="text-warn">Needs attention · 4</Eyebrow>
-                  <div className="flex items-center gap-2 text-[11.5px]">
+                  <div className="flex items-center gap-2 text-11p5">
                     <span className="flex-1">
                       <b>api</b> p95 812 ms — 4 min after deploy #142
                     </span>
@@ -354,39 +354,39 @@ function ProjectOverview() {
                       params={{ org, project }}
                       search={{ env }}
                     >
-                      <Btn variant="s" className="h-6 px-2 text-[10.5px]">
+                      <Btn variant="s" className="h-6 px-2 text-10p5">
                         Observe
                       </Btn>
                     </Link>
                   </div>
-                  <div className="flex items-center gap-2 text-[11.5px]">
+                  <div className="flex items-center gap-2 text-11p5">
                     <span className="flex-1">
                       <b>jobs</b>: 2 dead letters · <span className="mono">"receipt": null</span>
                     </span>
                     <Btn
                       variant="s"
-                      className="h-6 px-2 text-[10.5px]"
+                      className="h-6 px-2 text-10p5"
                       disabled
                       disabledReason="The queue DLQ view (D8) lands in Phase 3"
                     >
                       Open DLQ
                     </Btn>
                   </div>
-                  <div className="flex items-center gap-2 text-[11.5px]">
+                  <div className="flex items-center gap-2 text-11p5">
                     <span className="flex-1">
                       branch <span className="mono">preview/pr-142</span> flagged by{" "}
                       <span className="mono">branch-data-masking</span>
                     </span>
                     <Btn
                       variant="gh"
-                      className="h-6 px-2 text-[10.5px]"
+                      className="h-6 px-2 text-10p5"
                       disabled
                       disabledReason="Policies land in Phase 3"
                     >
                       Policy
                     </Btn>
                   </div>
-                  <div className="flex items-center gap-2 text-[11.5px]">
+                  <div className="flex items-center gap-2 text-11p5">
                     <span className="flex-1">
                       assistant drafted <span className="mono">prp_7c31a2</span> — the index fix
                     </span>
@@ -395,7 +395,7 @@ function ProjectOverview() {
                       params={{ org, project, service: "db-main" }}
                       search={{ env }}
                     >
-                      <Btn variant="p" className="h-6 px-2 text-[10.5px]">
+                      <Btn variant="p" className="h-6 px-2 text-10p5">
                         Review
                       </Btn>
                     </Link>
@@ -404,7 +404,7 @@ function ProjectOverview() {
                 <Card className="flex flex-col gap-2 p-3.5">
                   <Eyebrow>Latest events</Eyebrow>
                   {latestEvents.map((e) => (
-                    <div key={e.id} className="flex gap-2.5 text-[11.5px]">
+                    <div key={e.id} className="flex gap-2.5 text-11p5">
                       <span className="mono text-ink3">{fmtTime(e.at)}</span>
                       <span className="text-ink2">{describeEvent(e)}</span>
                     </div>
@@ -413,7 +413,7 @@ function ProjectOverview() {
                     to="/$org/$project/observe/events"
                     params={{ org, project }}
                     search={{ env }}
-                    className="border-hair border-t pt-2 text-[11px] font-medium text-steel"
+                    className="border-hair border-t pt-2 text-11 font-medium text-steel"
                   >
                     All events → Observe
                   </Link>

@@ -36,6 +36,22 @@
 
   --shadow-e1: var(--e1);
   --shadow-e2: var(--e2);
+
+  --color-scrim: var(--scrim);
+
+  /* LATTICE type ramp — the discrete UI scale (10px floor, half-pixel steps
+     are the gallery's own). Use these instead of arbitrary text-[Npx]:
+     text-10 · text-10p5 · text-11 · text-11p5 · text-12 · text-12p5 ·
+     text-13 · text-14. Sizes ≥15px are display/hero one-offs and stay
+     explicit. Nothing below 10px. */
+  --text-10: 10px;
+  --text-10p5: 10.5px;
+  --text-11: 11px;
+  --text-11p5: 11.5px;
+  --text-12: 12px;
+  --text-12p5: 12.5px;
+  --text-13: 13px;
+  --text-14: 14px;
 }
 
 @layer base {

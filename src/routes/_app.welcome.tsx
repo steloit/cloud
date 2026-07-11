@@ -23,7 +23,7 @@ function WelcomePage() {
     <div className="flex h-screen flex-col bg-canvas">
       <header className="ctx">
         <Mark />
-        <span className="text-[13px] font-semibold">Steloit</span>
+        <span className="text-13 font-semibold">Steloit</span>
         <span className="flex-1" />
         <a
           className="icb"
@@ -51,32 +51,32 @@ function WelcomePage() {
         <div className="flex gap-3.5">
           <Card className="flex w-[300px] flex-col gap-3 border-steel p-5">
             <Glyph id="s-org" />
-            <div className="text-[13px] font-semibold">Create an organization</div>
-            <p className="text-[11.5px] leading-relaxed text-ink3">
+            <div className="text-13 font-semibold">Create an organization</div>
+            <p className="text-11p5 leading-relaxed text-ink3">
               You'll own billing and policies, and can invite your team. Free tier included —
               nothing bills until you provision.
             </p>
             <Link to="/onboarding/org">
               <Btn variant="p">Create organization</Btn>
             </Link>
-            <span className="mono text-[10.5px] text-ink3">steloit org create</span>
+            <span className="mono text-10p5 text-ink3">steloit org create</span>
           </Card>
 
           <Card className="flex w-[300px] flex-col gap-3 p-5">
             <Glyph id="s-users" />
-            <div className="text-[13px] font-semibold">Join an organization</div>
-            <p className="text-[11.5px] leading-relaxed text-ink3">
+            <div className="text-13 font-semibold">Join an organization</div>
+            <p className="text-11p5 leading-relaxed text-ink3">
               Ask an admin to invite <span className="mono">{email}</span>. Invitations appear here
               the moment they're sent — no refresh needed.
             </p>
             <Btn variant="s">I have an invite link</Btn>
-            <span className="text-[10.5px] text-ink3">or open the link from your email</span>
+            <span className="text-10p5 text-ink3">or open the link from your email</span>
           </Card>
         </div>
 
         <Card className="flex w-[622px] items-center gap-3 p-4">
           <Dot tone="sus" />
-          <span className="flex-1 text-[11.5px] text-ink3">
+          <span className="flex-1 text-11p5 text-ink3">
             No pending invitations for <span className="mono">{email}</span> — we're watching for
             them automatically.
           </span>
@@ -85,7 +85,7 @@ function WelcomePage() {
           </Btn>
         </Card>
 
-        <div className="flex items-center gap-2 text-[11px] text-ink3">
+        <div className="flex items-center gap-2 text-11 text-ink3">
           Signed in as <span className="mono">{email}</span> ·
           <button
             type="button"

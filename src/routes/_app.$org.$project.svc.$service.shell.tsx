@@ -67,7 +67,7 @@ function ShellPage() {
           </div>
         </div>
 
-        <p className="text-[11px] leading-relaxed text-ink3">
+        <p className="text-11 leading-relaxed text-ink3">
           No SSH keys, no bastion — access is your console identity + role, sessions are audit
           events, and Developers get shells in non-production only unless policy says otherwise.
         </p>

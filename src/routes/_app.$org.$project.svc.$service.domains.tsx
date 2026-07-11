@@ -112,14 +112,14 @@ function DomainsPage() {
                 <td>
                   <Stlab tone="ok">serving</Stlab>
                 </td>
-                <td className="mono text-right text-[11px] text-ink3">fallback</td>
+                <td className="mono text-right text-11 text-ink3">fallback</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <Card className="flex flex-col gap-2.5 p-4">
-          <div className="text-[12px] font-semibold">Add domain</div>
+          <div className="text-12 font-semibold">Add domain</div>
           <div className="flex items-center gap-2.5">
             <Inp
               className="mono max-w-64 flex-1"
@@ -134,7 +134,7 @@ function DomainsPage() {
           </div>
         </Card>
 
-        <p className="text-[11px] leading-relaxed text-ink3">
+        <p className="text-11 leading-relaxed text-ink3">
           Verification polls DNS and issues the certificate on first success — no cert files, no
           renewal cron, nothing to forget. Previews get generated subdomains under
           *.preview.steloit.app automatically.

@@ -6,6 +6,7 @@ import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Icon } from "@/design-system/icon";
 import { Dot, Pill } from "@/design-system/pill";
 import {
   planLabel,
@@ -67,31 +68,29 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
       <div className="grid grid-cols-2 items-start gap-3.5">
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex items-center gap-2">
-            <span className="text-[14px] font-semibold">{planName}</span>
+            <span className="text-14 font-semibold">{planName}</span>
             <Pill tone="st">current</Pill>
-            <span className="mono ml-auto text-[12.5px]">
-              {PLAN_PRICE[sub?.plan ?? "business"]}
-            </span>
+            <span className="mono ml-auto text-12p5">{PLAN_PRICE[sub?.plan ?? "business"]}</span>
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
             <div>
               <Eyebrow>Seats</Eyebrow>
-              <div className="mono mt-0.5 text-[12.5px]">12 / 20</div>
+              <div className="mono mt-0.5 text-12p5">12 / 20</div>
             </div>
             <div>
               <Eyebrow>Egress incl.</Eyebrow>
-              <div className="mono mt-0.5 text-[12.5px]">100 GB</div>
+              <div className="mono mt-0.5 text-12p5">100 GB</div>
             </div>
             <div>
               <Eyebrow>PITR</Eyebrow>
-              <div className="mono mt-0.5 text-[12.5px]">30 d</div>
+              <div className="mono mt-0.5 text-12p5">30 d</div>
             </div>
             <div>
               <Eyebrow>Support</Eyebrow>
-              <div className="mt-0.5 text-[12.5px]">business hours</div>
+              <div className="mt-0.5 text-12p5">business hours</div>
             </div>
           </div>
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Enterprise adds dedicated cells & private regions · audit export · 99.95% SLA
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -117,7 +116,7 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
             </Btn>
           </div>
           {problem ? (
-            <div className="flex items-start gap-2 text-[11.5px]">
+            <div className="flex items-start gap-2 text-11p5">
               <Pill tone="err">blocked</Pill>
               <span>{problem.detail} — the button says why, like every blocked action here</span>
             </div>
@@ -127,15 +126,13 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
         <Card className="flex flex-col gap-3 p-4">
           <Eyebrow>Payment methods</Eyebrow>
           {(methods.data ?? []).map((pm) => (
-            <div key={pm.id} className="flex items-center gap-2 text-[12.5px]">
+            <div key={pm.id} className="flex items-center gap-2 text-12p5">
               <span className="font-medium">
                 {pm.brand} ·· {pm.last4}
               </span>
               {pm.backup ? <Pill tone="mut">backup</Pill> : <Pill tone="st">default</Pill>}
               {pm.expires ? (
-                <span className="mono text-[11px] text-ink3">
-                  exp {pm.expires.replace("/", " / ")}
-                </span>
+                <span className="mono text-11 text-ink3">exp {pm.expires.replace("/", " / ")}</span>
               ) : null}
               <span className="ml-auto">
                 <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
@@ -144,7 +141,7 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
               </span>
             </div>
           ))}
-          <div className="flex items-center gap-2 text-[12.5px]">
+          <div className="flex items-center gap-2 text-12p5">
             <span className="text-ink2">Backup method</span>
             <Pill tone="mut">none</Pill>
             <span className="ml-auto">
@@ -153,7 +150,7 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
               </Btn>
             </span>
           </div>
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             A backup card is tried automatically before any dunning starts. Cards are stored with
             the processor — Steloit keeps a token, never the number.
           </p>
@@ -161,47 +158,45 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
 
         <Card className="flex flex-col gap-2.5 p-4">
           <Eyebrow>Billing details</Eyebrow>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">Company</span>
             <span>Acme Technologies Pvt Ltd</span>
           </div>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">GSTIN</span>
             <span className="mono">29ABCDE1234F1Z5</span>
           </div>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">Address</span>
             <span>Indiranagar, Bengaluru 560038, IN</span>
           </div>
-          <p className="text-[11px] text-ink3">
-            Invoices to invoices@acme.dev + the Owner, always.
-          </p>
+          <p className="text-11 text-ink3">Invoices to invoices@acme.dev + the Owner, always.</p>
         </Card>
 
         <Card className="flex flex-col gap-2.5 p-4">
-          <div className="text-[12.5px] font-semibold">
+          <div className="text-12p5 font-semibold">
             If a charge fails — the whole policy, up front
           </div>
-          <div className="flex items-baseline gap-3 text-[12px]">
+          <div className="flex items-baseline gap-3 text-12">
             <span className="mono w-16 shrink-0 text-ink3">day 0–7</span>
             <span>
               3 automatic retries (backup card first) · Owner + Admins notified in-app and by email
               (N-series)
             </span>
           </div>
-          <div className="flex items-baseline gap-3 text-[12px]">
+          <div className="flex items-baseline gap-3 text-12">
             <span className="mono w-16 shrink-0 text-ink3">day 7–21</span>
             <span>
               console banner for Admins · new provisioning paused · running services untouched
             </span>
           </div>
-          <div className="flex items-baseline gap-3 text-[12px]">
+          <div className="flex items-baseline gap-3 text-12">
             <span className="mono w-16 shrink-0 text-ink3">day 21+</span>
             <span>
               services suspend (state kept) · no data deleted for billing reasons within 90 days
             </span>
           </div>
-          <p className="border-hair border-t pt-2 text-[11px] text-ink3">
+          <p className="border-hair border-t pt-2 text-11 text-ink3">
             Nothing in this column is a surprise reserved for the incident — it's the contract,
             printed where you set up the card.
           </p>
@@ -258,16 +253,14 @@ function TrialView({ org, sub }: { org: string; sub: Subscription }) {
 
       <div className="grid grid-cols-2 items-start gap-3.5">
         <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[12.5px] font-semibold">
-            When the trial ends — the whole contract
-          </div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="text-12p5 font-semibold">When the trial ends — the whole contract</div>
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="ok" />
             <span>
               If you choose Pro — $29/mo starts at the anchor. Nothing changes in your projects.
             </span>
           </div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="warn" />
             <span>
               If you don't — the org moves to Free limits. Your 1 project and services keep running
@@ -275,13 +268,13 @@ function TrialView({ org, sub }: { org: string; sub: Subscription }) {
               days) winds down with 7 days' notice.
             </span>
           </div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="ok" />
             <span>
               Either way — nothing is deleted. No card was taken, so nothing is charged silently.
             </span>
           </div>
-          <p className="border-hair border-t pt-2 text-[11px] text-ink3">
+          <p className="border-hair border-t pt-2 text-11 text-ink3">
             Trial reminders: bell + email at 7 days and 1 day. No countdown modals, no dark patterns
             — the trial ends the way this page says it does.
           </p>
@@ -289,19 +282,19 @@ function TrialView({ org, sub }: { org: string; sub: Subscription }) {
 
         <Card className="flex flex-col gap-2.5 p-4">
           <Eyebrow>Trial usage so far</Eyebrow>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">Resources (usage)</span>
             <span className="mono">$4.12</span>
           </div>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">Plan during trial</span>
             <span className="mono">$0</span>
           </div>
-          <div className="flex items-baseline justify-between gap-3 text-[12.5px]">
+          <div className="flex items-baseline justify-between gap-3 text-12p5">
             <span className="text-ink3">Members</span>
             <span className="mono">2 / 5</span>
           </div>
-          <p className="text-[11px] text-ink3">
+          <p className="text-11 text-ink3">
             Usage bills regardless of plan — the trial waives the plan fee, not the meter. Same rule
             as everywhere.
           </p>
@@ -348,15 +341,15 @@ function CancelledView({ org, sub }: { org: string; sub: Subscription }) {
 
       <div className="grid grid-cols-2 items-start gap-3.5">
         <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[12.5px] font-semibold">On {anchor}, Borealis moves to Free</div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="text-12p5 font-semibold">On {anchor}, Borealis moves to Free</div>
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="ok" />
             <span>
               Keeps running: your project, services, data, domains — and usage keeps billing at the
               same unit prices. Cancelling the plan is not deleting resources.
             </span>
           </div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="warn" />
             <span>
               Winds down: preview environments (Free has none) close when their PRs do; log
@@ -364,7 +357,7 @@ function CancelledView({ org, sub }: { org: string; sub: Subscription }) {
               early.
             </span>
           </div>
-          <div className="flex items-baseline gap-2.5 text-[12px]">
+          <div className="flex items-baseline gap-2.5 text-12">
             <Dot tone="ok" />
             <span>
               Nothing is deleted. Not at cancellation, not after. Deletion is only ever yours to do
@@ -374,8 +367,8 @@ function CancelledView({ org, sub }: { org: string; sub: Subscription }) {
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[12.5px] font-semibold">Coming back</div>
-          <p className="text-[12px]">
+          <div className="text-12p5 font-semibold">Coming back</div>
+          <p className="text-12">
             Reactivation is one click, any time — nothing was deleted in between.
           </p>
           <div>
@@ -454,7 +447,7 @@ function DunningView({ sub }: { org?: string; sub: Subscription }) {
         </span>
         <Btn
           variant="s"
-          className="h-6 px-2 text-[10.5px]"
+          className="h-6 px-2 text-10p5"
           disabled
           disabledReason="Card updates land with the payment processor"
         >
@@ -462,7 +455,7 @@ function DunningView({ sub }: { org?: string; sub: Subscription }) {
         </Btn>
         <Btn
           variant="gh"
-          className="h-6 px-2 text-[10.5px]"
+          className="h-6 px-2 text-10p5"
           disabled
           disabledReason="Retries run on the printed schedule"
         >
@@ -480,48 +473,48 @@ function DunningView({ sub }: { org?: string; sub: Subscription }) {
       <div className="flex gap-3.5">
         <Card className="flex flex-[1.3] flex-col gap-3 p-4">
           <Eyebrow>Where you are in the policy</Eyebrow>
-          <div className="flex items-start gap-3 text-[12px]">
-            <span className="text-ok">✓</span>
+          <div className="flex items-start gap-3 text-12">
+            <Icon id="s-check" className="h-3 w-3 text-ok" />
             <span>
               <b>Day 0 — charge failed</b>
-              <span className="mono block text-[10.5px] text-ink3">
+              <span className="mono block text-10p5 text-ink3">
                 Visa ··8841 declined · Owner + Admins notified (bell + email)
               </span>
             </span>
           </div>
-          <div className="flex items-start gap-3 text-[12px]">
-            <span className="text-ok">✓</span>
+          <div className="flex items-start gap-3 text-12">
+            <Icon id="s-check" className="h-3 w-3 text-ok" />
             <span>
               <b>Day 0–7 — automatic retries</b>
-              <span className="mono block text-[10.5px] text-ink3">
+              <span className="mono block text-10p5 text-ink3">
                 3 retries · backup card first (none on file) · all declined
               </span>
             </span>
           </div>
-          <div className="flex items-start gap-3 rounded-lg border border-warn/40 bg-warn-tint/40 p-2.5 text-[12px]">
-            <span className="dot warn mt-1" />
+          <div className="flex items-start gap-3 rounded-lg border border-warn/40 bg-warn-tint/40 p-2.5 text-12">
+            <Dot tone="warn" className="mt-1" />
             <span>
               <b>Day 7–21 — you are here (day {day})</b>
-              <span className="block text-[10.5px] text-ink3">
+              <span className="block text-10p5 text-ink3">
                 Console banner for Admins · new provisioning paused · running services untouched ·
                 retries continue
               </span>
             </span>
           </div>
-          <div className="flex items-start gap-3 text-[12px] text-ink3">
+          <div className="flex items-start gap-3 text-12 text-ink3">
             <span>4</span>
             <span>
               <b className="text-ink2">Day 21+ — suspension</b>
-              <span className="block text-[10.5px]">
+              <span className="block text-10p5">
                 Services suspend with state kept · resume instantly on payment
               </span>
             </span>
           </div>
-          <div className="flex items-start gap-3 text-[12px] text-ink3">
+          <div className="flex items-start gap-3 text-12 text-ink3">
             <span>5</span>
             <span>
               <b className="text-ink2">Day 90</b>
-              <span className="block text-[10.5px]">
+              <span className="block text-10p5">
                 Only now can data be deleted for billing reasons — with 14 days' final notice
               </span>
             </span>
@@ -530,11 +523,11 @@ function DunningView({ sub }: { org?: string; sub: Subscription }) {
         <div className="flex flex-1 flex-col gap-3">
           <Card className="flex flex-col gap-2.5 p-4">
             <Eyebrow>Fix it</Eyebrow>
-            <div className="flex justify-between text-[12px]">
+            <div className="flex justify-between text-12">
               <span className="text-ink3">Outstanding</span>
               <span className="mono">$29.00 + $4.12 usage</span>
             </div>
-            <div className="flex justify-between text-[12px]">
+            <div className="flex justify-between text-12">
               <span className="text-ink3">Card on file</span>
               <span className="mono">Visa ··8841 declined</span>
             </div>
@@ -544,11 +537,11 @@ function DunningView({ sub }: { org?: string; sub: Subscription }) {
             <Btn variant="s" disabled disabledReason="Backup cards land with the payment processor">
               Add a backup card
             </Btn>
-            <p className="text-[10.5px] text-ink3">
+            <p className="text-10p5 text-ink3">
               Payment clears everything instantly — banner gone, provisioning unpaused, no residue.
             </p>
           </Card>
-          <Card className="p-3.5 text-[11.5px] leading-relaxed text-ink3">
+          <Card className="p-3.5 text-11p5 leading-relaxed text-ink3">
             Grace period is a promise, not a favor: it's the same schedule printed on Payment & plan
             (B4) since day one.
           </Card>

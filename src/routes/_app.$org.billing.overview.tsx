@@ -230,7 +230,7 @@ function BillingOverviewPage() {
               value={
                 <>
                   {fmtMoney(b?.forecast_cents ?? 0)}
-                  <span className="text-[12px] text-ink3">
+                  <span className="text-12 text-ink3">
                     {" "}
                     ± {fmtMoney(b?.forecast_margin_cents ?? 0)}
                   </span>
@@ -274,10 +274,8 @@ function BillingOverviewPage() {
             <div className="flex min-w-0 flex-1 flex-col gap-3.5">
               <Card className="flex flex-col gap-2 p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-[12.5px] font-semibold">
-                    Daily accrual → month-end forecast
-                  </div>
-                  <div className="text-[10.5px] text-ink3">
+                  <div className="text-12p5 font-semibold">Daily accrual → month-end forecast</div>
+                  <div className="text-10p5 text-ink3">
                     solid = billed · dashed = projected · ▲ budget alerts at 50 / 80 / 100%
                   </div>
                 </div>
@@ -313,7 +311,7 @@ function BillingOverviewPage() {
                             {d.spark ? (
                               <Spark series={d.spark} tone={d.dot === "warn" ? "warn" : "steel"} />
                             ) : (
-                              <span className="text-[11px] text-ink3">{d.sparkNote}</span>
+                              <span className="text-11 text-ink3">{d.sparkNote}</span>
                             )}
                           </td>
                         </tr>
@@ -337,7 +335,7 @@ function BillingOverviewPage() {
                       <td className="font-semibold">Total</td>
                       <td className="mono font-semibold">{fmtMoney(mtd)}</td>
                       <td className="mono font-semibold">{fmtMoney(b?.forecast_cents ?? 0)}</td>
-                      <td colSpan={2} className="text-[11px] text-ink3">
+                      <td colSpan={2} className="text-11 text-ink3">
                         the same $482 every sidebar rolls up to — one arithmetic, everywhere
                       </td>
                     </tr>
@@ -349,15 +347,15 @@ function BillingOverviewPage() {
             <div className="flex w-[300px] shrink-0 flex-col gap-3.5">
               <Card className="flex flex-col gap-3 p-4">
                 <Eyebrow>Budget & alerts</Eyebrow>
-                <div className="flex items-center justify-between gap-2 text-[12px]">
+                <div className="flex items-center justify-between gap-2 text-12">
                   <span>Alert at 50 / 80 / 100%</span>
                   <Pill tone="st">in-app + email</Pill>
                 </div>
-                <div className="flex items-center justify-between gap-2 text-[12px]">
+                <div className="flex items-center justify-between gap-2 text-12">
                   <span className="text-ink3">Recipients</span>
                   <span>Owners + Admins</span>
                 </div>
-                <p className="text-[11px] text-ink3">
+                <p className="text-11 text-ink3">
                   Budgets page humans, never stop services — a hard ceiling is a deliberate policy
                   (compute-ceiling, G7), not a billing side effect.
                 </p>
@@ -370,7 +368,7 @@ function BillingOverviewPage() {
                   return (
                     <div
                       key={row.event_id ?? row.at}
-                      className="flex items-baseline gap-2 text-[11.5px]"
+                      className="flex items-baseline gap-2 text-11p5"
                     >
                       <span className="mono w-12 shrink-0 text-ink3">
                         {row.at ? fmtFeedDate(row.at) : ""}
@@ -386,13 +384,13 @@ function BillingOverviewPage() {
                   );
                 })}
                 {EXTRA_FEED.map((row) => (
-                  <div key={row.label} className="flex items-baseline gap-2 text-[11.5px]">
+                  <div key={row.label} className="flex items-baseline gap-2 text-11p5">
                     <span className="mono w-12 shrink-0 text-ink3">{row.date}</span>
                     <span className="flex-1">{row.label}</span>
                     <span className="mono text-ok">{row.delta}</span>
                   </div>
                 ))}
-                <p className="border-hair border-t pt-2 text-[11px] text-ink3">
+                <p className="border-hair border-t pt-2 text-11 text-ink3">
                   Every entry links to the audit event that caused it.
                 </p>
               </Card>

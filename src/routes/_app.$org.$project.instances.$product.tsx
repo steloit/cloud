@@ -258,7 +258,7 @@ function PostgresLanding({
                       search={{ env }}
                       className="flex items-center gap-2"
                     >
-                      <b className="mono text-[12.5px]">{svc.name}</b>
+                      <b className="mono text-12p5">{svc.name}</b>
                       {display ? <Pill tone="mut">{display.role}</Pill> : null}
                     </Link>
                   </td>
@@ -281,7 +281,7 @@ function PostgresLanding({
         </table>
       </div>
 
-      <Card className="p-4 text-[11.5px] leading-relaxed text-ink2">
+      <Card className="p-4 text-11p5 leading-relaxed text-ink2">
         Both instances appear as separate nodes in the topology (W3) with their own bindings,
         backups and branches — instances are peers, never hidden inside each other. Names are yours;
         the platform never assumes "the database".
@@ -289,7 +289,7 @@ function PostgresLanding({
 
       <Card className="flex flex-col gap-2 p-4">
         <Eyebrow>Why a second instance, not a bigger first one</Eyebrow>
-        <p className="text-[12px] leading-relaxed text-ink2">
+        <p className="text-12 leading-relaxed text-ink2">
           Reporting queries were competing with checkout traffic for the same connection pool.
           Isolating them into db-reports (fed by the worker) protects the primary — the same
           isolation logic environments give you, applied inside one environment.
@@ -336,7 +336,7 @@ function IllustrativeLanding({
               <tr key={row.name}>
                 <td>
                   <span className="flex items-center gap-2">
-                    <b className="mono text-[12.5px]">{row.name}</b>
+                    <b className="mono text-12p5">{row.name}</b>
                     <Pill tone="mut">{row.role}</Pill>
                   </span>
                 </td>
@@ -356,7 +356,7 @@ function IllustrativeLanding({
 
       <Card className="flex flex-col gap-2 p-4">
         <Eyebrow>Why a second instance, not a bigger first one</Eyebrow>
-        <p className="text-[12px] leading-relaxed text-ink2">{config.rationale}</p>
+        <p className="text-12 leading-relaxed text-ink2">{config.rationale}</p>
       </Card>
     </>
   );
@@ -402,7 +402,7 @@ function InstancesPage() {
               title={`${PRODUCT_LABEL[product]} · instances in ${project} / ${env}`}
               sub="One instance → the rail opens it directly. Two or more → you land here, and the sidebar header switches."
             />
-            <p className="text-[11.5px] text-ink3">
+            <p className="text-11p5 text-ink3">
               No {PRODUCT_LABEL[product]} instances in this environment.
             </p>
           </>

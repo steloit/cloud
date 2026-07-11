@@ -96,11 +96,11 @@ function SessionsPage() {
         </div>
 
         <Card className="flex max-w-[640px] flex-col gap-2 p-4">
-          <p className="text-[11.5px] leading-relaxed text-ink2">
+          <p className="text-11p5 leading-relaxed text-ink2">
             Revoke & secure revokes the session, forces a password change, and regenerates recovery
             codes in one flow.
           </p>
-          <p className="mono text-[10.5px] text-ink3">
+          <p className="mono text-10p5 text-ink3">
             sessions also die when an org removes you — G6's promise, kept here
           </p>
         </Card>

@@ -43,7 +43,7 @@ function ObjectsPage() {
     return (
       <main className="main">
         <div className="pgpad">
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             The Object Browser is an Object Storage surface — {svc.name} is a {svc.product} service.
           </Card>
         </div>
@@ -102,9 +102,9 @@ function ObjectsPage() {
           <Card className="flex w-[320px] shrink-0 flex-col gap-3 self-start p-4">
             <Eyebrow>Preview</Eyebrow>
             <div className="flex h-[140px] items-center justify-center rounded-lg border border-hair border-dashed">
-              <span className="mono text-[11px] text-ink3">img_88213_hero.webp · 1200×800</span>
+              <span className="mono text-11 text-ink3">img_88213_hero.webp · 1200×800</span>
             </div>
-            <div className="flex flex-col gap-2 text-[11.5px]">
+            <div className="flex flex-col gap-2 text-11p5">
               <div className="flex items-center justify-between">
                 <span className="text-ink3">Content type</span>
                 <span className="mono">image/webp</span>
@@ -131,7 +131,7 @@ function ObjectsPage() {
                 Delete…
               </Btn>
             </div>
-            <p className="border-hair border-t pt-2.5 text-[10.5px] text-ink3">
+            <p className="border-hair border-t pt-2.5 text-10p5 text-ink3">
               Browser actions are audited exactly like API calls.
             </p>
           </Card>

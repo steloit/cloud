@@ -25,9 +25,9 @@ function FactorRow({
   return (
     <div className="flex items-center gap-3 border-hair border-t py-2.5 first:border-t-0">
       <Icon id={icon} className="h-[15px] w-[15px] text-ink2" />
-      <span className="text-[12.5px] font-medium">{label}</span>
+      <span className="text-12p5 font-medium">{label}</span>
       <Pill tone={pillTone}>{pill}</Pill>
-      {meta ? <span className="mono text-[10.5px] text-ink3">{meta}</span> : null}
+      {meta ? <span className="mono text-10p5 text-ink3">{meta}</span> : null}
       <span className="ml-auto">{action}</span>
     </div>
   );
@@ -44,8 +44,8 @@ function SecurityPage() {
 
         <Card className="flex max-w-[640px] items-center gap-4 p-4">
           <div className="flex-1">
-            <div className="text-[13px] font-semibold">Password</div>
-            <div className="mt-1 text-[11.5px] text-ink3">
+            <div className="text-13 font-semibold">Password</div>
+            <div className="mt-1 text-11p5 text-ink3">
               last changed 2 months ago · changing it signs out every other session
             </div>
           </div>
@@ -56,7 +56,7 @@ function SecurityPage() {
 
         <Card className="flex max-w-[640px] flex-col p-4">
           <div className="mb-2 flex items-center gap-2.5">
-            <span className="text-[13px] font-semibold">Multi-factor authentication</span>
+            <span className="text-13 font-semibold">Multi-factor authentication</span>
             <Pill tone="ok">enabled</Pill>
           </div>
           <FactorRow
@@ -103,7 +103,7 @@ function SecurityPage() {
               </Btn>
             }
           />
-          <p className="mt-2 border-hair border-t pt-3 text-[11.5px] leading-relaxed text-ink3">
+          <p className="mt-2 border-hair border-t pt-3 text-11p5 leading-relaxed text-ink3">
             Org policy <span className="mono">mfa-required</span> makes MFA mandatory across Acme
             from Jul 20 — you're already covered. Removing your last factor is blocked while the
             policy applies.
@@ -111,9 +111,9 @@ function SecurityPage() {
         </Card>
 
         <Card className="flex max-w-[640px] flex-col gap-2.5 p-4">
-          <div className="text-[13px] font-semibold">Recent security events</div>
-          <div className="flex items-baseline gap-2.5 text-[11.5px]">
-            <span className="mono text-[10.5px] text-ink3">yesterday</span>
+          <div className="text-13 font-semibold">Recent security events</div>
+          <div className="flex items-baseline gap-2.5 text-11p5">
+            <span className="mono text-10p5 text-ink3">yesterday</span>
             <span className="text-ink2">
               New session · Chrome · Mumbai, IN — that wasn't you?{" "}
               <Link to="/account/sessions" className="font-medium text-steel">
@@ -121,8 +121,8 @@ function SecurityPage() {
               </Link>
             </span>
           </div>
-          <div className="flex items-baseline gap-2.5 text-[11.5px]">
-            <span className="mono text-[10.5px] text-ink3">2 mo</span>
+          <div className="flex items-baseline gap-2.5 text-11p5">
+            <span className="mono text-10p5 text-ink3">2 mo</span>
             <span className="text-ink2">Password changed · all other sessions signed out</span>
           </div>
         </Card>

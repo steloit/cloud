@@ -75,7 +75,7 @@ function SignupPage() {
             ))}
           </div>
           {strength >= 3 ? (
-            <div className="mt-1.5 text-[11px] text-ok">
+            <div className="mt-1.5 text-11 text-ok">
               Strong · 12+ characters ✓ · number ✓ · symbol ✓
             </div>
           ) : null}
@@ -84,7 +84,7 @@ function SignupPage() {
           Create account
         </Btn>
       </form>
-      <div className="text-center text-[11.5px] leading-relaxed text-ink3">
+      <div className="text-center text-11p5 leading-relaxed text-ink3">
         By continuing you agree to the <span className="font-medium text-steel">Terms</span> and{" "}
         <span className="font-medium text-steel">Privacy Policy</span>. Already have an account?{" "}
         <Link to="/login" className="font-medium text-steel">

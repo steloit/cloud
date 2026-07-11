@@ -19,7 +19,7 @@ function LogsTab() {
         {svc.product === "postgres" ? (
           <PostgresLogsTab svc={svc} org={org} project={project} env={env} />
         ) : (
-          <Card className="p-4 text-[12px] text-ink2">
+          <Card className="p-4 text-12 text-ink2">
             Logs for {svc.product} follow the D10 grammar — the gallery has no dedicated frame; the
             env-wide stream lives in Observe · Logs.
           </Card>

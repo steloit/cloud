@@ -24,7 +24,7 @@ function AccountShell() {
     <div className="flex h-screen flex-col bg-canvas">
       <header className="ctx">
         <Mark />
-        <span className="text-[12.5px] font-medium">
+        <span className="text-12p5 font-medium">
           {session?.name ?? "You"} <span className="csep">/</span>{" "}
           <span className="text-ink3">Account settings</span>
         </span>

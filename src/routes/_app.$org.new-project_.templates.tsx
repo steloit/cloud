@@ -180,10 +180,10 @@ function TemplatesGallery() {
 
           {empty ? (
             <Card dashed className="flex flex-col items-center gap-1 p-8 text-center">
-              <span className="text-[12.5px] font-medium text-ink2">
+              <span className="text-12p5 font-medium text-ink2">
                 No templates {q ? `match “${search.trim()}”` : "in this category yet"}
               </span>
-              <span className="text-[10.5px] text-ink3">
+              <span className="text-10p5 text-ink3">
                 Community templates: curated submissions open at v2.
               </span>
             </Card>
@@ -195,12 +195,12 @@ function TemplatesGallery() {
                   className={cn("flex flex-col gap-2.5 p-4", g.featured && "border-steel/45")}
                 >
                   <div className="flex items-center gap-2">
-                    <b className="text-[13.5px]">{g.name}</b>
+                    <b className="text-13">{g.name}</b>
                     {g.pill ? <Pill tone={g.pill.tone}>{g.pill.label}</Pill> : null}
                     <span className="sp" />
-                    <span className="mono text-[10px] text-ink3">{g.deploys}</span>
+                    <span className="mono text-10 text-ink3">{g.deploys}</span>
                   </div>
-                  <div className="text-[11px] leading-relaxed text-ink2">{g.desc}</div>
+                  <div className="text-11 leading-relaxed text-ink2">{g.desc}</div>
                   <div className="flex flex-wrap gap-1.5">
                     {g.services.map((s) => (
                       <Pill key={s} tone="mut">
@@ -209,7 +209,7 @@ function TemplatesGallery() {
                     ))}
                   </div>
                   <div className="mt-auto flex items-center">
-                    <span className="mono text-[11px] text-ink2">{g.est}</span>
+                    <span className="mono text-11 text-ink2">{g.est}</span>
                     <span className="sp" />
                     {g.name === "store" ? (
                       <Link to="/$org/template/$tpl" params={{ org, tpl: "store" }}>
@@ -228,16 +228,16 @@ function TemplatesGallery() {
               {orgTemplates.map((t) => (
                 <Card key={t.id} className="flex flex-col gap-2.5 p-4">
                   <div className="flex items-center gap-2">
-                    <b className="mono text-[12.5px]">{t.name}</b>
+                    <b className="mono text-12p5">{t.name}</b>
                     {t.visibility === "org" ? (
                       <Pill tone="st">org</Pill>
                     ) : (
                       <Pill tone="mut">restricted</Pill>
                     )}
                     <span className="sp" />
-                    <span className="mono text-[10px] text-ink3">used {t.used_by_count ?? 0}×</span>
+                    <span className="mono text-10 text-ink3">used {t.used_by_count ?? 0}×</span>
                   </div>
-                  <div className="text-[11px] leading-relaxed text-ink2">
+                  <div className="text-11 leading-relaxed text-ink2">
                     Saved shape · v{t.version}
                     {typeof t.contents?.services === "number"
                       ? ` · ${t.contents.services} services`
@@ -245,7 +245,7 @@ function TemplatesGallery() {
                     — an org asset, managed under Settings → Templates.
                   </div>
                   <div className="mt-auto flex items-center">
-                    <span className="mono text-[11px] text-ink2">
+                    <span className="mono text-11 text-ink2">
                       est. {fmtMoney(t.monthly_estimate_cents ?? 0)}/mo
                     </span>
                     <span className="sp" />
@@ -260,7 +260,7 @@ function TemplatesGallery() {
             </div>
           )}
 
-          <div className="flex items-center gap-2 text-[10.5px] text-ink3">
+          <div className="flex items-center gap-2 text-10p5 text-ink3">
             <Icon id="s-term" className="h-3 w-3" />
             Every template is a CLI command too:
             <Copybit>steloit init --template store</Copybit>

@@ -27,7 +27,7 @@ function ToggleRow({ label, title }: { label: string; title?: string }) {
       <span aria-hidden="true" className="relative h-[18px] w-8 shrink-0 rounded-full bg-steel">
         <span className="absolute top-[2px] left-[16px] h-[14px] w-[14px] rounded-full bg-white" />
       </span>
-      <span className="text-[12px] text-ink2">
+      <span className="text-12 text-ink2">
         {label}
         <span className="sr-only"> — on</span>
       </span>
@@ -54,7 +54,7 @@ export function QueueSettingsTab({ svc, env }: TabProps) {
           <Pill tone="st">at-least-once</Pill>
           <Pill tone="mut">immutable after create</Pill>
         </div>
-        <p className="text-[11.5px] leading-relaxed text-ink2">
+        <p className="text-11p5 leading-relaxed text-ink2">
           consumers were built against this guarantee — changing it silently would break them;
           create a new queue and migrate deliberately instead
         </p>
@@ -84,7 +84,7 @@ export function QueueSettingsTab({ svc, env }: TabProps) {
           <Btn variant="dgr" disabled disabledReason="No purge endpoint in the spec (finding)">
             Purge 12 ready messages…
           </Btn>
-          <p className="text-[11px] leading-relaxed text-ink3">
+          <p className="text-11 leading-relaxed text-ink3">
             type the queue name · in-flight messages complete · purge is an audit event with a
             required reason
           </p>

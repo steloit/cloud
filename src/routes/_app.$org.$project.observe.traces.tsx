@@ -62,7 +62,7 @@ function TracesPage() {
           <div className="w-[360px]">
             <Inp className="mono" defaultValue="route:/orders duration:>500ms" />
           </div>
-          <span className="text-[10.5px] text-ink3">— or paste a trace id from any log line</span>
+          <span className="text-10p5 text-ink3">— or paste a trace id from any log line</span>
           <span className="flex-1" />
           <span className="chip">p95 of matches: 811 ms</span>
           <Btn variant="s" disabled disabledReason="The rule drawer (U8) lands in Phase 3">
@@ -72,24 +72,24 @@ function TracesPage() {
 
         <div className="flex gap-3.5">
           <Card className="flex w-[390px] shrink-0 flex-col p-3">
-            <div className="px-1 pb-2 text-[11px] font-medium text-ink2">
+            <div className="px-1 pb-2 text-11 font-medium text-ink2">
               Slowest first · 13:30 – 14:45
             </div>
             {TRACE_ROWS.map((row) => (
               <div
                 key={row.id}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-md px-2 py-2 text-[11.5px]",
+                  "flex items-center gap-2.5 rounded-md px-2 py-2 text-11p5",
                   row.selected && "bg-steel/10",
                 )}
               >
                 <span className="mono font-semibold">{row.id}</span>
                 <span className="flex-1 truncate text-ink3">{row.route}</span>
                 <span className={cn("mono", row.warn && "text-warn")}>{row.ms}</span>
-                <span className="text-[10.5px] text-ink3">{row.spans}</span>
+                <span className="text-10p5 text-ink3">{row.spans}</span>
               </div>
             ))}
-            <p className="border-hair mt-2 border-t px-1 pt-2 text-[10px] text-ink3">
+            <p className="border-hair mt-2 border-t px-1 pt-2 text-10 text-ink3">
               sampling: 100% of errors and &gt;SLO requests · 1% baseline — slow and broken are
               never sampled away
             </p>
@@ -98,14 +98,14 @@ function TracesPage() {
           <div className="flex min-w-0 flex-1 flex-col gap-3.5">
             <Card className="flex flex-col gap-2.5 p-4">
               <div className="flex items-center gap-2.5">
-                <span className="mono text-[13px] font-bold">tr_8814</span>
+                <span className="mono text-13 font-bold">tr_8814</span>
                 <Pill tone="warn">812 ms</Pill>
-                <span className="text-[10.5px] text-ink3">
+                <span className="text-10p5 text-ink3">
                   14:02:11 · api → cache → db-main → jobs · 4 min after ◆ #142
                 </span>
                 <span className="flex-1" />
                 <Link to="/$org/$project/observe/logs" params={linkParams} search={search}>
-                  <Btn variant="gh" className="h-6 px-2.5 text-[10.5px]">
+                  <Btn variant="gh" className="h-6 px-2.5 text-10p5">
                     Logs for this trace
                   </Btn>
                 </Link>
@@ -118,7 +118,7 @@ function TracesPage() {
                   const width = Math.max(((span.duration_ms ?? 0) / total) * 100, 0.8);
                   const isDbMain = span.service === "db-main";
                   return (
-                    <div key={span.id} className="flex items-center gap-2.5 text-[10.5px]">
+                    <div key={span.id} className="flex items-center gap-2.5 text-10p5">
                       <span className="mono w-[210px] shrink-0 truncate text-ink2">
                         {span.service} · {span.name}
                       </span>
@@ -145,14 +145,14 @@ function TracesPage() {
             </Card>
 
             <Card className="border-warn/40 flex flex-col gap-2.5 p-4">
-              <p className="text-[12px] leading-relaxed text-ink2">
+              <p className="text-12 leading-relaxed text-ink2">
                 79% of this trace is one span — the unindexed orders query. The slowest span is the
                 navigation: it links straight to the query's own page and the drafted fix.
               </p>
               <div className="flex items-center gap-2">
                 <Btn
                   variant="s"
-                  className="h-6 px-2.5 text-[10.5px]"
+                  className="h-6 px-2.5 text-10p5"
                   disabled
                   disabledReason="Query insights (D4) lands in Phase 3"
                 >
@@ -163,14 +163,14 @@ function TracesPage() {
                   params={{ ...linkParams, service: "db-main" }}
                   search={search}
                 >
-                  <Btn variant="s" className="mono h-6 px-2.5 text-[10.5px]">
+                  <Btn variant="s" className="mono h-6 px-2.5 text-10p5">
                     prp_7c31a2
                   </Btn>
                 </Link>
               </div>
             </Card>
 
-            <div className="flex items-center gap-3 text-[10.5px] text-ink3">
+            <div className="flex items-center gap-3 text-10p5 text-ink3">
               <span className="flex-1">
                 Trace ids appear on every log line (O3) and in binding-aware clients automatically —
                 no SDK ceremony for platform services.

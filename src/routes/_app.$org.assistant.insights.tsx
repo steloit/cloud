@@ -48,7 +48,7 @@ const DISPLAY: Record<string, Display> = {
     title: "Queue — 2 dead letters blocking paid orders",
     desc: (
       <>
-        Both <span className="mono text-[10px]">order.paid</span>, from #142’s missing gift-card
+        Both <span className="mono text-10">order.paid</span>, from #142’s missing gift-card
         receipt. A code fix, not a retry — ships via #143, then replay.
       </>
     ),
@@ -65,8 +65,8 @@ const DISPLAY: Record<string, Display> = {
     title: "Valkey — cache full, rejecting writes",
     desc: (
       <>
-        Memory 95% with <span className="mono text-[10px]">noeviction</span> — 3.1k OOM rejects/hr.
-        Switch to <span className="mono text-[10px]">allkeys-lru</span>, raise maxmemory 2→3 GB.
+        Memory 95% with <span className="mono text-10">noeviction</span> — 3.1k OOM rejects/hr.
+        Switch to <span className="mono text-10">allkeys-lru</span>, raise maxmemory 2→3 GB.
       </>
     ),
     sevPill: { tone: "warn", label: "reliability · high" },
@@ -82,8 +82,8 @@ const DISPLAY: Record<string, Display> = {
     title: "Object Storage — temp files never expire",
     desc: (
       <>
-        31 GB unread in 30 days; <span className="mono text-[10px]">uploads/tmp/*</span> is
-        write-once. Lifecycle rules — no deletes yet, reversible.
+        31 GB unread in 30 days; <span className="mono text-10">uploads/tmp/*</span> is write-once.
+        Lifecycle rules — no deletes yet, reversible.
       </>
     ),
     sevPill: { tone: "st", label: "cost · medium" },
@@ -183,15 +183,15 @@ function InsightRow({
           <span className="glyph h-6 w-6">
             <Icon id={display.icon} className="h-3 w-3" />
           </span>
-          <b className="text-[12.5px]">{display.title}</b>
+          <b className="text-12p5">{display.title}</b>
           <Pill tone={display.sevPill.tone}>{display.sevPill.label}</Pill>
           <span className="sp flex-1" />
-          <span className="mono text-[9px] text-ink3">{display.prp}</span>
+          <span className="mono text-10 text-ink3">{display.prp}</span>
         </div>
-        <div className="mt-1.5 text-[11px] leading-relaxed text-ink2">{display.desc}</div>
+        <div className="mt-1.5 text-11 leading-relaxed text-ink2">{display.desc}</div>
         <div className="mt-2.5 flex items-center gap-2">
           <Pill tone="ai">{display.evidence}</Pill>
-          <span className="text-[10.5px] text-ink2">{display.impact}</span>
+          <span className="text-10p5 text-ink2">{display.impact}</span>
           <span className="sp flex-1" />
           {applied ? <Pill tone="ok">applied · #143</Pill> : null}
           <Link
@@ -203,13 +203,13 @@ function InsightRow({
             params={{ org, project: "ecommerce", service: display.review.service }}
             search={{ env: "production" }}
           >
-            <Btn variant="s" className="h-[26px] text-[10.5px]">
+            <Btn variant="s" className="h-[26px] text-10p5">
               Review →
             </Btn>
           </Link>
           <Btn
             variant="gh"
-            className="h-[26px] text-[10.5px] text-assist"
+            className="h-[26px] text-10p5 text-assist"
             onClick={() => openAssistant(insight.id)}
           >
             <Icon id="s-ai" />
@@ -219,7 +219,7 @@ function InsightRow({
             <>
               <Btn
                 variant="gh"
-                className="h-[26px] text-[10.5px]"
+                className="h-[26px] text-10p5"
                 onClick={snooze}
                 disabled={update.isPending}
               >
@@ -227,7 +227,7 @@ function InsightRow({
               </Btn>
               <Btn
                 variant="gh"
-                className="h-[26px] text-[10.5px] text-ink3"
+                className="h-[26px] text-10p5 text-ink3"
                 onClick={() => setDismissing((v) => !v)}
               >
                 Dismiss
@@ -239,7 +239,7 @@ function InsightRow({
           <div className="mt-2.5 flex items-center gap-2 border-hair border-t pt-2.5">
             <Inp
               placeholder="Reason — logged with the dismissal"
-              className="h-8 flex-1 text-[11px]"
+              className="h-8 flex-1 text-11"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
@@ -269,17 +269,17 @@ function DismissedWorkerRow() {
           <span className="glyph h-6 w-6">
             <Icon id="s-worker" className="h-3 w-3" />
           </span>
-          <b className="text-[12.5px]">Worker — over-provisioned off-peak</b>
+          <b className="text-12p5">Worker — over-provisioned off-peak</b>
           <Pill tone="mut">cost · low</Pill>
           <span className="sp flex-1" />
-          <span className="mono text-[9px] text-ink3">prp_wk03c1</span>
+          <span className="mono text-10 text-ink3">prp_wk03c1</span>
         </div>
-        <div className="mt-1.5 text-[11px] leading-relaxed text-ink2">
+        <div className="mt-1.5 text-11 leading-relaxed text-ink2">
           CPU &lt; 12% between 01:00–06:00. Suggested scale-to-1 — dismissed Mar 2.
         </div>
         <div className="mt-2.5 flex items-center gap-2">
           <Pill tone="ai">evidence: utilization</Pill>
-          <span className="text-[10.5px] text-ink2">−$7/mo (dismissed)</span>
+          <span className="text-10p5 text-ink2">−$7/mo (dismissed)</span>
         </div>
       </div>
     </Card>
@@ -354,7 +354,7 @@ function InsightsPage() {
             <DismissedWorkerRow />
           ) : null}
           {rows.length === 0 && status !== "dismissed" ? (
-            <Card className="p-4 text-[11.5px] text-ink3">
+            <Card className="p-4 text-11p5 text-ink3">
               Nothing {status} in this view — switch the status or category chips above.
             </Card>
           ) : null}

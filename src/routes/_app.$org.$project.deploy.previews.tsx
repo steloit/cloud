@@ -33,12 +33,12 @@ function PreviewsPage() {
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex items-center gap-2.5">
             <Dot tone="ok" />
-            <b className="text-[13px]">preview / pr-142</b>
+            <b className="text-13">preview / pr-142</b>
             <Pill tone="ok">open</Pill>
             <Pill tone="warn">branch flagged · branch-data-masking</Pill>
-            <span className="mono ml-auto text-[11.5px]">{pr142Cost} · expires in 5 d</span>
+            <span className="mono ml-auto text-11p5">{pr142Cost} · expires in 5 d</span>
           </div>
-          <div className="text-[11.5px] text-ink3">
+          <div className="text-11p5 text-ink3">
             acme/store #142 "gift card refunds" · marco · updated 2 h ago · deploys on every push
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -70,9 +70,9 @@ function PreviewsPage() {
           </div>
           <div className="flex flex-col gap-1.5 rounded-lg border border-hair bg-surface2 p-3">
             <Eyebrow>On the PR — the loop closes in GitHub</Eyebrow>
-            <div className="text-[11px] text-ink3">steloit-bot commented 2 h ago</div>
-            <div className="text-[11.5px]">✅ Preview ready — pr-142.ecommerce.previews…</div>
-            <div className="mono text-[11px] text-ink3">
+            <div className="text-11 text-ink3">steloit-bot commented 2 h ago</div>
+            <div className="text-11p5">✅ Preview ready — pr-142.ecommerce.previews…</div>
+            <div className="mono text-11 text-ink3">
               db: branch of production (masked · policy) · $0.07/day
             </div>
           </div>
@@ -125,7 +125,7 @@ function PreviewsPage() {
           </table>
         </div>
 
-        <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-ink3">
+        <div className="flex flex-col gap-1.5 text-11 leading-relaxed text-ink3">
           <span>
             Exclusions come from preview-minimal v2 (G7) and are shown per service — never a silent
             diff from production.

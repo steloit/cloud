@@ -76,9 +76,9 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
           ))}
           <span className="chip border-dashed">compare: prev hour</span>
         </div>
-        <span className="mono text-[10.5px] text-ink3">resolution auto · 15 s</span>
+        <span className="mono text-10p5 text-ink3">resolution auto · 15 s</span>
         <span className="flex-1" />
-        <span className="text-[10.5px] text-ink3">
+        <span className="text-10p5 text-ink3">
           ◆ deploys · ◇ scale · ▲ alerts — one timeline with Observe
         </span>
       </div>
@@ -97,7 +97,7 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
       </div>
 
       {cat !== "Overview" ? (
-        <p className="text-[11.5px] text-ink3">This category's panes land with more telemetry</p>
+        <p className="text-11p5 text-ink3">This category's panes land with more telemetry</p>
       ) : (
         <>
           <div className="grid grid-cols-5 gap-3">
@@ -110,9 +110,9 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
 
           <Card className="flex flex-col gap-2.5 p-4">
             <div className="flex items-center gap-2.5">
-              <span className="text-[12.5px] font-semibold">Query latency percentiles</span>
+              <span className="text-12p5 font-semibold">Query latency percentiles</span>
               <span className="flex-1" />
-              <span className="mono text-[10.5px] text-ink2">
+              <span className="mono text-10p5 text-ink2">
                 ━ p50 6 ms · ━ p95 812 ms · ━ p99 1.4 s
               </span>
             </div>
@@ -122,9 +122,9 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
               markers={toMarkers(p95.data)}
               unit="ms"
               tone="warn"
-              height={170}
+              size="lg"
             />
-            <span className="mono text-[10.5px] text-ink3">
+            <span className="mono text-10p5 text-ink3">
               brush: 13:40 → now · drag to zoom · double-click to reset
             </span>
           </Card>
@@ -132,7 +132,7 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
           <div className="grid grid-cols-2 gap-3.5">
             <Card className="flex flex-col gap-2 p-3.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11.5px] font-medium text-ink2">Connections by consumer</span>
+                <span className="text-11p5 font-medium text-ink2">Connections by consumer</span>
                 <span className="flex-1" />
                 <Pill tone="warn">alert set · &gt;190</Pill>
               </div>
@@ -140,25 +140,25 @@ export function PostgresMetricsTab({ svc, env }: PostgresTabProps) {
                 series={toSeries(connections.data)}
                 markers={toMarkers(connections.data)}
                 tone="warn"
-                height={96}
+                size="sm"
               />
-              <span className="mono text-[10.5px] text-ink3">
+              <span className="mono text-10p5 text-ink3">
                 api 141 · worker 38 · admin 9 — limit 200 dashed · pool exhaustion is a named alert,
                 not a mystery 500
               </span>
             </Card>
             <Card className="flex flex-col gap-2 p-3.5">
               <div className="flex items-center gap-2">
-                <span className="text-[11.5px] font-medium text-ink2">Commits vs rollbacks</span>
+                <span className="text-11p5 font-medium text-ink2">Commits vs rollbacks</span>
               </div>
-              <MetricChart series={toSeries(errorRate.data)} tone="steel" height={96} />
-              <span className="mono text-[10.5px] text-ink3">
+              <MetricChart series={toSeries(errorRate.data)} tone="steel" size="sm" />
+              <span className="mono text-10p5 text-ink3">
                 rollbacks tick up post-deploy — the assistant cites this pane in prp_7c31a2
               </span>
             </Card>
           </div>
 
-          <div className="flex items-center gap-2.5 text-[10.5px] text-ink3">
+          <div className="flex items-center gap-2.5 text-10p5 text-ink3">
             <span>raw 15 d · downsampled 13 mo · every pane is a query:</span>
             <Copybit>steloit metrics query db-main 'p95(query_latency)' --since 1h</Copybit>
             <span className="flex-1" />
@@ -277,7 +277,7 @@ function LogFacet({
   highlight?: boolean;
 }) {
   return (
-    <div className={cn("flex items-center gap-2 text-[11px]", highlight && "font-semibold")}>
+    <div className={cn("flex items-center gap-2 text-11", highlight && "font-semibold")}>
       <span className="flex-1 truncate text-ink2">{label}</span>
       <span
         className={tone === "err" ? "mono text-err" : tone === "warn" ? "mono text-warn" : "mono"}
@@ -341,7 +341,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
 
       <Card className="flex flex-col gap-1.5 p-3.5">
         <LogHistogram buckets={logs.data?.histogram ?? []} />
-        <span className="mono text-[10.5px] text-ink3">
+        <span className="mono text-10p5 text-ink3">
           volume · warn spikes begin at the deploy marker · click a bar or drag to filter the window
           · selected 14:02 → 14:20
         </span>
@@ -350,37 +350,35 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
       <div className="flex gap-3.5">
         <Card className="flex w-[190px] shrink-0 flex-col gap-3 p-3">
           <div className="flex flex-col gap-1">
-            <div className="text-[10px] font-semibold text-ink3 uppercase tracking-wide">Level</div>
+            <div className="text-10 font-semibold text-ink3 uppercase tracking-wide">Level</div>
             <LogFacet label="error" count="3" tone="err" />
             <LogFacet label="warn" count="214" tone="warn" highlight />
             <LogFacet label="info" count="12.4k" />
           </div>
           <div className="flex flex-col gap-1">
-            <div className="text-[10px] font-semibold text-ink3 uppercase tracking-wide">
-              Source
-            </div>
+            <div className="text-10 font-semibold text-ink3 uppercase tracking-wide">Source</div>
             <LogFacet label="postgres" count="201" highlight />
             <LogFacet label="pgbouncer" count="13" />
             <LogFacet label="backup" count="0" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <div className="text-[10px] font-semibold text-ink3 uppercase tracking-wide">
+            <div className="text-10 font-semibold text-ink3 uppercase tracking-wide">
               Top patterns
             </div>
-            <div className="flex items-center gap-2 text-[11px]">
+            <div className="flex items-center gap-2 text-11">
               <span className="flex-1 truncate text-warn">duration: … SELECT * FROM orders…</span>
               <span className="mono">198×</span>
             </div>
             <Btn
               variant="gh"
-              className="h-5 self-start px-2 text-[10px]"
+              className="h-5 self-start px-2 text-10"
               disabled
               disabledReason="The rule drawer (U8) lands in Phase 3"
             >
               alert on this
             </Btn>
           </div>
-          <p className="border-hair border-t pt-2 text-[10px] text-ink3">
+          <p className="border-hair border-t pt-2 text-10 text-ink3">
             facets are computed on the filtered window
           </p>
         </Card>
@@ -402,7 +400,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                   </button>
                   {row.expandable && expanded ? (
                     <div className="flex flex-col gap-1.5 py-1.5 pl-[74px]">
-                      <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-[11px]">
+                      <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-11">
                         <span className="t">timestamp</span>
                         <span>2026-07-06 14:06:12.881</span>
                         <span className="t">level</span>
@@ -423,7 +421,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                       <div className="flex items-center gap-2">
                         <Btn
                           variant="gh"
-                          className="h-5 px-2 text-[10px]"
+                          className="h-5 px-2 text-10"
                           disabled
                           disabledReason="Log context windows land in Phase 3"
                         >
@@ -434,13 +432,13 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                           params={{ org, project, service: svc.name }}
                           search={{ env }}
                         >
-                          <Btn variant="gh" className="h-5 px-2 text-[10px]">
+                          <Btn variant="gh" className="h-5 px-2 text-10">
                             Open in Query Insights
                           </Btn>
                         </Link>
                         <Btn
                           variant="gh"
-                          className="h-5 px-2 text-[10px]"
+                          className="h-5 px-2 text-10"
                           onClick={() =>
                             navigator.clipboard.writeText(`${row.t} ${row.level} ${row.msg}`)
                           }
@@ -449,7 +447,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
                         </Btn>
                         <Btn
                           variant="gh"
-                          className="h-5 px-2 text-[10px]"
+                          className="h-5 px-2 text-10"
                           disabled
                           disabledReason="The rule drawer (U8) lands in Phase 3"
                         >
@@ -462,7 +460,7 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
               );
             })}
           </div>
-          <div className="flex items-center gap-3 text-[10.5px] text-ink3">
+          <div className="flex items-center gap-3 text-10p5 text-ink3">
             <span className="mono">214 of 12,617 lines match</span>
             <span>j/k move · e expand · c context</span>
             <span className="flex-1" />
@@ -522,7 +520,7 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
       />
 
       <Card className="flex flex-col gap-3 p-4">
-        <div className="text-[12.5px] font-semibold">Size &amp; storage</div>
+        <div className="text-12p5 font-semibold">Size &amp; storage</div>
         <div className="flex items-center gap-2">
           <div className="chiprow">
             {SIZE_CHIPS.map((s) => (
@@ -539,7 +537,7 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
           {dirty ? (
             <Btn
               variant="p"
-              className="h-6 px-2.5 text-[10.5px]"
+              className="h-6 px-2.5 text-10p5"
               onClick={applyResize}
               disabled={update.isPending}
               disabledReason="Applying the resize…"
@@ -549,17 +547,17 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
           ) : null}
         </div>
         {dirty ? (
-          <p className="text-[11px] text-warn">
+          <p className="text-11 text-warn">
             resize = ~8 s failover on HA, ~40 s restart without — always stated before apply
           </p>
         ) : null}
-        <div className="flex items-center gap-2 border-hair border-t pt-3 text-[11.5px]">
+        <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">Storage</span>
           <span>50 GB · auto-grows</span>
           <span className="flex-1" />
           <span className="mono text-ink3">21.4 used</span>
         </div>
-        <div className="flex items-center gap-2 border-hair border-t pt-3 text-[11.5px]">
+        <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">
             High availability · +$19/mo · recommended for production
           </span>
@@ -570,18 +568,18 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
       </Card>
 
       <Card className="flex flex-col gap-3 p-4">
-        <div className="text-[12.5px] font-semibold">Config</div>
-        <div className="flex items-center gap-2 text-[11.5px]">
+        <div className="text-12p5 font-semibold">Config</div>
+        <div className="flex items-center gap-2 text-11p5">
           <span className="text-ink2">Maintenance window</span>
           <span className="flex-1" />
           <span>Sun 03:00–04:00 IST</span>
         </div>
-        <div className="flex items-center gap-2 border-hair border-t pt-3 text-[11.5px]">
+        <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">Slow-query threshold</span>
           <span className="flex-1" />
           <span className="mono">200 ms</span>
         </div>
-        <div className="flex items-center gap-2 border-hair border-t pt-3 text-[11.5px]">
+        <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">Extensions</span>
           <span className="flex-1" />
           <span className="chip on">pgvector</span>
@@ -590,14 +588,14 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
       </Card>
 
       <Card className="flex flex-col gap-2.5 border-err/45 p-4">
-        <div className="text-[12.5px] font-semibold text-err">Danger zone</div>
+        <div className="text-12p5 font-semibold text-err">Danger zone</div>
         <div className="flex items-center gap-2.5">
           <Btn variant="dgr" onClick={() => setDeleting(true)}>
             Delete {svc.name}…
           </Btn>
           <Pill tone="err">blocked — 3 bindings and 4 branches depend on this instance</Pill>
         </div>
-        <p className="text-[10.5px] text-ink3">
+        <p className="text-10p5 text-ink3">
           detach dependents first · then type the instance name to confirm · a final snapshot is
           kept 30 d
         </p>

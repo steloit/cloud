@@ -5,6 +5,7 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Icon } from "@/design-system/icon";
+import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import { useBindings, useServices } from "@/features/services/hooks";
 import type { Binding, Service } from "@/lib/api";
@@ -127,7 +128,7 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td className="mono text-[11px]">{row.id}</td>
+                <td className="mono text-11">{row.id}</td>
                 <td>
                   <span className="flex items-center gap-2">
                     {row.consumer}
@@ -143,7 +144,7 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
                   <span className="flex justify-end gap-1.5">
                     <Btn
                       variant="gh"
-                      className="h-5 px-2 text-[10px]"
+                      className="h-5 px-2 text-10"
                       disabled
                       disabledReason="No rotate endpoint in the spec — spec change first (finding)"
                     >
@@ -152,7 +153,7 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
                     <Btn
                       variant="gh"
                       className={cn(
-                        "h-5 px-2 text-[10px] text-err",
+                        "h-5 px-2 text-10 text-err",
                         armedId === row.id && "font-semibold",
                       )}
                       onClick={() => doRevoke(row)}
@@ -175,7 +176,7 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
         </Btn>
       </div>
 
-      <p className="text-[10.5px] text-ink3">
+      <p className="text-10p5 text-ink3">
         Rotation policy: 90 d automatic (org policy{" "}
         <span className="mono">credential-rotation</span>) · rotations are zero-downtime — old + new
         valid for 60 s · every issue, rotate, revoke → audit log. Consumers never see a password;
@@ -276,112 +277,17 @@ export function CreateBindingDrawer({
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: scrim dismiss mirrors Esc
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Esc handled on the radio inputs
-    <div className="fixed inset-0 z-40 bg-[rgba(6,9,12,0.44)]" onClick={onClose}>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: click-stop only, so the scrim doesn't dismiss */}
-      <div
-        className="absolute inset-y-0 right-0 flex w-[424px] flex-col gap-4 overflow-y-auto border-hair border-l bg-surface p-5 shadow-e2"
-        role="dialog"
-        aria-label="Create binding"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start gap-2">
-          <div>
-            <div className="text-[14px] font-semibold">Create binding</div>
-            <div className="hsub">
-              from <span className="mono">{svc.name}</span> · {project} / {env}
-            </div>
-          </div>
-          <span className="flex-1" />
-          <Btn variant="gh" className="h-6 w-6 px-0" onClick={onClose} aria-label="Close">
-            <Icon id="s-x" />
-          </Btn>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <div className="eyebrow">Bind to</div>
-          {selectable.map((s) => (
-            <label
-              key={s.id}
-              className={cn(
-                "flex cursor-pointer items-center gap-2.5 rounded-lg border border-hair px-3 py-2",
-                target === s.id && "border-steel",
-              )}
-            >
-              <input
-                type="radio"
-                name="bind-target"
-                checked={target === s.id}
-                onChange={() => setPicked(s.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") onClose();
-                }}
-              />
-              <span className="mono text-[12px]">{s.name}</span>
-              <span className="flex-1" />
-              <span className="text-[10.5px] text-ink3">{productLabel(s)}</span>
-            </label>
-          ))}
-          {alreadyBound.map((s) => (
-            <div
-              key={s.id}
-              className="flex items-center gap-2.5 rounded-lg border border-hair px-3 py-2 opacity-55"
-            >
-              <input type="radio" name="bind-target" disabled />
-              <span className="mono text-[12px]">{s.name}</span>
-              <span className="flex-1" />
-              <span className="text-[10.5px] text-ink3">already bound</span>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <div className="eyebrow">Scope</div>
-          <div className="chiprow">
-            <button
-              type="button"
-              className={cn("chip", scope === "read_only" && "on")}
-              onClick={() => setScope("read_only")}
-            >
-              read-only
-            </button>
-            <button
-              type="button"
-              className={cn("chip", scope === "read_write" && "on")}
-              onClick={() => setScope("read_write")}
-            >
-              read-write
-            </button>
-          </div>
-          <p className="text-[10.5px] text-ink3">
-            read-only mints a role that cannot write — enforced by the database, not the app.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <div className="eyebrow">Injected at deploy</div>
-          <div className="logwell">
-            <div>
-              {targetName ? envVarFor(targetName) : "…"}=postgres://{svc.name}
-              {scope === "read_only" ? "_ro" : "_rw"}:•••@{targetName || "…"}…
-            </div>
-            <div className="t"># credentials minted at bind, rotated on unbind</div>
-          </div>
-        </div>
-
-        <Card className="p-3.5">
-          <p className="text-[11.5px] leading-relaxed text-ink2">
-            Takes effect on the next deploy of <span className="mono">{svc.name}</span> — nothing
-            restarts now. The edge appears on the topology (W3) immediately as{" "}
-            <span className="mono">pending</span>.
-          </p>
-        </Card>
-
-        <div className="mt-auto flex items-center gap-2 border-hair border-t pt-3">
-          <span className="text-[10.5px] text-ink3">
-            No cost — bindings are wiring, not resources
-          </span>
+    <Drawer
+      title="Create binding"
+      sub={
+        <>
+          from <span className="mono">{svc.name}</span> · {project} / {env}
+        </>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <span className="text-10p5 text-ink3">No cost — bindings are wiring, not resources</span>
           <span className="flex-1" />
           <Btn variant="s" onClick={onClose}>
             Cancel
@@ -394,8 +300,84 @@ export function CreateBindingDrawer({
           >
             Create binding
           </Btn>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <div className="eyebrow">Bind to</div>
+        {selectable.map((s) => (
+          <label
+            key={s.id}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 rounded-lg border border-hair px-3 py-2",
+              target === s.id && "border-steel",
+            )}
+          >
+            <input
+              type="radio"
+              name="bind-target"
+              checked={target === s.id}
+              onChange={() => setPicked(s.id)}
+            />
+            <span className="mono text-12">{s.name}</span>
+            <span className="flex-1" />
+            <span className="text-10p5 text-ink3">{productLabel(s)}</span>
+          </label>
+        ))}
+        {alreadyBound.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center gap-2.5 rounded-lg border border-hair px-3 py-2 opacity-55"
+          >
+            <input type="radio" name="bind-target" disabled />
+            <span className="mono text-12">{s.name}</span>
+            <span className="flex-1" />
+            <span className="text-10p5 text-ink3">already bound</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <div className="eyebrow">Scope</div>
+        <div className="chiprow">
+          <button
+            type="button"
+            className={cn("chip", scope === "read_only" && "on")}
+            onClick={() => setScope("read_only")}
+          >
+            read-only
+          </button>
+          <button
+            type="button"
+            className={cn("chip", scope === "read_write" && "on")}
+            onClick={() => setScope("read_write")}
+          >
+            read-write
+          </button>
+        </div>
+        <p className="text-10p5 text-ink3">
+          read-only mints a role that cannot write — enforced by the database, not the app.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <div className="eyebrow">Injected at deploy</div>
+        <div className="logwell">
+          <div>
+            {targetName ? envVarFor(targetName) : "…"}=postgres://{svc.name}
+            {scope === "read_only" ? "_ro" : "_rw"}:•••@{targetName || "…"}…
+          </div>
+          <div className="t"># credentials minted at bind, rotated on unbind</div>
         </div>
       </div>
-    </div>
+
+      <Card className="p-3.5">
+        <p className="text-11p5 leading-relaxed text-ink2">
+          Takes effect on the next deploy of <span className="mono">{svc.name}</span> — nothing
+          restarts now. The edge appears on the topology (W3) immediately as{" "}
+          <span className="mono">pending</span>.
+        </p>
+      </Card>
+    </Drawer>
   );
 }

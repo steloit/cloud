@@ -36,49 +36,49 @@ function InfrastructureOverview() {
 
         <div className="grid grid-cols-2 gap-3.5">
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Latency · p95 by service</span>
+            <span className="text-12p5 font-semibold">Latency · p95 by service</span>
             <MetricChart
               series={toSeries(p95.data)}
               threshold={800}
               markers={toMarkers(p95.data)}
               unit="ms"
-              height={120}
+              size="md"
             />
-            <span className="text-[10.5px] text-ink3">api spiked at #142, settled after #143</span>
+            <span className="text-10p5 text-ink3">api spiked at #142, settled after #143</span>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Error rate</span>
+            <span className="text-12p5 font-semibold">Error rate</span>
             <MetricChart
               series={toSeries(errorRate.data)}
               markers={toMarkers(errorRate.data)}
               tone="warn"
-              height={120}
+              size="md"
             />
-            <span className="text-[10.5px] text-ink3">order.paid failures during the incident</span>
+            <span className="text-10p5 text-ink3">order.paid failures during the incident</span>
           </Card>
         </div>
 
         <div className="grid grid-cols-3 gap-3.5">
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Throughput · req/s</span>
-            <MetricChart series={toSeries(requests.data)} tone="ok" height={80} />
-            <span className="text-[10.5px] text-ink3">steady</span>
+            <span className="text-12p5 font-semibold">Throughput · req/s</span>
+            <MetricChart series={toSeries(requests.data)} tone="ok" size="sm" />
+            <span className="text-10p5 text-ink3">steady</span>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Saturation</span>
-            <MetricChart series={toSeries(connections.data)} tone="warn" height={80} />
-            <span className="text-[10.5px] text-ink3">
+            <span className="text-12p5 font-semibold">Saturation</span>
+            <MetricChart series={toSeries(connections.data)} tone="warn" size="sm" />
+            <span className="text-10p5 text-ink3">
               valkey memory 95% — the assistant's open insight
             </span>
           </Card>
           <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-[12.5px] font-semibold">Queue depth · DLQ</span>
-            <MetricChart series={toSeries(dlq.data)} height={80} />
-            <span className="text-[10.5px] text-ink3">2 dead letters resolved via #143</span>
+            <span className="text-12p5 font-semibold">Queue depth · DLQ</span>
+            <MetricChart series={toSeries(dlq.data)} size="sm" />
+            <span className="text-10p5 text-ink3">2 dead letters resolved via #143</span>
           </Card>
         </div>
 
-        <Card className="p-3.5 text-[11.5px] text-ink2">
+        <Card className="p-3.5 text-11p5 text-ink2">
           Deploys · production: <span className="mono">#143</span> idempotent gift-card receipts ·
           Jul 2 — markers on every widget above, so "what changed?" is never a second investigation.
         </Card>

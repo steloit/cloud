@@ -165,8 +165,8 @@ function ActivityPage() {
                         </span>
                       </td>
                       <td>
-                        <div className="text-[11.5px] text-ink1">{r.title}</div>
-                        <div className="mt-0.5 text-[9.5px] text-ink3">{r.meta}</div>
+                        <div className="text-11p5 text-ink1">{r.title}</div>
+                        <div className="mt-0.5 text-10 text-ink3">{r.meta}</div>
                       </td>
                       <td className="w-[90px] text-right">
                         <Pill tone={r.pill.tone}>{r.pill.label}</Pill>

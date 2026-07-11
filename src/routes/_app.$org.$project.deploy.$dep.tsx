@@ -5,6 +5,7 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { type DeployMarker, MetricChart, type SeriesPoint } from "@/design-system/chart";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Icon } from "@/design-system/icon";
 import { Dot, Pill, Stlab } from "@/design-system/pill";
 import { queryMetricsOptions } from "@/lib/api";
 
@@ -36,7 +37,7 @@ function RolloutPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Card className="flex flex-col items-start gap-2.5 p-4">
-            <b className="text-[13px]">
+            <b className="text-13">
               Only in-flight rollouts have a live view — #143 is the one promoting
             </b>
             <Link to="/$org/$project/deploy" params={{ org, project }} search={{ env }}>
@@ -78,30 +79,30 @@ function RolloutPage() {
 
         {/* Step strip — the five rollout stages, left to right. */}
         <Card className="grid grid-cols-5 gap-3 p-4">
-          <div className="flex items-start gap-2 text-[11.5px]">
-            <span className="text-ok">✓</span>
+          <div className="flex items-start gap-2 text-11p5">
+            <Icon id="s-check" className="h-3 w-3 text-ok" />
             <span>
               <b>Build</b> — <span className="text-ink3">41 s · image st-143</span>
             </span>
           </div>
-          <div className="flex items-start gap-2 text-[11.5px]">
-            <span className="text-ok">✓</span>
+          <div className="flex items-start gap-2 text-11p5">
+            <Icon id="s-check" className="h-3 w-3 text-ok" />
             <span>
               <b>Migrate</b> —{" "}
               <span className="text-ink3">0142_add_idx · CONCURRENTLY · reverse stated</span>
             </span>
           </div>
-          <div className="flex items-start gap-2 text-[11.5px]">
+          <div className="flex items-start gap-2 text-11p5">
             <span className="pt-1">
               <Dot tone="prov" />
             </span>
             <b>Canary 33% — 1 of 3 instances · 2 min elapsed</b>
           </div>
-          <div className="flex items-start gap-2 text-[11.5px] text-ink3">
+          <div className="flex items-start gap-2 text-11p5 text-ink3">
             <span>·</span>
             <span>Full rollout — waits for gates · no fixed timer</span>
           </div>
-          <div className="flex items-start gap-2 text-[11.5px] text-ink3">
+          <div className="flex items-start gap-2 text-11p5 text-ink3">
             <span>·</span>
             <span>Verify — 10 min watch, then #142 instances released</span>
           </div>
@@ -113,17 +114,17 @@ function RolloutPage() {
               <Eyebrow>
                 Instances — replacement, not restart: old serves until new is proven
               </Eyebrow>
-              <div className="flex items-center gap-2 text-[11.5px]">
+              <div className="flex items-center gap-2 text-11p5">
                 <Dot tone="prov" />
                 <span className="mono">inst-a · #143</span>
                 <span className="text-ink3">— canary · 33% traffic · p95 431 ms</span>
               </div>
-              <div className="flex items-center gap-2 text-[11.5px]">
+              <div className="flex items-center gap-2 text-11p5">
                 <Dot tone="ok" />
                 <span className="mono">inst-b · #142</span>
                 <span className="text-ink3">— serving · 34% · next to replace</span>
               </div>
-              <div className="flex items-center gap-2 text-[11.5px]">
+              <div className="flex items-center gap-2 text-11p5">
                 <Dot tone="ok" />
                 <span className="mono">inst-c · #142</span>
                 <span className="text-ink3">— serving · 33%</span>
@@ -133,7 +134,7 @@ function RolloutPage() {
             <Card className="flex flex-col gap-2.5 p-4">
               <div className="flex items-baseline gap-3">
                 <Eyebrow>Canary vs baseline · live</Eyebrow>
-                <span className="mono ml-auto text-[10.5px] text-ink3">
+                <span className="mono ml-auto text-10p5 text-ink3">
                   <span className="text-warn">—</span> #143 canary ·{" "}
                   <span className="text-ink3">—</span> #142 baseline
                 </span>
@@ -145,7 +146,7 @@ function RolloutPage() {
                 unit="ms"
                 tone="warn"
               />
-              <p className="text-[11px] leading-relaxed text-ink3">
+              <p className="text-11 leading-relaxed text-ink3">
                 The fix visible before it's fully shipped — idx_orders_customer_created (proposal
                 prp_7c31a2, applied as a reversible migration).
               </p>
@@ -191,7 +192,7 @@ function RolloutPage() {
                   </tr>
                 </tbody>
               </table>
-              <p className="border-hair border-t pt-2 text-[10.5px] leading-relaxed text-ink3">
+              <p className="border-hair border-t pt-2 text-10p5 leading-relaxed text-ink3">
                 Auto-abort: error rate &gt; 2× baseline for 2 min, or any 5xx spike → traffic
                 returns to #142 instances in &lt; 10 s. The migration stays — expand-contract means
                 #142 runs happily on the new schema. #140 was aborted by exactly this gate.
@@ -219,7 +220,7 @@ function RolloutPage() {
                   p95-slo trending to resolve
                 </div>
               </div>
-              <p className="text-[10.5px] leading-relaxed text-ink3">
+              <p className="text-10p5 leading-relaxed text-ink3">
                 Every line lands in Observe · Events; the deploy is one ◆ across all charts.
               </p>
             </Card>

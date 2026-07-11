@@ -18,13 +18,18 @@ export interface DeployMarker {
   label: string;
 }
 
+/** The three sanctioned chart heights — no per-call pixel values. */
+export type ChartSize = "sm" | "md" | "lg";
+const SIZE_H: Record<ChartSize, number> = { sm: 80, md: 120, lg: 160 };
+
 interface MetricChartProps {
   series: SeriesPoint[];
   /** SLO/threshold line value, drawn in --warn. */
   threshold?: number;
   markers?: DeployMarker[];
   unit?: string;
-  height?: number;
+  /** Height tier: sm 80 (strips) · md 120 (panels) · lg 160 (hero). */
+  size?: ChartSize;
   /** Series stroke: steel by default; warn for breaching series. */
   tone?: "steel" | "warn" | "ok" | "assist";
   className?: string;
@@ -42,11 +47,12 @@ export function MetricChart({
   threshold,
   markers = [],
   unit = "",
-  height = 120,
+  size = "md",
   tone = "steel",
   className,
 }: MetricChartProps) {
   const gradientId = useId();
+  const height = SIZE_H[size];
   if (series.length < 2) return <div style={{ height }} className={className} />;
 
   const width = 560;

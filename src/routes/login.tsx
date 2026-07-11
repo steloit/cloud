@@ -64,7 +64,7 @@ function LoginPage() {
           <Flabel
             htmlFor="password"
             aside={
-              <Link to="/forgot-password" className="text-[11px] font-medium text-steel">
+              <Link to="/forgot-password" className="text-11 font-medium text-steel">
                 Forgot?
               </Link>
             }
@@ -84,7 +84,7 @@ function LoginPage() {
           Sign in
         </Btn>
       </form>
-      <div className="text-center text-[11.5px] text-ink3">
+      <div className="text-center text-11p5 text-ink3">
         New to Steloit?{" "}
         <Link to="/signup" className="font-medium text-steel">
           Create an account

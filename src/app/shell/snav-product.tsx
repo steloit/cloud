@@ -233,7 +233,7 @@ export function SnavProduct({
                 {PRODUCT_LABEL[service.product]} in {project} · {siblings.length}
               </div>
               <DropdownMenu.Item
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface2"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 outline-none data-[highlighted]:bg-surface2"
                 onSelect={() =>
                   navigate({
                     to: "/$org/$project/instances/$product",
@@ -244,12 +244,12 @@ export function SnavProduct({
               >
                 <Icon id="s-grid" className="h-3.5 w-3.5 text-ink3" />
                 All instances
-                <span className="ml-auto text-[10.5px] text-ink3">{siblings.length}</span>
+                <span className="ml-auto text-10p5 text-ink3">{siblings.length}</span>
               </DropdownMenu.Item>
               {siblings.map((s) => (
                 <DropdownMenu.Item
                   key={s.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface2"
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 outline-none data-[highlighted]:bg-surface2"
                   onSelect={() =>
                     navigate({
                       to: `/$org/$project/svc/$service/${active === "overview" ? "" : active}`,
@@ -260,7 +260,7 @@ export function SnavProduct({
                 >
                   <Dot tone={statusDotTone(s.status)} />
                   <b>{s.name}</b>
-                  <span className="mono ml-auto text-[10.5px] text-ink3">
+                  <span className="mono ml-auto text-10p5 text-ink3">
                     {s.name === "db-main"
                       ? "$58/mo · Standard · 192/200 conns"
                       : s.name === "db-reports"
@@ -272,7 +272,7 @@ export function SnavProduct({
               ))}
               <DropdownMenu.Separator className="my-1 h-px bg-hair" />
               <DropdownMenu.Item
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] text-steel outline-none data-[highlighted]:bg-surface2"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 text-steel outline-none data-[highlighted]:bg-surface2"
                 onSelect={() =>
                   navigate({
                     to: "/$org/create",
@@ -290,7 +290,7 @@ export function SnavProduct({
               >
                 ⊕ New {PRODUCT_LABEL[service.product]}
               </DropdownMenu.Item>
-              <div className="px-3 py-2 text-[10.5px] text-ink3">
+              <div className="px-3 py-2 text-10p5 text-ink3">
                 switching keeps the page — Metrics stays Metrics, scoped to the other instance
               </div>
             </DropdownMenu.Content>

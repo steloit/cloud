@@ -52,7 +52,7 @@ function ProjectGeneralPage() {
 
           <Card className="flex max-w-[640px] flex-col gap-3 p-4">
             <Eyebrow>Transfer</Eyebrow>
-            <div className="text-[12px] text-ink2">
+            <div className="text-12 text-ink2">
               Moves services, environments, history and cost — bindings and credentials survive;
               billing switches at the next invoice boundary.
             </div>
@@ -75,7 +75,7 @@ function ProjectGeneralPage() {
               </Btn>
               <Pill tone="err">blocked — 7 services across 3 environments</Pill>
             </div>
-            <div className="text-[10.5px] text-ink3">
+            <div className="text-10p5 text-ink3">
               deletion spins services down in dependency order, keeps final snapshots 30 d, and
               requires typing the project slug
             </div>
