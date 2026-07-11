@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D5 · Backups — PITR + verified snapshots + the restore drill. 08-api has no
@@ -21,9 +23,9 @@ const SNAPSHOTS: Array<[string, string, string]> = [
 ];
 
 function BackupsPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
 
   if (!svc) return <main className="main" />;
@@ -32,6 +34,71 @@ function BackupsPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
+        </div>
+      </main>
+    );
+  }
+
+  // Wrong-instance fix: the PITR window, WAL lag, snapshots, and drill below
+  // are db-main's D5 canon — every other postgres instance keeps the page
+  // chrome (and its disabled-with-reason actions, per B6) but renders honest
+  // instance-scoped states.
+  const canon = svc.name === "db-main";
+
+  if (!canon) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            title="Backups"
+            sub={
+              <span className="mono">
+                {svc.name} · point-in-time recovery · {env}
+              </span>
+            }
+          >
+            <Btn variant="s" disabled disabledReason={NO_ENDPOINT}>
+              Take snapshot now
+            </Btn>
+          </Pghead>
+
+          <Card className="flex flex-col gap-3 p-4">
+            <div className="flex items-center gap-2.5">
+              <Pill tone="ok">continuous · PITR</Pill>
+              <span className="text-11p5 text-ink2">
+                PITR window starts accruing now — restore to <b>any second</b> once WAL history
+                builds
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Btn variant="p" disabled disabledReason={NO_ENDPOINT}>
+                Restore to a new branch…
+              </Btn>
+              <span className="text-10p5 text-ink3">
+                restores always land in a branch — production is never overwritten in place
+              </span>
+            </div>
+          </Card>
+
+          <EmptyState
+            compact
+            icon="s-db"
+            title="No snapshots yet"
+            meaning={
+              <>the first nightly snapshot lands at 02:00 IST — PITR covers 7 days from then</>
+            }
+          />
+
+          <Card className="flex items-center gap-3 p-4">
+            <Icon id="s-shield" className="h-4 w-4 shrink-0 text-ink3" />
+            <p className="text-11p5 text-ink2">
+              No restore drill has run yet — a backup you haven't restored is a rumor.
+            </p>
+            <span className="flex-1" />
+            <Btn variant="s" disabled disabledReason={NO_ENDPOINT}>
+              Run drill
+            </Btn>
+          </Card>
         </div>
       </main>
     );

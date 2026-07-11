@@ -3,11 +3,13 @@ import { type ReactNode, useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Stlab } from "@/design-system/pill";
 import { useRollback } from "@/features/deploy/hooks";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D19 · Web/Worker · Deployments — the per-service history behind DP1's
@@ -67,7 +69,7 @@ const INSTANCES = ["i-1 · 41% cpu", "i-2 · 38% cpu", "i-3 · 44% cpu"];
 function DeploymentsPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const rollback = useRollback();
   const [armed, setArmed] = useState<string | null>(null);
 
@@ -81,6 +83,43 @@ function DeploymentsPage() {
           <p className="hsub">
             Deployments (D19) is a web/worker surface — {svc.name} is {svc.product}.
           </p>
+        </div>
+      </main>
+    );
+  }
+
+  // The #140–142 history is the canon instance's (web → api · worker →
+  // worker) frame-fixed rows — any other service starts honest: no
+  // deployments until the first push.
+  const canon = svc.name === (svc.product === "web" ? "api" : "worker");
+
+  if (!canon) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            title="Deployments"
+            sub={
+              <span className="mono">
+                {svc.name} · {env} · zero-downtime · last 5 images kept warm for instant rollback
+              </span>
+            }
+          >
+            <Btn variant="s" disabled disabledReason="Nothing to roll back to yet">
+              <Icon id="s-undo" className="h-3 w-3" /> Roll back
+            </Btn>
+          </Pghead>
+          <EmptyState
+            icon="s-deploy"
+            title="No deployments yet"
+            meaning={
+              <>
+                the first <span className="mono">git push</span> creates #1 · rollbacks appear
+                beside every successful deploy
+              </>
+            }
+            cli="git push steloit main"
+          />
         </div>
       </main>
     );

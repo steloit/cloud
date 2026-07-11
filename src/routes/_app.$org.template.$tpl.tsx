@@ -9,6 +9,8 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
+import { SkeletonLines } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { errorMessage, getTemplateOptions, refreshTemplateMutation } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
 
@@ -194,7 +196,20 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   const refresh = useMutation(refreshTemplateMutation());
   const queryClient = useQueryClient();
 
-  if (template.isLoading) return <div className="text-11p5 text-ink3">Loading template…</div>;
+  if (template.isPending) return <SkeletonLines lines={4} className="max-w-[560px]" />;
+  if (template.isError) {
+    // A failed query is an error, never "wasn't found".
+    return (
+      <div className="max-w-[560px]">
+        <ApiFailureCard
+          title="Template didn't load"
+          error={template.error}
+          requestLine={`GET /templates/${tpl}`}
+          onRetry={() => template.refetch()}
+        />
+      </div>
+    );
+  }
   if (!template.data) {
     return (
       <Card dashed className="max-w-[560px] p-6 text-12 text-ink2">

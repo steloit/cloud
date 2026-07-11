@@ -4,6 +4,7 @@ import { Card } from "@/design-system/card";
 import { Glyph } from "@/design-system/glyph";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D6 · Valkey CLI Console — 08-api has no CLI-exec endpoint although D6
@@ -14,9 +15,9 @@ import { useServices } from "@/features/services/hooks";
 const RESPONSE_GET = '"{\\"cart\\":[\\"sku_2213\\",\\"sku_8841\\"],\\"exp\\":1751791220}"';
 
 function CliPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -61,33 +62,48 @@ function CliPage() {
         </Pghead>
 
         <Card className="flex flex-col gap-2.5 p-4">
-          <div className="logwell">
-            <div>
-              <span className="t">{prompt} </span>GET session:usr_88412
+          {/* The transcript is `cache`'s frame-fixed canon — any other valkey
+              instance opens a fresh session over an empty keyspace. */}
+          {svc.name !== "cache" ? (
+            <div className="logwell">
+              <div className="t">
+                # connected to {svc.name} · {env} · empty keyspace — try SCAN 0
+              </div>
+              <div>
+                <span className="t">{prompt} </span>
+                <span className="animate-pulse">▍</span>
+              </div>
             </div>
-            <div>{RESPONSE_GET}</div>
-            <div>
-              <span className="t">{prompt} </span>TTL session:usr_88412
+          ) : (
+            <div className="logwell">
+              <div>
+                <span className="t">{prompt} </span>GET session:usr_88412
+              </div>
+              <div>{RESPONSE_GET}</div>
+              <div>
+                <span className="t">{prompt} </span>TTL session:usr_88412
+              </div>
+              <div>(integer) 1187</div>
+              <div>
+                <span className="t">{prompt} </span>SCAN 0 MATCH session:* COUNT 100
+              </div>
+              <div className="lv-w">
+                ⚠ large keyspace — sampled 100 of ~41k matches (full SCAN is throttled in
+                production)
+              </div>
+              <div>
+                <span className="t">{prompt} </span>DEL session:usr_88412
+              </div>
+              <div className="lv-e">
+                ✗ blocked — session is read-only. Unlock writes (logged, 15 min) to run destructive
+                commands.
+              </div>
+              <div>
+                <span className="t">{prompt} </span>
+                <span className="animate-pulse">▍</span>
+              </div>
             </div>
-            <div>(integer) 1187</div>
-            <div>
-              <span className="t">{prompt} </span>SCAN 0 MATCH session:* COUNT 100
-            </div>
-            <div className="lv-w">
-              ⚠ large keyspace — sampled 100 of ~41k matches (full SCAN is throttled in production)
-            </div>
-            <div>
-              <span className="t">{prompt} </span>DEL session:usr_88412
-            </div>
-            <div className="lv-e">
-              ✗ blocked — session is read-only. Unlock writes (logged, 15 min) to run destructive
-              commands.
-            </div>
-            <div>
-              <span className="t">{prompt} </span>
-              <span className="animate-pulse">▍</span>
-            </div>
-          </div>
+          )}
           <div className="flex items-center gap-3 border-hair border-t pt-2.5">
             <Pill tone="mut">every command → audit log</Pill>
             <span className="text-10p5 text-ink3">

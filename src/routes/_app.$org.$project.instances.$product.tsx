@@ -4,6 +4,7 @@ import { PRODUCT_ICON, PRODUCT_LABEL } from "@/app/shell/rail";
 import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyRow } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Pill, Stlab, statusDotTone } from "@/design-system/pill";
@@ -247,6 +248,12 @@ function PostgresLanding({
             </tr>
           </thead>
           <tbody>
+            {instances.length === 0 ? (
+              <EmptyRow cols={7}>
+                No PostgreSQL instances in this environment yet — create one and it lands here with
+                its version, bindings and cost.
+              </EmptyRow>
+            ) : null}
             {instances.map((svc) => {
               const display = PG_DISPLAY[svc.name];
               return (

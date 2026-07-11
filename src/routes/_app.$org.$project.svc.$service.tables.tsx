@@ -3,9 +3,11 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyState } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,9 +38,9 @@ const ROWS: Array<[string, string, string, string, string | null, string]> = [
 ];
 
 function TablesPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
 
   if (!svc) return <main className="main" />;
@@ -47,6 +49,47 @@ function TablesPage() {
       <main className="main">
         <div className="pgpad !overflow-y-auto">
           <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
+        </div>
+      </main>
+    );
+  }
+
+  // Wrong-instance fix: the schema, filter, and rows below are db-main's D2
+  // canon — every other postgres instance keeps the viewer chrome but its
+  // table list renders an honest instance-scoped empty state.
+  const canon = svc.name === "db-main";
+
+  if (!canon) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            title="Table Viewer"
+            sub={
+              <span>
+                schema <span className="mono">public</span> · no tables yet
+              </span>
+            }
+          >
+            <Btn variant="s">+ Add filter</Btn>
+            <Btn variant="s">
+              Columns
+              <Icon id="s-chevd" className="h-[11px] w-[11px]" />
+            </Btn>
+          </Pghead>
+
+          <EmptyState
+            compact
+            icon="s-db"
+            title="No tables yet"
+            meaning={
+              <>
+                the schema shows up here after your first migration or write — connect and create a
+                table
+              </>
+            }
+            cli={`steloit db connect ${svc.name}`}
+          />
         </div>
       </main>
     );

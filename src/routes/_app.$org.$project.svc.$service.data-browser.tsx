@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Glyph } from "@/design-system/glyph";
 import { Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -53,9 +55,9 @@ const DETAIL_JSON = `{
 }`;
 
 function DataBrowserPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const [typeChip, setTypeChip] = useState<TypeChip>("all");
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
@@ -67,6 +69,28 @@ function DataBrowserPage() {
           <Card className="p-4 text-12 text-ink2">
             Data Browser is a Valkey surface — {svc.name} is a {svc.product} service.
           </Card>
+        </div>
+      </main>
+    );
+  }
+
+  // The keyspace above is `cache`'s frame-fixed canon — any other valkey
+  // instance starts honest: an empty keyspace until consumers write.
+  if (svc.name !== "cache") {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            before={<Glyph id="s-chip" />}
+            title="Data Browser"
+            sub="cache-mode · LRU eviction · read-only by default"
+          />
+          <EmptyState
+            icon="s-chip"
+            title="Keyspace is empty"
+            meaning="keys appear as consumers write · TTLs and memory show per key"
+            cli={`steloit valkey cli ${svc.name}`}
+          />
         </div>
       </main>
     );

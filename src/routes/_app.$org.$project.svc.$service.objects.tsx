@@ -3,11 +3,13 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Inp } from "@/design-system/inp";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -33,9 +35,9 @@ const OBJECTS: ObjectRow[] = [
 ];
 
 function ObjectsPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -46,6 +48,33 @@ function ObjectsPage() {
           <Card className="p-4 text-12 text-ink2">
             The Object Browser is an Object Storage surface — {svc.name} is a {svc.product} service.
           </Card>
+        </div>
+      </main>
+    );
+  }
+
+  // The prefix listing is `assets`' frame-fixed canon — any other bucket
+  // starts honest: empty until the first upload.
+  if (svc.name !== "assets") {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            before={<Glyph id="s-bucket" />}
+            title="Object Browser"
+            sub={<span className="mono">{svc.name} · 0 objects</span>}
+          />
+          <EmptyState
+            icon="s-bucket"
+            title="Bucket is empty"
+            meaning="objects appear on first upload · lifecycle rules apply from day one"
+            cta={
+              <Btn variant="s" disabled disabledReason="No object endpoints in the spec (finding)">
+                Upload
+              </Btn>
+            }
+            cli={`steloit storage cp ./hero.webp ${svc.name}/`}
+          />
         </div>
       </main>
     );

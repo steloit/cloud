@@ -3,10 +3,13 @@ import { Pghead } from "@/app/shell/pghead";
 import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Pill, type PillTone } from "@/design-system/pill";
+import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -65,7 +68,57 @@ const QUERY_ROWS: QueryRow[] = [
 ];
 
 /** D4 — the pg_stat_statements list; the regressed row opens the proposal. */
-function QueryInsightsList({ openProposal }: { openProposal: () => void }) {
+// Wrong-instance fix: the rows, regression banner, and proposal below are
+// db-main's D4 canon — every other postgres instance keeps the Pghead and
+// range chips but its insights region renders an honest instance-scoped
+// empty state.
+function QueryInsightsList({
+  openProposal,
+  name,
+  env,
+}: {
+  openProposal: () => void;
+  name: string;
+  env: string;
+}) {
+  const canon = name === "db-main";
+
+  if (!canon) {
+    return (
+      <>
+        <Pghead
+          title="Query Insights"
+          sub={
+            <span className="mono">
+              {name} · pg_stat_statements · last 1h · {env}
+            </span>
+          }
+        />
+
+        <div className="chiprow">
+          {["1h", "24h", "7d"].map((r) => (
+            <span key={r} className={cn("chip", r === "1h" && "on")}>
+              {r}
+            </span>
+          ))}
+          <span className="chip">sort: total time ▾</span>
+        </div>
+
+        <EmptyState
+          compact
+          icon="s-chart"
+          title="No query insights yet"
+          meaning={
+            <>
+              insights need sampled traffic — rows land here after the first 1,000 queries, with
+              plan, p95, and total time per statement
+            </>
+          }
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <Pghead
@@ -270,19 +323,33 @@ function ProposalView({ service, env }: { service: string; env: string }) {
 }
 
 function InsightsPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env, proposal } = Route.useSearch();
   const navigate = Route.useNavigate();
+  const services = useServices(resolveEnvKey(project, env));
+  const svc = services.data?.find((s) => s.name === service || s.id === service);
 
   const openProposal = () => navigate({ search: (prev) => ({ ...prev, proposal: "prp_7c31a2" }) });
+
+  if (!svc) return <main className="main" />;
+  if (svc.product !== "postgres") {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
-        {proposal === "prp_7c31a2" ? (
+        {/* prp_7c31a2 is db-main's proposal — the deep link never renders it on another instance. */}
+        {proposal === "prp_7c31a2" && svc.name === "db-main" ? (
           <ProposalView service={service} env={env} />
         ) : (
-          <QueryInsightsList openProposal={openProposal} />
+          <QueryInsightsList openProposal={openProposal} name={svc.name} env={env} />
         )}
       </div>
     </main>

@@ -238,7 +238,12 @@ export const handlers = [
     );
   }),
   http.delete("/v1/bindings/:binding", () => new HttpResponse(null, { status: 204 })),
-  http.get("/v1/services/:service/domains", () => list(world.domains)),
+  // Scoped to the canon owner (D21: api) — the fixtures carry no ownership
+  // field (finding), so other services honestly return an empty list.
+  http.get("/v1/services/:service/domains", ({ params }) => {
+    const svc = world.findService(String(params.service));
+    return list(svc?.name === "api" ? world.domains : []);
+  }),
   http.post("/v1/services/:service/domains", async ({ request }) => {
     const body = (await request.json()) as { domain: string };
     return HttpResponse.json(
@@ -265,7 +270,11 @@ export const handlers = [
       { status: 201 },
     );
   }),
-  http.get("/v1/services/:service/lifecycle-rules", () => list(world.lifecycleRules)),
+  // Scoped to the canon owner (D15: assets) — see the domains note above.
+  http.get("/v1/services/:service/lifecycle-rules", ({ params }) => {
+    const svc = world.findService(String(params.service));
+    return list(svc?.name === "assets" ? world.lifecycleRules : []);
+  }),
   http.post("/v1/services/:service/lifecycle-rules", async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json(
@@ -282,7 +291,11 @@ export const handlers = [
       note: "no immediate deletes — the rule applies going forward",
     });
   }),
-  http.get("/v1/services/:service/schedules", () => list(world.schedules)),
+  // Scoped to the canon owners (D17: jobs · S5: worker share the two rows).
+  http.get("/v1/services/:service/schedules", ({ params }) => {
+    const svc = world.findService(String(params.service));
+    return list(svc?.name === "jobs" || svc?.name === "worker" ? world.schedules : []);
+  }),
   http.post("/v1/services/:service/schedules", async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json(

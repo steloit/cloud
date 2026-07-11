@@ -4,9 +4,11 @@ import { Pghead } from "@/app/shell/pghead";
 import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,7 +20,9 @@ import { cn } from "@/lib/utils";
  */
 
 const TABS = ["Ready · 12", "In-flight · 3", "Dead letters · 2"] as const;
-type Tab = (typeof TABS)[number];
+
+/** A fresh queue's honest counts — nothing enqueued, nothing dead yet. */
+const TABS_FRESH = ["Ready · 0", "In-flight · 0", "Dead letters · 0"] as const;
 
 interface DlqRow {
   message: string;
@@ -47,8 +51,8 @@ const DLQ: DlqRow[] = [
 function MessagesPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
-  const [tab, setTab] = useState<Tab>("Dead letters · 2");
+  const services = useServices(resolveEnvKey(project, env));
+  const [tabIdx, setTabIdx] = useState(2);
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -64,6 +68,12 @@ function MessagesPage() {
     );
   }
 
+  // The dead letters (and the 12/3/2 counts) are `jobs`' frame-fixed canon
+  // from the Jul 2 incident — any other queue starts honest: empty lists
+  // until a message exhausts its retries.
+  const canon = svc.name === "jobs";
+  const tabs = canon ? TABS : TABS_FRESH;
+
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
@@ -78,23 +88,48 @@ function MessagesPage() {
         />
 
         <div className="tabrow">
-          {TABS.map((t) => (
+          {tabs.map((t, i) => (
             <button
               key={t}
               type="button"
-              className={cn("tab", tab === t && "on", t === "Dead letters · 2" && "text-warn")}
-              onClick={() => setTab(t)}
+              className={cn("tab", tabIdx === i && "on", t === "Dead letters · 2" && "text-warn")}
+              onClick={() => setTabIdx(i)}
             >
               {t}
             </button>
           ))}
         </div>
 
-        {tab !== "Dead letters · 2" ? (
+        {tabIdx !== 2 ? (
           <p className="text-11p5 text-ink3">
-            The ready and in-flight lists need a messages endpoint the spec lacks (finding) — dead
-            letters carry the incident today.
+            {canon
+              ? "The ready and in-flight lists need a messages endpoint the spec lacks (finding) — dead letters carry the incident today."
+              : "The ready and in-flight lists need a messages endpoint the spec lacks (finding)."}
           </p>
+        ) : !canon ? (
+          <EmptyState
+            icon="s-queue"
+            title="DLQ is empty"
+            meaning="messages land here after max retries · redrive returns them to the main queue"
+            cta={
+              <>
+                <Btn
+                  variant="p"
+                  disabled
+                  disabledReason="No redrive endpoint in the spec (finding)"
+                >
+                  Redrive
+                </Btn>
+                <Btn
+                  variant="dgr"
+                  disabled
+                  disabledReason="No redrive endpoint in the spec (finding)"
+                >
+                  Discard…
+                </Btn>
+              </>
+            }
+          />
         ) : (
           <>
             <Banner tone="warn">

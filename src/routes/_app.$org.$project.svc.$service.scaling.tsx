@@ -6,12 +6,14 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { useServices } from "@/features/services/hooks";
 import { updateServiceMutation } from "@/lib/api";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
 /**
@@ -31,6 +33,17 @@ const LADDER = [
   { label: "✕ 7+ · policy", policy: true },
 ];
 
+/** A fresh instance's ladder — same default range, no "now" reading yet. */
+const LADDER_FRESH = [
+  { label: "1" },
+  { label: "2 · floor", on: true },
+  { label: "3" },
+  { label: "4" },
+  { label: "5" },
+  { label: "6 · ceiling", on: true },
+  { label: "✕ 7+ · policy", policy: true },
+];
+
 const SIGNALS = ["CPU · target 70%", "Requests / instance", "p95 latency"];
 
 const COST_ROWS = [
@@ -40,9 +53,9 @@ const COST_ROWS = [
 ];
 
 function ScalingPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   // Chart query is frame-fixed on the api requests series — the canon 24 h
   // telemetry that carries the ◆ #142 marker.
   const metrics = useMetrics(env, "service:api metric:requests");
@@ -65,6 +78,11 @@ function ScalingPage() {
       </main>
     );
   }
+
+  // Instance counts, costs and the 24 h chart are the canon instance's
+  // (web → api · worker → worker) frame-fixed telemetry — the policy chrome
+  // (modes, ladder range, signals, pin) is config and applies to any instance.
+  const canon = svc.name === (svc.product === "web" ? "api" : "worker");
 
   const pinSet = pin.trim() !== "" && pin.trim() !== "—";
   const applyDisabled = pinSet && reason.trim() === "";
@@ -96,7 +114,11 @@ function ScalingPage() {
             </span>
           }
         >
-          <Pill tone="ok">● autoscaling · 3 instances now</Pill>
+          {canon ? (
+            <Pill tone="ok">● autoscaling · 3 instances now</Pill>
+          ) : (
+            <Pill tone="ok">● autoscaling · floor 2 · ceiling 6</Pill>
+          )}
         </Pghead>
 
         <div className="grid grid-cols-3 gap-3">
@@ -122,7 +144,7 @@ function ScalingPage() {
 
         <Card className="flex flex-col gap-3 p-4">
           <div className="chiprow">
-            {LADDER.map((step) => (
+            {(canon ? LADDER : LADDER_FRESH).map((step) => (
               <span
                 key={step.label}
                 className={cn(
@@ -166,50 +188,69 @@ function ScalingPage() {
 
         <Card className="flex flex-col gap-2.5 p-4">
           <Eyebrow>What this range costs</Eyebrow>
-          <div className="grid grid-cols-3 gap-3">
-            {COST_ROWS.map((row) => (
-              <div key={row.label} className="flex items-baseline gap-2">
-                <span className="text-11p5 text-ink3">{row.label}</span>
-                <span className="mono text-13 font-semibold">{row.value}</span>
-                <span className="text-10p5 text-ink3">{row.note}</span>
+          {canon ? (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                {COST_ROWS.map((row) => (
+                  <div key={row.label} className="flex items-baseline gap-2">
+                    <span className="text-11p5 text-ink3">{row.label}</span>
+                    <span className="mono text-13 font-semibold">{row.value}</span>
+                    <span className="text-10p5 text-ink3">{row.note}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <p className="text-11p5 leading-relaxed text-ink2">
-            Last 30 days on this range would have cost $47.20 — the range shows up in the project
-            estimate as $28–84, never as a surprise.
-          </p>
+              <p className="text-11p5 leading-relaxed text-ink2">
+                Last 30 days on this range would have cost $47.20 — the range shows up in the
+                project estimate as $28–84, never as a surprise.
+              </p>
+            </>
+          ) : (
+            <p className="text-11p5 leading-relaxed text-ink2">
+              Floor, now and ceiling costs derive from this instance's shape and land here with the
+              first billing hour — the range shows up in the project estimate as a floor–ceiling
+              band, never as a surprise.
+            </p>
+          )}
           <p className="border-hair border-t pt-2.5 text-11 leading-relaxed text-ink3">
             Raising the ceiling never restarts anything; raising the size of instances does — that
             lives in Settings and states its blast radius there.
           </p>
         </Card>
 
-        <Card className="flex flex-col gap-2.5 p-4">
-          <div className="flex items-center gap-3">
-            <Eyebrow>Last 24 h on this configuration</Eyebrow>
-            <span className="mono text-10p5 text-ink3">
-              ━ instances · ━ requests · band = floor↔ceiling
-            </span>
-            <span className="ml-auto text-10p5 text-ink3">
-              every scale event is annotated in Observe
-            </span>
-          </div>
-          <div className="relative">
-            <MetricChart
-              series={toSeries(metrics.data)}
-              markers={toMarkers(metrics.data)}
-              size="md"
-            />
-            <span className="mono absolute top-1 right-2 text-10 text-ink3">ceiling 6</span>
-            <span className="mono absolute right-2 bottom-6 text-10 text-ink3">floor 2</span>
-          </div>
-          <div className="mono text-10p5 text-ink3">◆ deploy #142 — cpu, not traffic</div>
-          <div className="mono text-10p5 text-ink2">
-            2 → 3 with lunch traffic · 3 → 4 after #142 (the slow query burns CPU — fixing the index
-            is cheaper than the extra instance)
-          </div>
-        </Card>
+        {!canon ? (
+          <EmptyState
+            compact
+            icon="s-chart"
+            title="No scaling history yet"
+            meaning="the 24 h band draws as the service takes traffic · every scale event is annotated in Observe"
+          />
+        ) : (
+          <Card className="flex flex-col gap-2.5 p-4">
+            <div className="flex items-center gap-3">
+              <Eyebrow>Last 24 h on this configuration</Eyebrow>
+              <span className="mono text-10p5 text-ink3">
+                ━ instances · ━ requests · band = floor↔ceiling
+              </span>
+              <span className="ml-auto text-10p5 text-ink3">
+                every scale event is annotated in Observe
+              </span>
+            </div>
+            <div className="relative">
+              <MetricChart
+                series={toSeries(metrics.data)}
+                markers={toMarkers(metrics.data)}
+                size="md"
+              />
+              <span className="mono absolute top-1 right-2 text-10 text-ink3">ceiling 6</span>
+              <span className="mono absolute right-2 bottom-6 text-10 text-ink3">floor 2</span>
+            </div>
+            <div className="mono text-10p5 text-ink3">◆ deploy #142 — cpu, not traffic</div>
+            <div className="mono text-10p5 text-ink2">
+              2 → 3 with lunch traffic · 3 → 4 after #142 (the slow query burns CPU — fixing the
+              index is cheaper than the extra instance)
+            </div>
+          </Card>
+        )}
 
         <Card className="flex flex-col gap-2.5 border-warn p-4">
           <Eyebrow className="text-warn">

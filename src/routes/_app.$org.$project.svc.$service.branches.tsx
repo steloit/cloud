@@ -7,6 +7,8 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Pill, type PillTone, Stlab } from "@/design-system/pill";
+import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * W5 · PostgreSQL Branches — the signature feature. 08-api has no branches
@@ -53,7 +55,39 @@ const BRANCHES: BranchRow[] = [
 ];
 
 function BranchesPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
+  const { env } = Route.useSearch();
+  const services = useServices(resolveEnvKey(project, env));
+  const svc = services.data?.find((s) => s.name === service || s.id === service);
+
+  if (!svc) return <main className="main" />;
+  if (svc.product !== "postgres") {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Card className="p-4 text-12 text-ink2">This tab belongs to PostgreSQL instances.</Card>
+        </div>
+      </main>
+    );
+  }
+
+  // Wrong-instance fix: the four rows above are db-main's W5 canon — every
+  // other postgres instance shows only its own main branch, derived from the
+  // instance itself, plus an honest hint about where branches appear.
+  const canon = svc.name === "db-main";
+  const rows: BranchRow[] = canon
+    ? BRANCHES
+    : [
+        {
+          name: "main",
+          pill: { tone: "st", label: "production" },
+          desc: "the live database · PITR window accruing",
+          status:
+            svc.status === "degraded"
+              ? { tone: "warn", label: "degraded" }
+              : { tone: "ok", label: "ready" },
+        },
+      ];
 
   return (
     <main className="main">
@@ -78,7 +112,7 @@ function BranchesPage() {
         </Pghead>
 
         <Card>
-          {BRANCHES.map((b, i) => (
+          {rows.map((b, i) => (
             <div
               key={b.name}
               className="flex items-center gap-3 border-hair border-b px-4 py-3 last:border-b-0"
@@ -95,6 +129,12 @@ function BranchesPage() {
               </Btn>
             </div>
           ))}
+          {!canon ? (
+            <div className="border-hair border-t border-dashed px-4 py-6 text-center text-11p5 text-ink3">
+              Branches appear here as you create them — every branch is a full copy-on-write
+              database.
+            </div>
+          ) : null}
         </Card>
 
         <div className="grid grid-cols-2 gap-3.5">

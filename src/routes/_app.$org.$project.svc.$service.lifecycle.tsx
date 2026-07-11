@@ -4,11 +4,15 @@ import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Glyph } from "@/design-system/glyph";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useServices } from "@/features/services/hooks";
 import { LifecycleDrawer } from "@/features/services/lifecycle-drawer";
 import { type LifecycleRule, listLifecycleRulesOptions } from "@/lib/api";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D15 · Lifecycle rules — the table rides the real lifecycle-rules endpoint;
@@ -18,9 +22,12 @@ import { type LifecycleRule, listLifecycleRulesOptions } from "@/lib/api";
  * fixtures-style world wins over the frame.
  */
 
+// Keyed on the canon fixture ids (not prefixes) so a non-canon rule that reuses
+// a canon prefix never inherits canon run history — it degrades to "not yet
+// run" / "—", and that degradation is intentional.
 const DISPLAY: Record<string, { last: string; affected: string }> = {
-  "tmp/": { last: "today · 03:00", affected: "2,041 objects" },
-  "originals/": { last: "today · 03:00", affected: "11,384 objects" },
+  rule_tmp_expire: { last: "today · 03:00", affected: "2,041 objects" },
+  rule_originals_cold: { last: "today · 03:00", affected: "11,384 objects" },
 };
 
 function actionLabel(action: LifecycleRule["action"]): string {
@@ -28,9 +35,9 @@ function actionLabel(action: LifecycleRule["action"]): string {
 }
 
 function LifecyclePage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
@@ -70,58 +77,91 @@ function LifecyclePage() {
           </Btn>
         </Pghead>
 
-        <Card>
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Prefix</th>
-                  <th>Action</th>
-                  <th>After</th>
-                  <th>Last run</th>
-                  <th>Affected</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {(rules.data ?? []).map((rule) => {
-                  const d = DISPLAY[rule.prefix];
-                  return (
-                    <tr key={rule.id}>
-                      <td className="mono">{rule.prefix}</td>
-                      <td>
-                        <Pill tone="mut">{actionLabel(rule.action)}</Pill>
-                      </td>
-                      <td className="mono">{rule.after_days ?? "—"} d</td>
-                      <td className="mono">{d?.last ?? "not yet run"}</td>
-                      <td className="mono">{d?.affected ?? "—"}</td>
-                      <td>
-                        <span className="flex justify-end gap-2">
-                          <Btn
-                            variant="s"
-                            className="h-6 px-2.5 text-10p5"
-                            disabled
-                            disabledReason="No per-rule resource in the spec (finding)"
-                          >
-                            Edit
-                          </Btn>
-                          <Btn
-                            variant="s"
-                            className="h-6 px-2.5 text-10p5"
-                            disabled
-                            disabledReason="No per-rule resource in the spec (finding)"
-                          >
-                            Remove
-                          </Btn>
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        {/* Four-state grammar (16-qa): pending → skeleton, error → failure
+            card, empty → EmptyState, else table. */}
+        {rules.isError ? (
+          <ApiFailureCard
+            title="Lifecycle rules didn't load"
+            error={rules.error}
+            requestLine={`GET /services/${svc.id}/lifecycle-rules`}
+            onRetry={() => rules.refetch()}
+          />
+        ) : !rules.isPending && (rules.data ?? []).length === 0 ? (
+          <EmptyState
+            compact
+            icon="s-bucket"
+            title="No lifecycle rules yet"
+            meaning={
+              <>
+                rules tier or expire objects automatically — a dry-run shows exactly what a rule
+                would touch before it applies
+              </>
+            }
+            cta={
+              <Btn variant="s" onClick={() => setDrawerOpen(true)}>
+                Add rule (U3)
+              </Btn>
+            }
+            cli="steloit storage lifecycle add tmp/ --expire 7d --dry-run"
+          />
+        ) : (
+          <Card>
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Prefix</th>
+                    <th>Action</th>
+                    <th>After</th>
+                    <th>Last run</th>
+                    <th>Affected</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.isPending ? (
+                    <SkeletonRows cols={6} />
+                  ) : (
+                    (rules.data ?? []).map((rule) => {
+                      const d = DISPLAY[rule.id];
+                      return (
+                        <tr key={rule.id}>
+                          <td className="mono">{rule.prefix}</td>
+                          <td>
+                            <Pill tone="mut">{actionLabel(rule.action)}</Pill>
+                          </td>
+                          <td className="mono">{rule.after_days ?? "—"} d</td>
+                          <td className="mono">{d?.last ?? "not yet run"}</td>
+                          <td className="mono">{d?.affected ?? "—"}</td>
+                          <td>
+                            <span className="flex justify-end gap-2">
+                              <Btn
+                                variant="s"
+                                className="h-6 px-2.5 text-10p5"
+                                disabled
+                                disabledReason="No per-rule resource in the spec (finding)"
+                              >
+                                Edit
+                              </Btn>
+                              <Btn
+                                variant="s"
+                                className="h-6 px-2.5 text-10p5"
+                                disabled
+                                disabledReason="No per-rule resource in the spec (finding)"
+                              >
+                                Remove
+                              </Btn>
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
 
         <p className="text-10p5 leading-relaxed text-ink3">
           Rules never race versioning: with versioning on, "delete" writes a delete marker; hard

@@ -3,10 +3,12 @@ import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";
 import { Pill, type PillTone } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D1 · SQL Editor — runs as the binding's role against a selectable target.
@@ -30,7 +32,7 @@ const RESULT_ROWS: Array<[string, string, string, string, string]> = [
 function SqlEditorPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   const [sql, setSql] = useState(DEFAULT_SQL);
   const [phase, setPhase] = useState<"idle" | "running" | "done">("idle");
@@ -46,8 +48,13 @@ function SqlEditorPage() {
     );
   }
 
+  // Wrong-instance fix: the canned results below are db-main's canon session —
+  // every other postgres instance keeps the editor chrome but gets an honest
+  // instance-scoped results region instead.
+  const canon = svc.name === "db-main";
+
   const run = () => {
-    if (phase === "running") return;
+    if (!canon || phase === "running") return;
     setPhase("running");
     window.setTimeout(() => setPhase("done"), 650);
   };
@@ -66,15 +73,20 @@ function SqlEditorPage() {
         >
           <span className="envpill">
             <Icon id="s-branch" />
-            target: preview/pr-142
+            {/* preview/pr-142 is a db-main branch — other instances only have main. */}
+            target: {canon ? "preview/pr-142" : "main"}
             <Icon id="s-chevd" className="h-[11px] w-[11px]" />
           </span>
           <Btn variant="s">Explain</Btn>
           <Btn
             variant="p"
             onClick={run}
-            disabled={phase === "running"}
-            disabledReason="Running against preview/pr-142…"
+            disabled={phase === "running" || !canon}
+            disabledReason={
+              canon
+                ? "Running against preview/pr-142…"
+                : "No query-execution endpoint in the spec — Run is canon playback, db-main only (finding)"
+            }
           >
             Run <Kbd>⌘↵</Kbd>
           </Btn>
@@ -92,7 +104,20 @@ function SqlEditorPage() {
           aria-label="SQL editor"
         />
 
-        {phase === "done" ? (
+        {!canon ? (
+          <EmptyState
+            compact
+            icon="s-term"
+            title="No query has run in this session"
+            meaning={
+              <>
+                run a query to see rows, timing, and the plan — results are scoped to this
+                instance's session, never another's
+              </>
+            }
+            cli={`steloit db connect ${svc.name}`}
+          />
+        ) : phase === "done" ? (
           <>
             <div className="flex items-center gap-2.5">
               <Pill tone="ok">8 rows</Pill>

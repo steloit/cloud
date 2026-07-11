@@ -12,6 +12,7 @@ import { Pill } from "@/design-system/pill";
 import { useProposal, useUpdateInsight } from "@/features/assistant/hooks";
 import { useServices } from "@/features/services/hooks";
 import { errorMessage } from "@/lib/api";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { useUIStore } from "@/lib/store";
 
 /**
@@ -398,7 +399,7 @@ function ProposalPanel({
 function ServiceAiPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   const product = svc?.product ?? "";

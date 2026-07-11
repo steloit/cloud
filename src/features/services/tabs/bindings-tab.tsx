@@ -4,9 +4,11 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
-import { Icon } from "@/design-system/icon";
+import { EmptyState } from "@/design-system/empty-state";
 import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useBindings, useServices } from "@/features/services/hooks";
 import type { Binding, Service } from "@/lib/api";
 import {
@@ -82,6 +84,12 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
     });
   }
 
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else table. db-main never hits empty (synthetic
+  // provisioning row above) — the empty state is for services with zero
+  // consumers.
+  const isEmpty = !bindings.isPending && !bindings.isError && rows.length === 0;
+
   const doRevoke = (row: BindingRow) => {
     if (armedId !== row.id) {
       setArmedId(row.id);
@@ -107,74 +115,107 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
         title="Bindings"
         sub={
           <span className="mono">
-            {svc.name} · {rows.length} consumers · credentials minted per consumer, least-privilege,
-            rotated
+            {svc.name} · {bindings.isSuccess ? rows.length : "…"} consumers · credentials minted per
+            consumer, least-privilege, rotated
           </span>
         }
       />
 
-      <div className="tblwrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Binding</th>
-              <th>Consumer</th>
-              <th>Role</th>
-              <th>Rotated</th>
-              <th>Last used</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td className="mono text-11">{row.id}</td>
-                <td>
-                  <span className="flex items-center gap-2">
-                    {row.consumer}
-                    {row.consumerPill ? (
-                      <Pill tone={row.consumerPill.tone}>{row.consumerPill.label}</Pill>
-                    ) : null}
-                  </span>
-                </td>
-                <td>{row.role}</td>
-                <td className="text-ink2">{row.rotated}</td>
-                <td className="text-ink2">{row.lastUsed}</td>
-                <td>
-                  <span className="flex justify-end gap-1.5">
-                    <Btn
-                      variant="gh"
-                      className="h-5 px-2 text-10"
-                      disabled
-                      disabledReason="No rotate endpoint in the spec — spec change first (finding)"
-                    >
-                      Rotate
-                    </Btn>
-                    <Btn
-                      variant="gh"
-                      className={cn(
-                        "h-5 px-2 text-10 text-err",
-                        armedId === row.id && "font-semibold",
-                      )}
-                      onClick={() => doRevoke(row)}
-                      disabled={revoke.isPending}
-                      disabledReason="Revoking…"
-                    >
-                      {armedId === row.id ? "Confirm revoke" : "Revoke"}
-                    </Btn>
-                  </span>
-                </td>
+      {bindings.isError ? (
+        <ApiFailureCard
+          title="Bindings didn't load"
+          error={bindings.error}
+          requestLine={`GET /services/${svc.id}/bindings`}
+          onRetry={() => bindings.refetch()}
+        />
+      ) : isEmpty ? (
+        <EmptyState
+          compact
+          icon="s-bind"
+          title="No consumers yet"
+          meaning={
+            <>
+              bindings mint least-privilege credentials per consumer — nothing shares a password,
+              and consumers never see one
+            </>
+          }
+          cta={
+            <Btn variant="s" onClick={() => setDrawerOpen(true)}>
+              Create binding (U2)
+            </Btn>
+          }
+          cli={`steloit bind api --to ${svc.name} --scope read-only`}
+        />
+      ) : (
+        <div className="tblwrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Binding</th>
+                <th>Consumer</th>
+                <th>Role</th>
+                <th>Rotated</th>
+                <th>Last used</th>
+                <th aria-label="Actions" />
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {bindings.isPending ? (
+                <SkeletonRows cols={6} />
+              ) : (
+                rows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="mono text-11">{row.id}</td>
+                    <td>
+                      <span className="flex items-center gap-2">
+                        {row.consumer}
+                        {row.consumerPill ? (
+                          <Pill tone={row.consumerPill.tone}>{row.consumerPill.label}</Pill>
+                        ) : null}
+                      </span>
+                    </td>
+                    <td>{row.role}</td>
+                    <td className="text-ink2">{row.rotated}</td>
+                    <td className="text-ink2">{row.lastUsed}</td>
+                    <td>
+                      <span className="flex justify-end gap-1.5">
+                        <Btn
+                          variant="gh"
+                          className="h-5 px-2 text-10"
+                          disabled
+                          disabledReason="No rotate endpoint in the spec — spec change first (finding)"
+                        >
+                          Rotate
+                        </Btn>
+                        <Btn
+                          variant="gh"
+                          className={cn(
+                            "h-5 px-2 text-10 text-err",
+                            armedId === row.id && "font-semibold",
+                          )}
+                          onClick={() => doRevoke(row)}
+                          disabled={revoke.isPending}
+                          disabledReason="Revoking…"
+                        >
+                          {armedId === row.id ? "Confirm revoke" : "Revoke"}
+                        </Btn>
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      <div>
-        <Btn variant="s" onClick={() => setDrawerOpen(true)}>
-          Create binding (U2)
-        </Btn>
-      </div>
+      {isEmpty ? null : (
+        <div>
+          <Btn variant="s" onClick={() => setDrawerOpen(true)}>
+            Create binding (U2)
+          </Btn>
+        </div>
+      )}
 
       <p className="text-10p5 text-ink3">
         Rotation policy: 90 d automatic (org policy{" "}

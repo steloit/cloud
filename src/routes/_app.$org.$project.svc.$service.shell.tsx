@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * D20 · Web/Worker · Shell — an ephemeral, audited session. 08-api has no
@@ -10,9 +11,9 @@ import { useServices } from "@/features/services/hooks";
  */
 
 function ShellPage() {
-  const { service } = Route.useParams();
+  const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -23,6 +24,41 @@ function ShellPage() {
           <h1 className="h1">Shell</h1>
           <p className="hsub">
             Shell (D20) is a web/worker surface — {svc.name} is {svc.product}.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  // The transcript is the canon instance's (web → api · worker → worker)
+  // frame-fixed session — any other service opens a fresh, empty session.
+  const canon = svc.name === (svc.product === "web" ? "api" : "worker");
+
+  if (!canon) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            title="Shell"
+            sub={
+              <span className="mono">
+                {svc.name} · {env} · ephemeral session · everything typed here is logged
+              </span>
+            }
+          >
+            <Pill tone="mut">session ends on close · 30 min max</Pill>
+          </Pghead>
+
+          <div className="logwell">
+            <div className="t"># connected to {svc.name} · read-only filesystem except /tmp</div>
+            <div>
+              <span className="t">app@{svc.name}:~$</span> <span className="animate-pulse">▊</span>
+            </div>
+          </div>
+
+          <p className="text-11 leading-relaxed text-ink3">
+            No SSH keys, no bastion — access is your console identity + role, sessions are audit
+            events, and Developers get shells in non-production only unless policy says otherwise.
           </p>
         </div>
       </main>

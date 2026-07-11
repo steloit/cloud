@@ -7,6 +7,7 @@ import { Copybit } from "@/design-system/copybit";
 import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { healthDotTone, Pill, Stlab } from "@/design-system/pill";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useBillingOverview, useOrgs } from "@/features/org/hooks";
 import { useProjects } from "@/features/projects/hooks";
 import type { Project } from "@/lib/api";
@@ -139,6 +140,14 @@ function ProjectsHome() {
                 <Card key={i} className="h-[150px] animate-pulse bg-surface2" />
               ))}
             </div>
+          ) : projects.isError ? (
+            // A failed query is an error, never "you have no projects".
+            <ApiFailureCard
+              title="Projects didn't load"
+              error={projects.error}
+              requestLine={`GET /orgs/${org}/projects`}
+              onRetry={() => projects.refetch()}
+            />
           ) : (projects.data ?? []).length === 0 ? (
             // E5 · Zero projects — the org's front door before anything exists.
             <>

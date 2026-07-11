@@ -1,7 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Outlet, useLocation, useParams, useSearch } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  useLocation,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
 import { Ctx } from "@/app/shell/ctx";
 import { Rail, type RailActive } from "@/app/shell/rail";
+import { Btn } from "@/design-system/btn";
+import { Card } from "@/design-system/card";
+import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { useEnvironments, useProjects } from "@/features/projects/hooks";
 import type { Product } from "@/lib/api";
@@ -35,7 +46,65 @@ function OrgShell() {
     enabled: envValid,
   });
 
-  if (!org) return null;
+  // Four-state shell: skeleton while orgs load, an API-failure card on error,
+  // a designed not-found for an unknown slug — never a blank screen.
+  if (orgs.isPending) {
+    return (
+      <div className="flex h-screen flex-col bg-canvas">
+        <header className="ctx">
+          <Skeleton className="h-5 w-44" />
+          <span className="flex-1" />
+          <Skeleton className="h-5 w-64" />
+        </header>
+        <div className="fbody">
+          <nav className="rail" aria-label="Products">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="mt-2 h-7 w-7 rounded-lg" />
+            ))}
+          </nav>
+          <main className="main">
+            <div className="pgpad">
+              <SkeletonLines lines={4} className="max-w-[520px]" />
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+  if (orgs.isError) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-canvas">
+        <div className="w-[560px]">
+          <ApiFailureCard
+            title="Your organizations didn't load"
+            error={orgs.error}
+            requestLine="GET /orgs"
+            onRetry={() => orgs.refetch()}
+          />
+        </div>
+      </div>
+    );
+  }
+  if (!org) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center bg-canvas">
+        <Card className="flex w-[480px] flex-col gap-3 p-6">
+          <b className="text-14">
+            No organization named <span className="mono">{orgParam}</span>
+          </b>
+          <p className="text-11p5 leading-relaxed text-ink3">
+            Check the URL — org slugs are lowercase. If you were invited here, the invite email
+            carries the right link.
+          </p>
+          <div>
+            <Link to="/">
+              <Btn variant="p">Go to your organization</Btn>
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   const path = location.pathname;
   const activeService = services.data?.find((s) => s.name === childParams.service);
