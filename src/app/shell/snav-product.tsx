@@ -1,18 +1,149 @@
 import { Icon } from "@/design-system/icon";
 import type { Service } from "@/lib/api";
-import { fmtMoneyPerMonth } from "@/lib/fmt";
+import { fmtMoney, fmtMoneyPerMonth } from "@/lib/fmt";
 import { PRODUCT_ICON, PRODUCT_LABEL } from "./rail";
 import { Nfoot, NitDisabled, NitLink, Nsec, Snav } from "./snav";
 
 /**
- * Snav variant B — product level (W4/W5/W10): the selected product's
- * workspace. Overview/Metrics/Logs → Browse → Manage, Settings last.
+ * Snav variant B — the selected product's workspace. Item sets match the
+ * per-product coverage matrix exactly, in the order Overview/Metrics/Logs →
+ * Browse → Manage, Settings always last (Design-Spec §nav rule).
  */
+
+interface MatrixItem {
+  label: string;
+  count?: string;
+  /** Frame that owns this destination — used in the disabled reason. */
+  frame: string;
+  /** Live route key when the surface is built. */
+  live?: "overview" | "branches" | "insights";
+  badge?: string;
+}
+
+interface ProductMatrix {
+  browse: MatrixItem[];
+  manage: MatrixItem[];
+}
+
+const MATRIX: Record<Service["product"], ProductMatrix> = {
+  postgres: {
+    browse: [
+      { label: "SQL Editor", frame: "D1" },
+      { label: "Table Viewer", frame: "D2" },
+      { label: "Query Insights", frame: "D4", live: "insights", badge: "1" },
+    ],
+    manage: [
+      { label: "Branches", frame: "W5", live: "branches", count: "4" },
+      { label: "Backups", frame: "D5" },
+      { label: "Bindings", frame: "D11", count: "3" },
+      { label: "Settings", frame: "D12" },
+    ],
+  },
+  valkey: {
+    browse: [
+      { label: "Data Browser", frame: "D3" },
+      { label: "CLI Console", frame: "D6" },
+    ],
+    manage: [
+      { label: "Bindings", frame: "D11", count: "1" },
+      { label: "Settings", frame: "D14" },
+    ],
+  },
+  storage: {
+    browse: [{ label: "Object Browser", frame: "D7" }],
+    manage: [
+      { label: "Lifecycle rules", frame: "D15", count: "2" },
+      { label: "Bindings", frame: "D11", count: "2" },
+      { label: "Settings", frame: "D16" },
+    ],
+  },
+  queue: {
+    browse: [
+      { label: "Messages", frame: "D8" },
+      { label: "Dead letters", frame: "D8", count: "2" },
+    ],
+    manage: [
+      { label: "Schedules", frame: "D17", count: "1" },
+      { label: "Bindings", frame: "D11", count: "3" },
+      { label: "Settings", frame: "D18" },
+    ],
+  },
+  web: {
+    browse: [
+      { label: "Deployments", frame: "D19" },
+      { label: "Shell", frame: "D20" },
+    ],
+    manage: [
+      { label: "Domains", frame: "D21", count: "2" },
+      { label: "Scaling", frame: "D22" },
+      { label: "Bindings", frame: "D11", count: "3" },
+      { label: "Settings", frame: "D23" },
+    ],
+  },
+  worker: {
+    browse: [
+      { label: "Deployments", frame: "D19" },
+      { label: "Shell", frame: "D20" },
+    ],
+    manage: [
+      { label: "Schedules", frame: "S5", count: "2" },
+      { label: "Scaling", frame: "D22" },
+      { label: "Bindings", frame: "D11", count: "3" },
+      { label: "Settings", frame: "D23" },
+    ],
+  },
+  "gpu-worker": {
+    browse: [{ label: "Shell", frame: "D20" }],
+    manage: [{ label: "Settings", frame: "D23" }],
+  },
+  "ai-gateway": {
+    browse: [],
+    manage: [{ label: "Settings", frame: "X1" }],
+  },
+};
+
+const LIVE_ICON = { insights: "s-pulse", branches: "s-branch" } as const;
+
+function MatrixNit({
+  item,
+  linkParams,
+  search,
+  active,
+}: {
+  item: MatrixItem;
+  linkParams: { org: string; project: string; service: string };
+  search: { env: string };
+  active: string;
+}) {
+  if (item.live === "insights" || item.live === "branches") {
+    return (
+      <NitLink
+        to={`/$org/$project/svc/$service/${item.live}`}
+        params={linkParams}
+        search={search}
+        icon={LIVE_ICON[item.live]}
+        label={item.label}
+        count={item.count}
+        badge={item.badge}
+        on={active === item.live}
+      />
+    );
+  }
+  return (
+    <NitDisabled
+      label={item.label}
+      count={item.count}
+      reason={`${item.label} (${item.frame}) lands in a later phase`}
+    />
+  );
+}
+
 export function SnavProduct({
   org,
   project,
   env,
   service,
+  serviceCount,
   projectTotalCents,
   active,
 }: {
@@ -20,12 +151,18 @@ export function SnavProduct({
   project: string;
   env: string;
   service: Service;
+  /** Instances of this product in the project — switcher chevron only at n>1. */
+  serviceCount: number;
   projectTotalCents?: number;
   active: "overview" | "branches" | "insights";
 }) {
-  const isPostgres = service.product === "postgres";
+  const matrix = MATRIX[service.product];
   const linkParams = { org, project, service: service.name };
   const search = { env };
+  const usageBased = service.product === "storage";
+  const costLabel = usageBased
+    ? `${fmtMoney(914)} mtd`
+    : fmtMoneyPerMonth(service.monthly_estimate_cents ?? 0);
 
   return (
     <Snav>
@@ -36,7 +173,8 @@ export function SnavProduct({
         <div>
           <div className="t">{PRODUCT_LABEL[service.product]}</div>
           <div className="u">
-            {service.name} ▾ · {env}
+            {service.name}
+            {serviceCount > 1 ? " ▾" : ""} · {env}
           </div>
         </div>
       </div>
@@ -48,56 +186,44 @@ export function SnavProduct({
         label="Overview"
         on={active === "overview"}
       />
-      <NitDisabled icon="s-chart" label="Metrics" reason="Metrics (D9) land in Phase 2" />
-      <NitDisabled icon="s-doc" label="Logs" reason="Logs (D10) land in Phase 2" />
-      {isPostgres ? (
+      <NitDisabled
+        icon="s-chart"
+        label="Metrics"
+        reason="Per-service metrics (D9) land in a later phase"
+      />
+      <NitDisabled
+        icon="s-doc"
+        label="Logs"
+        reason="Per-service logs (D10) land in a later phase"
+      />
+      {matrix.browse.length > 0 ? (
         <>
           <Nsec>Browse</Nsec>
-          <NitDisabled icon="s-term" label="SQL Editor" reason="SQL Editor (D1) lands in Phase 2" />
-          <NitDisabled
-            icon="s-grid"
-            label="Table Viewer"
-            reason="Table Viewer (D2) lands in Phase 2"
-          />
-          <NitLink
-            to="/$org/$project/svc/$service/insights"
-            params={linkParams}
-            search={search}
-            icon="s-pulse"
-            label="Query Insights"
-            badge="1"
-            on={active === "insights"}
-          />
-          <Nsec>Manage</Nsec>
-          <NitLink
-            to="/$org/$project/svc/$service/branches"
-            params={linkParams}
-            search={search}
-            icon="s-branch"
-            label="Branches"
-            count="4"
-            on={active === "branches"}
-          />
-          <NitDisabled icon="s-shield" label="Backups" reason="Backups (D5) land in Phase 2" />
-          <NitDisabled
-            icon="s-bind"
-            label="Bindings"
-            count="3"
-            reason="Bindings (D11) land in Phase 2"
-          />
-          <NitDisabled icon="s-gear" label="Settings" reason="Settings (D12) land in Phase 2" />
+          {matrix.browse.map((item) => (
+            <MatrixNit
+              key={item.label}
+              item={item}
+              linkParams={linkParams}
+              search={search}
+              active={active}
+            />
+          ))}
         </>
-      ) : (
-        <>
-          <Nsec>Manage</Nsec>
-          <NitDisabled icon="s-bind" label="Bindings" reason="Bindings (D11) land in Phase 2" />
-          <NitDisabled icon="s-gear" label="Settings" reason="Settings land in Phase 2" />
-        </>
-      )}
+      ) : null}
+      <Nsec>Manage</Nsec>
+      {matrix.manage.map((item) => (
+        <MatrixNit
+          key={item.label}
+          item={item}
+          linkParams={linkParams}
+          search={search}
+          active={active}
+        />
+      ))}
       <Nfoot>
         <div className="flex justify-between px-1.5">
           <span>This service</span>
-          <span className="mono">{fmtMoneyPerMonth(service.monthly_estimate_cents ?? 0)}</span>
+          <span className="mono">{costLabel}</span>
         </div>
         <div className="flex justify-between px-1.5 pt-1">
           <span>{project} total</span>

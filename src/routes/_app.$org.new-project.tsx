@@ -214,7 +214,7 @@ function NewProjectPage() {
                 >
                   Create project — {fmtMoney(totalCents)}/mo est.
                 </Btn>
-                <Btn variant="s" disabled disabledReason="Template capture (T3) lands in Phase 2">
+                <Btn variant="s" disabled disabledReason="Template capture (T3) lands in Phase 3">
                   Save as template instead (T3)
                 </Btn>
                 <span className="flex items-center gap-2 text-[11px] text-ink3">

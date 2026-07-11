@@ -1,4 +1,5 @@
 import type {
+  AlertRule,
   Binding,
   Deployment,
   Environment,
@@ -9,6 +10,7 @@ import type {
   Org,
   Project,
   Service,
+  Trace,
 } from "@/lib/api";
 import fixtures from "@/lib/canon/fixtures.json";
 import { CANON_NOW } from "@/lib/canon/now";
@@ -35,6 +37,8 @@ export const environments = section<Environment[]>("environments");
 export const services = section<Service[]>("services");
 export const bindings = section<Binding[]>("bindings");
 export const deployments = section<Deployment[]>("deployments");
+export const trace = section<Trace>("trace");
+export const alertRules = section<AlertRule[]>("alert_rules");
 export const events = section<Event[]>("events");
 export const billingOverview = section<Record<string, unknown>>("billing_overview");
 export const estimateExample = section<Record<string, unknown>>("estimate_example");

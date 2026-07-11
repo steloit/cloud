@@ -41,6 +41,7 @@ function ServiceLayout() {
         project={project}
         env={env}
         service={svc}
+        serviceCount={(services.data ?? []).filter((s) => s.product === svc.product).length}
         projectTotalCents={projectQuery.data?.monthly_cost_cents}
         active={active}
       />

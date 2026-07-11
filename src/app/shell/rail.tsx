@@ -109,24 +109,42 @@ export function Rail({ org, project, env, services, active }: RailProps) {
       <Link to="/$org" params={{ org }}>
         <Rit icon="s-hex" label="Home" on={active.kind === "home"} />
       </Link>
-      {/* Observe and Deploy are the only rail domains besides Home (ADR-017).
-          Their surfaces land in Phase 2 — disabled with the stated reason, never hidden. */}
-      <button
-        type="button"
-        disabled
-        title="Observe — lands in Phase 2"
-        className="cursor-not-allowed opacity-55"
-      >
-        <Rit icon="s-pulse" label="Observe" badge={alerting ? "1" : undefined} badgeTone="warn" />
-      </button>
-      <button
-        type="button"
-        disabled
-        title="Deploy — lands in Phase 2"
-        className="cursor-not-allowed opacity-55"
-      >
-        <Rit icon="s-deploy" label="Deploy" />
-      </button>
+      {/* Observe and Deploy are the only rail domains besides Home (ADR-017). */}
+      {project ? (
+        <>
+          <Link to="/$org/$project/observe/health" params={{ org, project }} search={search}>
+            <Rit
+              icon="s-pulse"
+              label="Observe"
+              on={active.kind === "observe"}
+              badge={alerting ? "1" : undefined}
+              badgeTone="warn"
+            />
+          </Link>
+          <Link to="/$org/$project/deploy" params={{ org, project }} search={search}>
+            <Rit icon="s-deploy" label="Deploy" on={active.kind === "deploy"} />
+          </Link>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            disabled
+            title="Observe — open a project first"
+            className="cursor-not-allowed opacity-55"
+          >
+            <Rit icon="s-pulse" label="Observe" />
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Deploy — open a project first"
+            className="cursor-not-allowed opacity-55"
+          >
+            <Rit icon="s-deploy" label="Deploy" />
+          </button>
+        </>
+      )}
 
       {services.length > 0 && <span className="my-1 h-px w-6 bg-hair" aria-hidden="true" />}
 
@@ -148,14 +166,9 @@ export function Rail({ org, project, env, services, active }: RailProps) {
           ))
         : null}
 
-      <button
-        type="button"
-        disabled
-        title="Create — the creation canvas (C1) lands in Phase 2"
-        className="cursor-not-allowed opacity-55"
-      >
-        <Rit icon="s-plus" label="Create service" add />
-      </button>
+      <Link to="/$org/create" params={{ org }} search={{ env: env ?? "production" }}>
+        <Rit icon="s-plus" label="Create service" add on={active.kind === "create"} />
+      </Link>
 
       <span className="mt-auto" />
       <Link to="/$org/settings/audit" params={{ org }}>

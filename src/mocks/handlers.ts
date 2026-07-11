@@ -1,4 +1,5 @@
 import { HttpResponse, http } from "msw";
+import { logResult, metricResult } from "./telemetry";
 import * as world from "./world";
 
 /**
@@ -131,14 +132,57 @@ export const handlers = [
   http.post("/v1/estimates", () => HttpResponse.json(world.estimateExample, { status: 201 })),
 
   // services (env-as-filter: shape is per-project; canon fixes env_prod rows)
+  http.post("/v1/envs/:env/services", async ({ params, request }) => {
+    const body = (await request.json()) as {
+      product: string;
+      name: string;
+      shape?: Record<string, unknown>;
+      estimate_id?: string;
+    };
+    if (!body.estimate_id) {
+      return problem(
+        422,
+        "Validation failed",
+        "estimate_id is required — nothing provisions without an accepted estimate.",
+        "POST /estimates first, then pass the returned est_… id.",
+      );
+    }
+    const created = {
+      id: `svc_${body.name.replace(/-/g, "_")}`,
+      env_id: String(params.env),
+      name: body.name,
+      product: body.product,
+      status: "provisioning",
+      shape: body.shape ?? {},
+      region: "aws/ap-south-1",
+      monthly_estimate_cents: 2400,
+      provisioning_steps: [
+        { step: "Allocate compute", status: "done" },
+        { step: `Configure ${body.product}`, status: "done" },
+        { step: "Private network & scoped credentials", status: "active" },
+        { step: "First backup & verification", status: "pending" },
+        {
+          step: "Ready — binding activates, consumers restart with config injected",
+          status: "pending",
+        },
+      ],
+      created_at: new Date().toISOString(),
+    } as (typeof world.services)[number];
+    createdServices.push(created);
+    return HttpResponse.json(created, { status: 201 });
+  }),
   http.get("/v1/envs/:env/services", ({ params }) => {
     const env = String(params.env);
     const known = world.environments.some((e) => e.id === env || e.name === env);
-    return list(known ? world.services : []);
+    if (!known) return list([]);
+    return list([...world.services, ...createdServices.map(withProvisioningProgress)]);
   }),
   http.get("/v1/services/:service", ({ params }) => {
-    const service = world.findService(String(params.service));
-    return service ? HttpResponse.json(service) : notFound(`Service ${String(params.service)}`);
+    const key = String(params.service);
+    const created = createdServices.find((s) => s.id === key || s.name === key);
+    if (created) return HttpResponse.json(withProvisioningProgress(created));
+    const service = world.findService(key);
+    return service ? HttpResponse.json(service) : notFound(`Service ${key}`);
   }),
   http.get("/v1/services/:service/bindings", ({ params }) => {
     const service = world.findService(String(params.service));
@@ -157,10 +201,42 @@ export const handlers = [
   }),
   http.get("/v1/envs/:env/events", () => list(world.events)),
 
+  // observe — canon telemetry anchored on the incident numbers
+  http.get("/v1/envs/:env/metrics", ({ request }) => {
+    const query = new URL(request.url).searchParams.get("query") ?? "";
+    return HttpResponse.json(metricResult(query));
+  }),
+  http.get("/v1/envs/:env/logs", ({ request }) => {
+    const query = new URL(request.url).searchParams.get("query") ?? undefined;
+    return HttpResponse.json(logResult(query));
+  }),
+  http.get("/v1/envs/:env/traces/:trace", ({ params }) => {
+    if (params.trace !== world.trace.id) return notFound(`Trace ${String(params.trace)}`);
+    return HttpResponse.json(world.trace);
+  }),
+  http.get("/v1/projects/:project/alert-rules", () => list(world.alertRules)),
+
   // billing + governance
   http.get("/v1/orgs/:org/billing/overview", () => HttpResponse.json(world.billingOverview)),
   http.get("/v1/orgs/:org/audit", () => list(world.auditEvents)),
 ];
+
+/** Session-created services (canon mode is in-memory; refresh resets the demo). */
+const createdServices: (typeof world.services)[number][] = [];
+
+/** Provisioning flips to ready ~40s after create — metering starts at ready (C4). */
+function withProvisioningProgress(svc: (typeof world.services)[number]) {
+  const created = new Date(svc.created_at ?? 0).getTime();
+  if (svc.status !== "provisioning" || Date.now() - created < 40_000) return svc;
+  return {
+    ...svc,
+    status: "ready" as const,
+    provisioning_steps: (svc.provisioning_steps ?? []).map((s) => ({
+      ...s,
+      status: "done" as const,
+    })),
+  };
+}
 
 function hash(input: string): number {
   let h = 0;

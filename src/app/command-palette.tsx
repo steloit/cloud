@@ -87,6 +87,49 @@ export function CommandPalette() {
         keywords: `service ${s.name} ${s.product}`,
       })),
       {
+        key: "observe",
+        section: "Jump to" as const,
+        title: (
+          <>
+            Observe · <b>Health</b>
+          </>
+        ),
+        run: () =>
+          navigate({
+            to: "/$org/$project/observe/health",
+            params: { org, project },
+            search: { env: "production" },
+          }),
+        keywords: "observe health metrics logs traces alerts events",
+      },
+      {
+        key: "deploy",
+        section: "Jump to" as const,
+        title: (
+          <>
+            Deploy · <b>Deployments</b>
+          </>
+        ),
+        run: () =>
+          navigate({
+            to: "/$org/$project/deploy",
+            params: { org, project },
+            search: { env: "production" },
+          }),
+        keywords: "deploy deployments rollout previews promote",
+      },
+      {
+        key: "create",
+        section: "Jump to" as const,
+        title: (
+          <>
+            Create · <b>New instance</b>
+          </>
+        ),
+        run: () => navigate({ to: "/$org/create", params: { org }, search: { env: "production" } }),
+        keywords: "create new instance add service postgres valkey",
+      },
+      {
         key: "audit",
         section: "Jump to" as const,
         title: (
@@ -157,7 +200,7 @@ export function CommandPalette() {
                 </span>
               </>
             ),
-            run: () => toast("The assistant drawer lands in Phase 2."),
+            run: () => toast("The assistant drawer lands in Phase 3."),
             keywords: "should i roll back api ask",
           },
         ]

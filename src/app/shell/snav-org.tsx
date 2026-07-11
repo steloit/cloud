@@ -47,7 +47,7 @@ export function SnavOrg({
         icon="s-chart"
         label="Dashboards"
         count="7"
-        reason="Dashboards land in Phase 2"
+        reason="Dashboards land in Phase 3"
       />
       <Nsec>Projects</Nsec>
       {projects.map((p) => (

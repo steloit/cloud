@@ -226,14 +226,16 @@ function ProjectOverview() {
           <span className="chip">
             <Kbd>⌘K</Kbd> jump anywhere
           </span>
-          <Btn variant="p" disabled disabledReason="The creation canvas (C1) lands in Phase 2">
-            <Icon id="s-plus" />
-            Add service
-          </Btn>
+          <Link to="/$org/create" params={{ org }} search={{ env }}>
+            <Btn variant="p">
+              <Icon id="s-plus" />
+              Add service
+            </Btn>
+          </Link>
         </Pghead>
 
         {/* Vitals — the four telemetry cells are frame-fixed canon (W3: the
-            incident numbers); metrics endpoints land with Observe in Phase 2. */}
+            incident numbers); the env-scoped metrics live under Observe; per-project vitals stay frame-fixed. */}
         <div className="grid grid-cols-5 gap-3">
           <Metric label="Requests" value="214/s" note="+6% vs yesterday" />
           <Metric label="p95" value="812 ms" tone="warn" note="SLO 800 ms · ▲ since #142" />
@@ -285,14 +287,11 @@ function ProjectOverview() {
                 <span className="flex-1">
                   <b>api</b> p95 812 ms — 4 min after deploy #142
                 </span>
-                <Btn
-                  variant="s"
-                  className="h-6 px-2 text-[10.5px]"
-                  disabled
-                  disabledReason="Observe lands in Phase 2"
-                >
-                  Observe
-                </Btn>
+                <Link to="/$org/$project/observe/health" params={{ org, project }} search={{ env }}>
+                  <Btn variant="s" className="h-6 px-2 text-[10.5px]">
+                    Observe
+                  </Btn>
+                </Link>
               </div>
               <div className="flex items-center gap-2 text-[11.5px]">
                 <span className="flex-1">
@@ -302,7 +301,7 @@ function ProjectOverview() {
                   variant="s"
                   className="h-6 px-2 text-[10.5px]"
                   disabled
-                  disabledReason="The queue DLQ view (D8) lands in Phase 2"
+                  disabledReason="The queue DLQ view (D8) lands in Phase 3"
                 >
                   Open DLQ
                 </Btn>
@@ -316,7 +315,7 @@ function ProjectOverview() {
                   variant="gh"
                   className="h-6 px-2 text-[10.5px]"
                   disabled
-                  disabledReason="Policies land in Phase 2"
+                  disabledReason="Policies land in Phase 3"
                 >
                   Policy
                 </Btn>
@@ -344,9 +343,14 @@ function ProjectOverview() {
                   <span className="text-ink2">{describeEvent(e)}</span>
                 </div>
               ))}
-              <div className="border-hair border-t pt-2 text-[11px] font-medium text-steel">
+              <Link
+                to="/$org/$project/observe/events"
+                params={{ org, project }}
+                search={{ env }}
+                className="border-hair border-t pt-2 text-[11px] font-medium text-steel"
+              >
                 All events → Observe
-              </div>
+              </Link>
             </Card>
           </div>
         </div>

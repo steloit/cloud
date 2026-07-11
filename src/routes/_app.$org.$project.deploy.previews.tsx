@@ -1,0 +1,143 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { Pghead } from "@/app/shell/pghead";
+import { Btn } from "@/design-system/btn";
+import { Card } from "@/design-system/card";
+import { Copybit } from "@/design-system/copybit";
+import { Eyebrow } from "@/design-system/eyebrow";
+import { Dot, Pill } from "@/design-system/pill";
+import { useEnvironments } from "@/features/projects/hooks";
+import { fmtMoneyPerMonth } from "@/lib/fmt";
+
+/**
+ * DP3 · Deploy · Previews — a preview is an environment. pr-142's cost comes
+ * from the environments fixture (env_pr142); the torn-down rows and PR-bot
+ * card are frame-fixed DP3 canon (Git integration lands in Phase 3).
+ */
+function PreviewsPage() {
+  const { project } = Route.useParams();
+  const environments = useEnvironments(project);
+  const pr142 = environments.data?.find((e) => e.name === "preview/pr-142");
+  const pr142Cost =
+    pr142?.monthly_cost_cents !== undefined ? fmtMoneyPerMonth(pr142.monthly_cost_cents) : "…";
+
+  return (
+    <main className="main">
+      <div className="pgpad !overflow-y-auto">
+        <Pghead
+          title="Deploy · Previews"
+          sub="A preview is an environment — created when a PR opens, commented on the PR, expired by policy. Same grammar as production, S-sized shape"
+        >
+          <span className="chip">policy: preview-minimal v2 ▾</span>
+        </Pghead>
+
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="flex items-center gap-2.5">
+            <Dot tone="ok" />
+            <b className="text-[13px]">preview / pr-142</b>
+            <Pill tone="ok">open</Pill>
+            <Pill tone="warn">branch flagged · branch-data-masking</Pill>
+            <span className="mono ml-auto text-[11.5px]">{pr142Cost} · expires in 5 d</span>
+          </div>
+          <div className="text-[11.5px] text-ink3">
+            acme/store #142 "gift card refunds" · marco · updated 2 h ago · deploys on every push
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone="ok">api</Pill>
+            <Pill tone="ok">admin</Pill>
+            <Pill tone="ok">db · branch of production</Pill>
+            <Pill tone="ok">cache</Pill>
+            <Pill tone="mut">jobs · excluded by policy</Pill>
+            <Pill tone="mut">worker · excluded</Pill>
+            <Pill tone="st">masking job · system</Pill>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <Copybit>https://pr-142.ecommerce.previews.steloit.app</Copybit>
+            <Btn variant="s">Open</Btn>
+            <Btn
+              variant="s"
+              disabled
+              disabledReason="Redeploy lands with Git integration in Phase 3"
+            >
+              Redeploy
+            </Btn>
+            <Btn
+              variant="dgr"
+              disabled
+              disabledReason="Typed-confirm teardown (U6 grammar) lands in Phase 3"
+            >
+              Tear down…
+            </Btn>
+          </div>
+          <div className="flex flex-col gap-1.5 rounded-lg border border-hair bg-surface2 p-3">
+            <Eyebrow>On the PR — the loop closes in GitHub</Eyebrow>
+            <div className="text-[11px] text-ink3">steloit-bot commented 2 h ago</div>
+            <div className="text-[11.5px]">✅ Preview ready — pr-142.ecommerce.previews…</div>
+            <div className="mono text-[11px] text-ink3">
+              db: branch of production (masked · policy) · $0.07/day
+            </div>
+          </div>
+        </Card>
+
+        <div className="tblwrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Preview</th>
+                <th>PR</th>
+                <th>Author</th>
+                <th>Status</th>
+                <th>Cost</th>
+                <th>Lifecycle</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="mono">pr-142</td>
+                <td>#142 "gift card refunds"</td>
+                <td>marco</td>
+                <td>
+                  <Pill tone="ok">live</Pill>
+                </td>
+                <td className="mono">{pr142Cost}</td>
+                <td className="text-ink3">expires in 5 d · renews on push</td>
+              </tr>
+              <tr className="opacity-55">
+                <td className="mono">pr-139</td>
+                <td>#139 "checkout retry"</td>
+                <td>marco</td>
+                <td>
+                  <Pill tone="mut">merged → torn down</Pill>
+                </td>
+                <td className="mono">$1.10 total</td>
+                <td className="text-ink3">lived 4 d · Jul 3</td>
+              </tr>
+              <tr className="opacity-55">
+                <td className="mono">pr-131</td>
+                <td>#131 "catalog cache"</td>
+                <td>priya</td>
+                <td>
+                  <Pill tone="mut">closed → torn down</Pill>
+                </td>
+                <td className="mono">$0.40 total</td>
+                <td className="text-ink3">lived 1 d · Jun 28</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-ink3">
+          <span>
+            Exclusions come from preview-minimal v2 (G7) and are shown per service — never a silent
+            diff from production.
+          </span>
+          <span>Torn-down previews keep their final cost line in Billing · Usage.</span>
+          <span>New PR → preview in ~60 s, no config.</span>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export const Route = createFileRoute("/_app/$org/$project/deploy/previews")({
+  component: PreviewsPage,
+});

@@ -189,7 +189,7 @@ export function Ctx({
           type="button"
           className="btn a h-[30px]"
           disabled
-          title="Assistant — lands in Phase 2"
+          title="Assistant — lands in Phase 3"
         >
           <Icon id="s-ai" />
           Assistant

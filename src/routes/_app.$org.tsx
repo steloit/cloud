@@ -40,9 +40,15 @@ function OrgShell() {
   const activeService = services.data?.find((s) => s.name === childParams.service);
   const active: RailActive = path.includes("/settings")
     ? { kind: "settings" }
-    : childParams.service && activeService
-      ? { kind: "product", product: activeService.product as Product }
-      : { kind: "home" };
+    : path.includes("/observe")
+      ? { kind: "observe" }
+      : path.includes("/deploy")
+        ? { kind: "deploy" }
+        : path.endsWith("/create")
+          ? { kind: "create" }
+          : childParams.service && activeService
+            ? { kind: "product", product: activeService.product as Product }
+            : { kind: "home" };
 
   return (
     <div className="flex h-screen flex-col bg-canvas">

@@ -10,7 +10,7 @@ import { Pill } from "@/design-system/pill";
 /**
  * W10 · AI proposal — evidence, reasoning, a reviewable diff; the apply
  * button belongs to the human (the four laws, ADR-005). Apply paths land
- * with the assistant in Phase 2 — disabled with the reason, never hidden.
+ * with the assistant in Phase 3 — disabled with the reason, never hidden.
  */
 function InsightsPage() {
   const { service } = Route.useParams();
@@ -101,21 +101,21 @@ function InsightsPage() {
                 <Btn
                   variant="p"
                   disabled
-                  disabledReason="The assistant apply path lands in Phase 2"
+                  disabledReason="The assistant apply path lands in Phase 3"
                 >
                   Open in preview branch
                 </Btn>
                 <Btn
                   variant="s"
                   disabled
-                  disabledReason="The assistant apply path lands in Phase 2"
+                  disabledReason="The assistant apply path lands in Phase 3"
                 >
                   Apply to production…
                 </Btn>
                 <Btn
                   variant="gh"
                   disabled
-                  disabledReason="The assistant apply path lands in Phase 2"
+                  disabledReason="The assistant apply path lands in Phase 3"
                 >
                   Dismiss (logged)
                 </Btn>
