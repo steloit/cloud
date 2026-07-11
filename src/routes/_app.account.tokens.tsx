@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { ConfirmModal } from "@/design-system/confirm";
 import { EmptyState } from "@/design-system/empty-state";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
@@ -57,7 +58,7 @@ function TokensPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; created: TokenCreated } | null>(null);
-  const [armedId, setArmedId] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<{ id: string; name: string } | null>(null);
 
   // Four-state grammar (16-qa): pending → skeleton, error → failure card,
   // empty → EmptyState, else the table (canon carries 2 tokens — empty is
@@ -81,19 +82,18 @@ function TokensPage() {
     );
   };
 
+  // Overlay census: the two-click armed button is gone — destructive verbs
+  // confirm through the one ConfirmModal recipe (460).
   const onRevoke = (id: string, name: string) => {
-    if (armedId !== id) {
-      setArmedId(id);
-      return;
-    }
     revokeToken.mutate(
       { path: { tok: id } },
       {
         onSuccess: () => {
-          setArmedId(null);
+          setRevoking(null);
           toast.success(`Token ${name} revoked — it stops working immediately`);
           queryClient.invalidateQueries({ queryKey: listPersonalTokensQueryKey() });
         },
+        // The modal stays open on error — the verb can be retried.
         onError: (err) => toast.error(errorMessage(err)),
       },
     );
@@ -188,7 +188,6 @@ function TokensPage() {
                 ) : (
                   (tokens.data ?? []).map((t) => {
                     const d = DISPLAY[t.name];
-                    const armed = armedId === t.id;
                     return (
                       <tr key={t.id}>
                         <td className="mono text-11p5">{t.name}</td>
@@ -200,11 +199,9 @@ function TokensPage() {
                         <td className="text-right">
                           <Btn
                             variant="dgr"
-                            onClick={() => onRevoke(t.id, t.name)}
-                            disabled={revokeToken.isPending}
-                            disabledReason="Revoking…"
+                            onClick={() => setRevoking({ id: t.id, name: t.name })}
                           >
-                            {armed ? "Confirm revoke" : "Revoke"}
+                            Revoke…
                           </Btn>
                         </td>
                       </tr>
@@ -227,6 +224,16 @@ function TokensPage() {
           sub={`${reveal.name} · full — your roles · expires in 90 d`}
           token={reveal.created.token}
           onDone={() => setReveal(null)}
+        />
+      ) : null}
+      {revoking ? (
+        <ConfirmModal
+          title={`Revoke ${revoking.name}`}
+          consequence="Anything using it starts failing on the next request — CI jobs included."
+          verb="Revoke token"
+          pending={revokeToken.isPending}
+          onConfirm={() => onRevoke(revoking.id, revoking.name)}
+          onClose={() => setRevoking(null)}
         />
       ) : null}
     </main>

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { ConfirmModal } from "@/design-system/confirm";
 import { EmptyState } from "@/design-system/empty-state";
 import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
@@ -53,7 +54,7 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
   const bindings = useBindings(svc.id);
   const qc = useQueryClient();
   const revoke = useMutation(deleteBindingMutation());
-  const [armedId, setArmedId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<BindingRow | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const nameOf = (id: string) =>
@@ -90,19 +91,16 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
   // consumers.
   const isEmpty = !bindings.isPending && !bindings.isError && rows.length === 0;
 
+  // One confirm idiom (overlay census): the two-click armed button becomes
+  // the 460 ConfirmModal — same mutation, same invalidation as before.
   const doRevoke = (row: BindingRow) => {
-    if (armedId !== row.id) {
-      setArmedId(row.id);
-      window.setTimeout(() => setArmedId((v) => (v === row.id ? null : v)), 3000);
-      return;
-    }
-    setArmedId(null);
     revoke.mutate(
       { path: { binding: row.id } },
       {
         onSuccess: () => {
           toast.success(`Binding revoked — ${row.consumer} loses access, audit-logged`);
           qc.invalidateQueries({ queryKey: listBindingsQueryKey({ path: { service: svc.id } }) });
+          setConfirming(null);
         },
         onError: (err) => toast.error(errorMessage(err)),
       },
@@ -189,15 +187,12 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
                         </Btn>
                         <Btn
                           variant="gh"
-                          className={cn(
-                            "h-5 px-2 text-10 text-err",
-                            armedId === row.id && "font-semibold",
-                          )}
-                          onClick={() => doRevoke(row)}
+                          className="h-5 px-2 text-10 text-err"
+                          onClick={() => setConfirming(row)}
                           disabled={revoke.isPending}
                           disabledReason="Revoking…"
                         >
-                          {armedId === row.id ? "Confirm revoke" : "Revoke"}
+                          Revoke
                         </Btn>
                       </span>
                     </td>
@@ -223,6 +218,17 @@ export function BindingsTab({ svc, project, env }: BindingsTabProps) {
         valid for 60 s · every issue, rotate, revoke → audit log. Consumers never see a password;
         the binding injects and refreshes it.
       </p>
+
+      {confirming ? (
+        <ConfirmModal
+          title={`Revoke binding ${confirming.id}`}
+          consequence={`${confirming.consumer} loses access on its next connection — credentials die now, the env var stops resolving at the next deploy · audit-logged`}
+          verb="Revoke binding"
+          pending={revoke.isPending}
+          onConfirm={() => doRevoke(confirming)}
+          onClose={() => setConfirming(null)}
+        />
+      ) : null}
 
       {drawerOpen ? (
         <CreateBindingDrawer

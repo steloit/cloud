@@ -1,3 +1,4 @@
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
@@ -126,6 +127,23 @@ const STATUS_CHIPS = [
 
 const CATEGORY_CHIPS = ["All", "Reliability", "Performance", "Cost", "Security"] as const;
 
+/** House DropdownMenu classes (the ctx-bar pattern), sized for a small verb menu. */
+const menuContentClass =
+  "z-50 min-w-[176px] rounded-xl border border-hair bg-surface p-1 shadow-e2";
+const menuItemClass =
+  "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-12p5 font-medium outline-none data-[highlighted]:bg-surface2";
+
+/**
+ * Snooze durations — the PATCH body carries no duration field (finding):
+ * every option sends the same status=snoozed mutation; the duration lives
+ * only in the menu and the toast.
+ */
+const SNOOZE_OPTIONS = [
+  { label: "1 day", toast: "for 1 day" },
+  { label: "7 days", toast: "for 7 days" },
+  { label: "until the next deploy", toast: "until the next deploy" },
+] as const;
+
 function InsightRow({
   org,
   insight,
@@ -153,13 +171,13 @@ function InsightRow({
         },
     );
 
-  const snooze = () =>
+  const snooze = (duration: string) =>
     update.mutate(
       { path: { ins: insight.id }, body: { status: "snoozed" } },
       {
         onSuccess: () => {
           patchCache("snoozed");
-          toast.success(`Snoozed — ${display.prp} stays open, out of the ranked list`);
+          toast.success(`Snoozed ${duration} — ${display.prp} stays open, out of the ranked list`);
         },
         onError: (err) => toast.error(errorMessage(err)),
       },
@@ -220,14 +238,32 @@ function InsightRow({
           </Btn>
           {!applied ? (
             <>
-              <Btn
-                variant="gh"
-                className="h-[26px] text-10p5"
-                onClick={snooze}
-                disabled={update.isPending}
-              >
-                Snooze
-              </Btn>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <Btn
+                    variant="gh"
+                    className="h-[26px] text-10p5"
+                    disabled={update.isPending}
+                    disabledReason="Snoozing…"
+                  >
+                    Snooze
+                    <Icon id="s-chevd" className="h-[9px] w-[9px]" />
+                  </Btn>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content className={menuContentClass} align="end" sideOffset={6}>
+                    {SNOOZE_OPTIONS.map((o) => (
+                      <DropdownMenu.Item
+                        key={o.label}
+                        className={menuItemClass}
+                        onSelect={() => snooze(o.toast)}
+                      >
+                        {o.label}
+                      </DropdownMenu.Item>
+                    ))}
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
               <Btn
                 variant="gh"
                 className="h-[26px] text-10p5 text-ink3"

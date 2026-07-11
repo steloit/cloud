@@ -8,7 +8,7 @@ import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Dot, Pill } from "@/design-system/pill";
 import { Skeleton, SkeletonRows } from "@/design-system/skeleton";
-import { useRollback } from "@/features/deploy/hooks";
+import { RollbackConfirm } from "@/features/deploy/rollback-confirm";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useDeployments } from "@/features/services/hooks";
 import type { Deployment } from "@/lib/api";
@@ -58,8 +58,9 @@ function DeploymentsPage() {
   const { org, project } = Route.useParams();
   const { env } = Route.useSearch();
   const deployments = useDeployments(env);
-  const rollback = useRollback();
-  const [armed, setArmed] = useState(false);
+  // ONE rollback idiom (overlay census): the two-click arm becomes the shared
+  // RollbackConfirm — same modal D19 opens.
+  const [confirming, setConfirming] = useState<Deployment | null>(null);
 
   const rows = [...(deployments.data ?? [])].sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
   // Four-state grammar (16-qa): pending → skeleton, error → failure card,
@@ -83,18 +84,8 @@ function DeploymentsPage() {
         );
       case 142:
         return (
-          <Btn
-            variant={armed ? "dgr" : "s"}
-            className={armed ? undefined : "text-err"}
-            onClick={() => {
-              if (!armed) {
-                setArmed(true);
-                return;
-              }
-              rollback.mutate({ path: { dep: dep.id } });
-            }}
-          >
-            {armed ? "Confirm rollback" : "Rollback…"}
+          <Btn variant="s" className="text-err" onClick={() => setConfirming(dep)}>
+            Rollback…
           </Btn>
         );
       case 140:
@@ -258,6 +249,16 @@ function DeploymentsPage() {
             </div>
           </>
         )}
+
+        {confirming ? (
+          // Rolling back #142 restores its predecessor — the title names the
+          // deploy that comes back, the POST addresses the one rolled back.
+          <RollbackConfirm
+            target={`#${(confirming.number ?? 0) - 1}`}
+            dep={confirming.id}
+            onClose={() => setConfirming(null)}
+          />
+        ) : null}
       </div>
     </main>
   );

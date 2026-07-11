@@ -6,7 +6,8 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { EmptyState } from "@/design-system/empty-state";
 import { Glyph } from "@/design-system/glyph";
-import { Inp } from "@/design-system/inp";
+import { Flabel, Inp } from "@/design-system/inp";
+import { Modal, ModalHead } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
 import { resolveEnvKey } from "@/lib/canon-env";
@@ -59,6 +60,7 @@ function DataBrowserPage() {
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
   const [typeChip, setTypeChip] = useState<TypeChip>("all");
+  const [editingTtl, setEditingTtl] = useState(false);
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -183,11 +185,7 @@ function DataBrowserPage() {
               <Btn variant="s" onClick={copyJson}>
                 Copy JSON
               </Btn>
-              <Btn
-                variant="s"
-                disabled
-                disabledReason="No key-browse endpoint in the spec (finding)"
-              >
+              <Btn variant="s" onClick={() => setEditingTtl(true)}>
                 Edit TTL
               </Btn>
               <Btn
@@ -203,8 +201,59 @@ function DataBrowserPage() {
             </p>
           </Card>
         </div>
+
+        {editingTtl ? <EditTtlModal onClose={() => setEditingTtl(false)} /> : null}
       </div>
     </main>
+  );
+}
+
+const TTL_UNITS = ["s", "m", "h", "d"] as const;
+
+/**
+ * Edit TTL — the small 460 modal for the selected canon key. Save stays gated
+ * with the page's finding: there is no key-browse endpoint in the spec.
+ */
+function EditTtlModal({ onClose }: { onClose: () => void }) {
+  const [ttl, setTtl] = useState("24");
+  const [unit, setUnit] = useState<(typeof TTL_UNITS)[number]>("m");
+  return (
+    <Modal label="Edit TTL" onClose={onClose}>
+      <ModalHead title="Edit TTL" sub={<span className="mono">session:u_8241</span>} />
+      <div className="flex items-end gap-2.5">
+        <div className="w-[120px]">
+          <Flabel htmlFor="ttl-value">TTL</Flabel>
+          <Inp
+            id="ttl-value"
+            className="mono"
+            value={ttl}
+            autoFocus
+            onChange={(e) => setTtl(e.target.value)}
+          />
+        </div>
+        <div className="chiprow">
+          {TTL_UNITS.map((u) => (
+            <button
+              key={u}
+              type="button"
+              className={cn("chip", unit === u && "on")}
+              onClick={() => setUnit(u)}
+            >
+              {u}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-10p5 text-ink3">TTL applies on save — a key at 0 expires immediately</p>
+      <div className="flex justify-end gap-2">
+        <Btn variant="s" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="p" disabled disabledReason="No key-browse endpoint in the spec (finding)">
+          Save
+        </Btn>
+      </div>
+    </Modal>
   );
 }
 

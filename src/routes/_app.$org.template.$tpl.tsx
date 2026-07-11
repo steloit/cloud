@@ -1,17 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { ConfirmModal } from "@/design-system/confirm";
 import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
 import { SkeletonLines } from "@/design-system/skeleton";
+import { RenameModal } from "@/features/common/rename-modal";
 import { ApiFailureCard } from "@/features/errors/failure-states";
-import { errorMessage, getTemplateOptions, refreshTemplateMutation } from "@/lib/api";
+import {
+  deleteTemplateMutation,
+  errorMessage,
+  getTemplateOptions,
+  refreshTemplateMutation,
+  updateTemplateMutation,
+} from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
 
 /**
@@ -194,7 +202,14 @@ const T2_CONTENTS = [
 function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   const template = useQuery(getTemplateOptions({ path: { tpl } }));
   const refresh = useMutation(refreshTemplateMutation());
+  const rename = useMutation(updateTemplateMutation());
+  const del = useMutation(deleteTemplateMutation());
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  // Pass-4: the static "Rename · Delete…" label becomes two live verbs.
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (template.isPending) return <SkeletonLines lines={4} className="max-w-[560px]" />;
   if (template.isError) {
@@ -355,10 +370,66 @@ function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
             <span className="text-ink3">Visibility</span>
             <Pill tone={t.visibility === "org" ? "st" : "mut"}>{t.visibility}</Pill>
           </div>
-          <div className="text-11p5 text-ink3">Rename · Delete…</div>
+          <div className="flex items-center gap-1.5">
+            <Btn variant="gh" onClick={() => setRenameOpen(true)}>
+              Rename
+            </Btn>
+            <Btn variant="gh" onClick={() => setDeleteOpen(true)}>
+              Delete…
+            </Btn>
+          </div>
           <div className="mono text-10p5 text-ink3">{t.id}</div>
         </Card>
       </div>
+      {renameOpen ? (
+        <RenameModal
+          entity="template"
+          current={t.name}
+          consequence="renames it everywhere it's offered (C1, C5, onboarding, CLI) — nothing already created from it changes"
+          pending={rename.isPending}
+          onClose={() => setRenameOpen(false)}
+          onSave={(name) =>
+            rename.mutate(
+              { path: { tpl: t.id }, body: { name } },
+              {
+                onSuccess: () => {
+                  // Echo mutation (the DB8 precedent): PATCH succeeds for the
+                  // contract's sake; fixtures win on refetch — canon keeps the name.
+                  toast.success(`Renamed to ${name} — nothing created from it changes`);
+                  queryClient.invalidateQueries({
+                    queryKey: getTemplateOptions({ path: { tpl } }).queryKey,
+                  });
+                  setRenameOpen(false);
+                },
+                onError: (err) => toast.error(errorMessage(err)),
+              },
+            )
+          }
+        />
+      ) : null}
+      {deleteOpen ? (
+        <ConfirmModal
+          title={`Delete ${t.name}`}
+          consequence="projects created from it keep running — a template is a recipe, not a dependency"
+          verb="Delete template"
+          pending={del.isPending}
+          onClose={() => setDeleteOpen(false)}
+          onConfirm={() =>
+            del.mutate(
+              { path: { tpl: t.id } },
+              {
+                onSuccess: () => {
+                  // Echo mutation (the DB8 precedent): DELETE 204s; fixtures win
+                  // on refetch — canon keeps its 3 templates.
+                  toast.success(`${t.name} deleted — projects created from it keep running`);
+                  navigate({ to: "/$org/settings/templates", params: { org } });
+                },
+                onError: (err) => toast.error(errorMessage(err)),
+              },
+            )
+          }
+        />
+      ) : null}
     </div>
   );
 }

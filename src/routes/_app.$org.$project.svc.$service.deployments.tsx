@@ -7,7 +7,7 @@ import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Stlab } from "@/design-system/pill";
-import { useRollback } from "@/features/deploy/hooks";
+import { RollbackConfirm } from "@/features/deploy/rollback-confirm";
 import { useServices } from "@/features/services/hooks";
 import { resolveEnvKey } from "@/lib/canon-env";
 
@@ -70,8 +70,9 @@ function DeploymentsPage() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
-  const rollback = useRollback();
-  const [armed, setArmed] = useState<string | null>(null);
+  // ONE rollback idiom (overlay census): header button and per-row actions
+  // share the RollbackConfirm modal — no bare fire, no two-click arm.
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
@@ -135,20 +136,9 @@ function DeploymentsPage() {
         </Link>
       );
     }
-    const isArmed = armed === row.deploy;
     return (
-      <Btn
-        variant={isArmed ? "dgr" : "gh"}
-        onClick={() => {
-          if (!isArmed) {
-            setArmed(row.deploy);
-            return;
-          }
-          rollback.mutate({ path: { dep: "dep_142" } });
-          setArmed(null);
-        }}
-      >
-        {isArmed ? "Confirm rollback" : "Roll back to"}
+      <Btn variant="gh" onClick={() => setConfirmTarget(row.deploy)}>
+        Roll back to
       </Btn>
     );
   };
@@ -164,7 +154,7 @@ function DeploymentsPage() {
             </span>
           }
         >
-          <Btn variant="s" onClick={() => rollback.mutate({ path: { dep: "dep_142" } })}>
+          <Btn variant="s" onClick={() => setConfirmTarget("#141")}>
             <Icon id="s-undo" className="h-3 w-3" /> Roll back to #141
           </Btn>
         </Pghead>
@@ -222,6 +212,16 @@ function DeploymentsPage() {
             gap
           </p>
         </Card>
+
+        {confirmTarget ? (
+          // Rollback always addresses dep_142, the live deployment (frame-fixed
+          // — the header comment above); the modal titles the row's target.
+          <RollbackConfirm
+            target={confirmTarget}
+            dep="dep_142"
+            onClose={() => setConfirmTarget(null)}
+          />
+        ) : null}
       </div>
     </main>
   );

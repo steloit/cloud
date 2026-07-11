@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Flabel, Inp } from "@/design-system/inp";
+import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import type { Service } from "@/lib/api";
 
@@ -25,6 +28,7 @@ const ENV_VARS = [
 ];
 
 export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
+  const [editingVars, setEditingVars] = useState(false);
   return (
     <>
       <Pghead
@@ -64,7 +68,6 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
               <tr>
                 <th>Key</th>
                 <th>Value</th>
-                <th />
               </tr>
             </thead>
             <tbody>
@@ -72,19 +75,15 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
                 <tr key={v.key}>
                   <td className="mono">{v.key}</td>
                   <td className="mono">{v.value}</td>
-                  <td className="text-right">
-                    <Btn
-                      variant="gh"
-                      disabled
-                      disabledReason="Env-var CRUD folds into updateService.shape — apply flow lands in Phase 5"
-                    >
-                      Edit
-                    </Btn>
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+        <div>
+          <Btn variant="s" onClick={() => setEditingVars(true)}>
+            Edit variables…
+          </Btn>
         </div>
         <p className="text-11 leading-relaxed text-ink3">
           Pasting something that looks like a secret triggers a block with a pointer to Bindings —
@@ -109,6 +108,93 @@ export function WebSettingsTab({ svc, env }: WebSettingsTabProps) {
           outbound bindings are revoked with it
         </p>
       </Card>
+
+      {editingVars ? (
+        <EditVariablesDrawer svc={svc} env={env} onClose={() => setEditingVars(false)} />
+      ) : null}
     </>
+  );
+}
+
+/**
+ * Edit variables — the 424 add-secret sheet. Apply stays gated with the
+ * file's finding: env-var CRUD has no endpoint of its own yet.
+ */
+function EditVariablesDrawer({
+  svc,
+  env,
+  onClose,
+}: {
+  svc: Service;
+  env: string;
+  onClose: () => void;
+}) {
+  const [key, setKey] = useState("");
+  const [value, setValue] = useState("");
+  return (
+    <Drawer
+      title="Edit variables"
+      sub={
+        <>
+          {svc.name} · {env}
+        </>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <span className="flex-1" />
+          <Btn variant="s" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn
+            variant="p"
+            disabled
+            disabledReason="Env-var CRUD folds into updateService.shape — apply flow lands in Phase 5"
+          >
+            Apply
+          </Btn>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <div className="eyebrow">Current variables</div>
+        {ENV_VARS.map((v) => (
+          <div
+            key={v.key}
+            className="flex items-center gap-2.5 rounded-lg border border-hair px-3 py-2"
+          >
+            <span className="mono text-11p5">{v.key}</span>
+            <span className="flex-1" />
+            <span className="mono text-11 text-ink3">••••••••</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-2.5">
+        <div className="eyebrow">Add variable</div>
+        <div>
+          <Flabel htmlFor="envvar-key">Key</Flabel>
+          <Inp
+            id="envvar-key"
+            className="mono"
+            placeholder="KEY"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        </div>
+        <div>
+          <Flabel htmlFor="envvar-value">Value</Flabel>
+          <Inp
+            id="envvar-value"
+            className="mono"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </div>
+        <p className="text-10p5 text-ink3">
+          secrets are write-only after save — read access is the binding's job
+        </p>
+      </div>
+    </Drawer>
   );
 }

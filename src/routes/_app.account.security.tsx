@@ -1,11 +1,104 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Icon, type IconId } from "@/design-system/icon";
+import { Flabel, Inp } from "@/design-system/inp";
+import { Modal, ModalHead } from "@/design-system/overlay";
 import { Pill, type PillTone } from "@/design-system/pill";
+import { cn } from "@/lib/utils";
 
 /** P3 · Account · Security & MFA — account-level protection, not org-level. */
+
+/**
+ * Change password — the overlay exists; the verb is gated. No password
+ * endpoint in the spec (finding), so Save carries the reason once the
+ * fields validate; the reason ladder surfaces empty/mismatch first.
+ * Requirement rows mirror the reset-password page (A4) — one grammar.
+ */
+function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+
+  const checks = [
+    { label: "At least 12 characters", pass: next.length >= 12 },
+    {
+      label: "Contains a number and a symbol",
+      pass: /\d/.test(next) && /[^a-zA-Z0-9]/.test(next),
+    },
+    { label: "Not a previously used password", pass: next.length > 0 },
+  ];
+
+  const reason = !current
+    ? "Enter your current password"
+    : checks.some((c) => !c.pass)
+      ? "Meet every requirement below"
+      : !confirm
+        ? "Confirm the new password"
+        : confirm !== next
+          ? "Passwords don't match"
+          : "No password endpoint in the spec (finding)";
+
+  return (
+    <Modal label="Change password" onClose={onClose}>
+      <ModalHead
+        title="Change password"
+        sub="Changing it signs out every other session — this one stays."
+      />
+      <div>
+        <Flabel htmlFor="pw-current">Current password</Flabel>
+        <Inp
+          id="pw-current"
+          type="password"
+          value={current}
+          autoFocus
+          onChange={(e) => setCurrent(e.target.value)}
+          autoComplete="current-password"
+        />
+      </div>
+      <div>
+        <Flabel htmlFor="pw-next">New password</Flabel>
+        <Inp
+          id="pw-next"
+          type="password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          autoComplete="new-password"
+        />
+      </div>
+      <div>
+        <Flabel htmlFor="pw-confirm">Confirm new password</Flabel>
+        <Inp
+          id="pw-confirm"
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
+        />
+      </div>
+      <ul className="flex flex-col gap-1 text-11p5">
+        {checks.map((c) => (
+          <li
+            key={c.label}
+            className={cn("flex items-center gap-1.5", c.pass ? "text-ok" : "text-ink3")}
+          >
+            <Icon id={c.pass ? "s-check" : "s-x"} className="h-[11px] w-[11px]" /> {c.label}
+          </li>
+        ))}
+      </ul>
+      <div className="flex justify-end gap-2">
+        <Btn variant="s" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="p" disabled disabledReason={reason}>
+          Save new password
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
 
 function FactorRow({
   icon,
@@ -34,6 +127,7 @@ function FactorRow({
 }
 
 function SecurityPage() {
+  const [pwOpen, setPwOpen] = useState(false);
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
@@ -49,7 +143,7 @@ function SecurityPage() {
               last changed 2 months ago · changing it signs out every other session
             </div>
           </div>
-          <Btn variant="s" disabled disabledReason="Password change flows land in Phase 5">
+          <Btn variant="s" onClick={() => setPwOpen(true)}>
             Change password…
           </Btn>
         </Card>
@@ -127,6 +221,7 @@ function SecurityPage() {
           </div>
         </Card>
       </div>
+      {pwOpen ? <ChangePasswordModal onClose={() => setPwOpen(false)} /> : null}
     </main>
   );
 }

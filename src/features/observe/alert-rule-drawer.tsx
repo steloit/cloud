@@ -62,6 +62,7 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
   const [conditionText, setConditionText] = useState("> 400 ms");
   const [windowLabel, setWindowLabel] = useState<WindowLabel>("5 min");
   const [routes, setRoutes] = useState<RouteKey[]>(["bell", "email"]);
+  const [webhookUrl, setWebhookUrl] = useState("");
 
   const queryClient = useQueryClient();
   const backtest = useMutation(backtestAlertRuleMutation());
@@ -182,6 +183,36 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
             </button>
           ))}
         </div>
+        {routes.includes("webhook") ? (
+          // Webhook config expands INLINE with the chip — drawer-over-drawer
+          // is the wrong recipe, so this never opens a second overlay; it
+          // collapses when the chip is deselected.
+          <Card className="flex flex-col gap-2.5 p-3.5">
+            <div>
+              <Flabel htmlFor="webhook-url">Webhook URL</Flabel>
+              <Inp
+                id="webhook-url"
+                className="mono"
+                placeholder="https://"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-11 text-ink2">Signing secret</span>
+              <span className="chip mono">whsec_••••••••••••</span>
+              <span className="text-10p5 text-ink3">revealed once at rule create</span>
+              <span className="flex-1" />
+              <Btn
+                variant="s"
+                disabled
+                disabledReason="Webhook delivery lands with the notifications endpoints (finding)"
+              >
+                Send test delivery
+              </Btn>
+            </div>
+          </Card>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-1.5">

@@ -10,9 +10,11 @@ import { Copybit } from "@/design-system/copybit";
 import { Inp } from "@/design-system/inp";
 import { Metric } from "@/design-system/metric";
 import { Pill } from "@/design-system/pill";
+import { RenameModal } from "@/features/common/rename-modal";
 import { minutesOfDay, toMarkers, toSeries, useLogs, useMetrics } from "@/features/observe/hooks";
 import { DeleteServiceModal } from "@/features/services/delete-service-modal";
-import type { Service } from "@/lib/api";
+import { EditShapeDrawer, type ShapeOption } from "@/features/services/edit-shape-drawer";
+import type { Service, UpdateServiceData } from "@/lib/api";
 import { errorMessage, updateServiceMutation } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -482,31 +484,34 @@ export function PostgresLogsTab({ svc, org, project, env }: PostgresTabProps) {
  * says 12.4 GB of data. Each surface renders its own frame's copy.
  */
 
-const SIZE_CHIPS: Array<{ size: string; label: string }> = [
-  { size: "dev", label: "Dev · $19" },
-  { size: "standard", label: "Standard · $58" },
-  { size: "performance", label: "Performance · $112" },
+/** Canon sizes — chip prices ($19/$58/$112) + specs from the C2 create block. */
+const PG_SHAPE_STANDARD: ShapeOption = {
+  id: "standard",
+  title: "Standard",
+  spec: "2 vCPU / 4 GB",
+  price: 58,
+  patch: { size: "standard" },
+};
+const PG_SHAPES: ShapeOption[] = [
+  { id: "dev", title: "Dev", spec: "1 vCPU / 2 GB", price: 19, patch: { size: "dev" } },
+  PG_SHAPE_STANDARD,
+  {
+    id: "performance",
+    title: "Performance",
+    spec: "4 vCPU / 8 GB",
+    price: 112,
+    patch: { size: "performance" },
+  },
 ];
 
 export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
   const shape = (svc.shape ?? {}) as Record<string, unknown>;
-  const currentSize = String(shape.size ?? "standard");
-  const [size, setSize] = useState(currentSize);
+  const currentShape =
+    PG_SHAPES.find((s) => s.id === String(shape.size ?? "standard")) ?? PG_SHAPE_STANDARD;
+  const [editingShape, setEditingShape] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // No PATCH /services handler in the canon MSW mode — the error toast is the
-  // expected path until the mock (or the real API) lands; wired regardless.
   const update = useMutation(updateServiceMutation());
-  const dirty = size !== currentSize;
-
-  const applyResize = () => {
-    update.mutate(
-      { path: { service: svc.id }, body: { shape: { ...shape, size } } },
-      {
-        onSuccess: () => toast.success(`Resized ${svc.name} — restart applies as stated`),
-        onError: (err) => toast.error(errorMessage(err)),
-      },
-    );
-  };
 
   return (
     <>
@@ -521,36 +526,17 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
 
       <Card className="flex flex-col gap-3 p-4">
         <div className="text-12p5 font-semibold">Size &amp; storage</div>
-        <div className="flex items-center gap-2">
-          <div className="chiprow">
-            {SIZE_CHIPS.map((s) => (
-              <button
-                key={s.size}
-                type="button"
-                className={cn("chip", size === s.size && "on")}
-                onClick={() => setSize(s.size)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          {dirty ? (
-            <Btn
-              variant="p"
-              className="h-6 px-2.5 text-10p5"
-              onClick={applyResize}
-              disabled={update.isPending}
-              disabledReason="Applying the resize…"
-            >
-              Apply
-            </Btn>
-          ) : null}
+        <div className="flex items-center gap-2 text-11p5">
+          <span className="text-ink2">Size</span>
+          <span>
+            {currentShape.title} · {currentShape.spec}
+          </span>
+          <span className="mono text-ink3">${currentShape.price}/mo</span>
+          <span className="flex-1" />
+          <Btn variant="s" className="h-6 px-2.5 text-10p5" onClick={() => setEditingShape(true)}>
+            Edit shape…
+          </Btn>
         </div>
-        {dirty ? (
-          <p className="text-11 text-warn">
-            resize = ~8 s failover on HA, ~40 s restart without — always stated before apply
-          </p>
-        ) : null}
         <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">Storage</span>
           <span>50 GB · auto-grows</span>
@@ -570,6 +556,14 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
       <Card className="flex flex-col gap-3 p-4">
         <div className="text-12p5 font-semibold">Config</div>
         <div className="flex items-center gap-2 text-11p5">
+          <span className="text-ink2">Name</span>
+          <span className="flex-1" />
+          <span className="mono">{svc.name}</span>
+          <Btn variant="gh" className="h-5 px-2 text-10" onClick={() => setRenaming(true)}>
+            Rename…
+          </Btn>
+        </div>
+        <div className="flex items-center gap-2 border-hair border-t pt-3 text-11p5">
           <span className="text-ink2">Maintenance window</span>
           <span className="flex-1" />
           <span>Sun 03:00–04:00 IST</span>
@@ -600,6 +594,46 @@ export function PostgresSettingsTab({ svc, env }: PostgresTabProps) {
           kept 30 d
         </p>
       </Card>
+
+      {editingShape ? (
+        <EditShapeDrawer
+          svc={svc}
+          env={env}
+          options={PG_SHAPES}
+          currentId={currentShape.id}
+          onClose={() => setEditingShape(false)}
+        />
+      ) : null}
+
+      {renaming ? (
+        <RenameModal
+          entity="service"
+          current={svc.name}
+          consequence="binding env-var names re-derive from the new name at the next deploy — connection strings rotate with it"
+          pending={update.isPending}
+          onClose={() => setRenaming(false)}
+          onSave={(name) =>
+            update.mutate(
+              {
+                path: { service: svc.id },
+                // Finding: 08-api's PATCH /services body carries no `name`
+                // field — rename needs a spec change; the MSW echo handler
+                // accepts it meanwhile, hence the cast.
+                body: { name } as unknown as UpdateServiceData["body"],
+              },
+              {
+                // PATCH /services/:service is the echo handler (DB8 precedent) —
+                // the rename comes back once, fixtures win on refetch.
+                onSuccess: () => {
+                  toast.success(`Renamed to ${name} — bindings re-derive at the next deploy`);
+                  setRenaming(false);
+                },
+                onError: (err) => toast.error(errorMessage(err)),
+              },
+            )
+          }
+        />
+      ) : null}
 
       {deleting ? (
         <DeleteServiceModal

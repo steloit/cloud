@@ -1,16 +1,22 @@
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
+import { TypedConfirmModal } from "@/design-system/confirm";
 import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Metric } from "@/design-system/metric";
 import { Pill } from "@/design-system/pill";
+import { RenameModal } from "@/features/common/rename-modal";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
-import type { Service } from "@/lib/api";
+import { EditShapeDrawer, type ShapeOption } from "@/features/services/edit-shape-drawer";
+import type { Service, UpdateServiceData } from "@/lib/api";
+import { errorMessage, updateServiceMutation } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
@@ -179,9 +185,27 @@ export function ValkeyMetricsTab({ svc, env }: TabProps) {
 // D14 · Settings
 // --------------------------------------------------------------------------
 
-const MEMORY_CHIPS = ["256 MB", "1 GB · $22", "4 GB · $64"] as const;
+/** Canon memory shapes — prices from the C3 create block (256 MB · $8, 1 GB · $22, 4 GB · $64). */
+const VK_SHAPE_1GB: ShapeOption = {
+  id: "1024",
+  title: "1 GB",
+  price: 22,
+  patch: { memory_mb: 1024 },
+};
+const VK_SHAPES: ShapeOption[] = [
+  { id: "256", title: "256 MB", price: 8, patch: { memory_mb: 256 } },
+  VK_SHAPE_1GB,
+  { id: "4096", title: "4 GB", price: 64, patch: { memory_mb: 4096 } },
+];
 
 export function ValkeySettingsTab({ svc, env }: TabProps) {
+  const shape = (svc.shape ?? {}) as Record<string, unknown>;
+  const currentShape =
+    VK_SHAPES.find((s) => s.id === String(shape.memory_mb ?? 1024)) ?? VK_SHAPE_1GB;
+  const [editingShape, setEditingShape] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [flushing, setFlushing] = useState(false);
+  const update = useMutation(updateServiceMutation());
   return (
     <>
       <Pghead
@@ -193,6 +217,17 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
           </span>
         }
       />
+
+      <Card className="flex flex-col gap-2.5 p-4">
+        <Eyebrow>Identity</Eyebrow>
+        <div className="flex items-center gap-2.5">
+          <span className="mono text-12">{svc.name}</span>
+          <span className="flex-1" />
+          <Btn variant="gh" onClick={() => setRenaming(true)}>
+            Rename…
+          </Btn>
+        </div>
+      </Card>
 
       <Card className="flex flex-col gap-2.5 p-4">
         <Eyebrow>Mode</Eyebrow>
@@ -216,16 +251,13 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
       <Card className="grid grid-cols-3 gap-4 p-4">
         <div className="flex flex-col gap-1.5">
           <Flabel>Max memory</Flabel>
-          <div className="chiprow">
-            {MEMORY_CHIPS.map((c) => (
-              <span
-                key={c}
-                className={cn("chip", c === "1 GB · $22" && "on")}
-                title="Memory changes ride updateService.shape — apply flow lands in Phase 5"
-              >
-                {c}
-              </span>
-            ))}
+          <div className="flex items-center gap-2">
+            <span className="text-12">{currentShape.title}</span>
+            <span className="mono text-11 text-ink3">${currentShape.price}/mo</span>
+            <span className="flex-1" />
+            <Btn variant="s" className="h-6 px-2.5 text-10p5" onClick={() => setEditingShape(true)}>
+              Edit shape…
+            </Btn>
           </div>
         </div>
         <div>
@@ -244,7 +276,7 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
       <Card className="flex flex-col gap-3 border-err/40 p-4">
         <Eyebrow className="text-err">Danger zone</Eyebrow>
         <div className="flex items-start gap-3">
-          <Btn variant="dgr" disabled disabledReason="No flush endpoint in the spec (finding)">
+          <Btn variant="dgr" onClick={() => setFlushing(true)}>
             FLUSHALL…
           </Btn>
           <p className="text-11 leading-relaxed text-ink3">
@@ -263,6 +295,61 @@ export function ValkeySettingsTab({ svc, env }: TabProps) {
           <Pill tone="err">blocked — 1 binding depends on this instance</Pill>
         </div>
       </Card>
+
+      {flushing ? (
+        // The B6 grammar moves INTO the overlay: the typed name gates the verb
+        // first, then the honest endpoint reason keeps it disabled (reason
+        // ladder — type-gate, then endpoint-gate).
+        <TypedConfirmModal
+          title={`FLUSHALL ${svc.name}`}
+          consequence="every key in every db goes — bound consumers reconnect to an empty keyspace, hit ratio starts from zero"
+          expected={svc.name}
+          verb="FLUSHALL"
+          gatedReason="No flush endpoint in the spec (finding)"
+          onConfirm={() => undefined}
+          onClose={() => setFlushing(false)}
+        />
+      ) : null}
+
+      {editingShape ? (
+        <EditShapeDrawer
+          svc={svc}
+          env={env}
+          options={VK_SHAPES}
+          currentId={currentShape.id}
+          onClose={() => setEditingShape(false)}
+        />
+      ) : null}
+
+      {renaming ? (
+        <RenameModal
+          entity="service"
+          current={svc.name}
+          consequence="binding env-var names re-derive from the new name at the next deploy — connection strings rotate with it"
+          pending={update.isPending}
+          onClose={() => setRenaming(false)}
+          onSave={(name) =>
+            update.mutate(
+              {
+                path: { service: svc.id },
+                // Finding: 08-api's PATCH /services body carries no `name`
+                // field — rename needs a spec change; the MSW echo handler
+                // accepts it meanwhile, hence the cast.
+                body: { name } as unknown as UpdateServiceData["body"],
+              },
+              {
+                // PATCH /services/:service is the echo handler (DB8 precedent) —
+                // the rename comes back once, fixtures win on refetch.
+                onSuccess: () => {
+                  toast.success(`Renamed to ${name} — bindings re-derive at the next deploy`);
+                  setRenaming(false);
+                },
+                onError: (err) => toast.error(errorMessage(err)),
+              },
+            )
+          }
+        />
+      ) : null}
     </>
   );
 }

@@ -1,7 +1,10 @@
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
+import { ConfirmModal } from "@/design-system/confirm";
 import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Pill, type PillTone } from "@/design-system/pill";
@@ -9,6 +12,12 @@ import { SkeletonRows } from "@/design-system/skeleton";
 import { useDashboards } from "@/features/dashboards/hooks";
 import { NewDashboardModal } from "@/features/dashboards/new-dashboard-modal";
 import { ApiFailureCard } from "@/features/errors/failure-states";
+import {
+  deleteDashboardMutation,
+  errorMessage,
+  listDashboardsQueryKey,
+  queryClient,
+} from "@/lib/api";
 
 /**
  * DB5 · My dashboards & shared — scope (org-wide vs project) and visibility
@@ -18,6 +27,8 @@ import { ApiFailureCard } from "@/features/errors/failure-states";
 
 interface Row {
   name: string;
+  /** API id where one exists — frame-fixed rows have none; the name stands in. */
+  id?: string;
   sub?: string;
   scope: string;
   scopeTone: PillTone;
@@ -103,7 +114,18 @@ const SHARED: Row[] = [
   },
 ];
 
-function DashTable({ org, rows, pending }: { org: string; rows: Row[]; pending?: boolean }) {
+function DashTable({
+  org,
+  rows,
+  pending,
+  onDelete,
+}: {
+  org: string;
+  rows: Row[];
+  pending?: boolean;
+  /** Present for Mine — Delete opens the ConfirmModal. Absent (Shared) keeps it honestly disabled. */
+  onDelete?: (row: Row) => void;
+}) {
   return (
     <div className="tblwrap">
       <table className="tbl">
@@ -162,9 +184,15 @@ function DashTable({ org, rows, pending }: { org: string; rows: Row[]; pending?:
                   <Btn variant="gh" disabled disabledReason="Duplicate lands in Phase 4">
                     Duplicate
                   </Btn>
-                  <Btn variant="gh" disabled disabledReason="Delete lands in Phase 4">
-                    Delete…
-                  </Btn>
+                  {onDelete ? (
+                    <Btn variant="gh" className="text-err" onClick={() => onDelete(row)}>
+                      Delete…
+                    </Btn>
+                  ) : (
+                    <Btn variant="gh" disabled disabledReason="Only the owner deletes a dashboard">
+                      Delete…
+                    </Btn>
+                  )}
                 </td>
               </tr>
             ))
@@ -177,8 +205,27 @@ function DashTable({ org, rows, pending }: { org: string; rows: Row[]; pending?:
 
 function MyDashboards() {
   const { org } = Route.useParams();
+  // Strictly one overlay at a time: either the new-dashboard modal or the
+  // delete confirm, never both.
   const [modalOpen, setModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState<Row | null>(null);
   const dashboards = useDashboards(org);
+  const deleteDashboard = useMutation(deleteDashboardMutation());
+
+  const onDelete = (row: Row) =>
+    deleteDashboard.mutate(
+      // Frame-fixed rows carry no fixture id — the name stands in; MSW 204s either way.
+      { path: { dash: row.id ?? row.name } },
+      {
+        onSuccess: () => {
+          setDeleting(null);
+          toast.success(`Dashboard ${row.name} deleted`);
+          // MSW 204-echoes the delete — fixtures win on refetch (the DB8 add-widget precedent).
+          queryClient.invalidateQueries({ queryKey: listDashboardsQueryKey({ path: { org } }) });
+        },
+        onError: (err) => toast.error(errorMessage(err)),
+      },
+    );
 
   const checkout = dashboards.data?.find((d) => d.id === "dsh_checkout_health");
   // The live row renders only when the API actually carries it — previously a
@@ -188,6 +235,7 @@ function MyDashboards() {
       ? [
           {
             name: checkout.name ?? "checkout-health",
+            id: checkout.id,
             sub: "born Jul 2, during the incident — editing in DB7",
             scope: "ecommerce",
             scopeTone: "mut" as PillTone,
@@ -250,7 +298,12 @@ function MyDashboards() {
             }
           />
         ) : (
-          <DashTable org={org} rows={mine} pending={dashboards.isPending} />
+          <DashTable
+            org={org}
+            rows={mine}
+            pending={dashboards.isPending}
+            onDelete={(row) => setDeleting(row)}
+          />
         )}
 
         <Eyebrow>Shared with you · 4</Eyebrow>
@@ -262,6 +315,16 @@ function MyDashboards() {
         </div>
       </div>
       {modalOpen ? <NewDashboardModal org={org} onClose={() => setModalOpen(false)} /> : null}
+      {deleting ? (
+        <ConfirmModal
+          title={`Delete ${deleting.name}`}
+          consequence="Widgets and layout go — the queries behind them are untouched."
+          verb="Delete dashboard"
+          pending={deleteDashboard.isPending}
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      ) : null}
     </main>
   );
 }

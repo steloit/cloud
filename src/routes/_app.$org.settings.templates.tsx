@@ -1,8 +1,11 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
+import { ConfirmModal } from "@/design-system/confirm";
 import { EmptyRow, EmptyState } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Inp } from "@/design-system/inp";
@@ -11,6 +14,7 @@ import { SkeletonRows } from "@/design-system/skeleton";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { useTemplatesList } from "@/features/settings/hooks";
+import { deleteTemplateMutation, errorMessage, listTemplatesQueryKey } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
 import { cn } from "@/lib/utils";
 
@@ -55,8 +59,13 @@ function TemplatesPage() {
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
   const templates = useTemplatesList(org);
 
+  const queryClient = useQueryClient();
+  const del = useMutation(deleteTemplateMutation());
+
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  // Pass-4: the disabled Delete becomes a live verb behind the 460 ConfirmModal.
+  const [deleteFor, setDeleteFor] = useState<{ id: string; name: string } | null>(null);
 
   const rows = (templates.data ?? []).filter(
     (t) =>
@@ -202,7 +211,10 @@ function TemplatesPage() {
                               <Btn variant="gh" disabled disabledReason={EDIT_REASON}>
                                 Duplicate
                               </Btn>
-                              <Btn variant="gh" disabled disabledReason={EDIT_REASON}>
+                              <Btn
+                                variant="gh"
+                                onClick={() => setDeleteFor({ id: t.id, name: t.name })}
+                              >
                                 Delete…
                               </Btn>
                             </span>
@@ -223,6 +235,34 @@ function TemplatesPage() {
           </p>
         </div>
       </main>
+      {deleteFor ? (
+        <ConfirmModal
+          title={`Delete ${deleteFor.name}`}
+          consequence="projects created from it keep running — a template is a recipe, not a dependency"
+          verb="Delete template"
+          pending={del.isPending}
+          onClose={() => setDeleteFor(null)}
+          onConfirm={() =>
+            del.mutate(
+              { path: { tpl: deleteFor.id } },
+              {
+                onSuccess: () => {
+                  // Echo mutation (the DB8 precedent): DELETE 204s; fixtures win
+                  // on refetch — canon keeps its 3 templates.
+                  toast.success(
+                    `${deleteFor.name} deleted — projects created from it keep running`,
+                  );
+                  queryClient.invalidateQueries({
+                    queryKey: listTemplatesQueryKey({ path: { org } }),
+                  });
+                  setDeleteFor(null);
+                },
+                onError: (err) => toast.error(errorMessage(err)),
+              },
+            )
+          }
+        />
+      ) : null}
     </>
   );
 }

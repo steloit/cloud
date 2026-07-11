@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { TypedConfirmModal } from "@/design-system/confirm";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { Flabel, Inp } from "@/design-system/inp";
@@ -36,6 +38,7 @@ function ToggleRow({ label, title }: { label: string; title?: string }) {
 }
 
 export function QueueSettingsTab({ svc, env }: TabProps) {
+  const [purging, setPurging] = useState(false);
   return (
     <>
       <Pghead
@@ -81,7 +84,7 @@ export function QueueSettingsTab({ svc, env }: TabProps) {
       <Card className="flex flex-col gap-3 border-err/40 p-4">
         <Eyebrow className="text-err">Danger zone</Eyebrow>
         <div className="flex items-start gap-3">
-          <Btn variant="dgr" disabled disabledReason="No purge endpoint in the spec (finding)">
+          <Btn variant="dgr" onClick={() => setPurging(true)}>
             Purge 12 ready messages…
           </Btn>
           <p className="text-11 leading-relaxed text-ink3">
@@ -100,6 +103,21 @@ export function QueueSettingsTab({ svc, env }: TabProps) {
           <Pill tone="err">blocked — 3 bindings and 1 schedule depend on this queue</Pill>
         </div>
       </Card>
+
+      {purging ? (
+        // The B6 grammar moves INTO the overlay: the typed name gates the verb
+        // first, then the honest endpoint reason keeps it disabled (reason
+        // ladder — type-gate, then endpoint-gate).
+        <TypedConfirmModal
+          title={`Purge ${svc.name}`}
+          consequence="every ready and in-flight message is discarded — the DLQ keeps its dead letters, consumers stay bound"
+          expected={svc.name}
+          verb="Purge queue"
+          gatedReason="No purge endpoint in the spec (finding)"
+          onConfirm={() => undefined}
+          onClose={() => setPurging(false)}
+        />
+      ) : null}
     </>
   );
 }

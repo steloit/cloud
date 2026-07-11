@@ -65,6 +65,37 @@ export const handlers = [
   }),
   http.delete("/v1/orgs/:org/members/:member", () => HttpResponse.json({ flagged_resources: [] })),
 
+  // Rename/delete for org·project·service·template·dashboard — echo-style
+  // (the DB8 add-widget precedent): the mutation succeeds for the contract's
+  // sake; fixtures win again on refetch (finding: canon mode is stateless
+  // for these entities).
+  http.patch("/v1/orgs/:org", async ({ params, request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const org = world.findOrg(String(params.org));
+    return org
+      ? HttpResponse.json({ ...org, ...body })
+      : notFound(`Organization ${String(params.org)}`);
+  }),
+  http.delete("/v1/orgs/:org", () => new HttpResponse(null, { status: 204 })),
+  http.patch("/v1/projects/:project", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({ id: "prj_echo", ...body });
+  }),
+  http.delete("/v1/projects/:project", () => new HttpResponse(null, { status: 204 })),
+  http.patch("/v1/services/:service", async ({ params, request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const svc = world.findService(String(params.service));
+    return svc
+      ? HttpResponse.json({ ...svc, ...body })
+      : notFound(`Service ${String(params.service)}`);
+  }),
+  http.patch("/v1/templates/:tpl", async ({ params, request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({ id: String(params.tpl), ...body });
+  }),
+  http.delete("/v1/templates/:tpl", () => new HttpResponse(null, { status: 204 })),
+  http.delete("/v1/dashboards/:dash", () => new HttpResponse(null, { status: 204 })),
+
   // invites
   http.get("/v1/orgs/:org/invites", () => list(world.pendingInvites)),
   http.post("/v1/orgs/:org/invites", async ({ request }) => {

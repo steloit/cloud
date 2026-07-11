@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
@@ -7,6 +8,8 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
+import { Flabel, Inp } from "@/design-system/inp";
+import { Modal, ModalHead } from "@/design-system/overlay";
 import { Dot, Pill } from "@/design-system/pill";
 import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
 import {
@@ -18,7 +21,7 @@ import {
 } from "@/features/billing/hooks";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
-import { errorMessage, ProblemError, type Subscription } from "@/lib/api";
+import { errorMessage, type PaymentMethod, ProblemError, type Subscription } from "@/lib/api";
 import { CANON_NOW } from "@/lib/canon/now";
 
 /**
@@ -52,6 +55,85 @@ function trialDaysLeft(sub: Subscription): number {
   );
 }
 
+/**
+ * Replace card — the overlay exists; the verb is gated. No payment-method
+ * endpoint in the spec (finding), and the inputs are display-grade: no
+ * processor tokenization flow ships here, so nothing card-shaped ever
+ * leaves this component.
+ */
+function ReplaceCardModal({ method, onClose }: { method: PaymentMethod; onClose: () => void }) {
+  const [number, setNumber] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [cvc, setCvc] = useState("");
+
+  const reason = !number.trim()
+    ? "Enter the card number"
+    : !expiry.trim()
+      ? "Enter the expiry"
+      : !cvc.trim()
+        ? "Enter the CVC"
+        : "No payment-method endpoint in the spec (finding)";
+
+  return (
+    <Modal label={`Replace ${method.brand} ·· ${method.last4}`} onClose={onClose}>
+      <ModalHead
+        title={`Replace ${method.brand} ·· ${method.last4}`}
+        sub="The new card becomes the default — nothing is charged now; the next invoice uses it."
+      />
+      <div>
+        <Flabel htmlFor="card-number">Card number</Flabel>
+        <Inp
+          id="card-number"
+          className="mono"
+          inputMode="numeric"
+          autoComplete="cc-number"
+          placeholder="4242 4242 4242 4242"
+          value={number}
+          autoFocus
+          onChange={(e) => setNumber(e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Flabel htmlFor="card-expiry">Expiry</Flabel>
+          <Inp
+            id="card-expiry"
+            className="mono"
+            inputMode="numeric"
+            autoComplete="cc-exp"
+            placeholder="MM / YY"
+            value={expiry}
+            onChange={(e) => setExpiry(e.target.value)}
+          />
+        </div>
+        <div>
+          <Flabel htmlFor="card-cvc">CVC</Flabel>
+          <Inp
+            id="card-cvc"
+            className="mono"
+            inputMode="numeric"
+            autoComplete="cc-csc"
+            placeholder="123"
+            value={cvc}
+            onChange={(e) => setCvc(e.target.value)}
+          />
+        </div>
+      </div>
+      <p className="text-11 text-ink3">
+        Cards are tokenized by the processor — Steloit never stores the number.
+      </p>
+      <div className="flex justify-end gap-2">
+        <Btn variant="s" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="p" disabled disabledReason={reason}>
+          Replace card
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
 /** B4 — the current-plan view. Limits grid and billing details are Acme frame content. */
 function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined }) {
   const navigate = useNavigate();
@@ -59,6 +141,8 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
   const changePlan = useChangePlan(org);
   const problem = changePlan.error instanceof ProblemError ? changePlan.error.problem : undefined;
   const planName = sub ? planLabel(sub.plan) : "Business";
+  // Strictly one overlay open at a time — this is the page's only overlay state.
+  const [replacing, setReplacing] = useState<PaymentMethod | null>(null);
 
   return (
     <>
@@ -153,7 +237,7 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
                     </span>
                   ) : null}
                   <span className="ml-auto">
-                    <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
+                    <Btn variant="s" onClick={() => setReplacing(pm)}>
                       Replace…
                     </Btn>
                   </span>
@@ -222,6 +306,9 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
           </p>
         </Card>
       </div>
+      {replacing ? (
+        <ReplaceCardModal method={replacing} onClose={() => setReplacing(null)} />
+      ) : null}
     </>
   );
 }

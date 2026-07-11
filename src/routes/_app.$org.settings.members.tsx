@@ -1,3 +1,4 @@
+import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -6,6 +7,7 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { ConfirmModal } from "@/design-system/confirm";
 import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
@@ -15,9 +17,13 @@ import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { useChangeRole, useMembers, useRemoveMember } from "@/features/settings/hooks";
 import { InviteModal } from "@/features/settings/invite-modal";
-import { errorMessage, type Role } from "@/lib/api";
+import { client, errorMessage, type Role } from "@/lib/api";
 
 /** G6 · Organization · Members — seats, roles, MFA posture; removal is immediate and honest. */
+
+// The pending row is frame-fixed (G6) and fixtures carry no dev-3 invite id,
+// so its id is frame-fixed too — MSW's DELETE /invites/{invite} accepts any.
+const PENDING_INVITE = { id: "inv_dev3", email: "dev-3@acme.dev" };
 
 interface MemberDisplay {
   role: ReactNode;
@@ -62,9 +68,19 @@ function OrgMembersPage() {
   const changeRole = useChangeRole();
   const removeMember = useRemoveMember();
 
+  // Generated client has no deleteInvite even though the contract's MSW side
+  // answers DELETE /invites/{invite} — spec omission, surfaced as a finding.
+  // Raw-client workaround mirrors useRenewInvite's precedent.
+  const revokeInvite = useMutation({
+    mutationFn: (invite: string) => client.delete({ url: `/invites/${invite}` }),
+  });
+
   const [inviteOpen, setInviteOpen] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [armedRemove, setArmedRemove] = useState<string | null>(null);
+  // Pass-4: the two-click armed Remove becomes the 460 ConfirmModal — one
+  // destructive-confirm idiom app-wide.
+  const [removeFor, setRemoveFor] = useState<{ id: string; name: string } | null>(null);
+  const [revokeOpen, setRevokeOpen] = useState(false);
 
   const seats = members.data?.seats;
   const rows = members.data?.data ?? [];
@@ -87,17 +103,21 @@ function OrgMembersPage() {
     );
   };
 
-  const onRemove = (memberId: string, name: string) => {
-    if (armedRemove !== memberId) {
-      setArmedRemove(memberId);
-      return;
-    }
-    setArmedRemove(null);
+  const onRemove = ({ id, name }: { id: string; name: string }) => {
     removeMember.mutate(
-      { path: { org, member: memberId } },
+      { path: { org, member: id } },
       {
-        onSuccess: () =>
-          toast.success(`${name} removed — sessions and personal tokens revoked immediately`),
+        onSuccess: (data) => {
+          // Canon returns flagged_resources: [] — when the API flags owned
+          // resources, the toast says so; they are never silently reassigned.
+          const flagged = data.flagged_resources ?? [];
+          toast.success(
+            flagged.length > 0
+              ? `${name} removed — ${flagged.length} resource${flagged.length === 1 ? "" : "s"} they created flagged, never silently reassigned`
+              : `${name} removed — sessions and personal tokens revoked immediately`,
+          );
+          setRemoveFor(null);
+        },
         onError: (err) => toast.error(errorMessage(err)),
       },
     );
@@ -263,9 +283,11 @@ function OrgMembersPage() {
                                   ) : null}
                                   <Btn
                                     variant="dgr"
-                                    onClick={() => onRemove(m.id, name.toLowerCase())}
+                                    onClick={() =>
+                                      setRemoveFor({ id: m.id, name: name.toLowerCase() })
+                                    }
                                   >
-                                    {armedRemove === m.id ? "Confirm remove" : "Remove…"}
+                                    Remove…
                                   </Btn>
                                 </span>
                               )}
@@ -293,10 +315,7 @@ function OrgMembersPage() {
                             >
                               Resend
                             </Btn>
-                            <Btn
-                              variant="gh"
-                              onClick={() => toast.success("Invite revoked — dev-3@acme.dev")}
-                            >
+                            <Btn variant="gh" onClick={() => setRevokeOpen(true)}>
                               Revoke
                             </Btn>
                           </span>
@@ -321,6 +340,34 @@ function OrgMembersPage() {
         </div>
       </main>
       {inviteOpen ? <InviteModal org={org} onClose={() => setInviteOpen(false)} /> : null}
+      {removeFor ? (
+        <ConfirmModal
+          title={`Remove ${removeFor.name}`}
+          consequence="sessions end now, their personal tokens die with membership · resources they created stay — flagged, never silently reassigned"
+          verb="Remove"
+          pending={removeMember.isPending}
+          onClose={() => setRemoveFor(null)}
+          onConfirm={() => onRemove(removeFor)}
+        />
+      ) : null}
+      {revokeOpen ? (
+        <ConfirmModal
+          title="Revoke invite"
+          consequence={`the link stops working immediately — ${PENDING_INVITE.email} can no longer accept; a new invite is one click away`}
+          verb="Revoke"
+          pending={revokeInvite.isPending}
+          onClose={() => setRevokeOpen(false)}
+          onConfirm={() =>
+            revokeInvite.mutate(PENDING_INVITE.id, {
+              onSuccess: () => {
+                toast.success(`Invite revoked — ${PENDING_INVITE.email}`);
+                setRevokeOpen(false);
+              },
+              onError: (err) => toast.error(errorMessage(err)),
+            })
+          }
+        />
+      ) : null}
     </>
   );
 }

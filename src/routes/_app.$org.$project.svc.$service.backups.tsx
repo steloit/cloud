@@ -1,12 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { EmptyState } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
+import { Flabel, Inp } from "@/design-system/inp";
+import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
 import { resolveEnvKey } from "@/lib/canon-env";
+import { cn } from "@/lib/utils";
 
 /**
  * D5 · Backups — PITR + verified snapshots + the restore drill. 08-api has no
@@ -26,6 +30,7 @@ function BackupsPage() {
   const { project, service } = Route.useParams();
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
+  const [restoring, setRestoring] = useState(false);
   const svc = services.data?.find((s) => s.name === service || s.id === service);
 
   if (!svc) return <main className="main" />;
@@ -145,7 +150,7 @@ function BackupsPage() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            <Btn variant="p" disabled disabledReason={NO_ENDPOINT}>
+            <Btn variant="p" onClick={() => setRestoring(true)}>
               Restore to a new branch…
             </Btn>
             <span className="text-10p5 text-ink3">
@@ -204,8 +209,118 @@ function BackupsPage() {
             Run drill
           </Btn>
         </Card>
+
+        {restoring ? (
+          <RestoreDrawer svcName={svc.name} env={env} onClose={() => setRestoring(false)} />
+        ) : null}
       </div>
     </main>
+  );
+}
+
+/**
+ * Restore to a new branch — the 424 sheet over db-main's canon branch. The
+ * verb stays gated with the page's finding (no backups endpoint in the spec);
+ * the flow itself is the honest shape of the restore contract.
+ */
+function RestoreDrawer({
+  svcName,
+  env,
+  onClose,
+}: {
+  svcName: string;
+  env: string;
+  onClose: () => void;
+}) {
+  const [point, setPoint] = useState("snap_0706_0200");
+  // The canon incident moment — the natural PITR target in the demo world.
+  const [pitrAt, setPitrAt] = useState("2026-07-02T14:02:00+05:30");
+  // Default branch name from the canon world day (the 0706 snapshot).
+  const [branch, setBranch] = useState("restore-2026-07-06");
+  return (
+    <Drawer
+      title="Restore to a new branch"
+      sub={
+        <>
+          {svcName} · {env}
+        </>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <span className="flex-1" />
+          <Btn variant="s" onClick={onClose}>
+            Cancel
+          </Btn>
+          <Btn variant="p" disabled disabledReason={NO_ENDPOINT}>
+            Restore to branch
+          </Btn>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1.5">
+        <div className="eyebrow">Restore point</div>
+        {SNAPSHOTS.map(([id, taken, size]) => (
+          <label
+            key={id}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 rounded-lg border border-hair px-3 py-2",
+              point === id && "border-steel",
+            )}
+          >
+            <input
+              type="radio"
+              name="restore-point"
+              checked={point === id}
+              onChange={() => setPoint(id)}
+            />
+            <span className="mono text-11p5">{id}</span>
+            <span className="text-11 text-ink3">{taken}</span>
+            <span className="flex-1" />
+            <span className="mono text-10p5 text-ink3">{size}</span>
+          </label>
+        ))}
+        <label
+          className={cn(
+            "flex cursor-pointer flex-col gap-2 rounded-lg border border-hair px-3 py-2",
+            point === "pitr" && "border-steel",
+          )}
+        >
+          <span className="flex items-center gap-2.5">
+            <input
+              type="radio"
+              name="restore-point"
+              checked={point === "pitr"}
+              onChange={() => setPoint("pitr")}
+            />
+            <span className="text-11p5">PITR — any second in the last 7 days</span>
+          </span>
+          <Inp
+            className="mono"
+            value={pitrAt}
+            aria-label="Restore moment"
+            onChange={(e) => setPitrAt(e.target.value)}
+            onFocus={() => setPoint("pitr")}
+          />
+        </label>
+      </div>
+
+      <div>
+        <Flabel htmlFor="restore-branch">Target branch</Flabel>
+        <Inp
+          id="restore-branch"
+          className="mono"
+          value={branch}
+          onChange={(e) => setBranch(e.target.value)}
+        />
+      </div>
+
+      <Card className="p-3.5">
+        <p className="text-11p5 leading-relaxed text-ink2">
+          restores into a NEW branch — production is never touched by a restore
+        </p>
+      </Card>
+    </Drawer>
   );
 }
 

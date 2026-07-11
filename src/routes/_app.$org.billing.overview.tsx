@@ -1,16 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { type SeriesPoint, Spark } from "@/design-system/chart";
 import { Eyebrow } from "@/design-system/eyebrow";
+import { Flabel, Inp } from "@/design-system/inp";
 import { Metric } from "@/design-system/metric";
+import { Modal, ModalHead } from "@/design-system/overlay";
 import { Dot, Pill } from "@/design-system/pill";
 import { planLabel } from "@/features/billing/hooks";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useBillingOverview, useOrgs } from "@/features/org/hooks";
 import { fmtMoney } from "@/lib/fmt";
+import { cn } from "@/lib/utils";
 
 /** B1 · Billing overview — one number, then every step of how it's built. */
 
@@ -184,12 +188,84 @@ const EXTRA_FEED = [
   { date: "Jun 12", label: "internal-tools scaled a worker down", delta: "−$3/mo" },
 ];
 
+/**
+ * Set budget — the overlay exists; the verb is gated. No budget endpoint in
+ * the spec (finding), so Save carries the reason once the amount validates.
+ * Threshold chips toggle locally; nothing is sent anywhere.
+ */
+function SetBudgetModal({ initial, onClose }: { initial: string; onClose: () => void }) {
+  const [amount, setAmount] = useState(initial);
+  const [notify80, setNotify80] = useState(true);
+  const [hardStop, setHardStop] = useState(false);
+
+  const parsed = Number(amount);
+  const reason =
+    amount.trim() === "" || !Number.isFinite(parsed) || parsed <= 0
+      ? "Enter a budget amount"
+      : "No budget endpoint in the spec (finding)";
+
+  return (
+    <Modal label="Set budget" onClose={onClose}>
+      <ModalHead
+        title="Set budget"
+        sub="Budgets notify people — they never stop workloads unless hard-stop is chosen, and hard-stop pauses projects; nothing is deleted."
+      />
+      <div>
+        <Flabel htmlFor="budget-amount">Monthly budget</Flabel>
+        <Inp
+          id="budget-amount"
+          className="mono"
+          inputMode="decimal"
+          prefixNode={<span className="mono text-ink3">$</span>}
+          value={amount}
+          autoFocus
+          onChange={(e) => setAmount(e.target.value)}
+        />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Flabel>Thresholds</Flabel>
+        <div className="chiprow">
+          <button
+            type="button"
+            className={cn("chip", notify80 && "on")}
+            aria-pressed={notify80}
+            onClick={() => setNotify80((v) => !v)}
+          >
+            notify at 80%
+          </button>
+          <button
+            type="button"
+            className={cn("chip", hardStop && "on")}
+            aria-pressed={hardStop}
+            onClick={() => setHardStop((v) => !v)}
+          >
+            hard-stop at 100%
+          </button>
+        </div>
+        <div className="text-10p5 text-ink3">
+          Notify pages Owners + Admins (in-app + email). Hard-stop pauses projects at the ceiling —
+          it never deletes data.
+        </div>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Btn variant="s" onClick={onClose}>
+          Cancel
+        </Btn>
+        <Btn variant="p" disabled disabledReason={reason}>
+          Save budget
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function BillingOverviewPage() {
   const { org } = Route.useParams();
   const orgs = useOrgs();
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
   const billing = useBillingOverview(org);
   const b = billing.data;
+  const [budgetOpen, setBudgetOpen] = useState(false);
 
   const mtd = b?.mtd_cents ?? 0;
   const planFee = b?.plan_fee_cents ?? 0;
@@ -216,10 +292,14 @@ function BillingOverviewPage() {
             title="Billing · Overview"
             sub="Acme · Business — one number, then every step of how it's built"
           >
-            <Btn variant="s" disabled disabledReason="Budget editing lands in Phase 4">
+            <Btn variant="s" onClick={() => setBudgetOpen(true)}>
               Set budget…
             </Btn>
-            <Btn variant="s" disabled disabledReason="Budget editing lands in Phase 4">
+            <Btn
+              variant="s"
+              disabled
+              disabledReason="No billing export endpoint in the spec (finding)"
+            >
               Export ↗
             </Btn>
           </Pghead>
@@ -422,6 +502,12 @@ function BillingOverviewPage() {
           )}
         </div>
       </main>
+      {budgetOpen ? (
+        <SetBudgetModal
+          initial={b?.budget?.limit_cents ? String(b.budget.limit_cents / 100) : ""}
+          onClose={() => setBudgetOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
