@@ -47,9 +47,11 @@ function OrgShell() {
         ? { kind: "deploy" }
         : path.endsWith("/create")
           ? { kind: "create" }
-          : childParams.service && activeService
-            ? { kind: "product", product: activeService.product as Product }
-            : { kind: "home" };
+          : childParams.service === "gateway" || childParams.service === "ai-gateway"
+            ? { kind: "product", product: "ai-gateway" }
+            : childParams.service && activeService
+              ? { kind: "product", product: activeService.product as Product }
+              : { kind: "home" };
 
   return (
     <div className="flex h-screen flex-col bg-canvas">

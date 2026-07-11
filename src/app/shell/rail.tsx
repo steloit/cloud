@@ -174,6 +174,23 @@ export function Rail({ org, project, env, services, active }: RailProps) {
           ))
         : null}
 
+      {/* X1 — the AI Gateway capability entry: chrome, not data. It links to
+          the exemplar page without adding a service to the canon world (which
+          would break the 7-services-=-$208 invariant); no ×n badge by design. */}
+      {project === "ecommerce" ? (
+        <Link
+          to="/$org/$project/svc/$service"
+          params={{ org, project, service: "gateway" }}
+          search={search}
+        >
+          <Rit
+            icon="s-ai"
+            label="AI Gateway"
+            on={active.kind === "product" && active.product === "ai-gateway"}
+          />
+        </Link>
+      ) : null}
+
       <Link to="/$org/create" params={{ org }} search={{ env: env ?? "production" }}>
         <Rit icon="s-plus" label="Create service" add on={active.kind === "create"} />
       </Link>
