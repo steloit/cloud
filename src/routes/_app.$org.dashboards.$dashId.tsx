@@ -9,7 +9,9 @@ import { MetricChart, Spark } from "@/design-system/chart";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Drawer } from "@/design-system/overlay";
 import { Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
 import { useDashboard } from "@/features/dashboards/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { useBillingOverview } from "@/features/org/hooks";
 import { useDeployments } from "@/features/services/hooks";
@@ -327,22 +329,46 @@ function DashboardDetail() {
           </Btn>
         </Pghead>
 
-        <div className="grid grid-cols-12 gap-3.5">
-          {(dashboard.data?.widgets ?? []).map((widget) => (
-            <WidgetShell key={widget.id} widget={widget} editing={editing}>
-              <WidgetBody widget={widget} org={org} />
-            </WidgetShell>
-          ))}
-          {editing ? (
-            <button
-              type="button"
-              className="card col-span-4 flex min-h-[90px] items-center justify-center border-dashed bg-transparent text-12 text-ink3 hover:border-ink3"
-              onClick={() => setDrawerOpen(true)}
-            >
-              + Add widget
-            </button>
-          ) : null}
-        </div>
+        {/* Four-state grammar (16-qa): the grid previously rendered empty for
+            both pending and error — indistinguishable from a widgetless
+            dashboard. The skeleton mirrors the canon 8/4 · 4/4/4 layout. */}
+        {dashboard.isPending ? (
+          <div className="grid grid-cols-12 gap-3.5" aria-hidden="true">
+            {["col-span-8", "col-span-4", "col-span-4", "col-span-4", "col-span-4"].map(
+              (span, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cards have no identity
+                <Card key={i} className={cn("flex flex-col gap-2 p-3.5", span)}>
+                  <Skeleton className="h-3 w-28" />
+                  <Skeleton className="h-[96px]" />
+                </Card>
+              ),
+            )}
+          </div>
+        ) : dashboard.isError ? (
+          <ApiFailureCard
+            title="checkout-health didn't load"
+            error={dashboard.error}
+            requestLine="GET /dashboards/dsh_checkout_health"
+            onRetry={() => dashboard.refetch()}
+          />
+        ) : (
+          <div className="grid grid-cols-12 gap-3.5">
+            {(dashboard.data?.widgets ?? []).map((widget) => (
+              <WidgetShell key={widget.id} widget={widget} editing={editing}>
+                <WidgetBody widget={widget} org={org} />
+              </WidgetShell>
+            ))}
+            {editing ? (
+              <button
+                type="button"
+                className="card col-span-4 flex min-h-[90px] items-center justify-center border-dashed bg-transparent text-12 text-ink3 hover:border-ink3"
+                onClick={() => setDrawerOpen(true)}
+              >
+                + Add widget
+              </button>
+            ) : null}
+          </div>
+        )}
       </div>
       {drawerOpen ? <AddWidgetDrawer onClose={() => setDrawerOpen(false)} /> : null}
     </main>

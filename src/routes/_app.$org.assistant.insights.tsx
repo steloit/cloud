@@ -5,11 +5,14 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Inp } from "@/design-system/inp";
 import { Metric } from "@/design-system/metric";
 import { Pill, type PillTone } from "@/design-system/pill";
+import { SkeletonLines } from "@/design-system/skeleton";
 import { useInsights, useUpdateInsight } from "@/features/assistant/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { errorMessage, type Insight, listInsightsQueryKey } from "@/lib/api";
 import { useUIStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -346,18 +349,47 @@ function InsightsPage() {
           ))}
         </div>
 
+        {/* Four-state grammar (16-qa): the ranked list rides GET /assistant/insights;
+            the metric tiles and chip counts above are frame-fixed (AI10) and stay. */}
         <div className="flex flex-col gap-2.5">
-          {rows.map(({ insight, display }) => (
-            <InsightRow key={insight.id} org={org} insight={insight} display={display} />
-          ))}
-          {status === "dismissed" && (category === "All" || category === "Cost") ? (
-            <DismissedWorkerRow />
-          ) : null}
-          {rows.length === 0 && status !== "dismissed" ? (
-            <Card className="p-4 text-11p5 text-ink3">
-              Nothing {status} in this view — switch the status or category chips above.
-            </Card>
-          ) : null}
+          {insights.isPending ? (
+            Array.from({ length: 3 }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cards have no identity
+              <Card key={i} className="p-4">
+                <SkeletonLines lines={2} />
+              </Card>
+            ))
+          ) : insights.isError ? (
+            <ApiFailureCard
+              title="Insights didn't load"
+              error={insights.error}
+              requestLine="GET /assistant/insights"
+              onRetry={() => insights.refetch()}
+            />
+          ) : (
+            <>
+              {rows.map(({ insight, display }) => (
+                <InsightRow key={insight.id} org={org} insight={insight} display={display} />
+              ))}
+              {status === "dismissed" && (category === "All" || category === "Cost") ? (
+                <DismissedWorkerRow />
+              ) : null}
+              {rows.length === 0 && status !== "dismissed" ? (
+                <EmptyState
+                  compact
+                  icon="s-ai"
+                  title={`Nothing ${status} in this view`}
+                  meaning={
+                    <>
+                      insights arrive as telemetry accumulates — the assistant ranks them by impact,
+                      and each one waits for your review; switch the status or category chips above
+                      to see the rest
+                    </>
+                  }
+                />
+              ) : null}
+            </>
+          )}
         </div>
       </div>
     </main>

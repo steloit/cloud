@@ -4,7 +4,9 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
 import { Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
 import { FilterChips } from "@/features/dashboards/filter-chips";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { toSeries, useMetrics } from "@/features/observe/hooks";
 
 /**
@@ -129,20 +131,43 @@ function PostgresHealth() {
           </table>
         </div>
 
-        <div className="grid grid-cols-2 gap-3.5">
-          <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-12p5 font-semibold">Connections · fleet</span>
-            <MetricChart series={toSeries(connections.data)} tone="warn" size="md" />
-            <span className="text-10p5 text-ink3">
-              db-main nearing its 200 limit — the same signal the product page shows
-            </span>
-          </Card>
-          <Card className="flex flex-col gap-2 p-3.5">
-            <span className="text-12p5 font-semibold">p95 query time</span>
-            <MetricChart series={toSeries(p95.data)} tone="steel" size="md" unit="ms" />
-            <span className="text-10p5 text-ink3">per instance · overlaid</span>
-          </Card>
-        </div>
+        {/* Four-state grammar on the chart section — O2's grouping: one
+            failure card per section, not per pane; retry re-fires both
+            queries. Per-chart skeletons while pending. */}
+        {connections.isError || p95.isError ? (
+          <ApiFailureCard
+            title="Fleet telemetry didn't load"
+            error={connections.error ?? p95.error}
+            requestLine="GET /envs/production/metrics · connections, p95"
+            onRetry={() => {
+              connections.refetch();
+              p95.refetch();
+            }}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-3.5">
+            <Card className="flex flex-col gap-2 p-3.5">
+              <span className="text-12p5 font-semibold">Connections · fleet</span>
+              {connections.isPending ? (
+                <Skeleton className="h-[120px]" />
+              ) : (
+                <MetricChart series={toSeries(connections.data)} tone="warn" size="md" />
+              )}
+              <span className="text-10p5 text-ink3">
+                db-main nearing its 200 limit — the same signal the product page shows
+              </span>
+            </Card>
+            <Card className="flex flex-col gap-2 p-3.5">
+              <span className="text-12p5 font-semibold">p95 query time</span>
+              {p95.isPending ? (
+                <Skeleton className="h-[120px]" />
+              ) : (
+                <MetricChart series={toSeries(p95.data)} tone="steel" size="md" unit="ms" />
+              )}
+              <span className="text-10p5 text-ink3">per instance · overlaid</span>
+            </Card>
+          </div>
+        )}
 
         <div className="mt-auto text-10p5 text-ink3">
           Depth stays on the product pages — Open → jumps to the instance. This view exists for the

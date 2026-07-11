@@ -2,8 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
+import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { minutesOfDay, useLogs } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import type { LogEntry } from "@/lib/api";
@@ -205,6 +208,11 @@ function LogsPage() {
     | { level?: Record<string, number>; source?: Record<string, number> }
     | undefined;
 
+  // Four-state grammar (16-qa): the histogram and the logwell ride the logs
+  // query; the search bar and facet rail (Pass 6 scope) stay put.
+  const entries = logs.data?.data ?? [];
+  const isEmpty = logs.isSuccess && entries.length === 0;
+
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
@@ -224,42 +232,81 @@ function LogsPage() {
           </Btn>
         </div>
 
-        <Card className="flex flex-col gap-1.5 p-3.5">
-          <div className="flex items-center gap-2">
-            <span className="text-11p5 font-medium text-ink2">Volume</span>
-            <span className="flex-1" />
-            <span className="text-10p5 text-ink3">the spike is the navigation</span>
-          </div>
-          <Histogram buckets={logs.data?.histogram ?? []} />
-        </Card>
+        {/* Four-state grammar: the failure card replaces everything below the
+            bar — facets are computed on the result, so a failed result has no
+            facets to show either. */}
+        {logs.isError ? (
+          <ApiFailureCard
+            title="Logs didn't load"
+            error={logs.error}
+            requestLine={`GET /envs/${env}/logs`}
+            onRetry={() => logs.refetch()}
+          />
+        ) : (
+          <>
+            <Card className="flex flex-col gap-1.5 p-3.5">
+              <div className="flex items-center gap-2">
+                <span className="text-11p5 font-medium text-ink2">Volume</span>
+                <span className="flex-1" />
+                <span className="text-10p5 text-ink3">the spike is the navigation</span>
+              </div>
+              {logs.isPending ? (
+                <Skeleton className="h-[70px]" />
+              ) : (
+                <Histogram buckets={logs.data?.histogram ?? []} />
+              )}
+            </Card>
 
-        <div className="flex gap-3.5">
-          <Card className="flex w-[170px] shrink-0 flex-col gap-3 p-3">
-            <FacetSection title="Service" rows={facetRows(facets?.source, CANON_SERVICE_FACETS)} />
-            <FacetSection title="Level" rows={facetRows(facets?.level, CANON_LEVEL_FACETS)} />
-            <FacetSection title="Route" rows={CANON_ROUTE_FACETS} />
-            <p className="border-hair border-t pt-2 text-10 text-ink3">
-              facets are computed on the result, so they're always clickable truths
-            </p>
-          </Card>
-
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="logwell">
-              {(logs.data?.data ?? []).map((entry) => (
-                <LogRow
-                  key={`${entry.at}-${entry.source}-${entry.message}`}
-                  entry={entry}
-                  expanded={expanded}
-                  onToggle={() => setExpanded((v) => !v)}
+            <div className="flex gap-3.5">
+              <Card className="flex w-[170px] shrink-0 flex-col gap-3 p-3">
+                <FacetSection
+                  title="Service"
+                  rows={facetRows(facets?.source, CANON_SERVICE_FACETS)}
                 />
-              ))}
+                <FacetSection title="Level" rows={facetRows(facets?.level, CANON_LEVEL_FACETS)} />
+                <FacetSection title="Route" rows={CANON_ROUTE_FACETS} />
+                <p className="border-hair border-t pt-2 text-10 text-ink3">
+                  facets are computed on the result, so they're always clickable truths
+                </p>
+              </Card>
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                {logs.isPending ? (
+                  <div className="logwell">
+                    <SkeletonLines lines={8} />
+                  </div>
+                ) : isEmpty ? (
+                  <EmptyState
+                    compact
+                    icon="s-doc"
+                    title="No log lines in this window"
+                    meaning={
+                      <>
+                        nothing matched this query in the selected range — widen the window with the
+                        time chips above, or loosen the query
+                      </>
+                    }
+                  />
+                ) : (
+                  <div className="logwell">
+                    {entries.map((entry) => (
+                      <LogRow
+                        key={`${entry.at}-${entry.source}-${entry.message}`}
+                        entry={entry}
+                        expanded={expanded}
+                        onToggle={() => setExpanded((v) => !v)}
+                      />
+                    ))}
+                  </div>
+                )}
+                <p className="text-10p5 text-ink3">
+                  j/k move · e expand · c context · one trace id stitches api → jobs → db — the same
+                  incident from three services, one stream
+                </p>
+              </div>
             </div>
-            <p className="text-10p5 text-ink3">
-              j/k move · e expand · c context · one trace id stitches api → jobs → db — the same
-              incident from three services, one stream
-            </p>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </main>
   );

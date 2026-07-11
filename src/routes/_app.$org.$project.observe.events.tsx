@@ -4,6 +4,8 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
 import { Dot, Pill, type PillTone } from "@/design-system/pill";
+import { SkeletonLines } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import { useEvents } from "@/features/services/hooks";
 import type { Event } from "@/lib/api";
@@ -135,32 +137,66 @@ function EventsPage() {
           <Copybit>steloit events --env production --since 13:30</Copybit>
         </div>
 
-        <Card className="flex flex-col gap-1 p-4">
-          {recent.length > 0 ? (
-            <>
-              <div className="eyebrow pb-1">14:00 — now</div>
-              {recent.map((e) => (
-                <EventRow key={e.id} event={e} />
-              ))}
-            </>
-          ) : null}
-          {earlier.length > 0 ? (
-            <>
-              <div className="eyebrow pt-3 pb-1">13:30 — 14:00</div>
-              {earlier.map((e) => (
-                <EventRow key={e.id} event={e} />
-              ))}
-            </>
-          ) : null}
-          <div className="flex flex-col gap-1 border-hair border-t pt-2.5 text-10p5 text-ink3">
-            <span>
-              This stream is the spine — every ◆ ◇ ⬖ marker on every chart is one of these rows.
-            </span>
-            <span>
-              Ops question → here; compliance question → Audit log (W12). Same truth, two grains.
-            </span>
-          </div>
-        </Card>
+        {/* Four-state grammar (16-qa): the day groups ride the events query;
+            a kind filter that matches nothing names itself and offers the way
+            back — never a bare card. */}
+        {events.isError ? (
+          <ApiFailureCard
+            title="Events didn't load"
+            error={events.error}
+            requestLine={`GET /envs/${env}/events`}
+            onRetry={() => events.refetch()}
+          />
+        ) : (
+          <Card className="flex flex-col gap-1 p-4">
+            {events.isPending ? (
+              <SkeletonLines lines={6} className="py-2" />
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-8">
+                <div className="text-12p5 font-semibold">
+                  {kind ? "No events match this filter" : "No events in this window yet"}
+                </div>
+                <p className="max-w-[440px] text-center text-11p5 leading-relaxed text-ink3">
+                  {kind
+                    ? "nothing of this kind in this window — clear it to see the full spine"
+                    : "the spine fills as deploys, scaling, alerts and policy triggers happen in this environment"}
+                </p>
+                {kind ? (
+                  <Btn variant="s" onClick={() => setKind(undefined)}>
+                    Clear filter
+                  </Btn>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                {recent.length > 0 ? (
+                  <>
+                    <div className="eyebrow pb-1">14:00 — now</div>
+                    {recent.map((e) => (
+                      <EventRow key={e.id} event={e} />
+                    ))}
+                  </>
+                ) : null}
+                {earlier.length > 0 ? (
+                  <>
+                    <div className="eyebrow pt-3 pb-1">13:30 — 14:00</div>
+                    {earlier.map((e) => (
+                      <EventRow key={e.id} event={e} />
+                    ))}
+                  </>
+                ) : null}
+              </>
+            )}
+            <div className="flex flex-col gap-1 border-hair border-t pt-2.5 text-10p5 text-ink3">
+              <span>
+                This stream is the spine — every ◆ ◇ ⬖ marker on every chart is one of these rows.
+              </span>
+              <span>
+                Ops question → here; compliance question → Audit log (W12). Same truth, two grains.
+              </span>
+            </div>
+          </Card>
+        )}
 
         <Card className="flex items-center gap-2.5 p-3.5">
           <Dot tone="warn" />

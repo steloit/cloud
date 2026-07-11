@@ -2,7 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyRow, EmptyState } from "@/design-system/empty-state";
 import { Dot, Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { AlertRuleDrawer } from "@/features/observe/alert-rule-drawer";
 import { useAlertRules } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
@@ -70,13 +73,19 @@ function AlertsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const all = rules.data ?? [];
-  const shown = tab === "firing" ? all.filter((r) => r.state === "firing") : all;
+  const firing = all.filter((r) => r.state === "firing");
+  const shown = tab === "firing" ? firing : all;
+  // Tab counts derive from the live data the table filters — while the query
+  // is unresolved they say "…", never a number the rows can contradict.
+  // Silences has no endpoint; its 0 is frame-fixed (O5).
+  const count = (n: number) => (rules.isSuccess ? n : "…");
   const tabs = [
-    { id: "rules", label: `Rules · ${all.length}` },
-    { id: "firing", label: "Firing · 1" },
+    { id: "rules", label: `Rules · ${count(all.length)}` },
+    { id: "firing", label: `Firing · ${count(firing.length)}` },
     { id: "history", label: "History" },
     { id: "silences", label: "Silences · 0" },
   ];
+  const isEmpty = rules.isSuccess && all.length === 0;
 
   return (
     <main className="main">
@@ -105,6 +114,31 @@ function AlertsPage() {
           <p className="text-11p5 text-ink3">
             {tab === "history" ? "History lands in Phase 3" : "Silences land in Phase 3"}
           </p>
+        ) : rules.isError ? (
+          <ApiFailureCard
+            title="Alert rules didn't load"
+            error={rules.error}
+            requestLine={`GET /projects/${project}/alert-rules`}
+            onRetry={() => rules.refetch()}
+          />
+        ) : isEmpty ? (
+          <EmptyState
+            compact
+            icon="s-bell"
+            title="No alert rules yet"
+            meaning={
+              <>
+                anything findable is alertable — a rule is a query plus a condition, and it fires
+                into the inbox (N2) through the same bell and email rules as everything else
+              </>
+            }
+            cta={
+              <Btn variant="p" onClick={() => setDrawerOpen(true)}>
+                New alert rule
+              </Btn>
+            }
+            cli="steloit alert create 'service:api metric:p95' --gt 800ms --window 5m"
+          />
         ) : (
           <div className="tblwrap">
             <table className="tbl">
@@ -119,9 +153,15 @@ function AlertsPage() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((rule) => (
-                  <RuleRow key={rule.id} rule={rule} />
-                ))}
+                {rules.isPending ? (
+                  <SkeletonRows cols={6} />
+                ) : shown.length === 0 ? (
+                  <EmptyRow cols={6}>
+                    Nothing firing — all {all.length} rules are quiet right now
+                  </EmptyRow>
+                ) : (
+                  shown.map((rule) => <RuleRow key={rule.id} rule={rule} />)
+                )}
               </tbody>
             </table>
           </div>

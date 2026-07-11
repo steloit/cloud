@@ -3,6 +3,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
+import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
@@ -280,17 +281,30 @@ function CreatePage() {
   const onBlockChange = useCallback((s: BlockState) => setBlock(s), []);
   const estimateId = type && est?.forType === type ? est.id : undefined;
 
-  // Estimate-before-provision: the type block's first props-up state prices itself.
+  // Estimate-before-provision: the type block's first props-up state prices
+  // itself. isError stops the loop — without it a failing estimate re-fires on
+  // every render forever; recovery is the explicit retry in the rail.
   useEffect(() => {
-    if (!type || !block || estimateId || estimate.isPending) return;
+    if (!type || !block || estimateId || estimate.isPending || estimate.isError) return;
     estimate.mutate(
       { body: { env, services: [{ product: type, name: block.name, shape: block.shape }] } },
       { onSuccess: (data) => setEst({ forType: type, id: data.id }) },
     );
   }, [type, block, estimateId, estimate, env]);
 
-  const pick = (t: CreatableProduct) =>
+  const retryEstimate = () => {
+    if (!type || !block) return;
+    estimate.mutate(
+      { body: { env, services: [{ product: type, name: block.name, shape: block.shape }] } },
+      { onSuccess: (data) => setEst({ forType: type, id: data.id }) },
+    );
+  };
+
+  const pick = (t: CreatableProduct) => {
+    // A stale failure must not gate the next product's auto-estimate.
+    if (estimate.isError) estimate.reset();
     navigate({ to: "/$org/create", params: { org }, search: { type: t, env } });
+  };
 
   const cancel = () => {
     if (project) {
@@ -397,12 +411,29 @@ function CreatePage() {
                       {def.footer}
                     </p>
                   ) : null}
+                  {/* Estimate failure is loud, not "Waiting…" forever (audit
+                      P1): the banner names it, retry re-fires, the confirm
+                      button's reason points here. */}
+                  {estimate.isError ? (
+                    <Banner tone="warn">
+                      <span className="flex-1">
+                        Estimate failed — {errorMessage(estimate.error)}
+                      </span>
+                      <Btn variant="s" className="h-6 px-2 text-10p5" onClick={retryEstimate}>
+                        Retry
+                      </Btn>
+                    </Banner>
+                  ) : null}
                   <Btn
                     variant="p"
                     className="mt-1 justify-center"
                     onClick={submit}
                     disabled={!estimateId || !block || create.isPending}
-                    disabledReason="Waiting for the estimate — nothing provisions without one"
+                    disabledReason={
+                      estimate.isError
+                        ? "Estimate failed — retry above"
+                        : "Waiting for the estimate — nothing provisions without one"
+                    }
                   >
                     {block?.buttonLabel ?? "Create"}
                   </Btn>

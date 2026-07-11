@@ -8,6 +8,7 @@ import { Card } from "@/design-system/card";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Pill } from "@/design-system/pill";
+import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
 import {
   planLabel,
   useCancelPlan,
@@ -15,6 +16,7 @@ import {
   usePaymentMethods,
   useSubscription,
 } from "@/features/billing/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { errorMessage, ProblemError, type Subscription } from "@/lib/api";
 import { CANON_NOW } from "@/lib/canon/now";
@@ -123,38 +125,56 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
           ) : null}
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
-          <Eyebrow>Payment methods</Eyebrow>
-          {(methods.data ?? []).map((pm) => (
-            <div key={pm.id} className="flex items-center gap-2 text-12p5">
-              <span className="font-medium">
-                {pm.brand} ·· {pm.last4}
-              </span>
-              {pm.backup ? <Pill tone="mut">backup</Pill> : <Pill tone="st">default</Pill>}
-              {pm.expires ? (
-                <span className="mono text-11 text-ink3">exp {pm.expires.replace("/", " / ")}</span>
-              ) : null}
+        {/* The methods list is query-backed: pending → line skeletons,
+            error → failure card in the grid cell (empty can't happen for a
+            current subscription — a default method always exists). */}
+        {methods.isError ? (
+          <ApiFailureCard
+            title="Payment methods didn't load"
+            error={methods.error}
+            requestLine={`GET /orgs/${org}/payment-methods`}
+            onRetry={() => methods.refetch()}
+          />
+        ) : (
+          <Card className="flex flex-col gap-3 p-4">
+            <Eyebrow>Payment methods</Eyebrow>
+            {methods.isPending ? (
+              <SkeletonLines lines={2} />
+            ) : (
+              (methods.data ?? []).map((pm) => (
+                <div key={pm.id} className="flex items-center gap-2 text-12p5">
+                  <span className="font-medium">
+                    {pm.brand} ·· {pm.last4}
+                  </span>
+                  {pm.backup ? <Pill tone="mut">backup</Pill> : <Pill tone="st">default</Pill>}
+                  {pm.expires ? (
+                    <span className="mono text-11 text-ink3">
+                      exp {pm.expires.replace("/", " / ")}
+                    </span>
+                  ) : null}
+                  <span className="ml-auto">
+                    <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
+                      Replace…
+                    </Btn>
+                  </span>
+                </div>
+              ))
+            )}
+            <div className="flex items-center gap-2 text-12p5">
+              <span className="text-ink2">Backup method</span>
+              <Pill tone="mut">none</Pill>
               <span className="ml-auto">
                 <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
-                  Replace…
+                  Add backup
                 </Btn>
               </span>
             </div>
-          ))}
-          <div className="flex items-center gap-2 text-12p5">
-            <span className="text-ink2">Backup method</span>
-            <Pill tone="mut">none</Pill>
-            <span className="ml-auto">
-              <Btn variant="s" disabled disabledReason="Card management lands in Phase 4">
-                Add backup
-              </Btn>
-            </span>
-          </div>
-          <p className="text-11 text-ink3">
-            A backup card is tried automatically before any dunning starts. Cards are stored with
-            the processor — Steloit keeps a token, never the number.
-          </p>
-        </Card>
+            <p className="text-11 text-ink3">
+              A backup card is tried automatically before any dunning starts. Cards are stored with
+              the processor — Steloit keeps a token, never the number.
+            </p>
+          </Card>
+        )}
 
         <Card className="flex flex-col gap-2.5 p-4">
           <Eyebrow>Billing details</Eyebrow>
@@ -413,9 +433,29 @@ function PaymentPage() {
       />
       <main className="main">
         <div className="pgpad">
-          {sub.data?.status === "grace" ||
-          sub.data?.status === "provisioning_paused" ||
-          sub.data?.dunning?.state === "provisioning_paused" ? (
+          {/* The whole page keys off Subscription.status, so the query's own
+              states come first: pending → page-shaped skeleton, error →
+              failure card, then the status-driven views. */}
+          {sub.isPending ? (
+            <>
+              <Skeleton className="h-[46px] w-[460px]" />
+              <div className="grid grid-cols-2 items-start gap-3.5">
+                <Skeleton className="h-[220px]" />
+                <Skeleton className="h-[220px]" />
+                <Skeleton className="h-[140px]" />
+                <Skeleton className="h-[140px]" />
+              </div>
+            </>
+          ) : sub.isError ? (
+            <ApiFailureCard
+              title="Subscription didn't load"
+              error={sub.error}
+              requestLine={`GET /orgs/${org}/subscription`}
+              onRetry={() => sub.refetch()}
+            />
+          ) : sub.data?.status === "grace" ||
+            sub.data?.status === "provisioning_paused" ||
+            sub.data?.dunning?.state === "provisioning_paused" ? (
             <DunningView org={org} sub={sub.data} />
           ) : sub.data?.status === "trial" ? (
             <TrialView org={org} sub={sub.data} />

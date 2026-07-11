@@ -10,6 +10,7 @@ import {
   type AlertCondition,
   backtestAlertRuleMutation,
   createAlertRuleMutation,
+  errorMessage,
   listAlertRulesQueryKey,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -71,6 +72,7 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
       queryClient.invalidateQueries({ queryKey: listAlertRulesQueryKey({ path: { project } }) });
       onClose();
     },
+    onError: (err) => toast.error(errorMessage(err)),
   });
 
   const { mutate: runBacktest } = backtest;
@@ -196,6 +198,28 @@ export function AlertRuleDrawer({ project, onClose }: { project: string; onClose
             </>
           ) : backtest.isPending || backtest.isIdle ? (
             <div className="t">running backtest…</div>
+          ) : backtest.isError ? (
+            // A failed backtest must never read as "no firings" — the quiet
+            // result and the missing result are different truths.
+            <div className="flex items-center gap-2">
+              <span className="text-err">backtest didn't run — check the query</span>
+              <Btn
+                variant="gh"
+                className="h-5 px-1.5 text-10"
+                onClick={() =>
+                  runBacktest({
+                    body: {
+                      query,
+                      condition: parseCondition(conditionText),
+                      window: WINDOW_API[windowLabel],
+                      days: 7,
+                    },
+                  })
+                }
+              >
+                Retry
+              </Btn>
+            </div>
           ) : (
             <div className="t">no firings in the last 7 days</div>
           )}

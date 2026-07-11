@@ -2,7 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
+import { EmptyState } from "@/design-system/empty-state";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { usePolicies } from "@/features/settings/hooks";
 import type { Policy } from "@/lib/api";
@@ -47,6 +50,12 @@ function ProjectPoliciesPage() {
     (p) => p.scope?.project_id == null && INHERITED_KEYS.includes(p.key),
   );
 
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the table. Empty means neither project rules nor
+  // inherited org rows — canon-unreachable (credential-rotation always
+  // applies), wired anyway.
+  const isEmpty = policies.isSuccess && projectRows.length + inheritedRows.length === 0;
+
   return (
     <>
       <SnavSettings
@@ -66,23 +75,56 @@ function ProjectPoliciesPage() {
             </Btn>
           </Pghead>
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Policy</th>
-                  <th>Rule</th>
-                  <th>Scope</th>
-                  <th>Enforcement</th>
-                  <th>Last changed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projectRows.map((p) => policyRow(p, false))}
-                {inheritedRows.map((p) => policyRow(p, true))}
-              </tbody>
-            </table>
-          </div>
+          {policies.isError ? (
+            <ApiFailureCard
+              title="Policies didn't load"
+              error={policies.error}
+              requestLine={`GET /orgs/${org}/policies`}
+              onRetry={() => policies.refetch()}
+            />
+          ) : isEmpty ? (
+            <EmptyState
+              compact
+              icon="s-shield"
+              title="No policies yet"
+              meaning={
+                <>
+                  policies gate actions before they run — approval is a design primitive, not a
+                  favor; project rules tighten org rules, never loosen them
+                </>
+              }
+              cta={
+                <Btn variant="p" disabled disabledReason="Project policy creation lands in Phase 4">
+                  New project policy
+                </Btn>
+              }
+              cli="steloit policy create --project ecommerce"
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Policy</th>
+                    <th>Rule</th>
+                    <th>Scope</th>
+                    <th>Enforcement</th>
+                    <th>Last changed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {policies.isPending ? (
+                    <SkeletonRows cols={5} />
+                  ) : (
+                    <>
+                      {projectRows.map((p) => policyRow(p, false))}
+                      {inheritedRows.map((p) => policyRow(p, true))}
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <p className="text-11 text-ink3">
             Inherited rows are managed at the organization (G7). Every policy is versioned; every

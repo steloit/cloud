@@ -178,6 +178,19 @@ function NewEnvironmentPage() {
                 </span>
               </div>
 
+              {/* A failed cells query previously just hid the section — an
+                  org with cells would silently see a managed-only list. */}
+              {cells.isError ? (
+                <div className="flex items-center gap-2 text-10p5 text-warn">
+                  <span>
+                    Your cells didn't load — {errorMessage(cells.error)} · managed regions below are
+                    unaffected
+                  </span>
+                  <Btn variant="gh" className="h-5 px-1.5 text-10" onClick={() => cells.refetch()}>
+                    Retry
+                  </Btn>
+                </div>
+              ) : null}
               {cellRows.length > 0 ? (
                 <>
                   <Eyebrow>Your cells · customer cloud</Eyebrow>

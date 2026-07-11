@@ -212,6 +212,10 @@ function NotificationsInbox() {
   const today = filtered.filter((n) => n.day === "today").sort(byOrd);
   const yesterday = filtered.filter((n) => n.day === "yesterday").sort(byOrd);
   const selected = NOTIFICATIONS.find((n) => n.id === selectedId);
+  // Rows are frame-fixed fixtures (no notifications endpoint — finding above),
+  // so the only honest empty here is the filter-aware one: both panes must say
+  // why they're empty, never go blank.
+  const filteredEmpty = today.length === 0 && yesterday.length === 0;
 
   const dayGroup = (label: string, rows: NotificationRow[]) =>
     rows.length === 0 ? null : (
@@ -306,14 +310,42 @@ function NotificationsInbox() {
         <div className="flex min-h-0 flex-1 gap-3.5">
           <Card className="flex w-[400px] shrink-0 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto">
-              {dayGroup("Today", today)}
-              {dayGroup("Yesterday", yesterday)}
+              {filteredEmpty ? (
+                <div className="flex flex-col items-center gap-2 px-3.5 py-10">
+                  <div className="text-12p5 font-semibold">Nothing matches this filter</div>
+                  <p className="max-w-[300px] text-center text-11p5 leading-relaxed text-ink3">
+                    this combination of tab and type matches no notifications — widen the chips
+                    above, or clear them
+                  </p>
+                  <Btn
+                    variant="s"
+                    onClick={() => {
+                      setTab("all");
+                      setTypeChip("all");
+                    }}
+                  >
+                    Clear filters
+                  </Btn>
+                </div>
+              ) : (
+                <>
+                  {dayGroup("Today", today)}
+                  {dayGroup("Yesterday", yesterday)}
+                </>
+              )}
             </div>
             <div className="border-hair border-t px-3.5 py-2 text-10p5 text-ink3">
               j/k move · e read · s silence · retained 90 d
             </div>
           </Card>
-          {selected?.id === "n-p95" ? (
+          {filteredEmpty ? (
+            <Card className="flex flex-1 items-center justify-center p-5">
+              <p className="max-w-[360px] text-center text-11p5 leading-relaxed text-ink3">
+                Nothing to open — the filter on the left matches no notifications, so no detail is
+                selected.
+              </p>
+            </Card>
+          ) : selected?.id === "n-p95" ? (
             <P95Detail org={org} />
           ) : selected ? (
             <GenericDetail row={selected} org={org} />

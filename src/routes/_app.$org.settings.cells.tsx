@@ -6,9 +6,12 @@ import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import type { Cell } from "@/lib/api";
 import { listCellsOptions } from "@/lib/api";
@@ -151,11 +154,49 @@ function CellsPage() {
             </Btn>
           </Pghead>
 
-          <div className="grid grid-cols-2 gap-3">
-            {(cells.data ?? []).map((c) => (
-              <CellCard key={c.id} cell={c} />
-            ))}
-          </div>
+          {/* Four-state grammar (16-qa): pending → card-shaped skeletons,
+              error → failure card, empty → EmptyState, else the cells grid
+              (canon carries 2 cells). */}
+          {cells.isError ? (
+            <ApiFailureCard
+              title="Cells didn't load"
+              error={cells.error}
+              requestLine={`GET /orgs/${org}/cells`}
+              onRetry={() => cells.refetch()}
+            />
+          ) : cells.isPending ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Skeleton className="h-[122px]" />
+              <Skeleton className="h-[122px]" />
+            </div>
+          ) : (cells.data ?? []).length === 0 ? (
+            <EmptyState
+              compact
+              icon="s-grid"
+              title="No cells yet"
+              meaning={
+                <>
+                  bring your own cloud — connect an AWS, GCP or Azure account and it becomes a
+                  deployment target; the control plane stays managed, the infrastructure stays yours
+                </>
+              }
+              cta={
+                <Btn
+                  variant="p"
+                  onClick={() => connectRef.current?.scrollIntoView({ behavior: "smooth" })}
+                >
+                  Connect cloud
+                </Btn>
+              }
+              cli="steloit cells connect --provider aws"
+            />
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {(cells.data ?? []).map((c) => (
+                <CellCard key={c.id} cell={c} />
+              ))}
+            </div>
+          )}
 
           <div ref={connectRef}>
             <Card className="flex flex-col overflow-hidden p-0">

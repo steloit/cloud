@@ -3,8 +3,10 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyRow } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useAuditEvents, useOrgs } from "@/features/org/hooks";
 import type { Event } from "@/lib/api";
 
@@ -70,6 +72,14 @@ function AuditLogPage() {
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
   const events = useAuditEvents(org);
 
+  // The filter row below is frame-fixed W12 chrome (static pickers + an
+  // active event-type chip), so an empty result here reads as filtered-out,
+  // not as an empty history. Making the chip actually filter would drop the
+  // canon lifecycle/alert rows the frame shows alongside it — finding — so
+  // the flag is a constant and the no-filter branch is canon-unreachable,
+  // wired anyway (same status as other canon-unreachable empties).
+  const filterActive: boolean = true;
+
   return (
     <>
       <SnavSettings org={org} orgName={orgRecord?.name ?? org} project="ecommerce" active="audit" />
@@ -100,27 +110,42 @@ function AuditLogPage() {
             </span>
           </div>
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Actor</th>
-                  <th>Action</th>
-                  <th>Target</th>
-                  <th>Event ID</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.isPending
-                  ? [0, 1, 2, 3].map((i) => (
+          {events.isError ? (
+            <ApiFailureCard
+              title="Audit log didn't load"
+              error={events.error}
+              requestLine={`GET /orgs/${org}/audit`}
+              onRetry={() => events.refetch()}
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Event ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.isPending ? (
+                    [0, 1, 2, 3].map((i) => (
                       <tr key={i}>
                         <td colSpan={5}>
                           <div className="h-4 animate-pulse rounded bg-surface2" />
                         </td>
                       </tr>
                     ))
-                  : (events.data ?? []).map((e) => {
+                  ) : (events.data ?? []).length === 0 ? (
+                    <EmptyRow cols={5}>
+                      {filterActive
+                        ? "No events match this filter — widen the time range or clear the event filter"
+                        : "No audit events yet — every state change lands here from day one"}
+                    </EmptyRow>
+                  ) : (
+                    (events.data ?? []).map((e) => {
                       const detail = (e.detail ?? {}) as Record<string, unknown>;
                       return (
                         <tr key={e.id}>
@@ -138,10 +163,12 @@ function AuditLogPage() {
                           <td className="mono text-ink3">{e.id}</td>
                         </tr>
                       );
-                    })}
-              </tbody>
-            </table>
-          </div>
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <p className="text-11 text-ink3">
             Audit events are append-only and retained per org policy · assistant-applied changes

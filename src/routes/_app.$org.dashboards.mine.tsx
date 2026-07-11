@@ -2,10 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Pill, type PillTone } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
 import { useDashboards } from "@/features/dashboards/hooks";
 import { NewDashboardModal } from "@/features/dashboards/new-dashboard-modal";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 
 /**
  * DB5 · My dashboards & shared — scope (org-wide vs project) and visibility
@@ -100,7 +103,7 @@ const SHARED: Row[] = [
   },
 ];
 
-function DashTable({ org, rows }: { org: string; rows: Row[] }) {
+function DashTable({ org, rows, pending }: { org: string; rows: Row[]; pending?: boolean }) {
   return (
     <div className="tblwrap">
       <table className="tbl">
@@ -117,51 +120,55 @@ function DashTable({ org, rows }: { org: string; rows: Row[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.name}>
-              <td>
-                {row.live ? (
-                  <Link
-                    to="/$org/dashboards/$dashId"
-                    params={{ org, dashId: "checkout-health" }}
-                    className="mono font-medium hover:underline"
-                  >
-                    {row.name}
-                  </Link>
-                ) : (
-                  <span className="mono font-medium">{row.name}</span>
-                )}
-                {row.sub ? <div className="text-10p5 text-ink3">{row.sub}</div> : null}
-              </td>
-              <td>
-                <Pill tone={row.scopeTone}>{row.scope}</Pill>
-              </td>
-              <td>
-                <Pill tone={row.visibilityTone}>{row.visibility}</Pill>
-              </td>
-              <td className="mono">{row.widgets}</td>
-              <td className="text-ink2">{row.owner}</td>
-              <td className="text-ink2">{row.updated}</td>
-              <td>{row.pinned ? "★" : "☆"}</td>
-              <td className="text-right whitespace-nowrap">
-                {row.live ? (
-                  <Link to="/$org/dashboards/$dashId" params={{ org, dashId: "checkout-health" }}>
-                    <Btn variant="gh">Open</Btn>
-                  </Link>
-                ) : (
-                  <Btn variant="gh" disabled disabledReason="only canon dashboards are navigable">
-                    Open
+          {pending ? (
+            <SkeletonRows cols={8} />
+          ) : (
+            rows.map((row) => (
+              <tr key={row.name}>
+                <td>
+                  {row.live ? (
+                    <Link
+                      to="/$org/dashboards/$dashId"
+                      params={{ org, dashId: "checkout-health" }}
+                      className="mono font-medium hover:underline"
+                    >
+                      {row.name}
+                    </Link>
+                  ) : (
+                    <span className="mono font-medium">{row.name}</span>
+                  )}
+                  {row.sub ? <div className="text-10p5 text-ink3">{row.sub}</div> : null}
+                </td>
+                <td>
+                  <Pill tone={row.scopeTone}>{row.scope}</Pill>
+                </td>
+                <td>
+                  <Pill tone={row.visibilityTone}>{row.visibility}</Pill>
+                </td>
+                <td className="mono">{row.widgets}</td>
+                <td className="text-ink2">{row.owner}</td>
+                <td className="text-ink2">{row.updated}</td>
+                <td>{row.pinned ? "★" : "☆"}</td>
+                <td className="text-right whitespace-nowrap">
+                  {row.live ? (
+                    <Link to="/$org/dashboards/$dashId" params={{ org, dashId: "checkout-health" }}>
+                      <Btn variant="gh">Open</Btn>
+                    </Link>
+                  ) : (
+                    <Btn variant="gh" disabled disabledReason="only canon dashboards are navigable">
+                      Open
+                    </Btn>
+                  )}
+                  <Btn variant="gh" disabled disabledReason="Duplicate lands in Phase 4">
+                    Duplicate
                   </Btn>
-                )}
-                <Btn variant="gh" disabled disabledReason="Duplicate lands in Phase 4">
-                  Duplicate
-                </Btn>
-                <Btn variant="gh" disabled disabledReason="Delete lands in Phase 4">
-                  Delete…
-                </Btn>
-              </td>
-            </tr>
-          ))}
+                  <Btn variant="gh" disabled disabledReason="Delete lands in Phase 4">
+                    Delete…
+                  </Btn>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
@@ -174,26 +181,37 @@ function MyDashboards() {
   const dashboards = useDashboards(org);
 
   const checkout = dashboards.data?.find((d) => d.id === "dsh_checkout_health");
+  // The live row renders only when the API actually carries it — previously a
+  // fallback row claimed checkout-health existed even with zero dashboards.
   const mine: Row[] = [
-    {
-      name: checkout?.name ?? "checkout-health",
-      sub: "born Jul 2, during the incident — editing in DB7",
-      scope: "ecommerce",
-      scopeTone: "mut",
-      // Fixtures say visibility "org" but the Design Spec records that org
-      // badge as the error — rendered personal per spec; surfaced as a finding.
-      visibility: "personal",
-      visibilityTone: "mut",
-      // Fixtures have 5 widgets while the frames say 6 — frame value rendered,
-      // divergence noted as a finding.
-      widgets: "6",
-      owner: "asha (you)",
-      updated: "Jul 5",
-      pinned: true,
-      live: true,
-    },
+    ...(checkout
+      ? [
+          {
+            name: checkout.name ?? "checkout-health",
+            sub: "born Jul 2, during the incident — editing in DB7",
+            scope: "ecommerce",
+            scopeTone: "mut" as PillTone,
+            // Fixtures say visibility "org" but the Design Spec records that org
+            // badge as the error — rendered personal per spec; surfaced as a finding.
+            visibility: "personal",
+            visibilityTone: "mut" as PillTone,
+            // Fixtures have 5 widgets while the frames say 6 — frame value rendered,
+            // divergence noted as a finding.
+            widgets: "6",
+            owner: "asha (you)",
+            updated: "Jul 5",
+            pinned: true,
+            live: true,
+          },
+        ]
+      : []),
     ...MINE_STATIC,
   ];
+  // Four-state grammar (16-qa) on the dashboards query. Empty means zero user
+  // dashboards — the frame-fixed Mine rows describe asha's canon world and
+  // don't survive into an honestly-empty one; the Shared table below is
+  // frame-fixed and stays.
+  const isEmpty = dashboards.isSuccess && (dashboards.data ?? []).length === 0;
 
   return (
     <main className="main">
@@ -207,8 +225,33 @@ function MyDashboards() {
           </Btn>
         </Pghead>
 
-        <Eyebrow>Mine · 3</Eyebrow>
-        <DashTable org={org} rows={mine} />
+        <Eyebrow>Mine · {dashboards.isSuccess ? (isEmpty ? 0 : mine.length) : "…"}</Eyebrow>
+        {dashboards.isError ? (
+          <ApiFailureCard
+            title="Your dashboards didn't load"
+            error={dashboards.error}
+            requestLine={`GET /orgs/${org}/dashboards`}
+            onRetry={() => dashboards.refetch()}
+          />
+        ) : isEmpty ? (
+          <EmptyState
+            compact
+            icon="s-grid"
+            title="No dashboards yet"
+            meaning={
+              <>
+                pin what you watch — one grid composes widgets from metrics, logs, cost and deploys
+              </>
+            }
+            cta={
+              <Btn variant="p" onClick={() => setModalOpen(true)}>
+                New dashboard (DB8)
+              </Btn>
+            }
+          />
+        ) : (
+          <DashTable org={org} rows={mine} pending={dashboards.isPending} />
+        )}
 
         <Eyebrow>Shared with you · 4</Eyebrow>
         <DashTable org={org} rows={SHARED} />

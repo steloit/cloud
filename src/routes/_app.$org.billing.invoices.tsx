@@ -4,8 +4,11 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Pill } from "@/design-system/pill";
+import { Skeleton, SkeletonRows } from "@/design-system/skeleton";
 import { planLabel, useInvoices } from "@/features/billing/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import type { Invoice } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
@@ -39,6 +42,11 @@ function InvoicesPage() {
   const lines = selected?.lines ?? [];
   const subtotal = lines.reduce((sum, l) => sum + (l.cents ?? 0), 0);
 
+  // Four-state grammar (16-qa): pending → skeleton (list + panel), error →
+  // failure card, empty → EmptyState, else the list. The detail panel never
+  // vanishes silently: no matching invoice → an honest fallback line.
+  const isEmpty = invoices.isSuccess && (invoices.data ?? []).length === 0;
+
   return (
     <>
       <SnavSettings
@@ -55,110 +63,147 @@ function InvoicesPage() {
             sub="Finalized on the 1st, paid on the default method — every one downloadable as PDF, CSV and JSON"
           />
 
-          <div className="flex items-start gap-3.5">
-            <div className="tblwrap w-[520px] shrink-0">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Period</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(invoices.data ?? []).map((inv) => {
-                    const accruing = inv.status === "accruing";
-                    const isSelected = inv.id === selectedId;
-                    return (
-                      <tr
-                        key={inv.id}
-                        className="cursor-pointer"
-                        onClick={() => {
-                          if (!accruing) setSelectedId(inv.id);
-                        }}
-                      >
-                        <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
-                          {accruing ? <span className="text-ink3">upcoming</span> : inv.id}
-                        </td>
-                        <td className={isSelected ? "bg-steel-tint" : ""}>{inv.period}</td>
-                        <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
-                          {accruing ? `≈ ${fmtMoney(inv.total_cents)}` : fmtMoney(inv.total_cents)}
-                        </td>
-                        <td className={isSelected ? "bg-steel-tint" : ""}>
-                          {accruing ? (
-                            <Pill tone="st">accruing · finalizes Aug 1</Pill>
-                          ) : (
-                            <Pill tone="ok">paid</Pill>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          {invoices.isError ? (
+            <ApiFailureCard
+              title="Invoices didn't load"
+              error={invoices.error}
+              requestLine={`GET /orgs/${org}/billing/invoices`}
+              onRetry={() => invoices.refetch()}
+            />
+          ) : isEmpty ? (
+            <EmptyState
+              compact
+              icon="s-card"
+              title="No invoices yet"
+              meaning={
+                <>
+                  the first invoice finalizes on the 1st — until then the month accrues on Usage
+                  (B2), every line queryable before it's ever billed
+                </>
+              }
+              cli="steloit invoices list"
+            />
+          ) : (
+            <div className="flex items-start gap-3.5">
+              <div className="tblwrap w-[520px] shrink-0">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Invoice</th>
+                      <th>Period</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoices.isPending ? (
+                      <SkeletonRows cols={4} />
+                    ) : (
+                      (invoices.data ?? []).map((inv) => {
+                        const accruing = inv.status === "accruing";
+                        const isSelected = inv.id === selectedId;
+                        return (
+                          <tr
+                            key={inv.id}
+                            className="cursor-pointer"
+                            onClick={() => {
+                              if (!accruing) setSelectedId(inv.id);
+                            }}
+                          >
+                            <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
+                              {accruing ? <span className="text-ink3">upcoming</span> : inv.id}
+                            </td>
+                            <td className={isSelected ? "bg-steel-tint" : ""}>{inv.period}</td>
+                            <td className={`mono ${isSelected ? "bg-steel-tint" : ""}`}>
+                              {accruing
+                                ? `≈ ${fmtMoney(inv.total_cents)}`
+                                : fmtMoney(inv.total_cents)}
+                            </td>
+                            <td className={isSelected ? "bg-steel-tint" : ""}>
+                              {accruing ? (
+                                <Pill tone="st">accruing · finalizes Aug 1</Pill>
+                              ) : (
+                                <Pill tone="ok">paid</Pill>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-            {selected ? (
-              <Card className="flex min-w-0 flex-1 flex-col gap-3 p-4">
-                <div className="flex items-start gap-2">
-                  <div>
-                    <div className="text-13 font-semibold">{invoiceTitle(selected)}</div>
-                    <div className="mt-0.5 text-11 text-ink3">
-                      {selected.id === "inv_2026_06"
-                        ? "Jun 1 – Jun 30, 2026 · finalized Jul 1 00:00 UTC"
-                        : selected.period}
+              {selected ? (
+                <Card className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+                  <div className="flex items-start gap-2">
+                    <div>
+                      <div className="text-13 font-semibold">{invoiceTitle(selected)}</div>
+                      <div className="mt-0.5 text-11 text-ink3">
+                        {selected.id === "inv_2026_06"
+                          ? "Jun 1 – Jun 30, 2026 · finalized Jul 1 00:00 UTC"
+                          : selected.period}
+                      </div>
                     </div>
+                    <span className="ml-auto flex items-center gap-2">
+                      <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
+                        PDF
+                      </Btn>
+                      <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
+                        CSV
+                      </Btn>
+                      <Btn variant="s" onClick={() => downloadJson(selected)}>
+                        JSON
+                      </Btn>
+                    </span>
                   </div>
-                  <span className="ml-auto flex items-center gap-2">
-                    <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
-                      PDF
-                    </Btn>
-                    <Btn variant="s" disabled disabledReason="Rendered formats land in Phase 4">
-                      CSV
-                    </Btn>
-                    <Btn variant="s" onClick={() => downloadJson(selected)}>
-                      JSON
-                    </Btn>
-                  </span>
-                </div>
 
-                <div className="flex flex-col">
-                  {lines.map((l) => (
-                    <div
-                      key={l.description}
-                      className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5"
-                    >
-                      <span>{l.description}</span>
-                      <span className="mono">{fmtMoney(l.cents ?? 0)}</span>
-                    </div>
-                  ))}
-                  {/* The FRAME's own subtotal ($344.92) does not equal the sum of its
+                  <div className="flex flex-col">
+                    {lines.map((l) => (
+                      <div
+                        key={l.description}
+                        className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5"
+                      >
+                        <span>{l.description}</span>
+                        <span className="mono">{fmtMoney(l.cents ?? 0)}</span>
+                      </div>
+                    ))}
+                    {/* The FRAME's own subtotal ($344.92) does not equal the sum of its
                       printed lines ($414.92) — rendered from data, arithmetic defect
                       flagged as a finding (the taxed total doesn't reconcile either). */}
-                  <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5">
-                    <span className="text-ink3">Subtotal</span>
-                    <span className="mono">{fmtMoney(subtotal)}</span>
-                  </div>
-                  {selected.tax ? (
                     <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5">
-                      <span className="text-ink3">GST 18% · GSTIN 29ABCDE1234F1Z5</span>
-                      <span className="mono">{fmtMoney(selected.tax.cents ?? 0)}</span>
+                      <span className="text-ink3">Subtotal</span>
+                      <span className="mono">{fmtMoney(subtotal)}</span>
                     </div>
-                  ) : null}
-                  <div className="flex items-baseline justify-between gap-3 py-2 text-12p5 font-semibold">
-                    <span>Total</span>
-                    <span className="mono">{fmtMoney(selected.total_cents)}</span>
+                    {selected.tax ? (
+                      <div className="flex items-baseline justify-between gap-3 border-hair border-b py-2 text-12p5">
+                        <span className="text-ink3">GST 18% · GSTIN 29ABCDE1234F1Z5</span>
+                        <span className="mono">{fmtMoney(selected.tax.cents ?? 0)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex items-baseline justify-between gap-3 py-2 text-12p5 font-semibold">
+                      <span>Total</span>
+                      <span className="mono">{fmtMoney(selected.total_cents)}</span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 text-11p5">
-                  <Pill tone="ok">paid</Pill>
-                  Visa ·· 4412 · charged Jul 1 09:00 IST · receipt emailed to invoices@acme.dev
-                </div>
-              </Card>
-            ) : null}
-          </div>
+                  <div className="flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 text-11p5">
+                    <Pill tone="ok">paid</Pill>
+                    Visa ·· 4412 · charged Jul 1 09:00 IST · receipt emailed to invoices@acme.dev
+                  </div>
+                </Card>
+              ) : invoices.isPending ? (
+                <Skeleton className="h-[260px] min-w-0 flex-1" />
+              ) : (
+                <Card className="flex min-w-0 flex-1 flex-col p-4">
+                  <p className="text-11p5 text-ink3">
+                    No invoice selected — pick a finalized invoice on the left to see its lines.
+                    Accruing months aren't invoices yet; they finalize on the 1st.
+                  </p>
+                </Card>
+              )}
+            </div>
+          )}
 
           <p className="text-11 text-ink3">
             Every line expands to the usage rows behind it (B2 · Usage keeps them queryable forever)

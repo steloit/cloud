@@ -6,9 +6,12 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { useChangeRole, useMembers, useRemoveMember } from "@/features/settings/hooks";
 import { InviteModal } from "@/features/settings/invite-modal";
@@ -66,6 +69,13 @@ function OrgMembersPage() {
   const seats = members.data?.seats;
   const rows = members.data?.data ?? [];
 
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the table. Canon never hits empty (org_acme has
+  // 12 seated members) — wired anyway; a truly empty org has no pending
+  // invite either, so the frame-fixed dev-3 row belongs to the populated
+  // table only.
+  const isEmpty = members.isSuccess && rows.length === 0;
+
   const onChangeRole = (memberId: string, name: string, role: Role, label: string) => {
     setMenuFor(null);
     changeRole.mutate(
@@ -105,7 +115,11 @@ function OrgMembersPage() {
         <div className="pgpad !overflow-y-auto">
           <Pghead
             title="Organization · Members"
-            sub={`${seats?.used ?? 12} of ${seats?.included ?? 20} seats · Business plan`}
+            sub={
+              members.isSuccess
+                ? `${seats?.used ?? 12} of ${seats?.included ?? 20} seats · Business plan`
+                : "… of … seats · Business plan"
+            }
           >
             <Btn variant="p" onClick={() => setInviteOpen(true)}>
               Invite member (U1)
@@ -164,100 +178,136 @@ function OrgMembersPage() {
             </Card>
           </div>
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Org role</th>
-                  <th>Projects</th>
-                  <th>MFA</th>
-                  <th>Last active</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((m) => {
-                  const d = DISPLAY[m.email];
-                  const name = m.name ?? m.email;
-                  return (
-                    <tr key={m.id}>
-                      <td>
-                        <b>{name.toLowerCase()}</b>{" "}
-                        <span className="mono text-11 text-ink3">{m.email}</span>
-                      </td>
-                      <td>{d?.role ?? m.role}</td>
-                      <td>{d?.projects ?? "—"}</td>
-                      <td>{d?.mfa ?? (m.mfa_enabled ? "on" : "off")}</td>
-                      <td className="text-ink2">{d?.lastActive ?? "—"}</td>
-                      <td>
-                        {d?.ownerLocked ? (
-                          <span className="text-11 text-ink3">owner</span>
-                        ) : (
-                          <span className="relative flex items-center justify-end gap-2">
+          {members.isError ? (
+            <ApiFailureCard
+              title="Members didn't load"
+              error={members.error}
+              requestLine={`GET /orgs/${org}/members`}
+              onRetry={() => members.refetch()}
+            />
+          ) : isEmpty ? (
+            <EmptyState
+              compact
+              icon="s-users"
+              title="No members yet"
+              meaning={
+                <>
+                  every seat starts as an invite — it lands here as a pending row the moment it's
+                  sent, role chosen up front, accepted with one click
+                </>
+              }
+              cta={
+                <Btn variant="p" onClick={() => setInviteOpen(true)}>
+                  Invite member (U1)
+                </Btn>
+              }
+              cli="steloit org invite name@company.com"
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Org role</th>
+                    <th>Projects</th>
+                    <th>MFA</th>
+                    <th>Last active</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.isPending ? (
+                    <SkeletonRows cols={6} rows={4} />
+                  ) : (
+                    <>
+                      {rows.map((m) => {
+                        const d = DISPLAY[m.email];
+                        const name = m.name ?? m.email;
+                        return (
+                          <tr key={m.id}>
+                            <td>
+                              <b>{name.toLowerCase()}</b>{" "}
+                              <span className="mono text-11 text-ink3">{m.email}</span>
+                            </td>
+                            <td>{d?.role ?? m.role}</td>
+                            <td>{d?.projects ?? "—"}</td>
+                            <td>{d?.mfa ?? (m.mfa_enabled ? "on" : "off")}</td>
+                            <td className="text-ink2">{d?.lastActive ?? "—"}</td>
+                            <td>
+                              {d?.ownerLocked ? (
+                                <span className="text-11 text-ink3">owner</span>
+                              ) : (
+                                <span className="relative flex items-center justify-end gap-2">
+                                  <Btn
+                                    variant="gh"
+                                    onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
+                                  >
+                                    Change ▾
+                                  </Btn>
+                                  {menuFor === m.id ? (
+                                    <div className="umenu absolute top-full right-0 z-30 mt-1">
+                                      {ROLE_OPTIONS.map((r) => (
+                                        <button
+                                          key={r.value}
+                                          type="button"
+                                          className="umit w-full text-left"
+                                          onClick={() =>
+                                            onChangeRole(m.id, name.toLowerCase(), r.value, r.label)
+                                          }
+                                        >
+                                          {r.label}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  <Btn
+                                    variant="dgr"
+                                    onClick={() => onRemove(m.id, name.toLowerCase())}
+                                  >
+                                    {armedRemove === m.id ? "Confirm remove" : "Remove…"}
+                                  </Btn>
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {/* Invited row is frame-fixed (G6): fixtures name 3 of the 12 seated members
+                    and carry no dev-3 invite id, so this pending row renders statically. */}
+                      <tr className="opacity-70">
+                        <td>
+                          <span className="mono text-11p5">dev-3@acme.dev</span>
+                        </td>
+                        <td>
+                          <Pill tone="mut">invited · Member</Pill>
+                        </td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td className="text-ink2">pending 2 d</td>
+                        <td>
+                          <span className="flex items-center justify-end gap-2">
                             <Btn
                               variant="gh"
-                              onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
+                              onClick={() => toast.success("Invite resent to dev-3@acme.dev")}
                             >
-                              Change ▾
+                              Resend
                             </Btn>
-                            {menuFor === m.id ? (
-                              <div className="umenu absolute top-full right-0 z-30 mt-1">
-                                {ROLE_OPTIONS.map((r) => (
-                                  <button
-                                    key={r.value}
-                                    type="button"
-                                    className="umit w-full text-left"
-                                    onClick={() =>
-                                      onChangeRole(m.id, name.toLowerCase(), r.value, r.label)
-                                    }
-                                  >
-                                    {r.label}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : null}
-                            <Btn variant="dgr" onClick={() => onRemove(m.id, name.toLowerCase())}>
-                              {armedRemove === m.id ? "Confirm remove" : "Remove…"}
+                            <Btn
+                              variant="gh"
+                              onClick={() => toast.success("Invite revoked — dev-3@acme.dev")}
+                            >
+                              Revoke
                             </Btn>
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {/* Invited row is frame-fixed (G6): fixtures name 3 of the 12 seated members
-                    and carry no dev-3 invite id, so this pending row renders statically. */}
-                <tr className="opacity-70">
-                  <td>
-                    <span className="mono text-11p5">dev-3@acme.dev</span>
-                  </td>
-                  <td>
-                    <Pill tone="mut">invited · Member</Pill>
-                  </td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td className="text-ink2">pending 2 d</td>
-                  <td>
-                    <span className="flex items-center justify-end gap-2">
-                      <Btn
-                        variant="gh"
-                        onClick={() => toast.success("Invite resent to dev-3@acme.dev")}
-                      >
-                        Resend
-                      </Btn>
-                      <Btn
-                        variant="gh"
-                        onClick={() => toast.success("Invite revoked — dev-3@acme.dev")}
-                      >
-                        Revoke
-                      </Btn>
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <Card className="flex items-center gap-3 p-3.5">
             <div className="text-11p5 text-ink2">

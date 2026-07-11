@@ -6,8 +6,11 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { useApiKeys, useCreateApiKey } from "@/features/settings/hooks";
 import { TokenReveal } from "@/features/settings/token-reveal";
@@ -60,6 +63,11 @@ function ApiKeysPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; created: TokenCreated } | null>(null);
+
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the table (canon carries 3 keys — empty is for
+  // fresh orgs).
+  const isEmpty = keys.isSuccess && (keys.data ?? []).length === 0;
 
   const onCreate = () => {
     if (!newName.trim()) return;
@@ -128,50 +136,81 @@ function ApiKeysPage() {
             </Card>
           ) : null}
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Prefix</th>
-                  <th>Scope</th>
-                  <th>Created</th>
-                  <th>Last used</th>
-                  <th>Expires</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {(keys.data ?? []).map((k) => {
-                  const d = DISPLAY[k.name];
-                  return (
-                    <tr key={k.id} className={cn(d?.stale && "opacity-60")}>
-                      <td className="mono text-11p5">{k.name}</td>
-                      <td className="mono text-11 text-ink3">{k.prefix}</td>
-                      <td>{d?.scope ?? k.scope}</td>
-                      <td className="text-ink2">{d?.created ?? "—"}</td>
-                      <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
-                      <td className="text-ink2">{d?.expires ?? "—"}</td>
-                      <td>
-                        <span className="flex items-center justify-end gap-2">
-                          {d?.stale ? <Pill tone="warn">stale — revoke?</Pill> : null}
-                          {/* openapi.yaml has no DELETE /orgs/{org}/api-keys/{key} —
+          {keys.isError ? (
+            <ApiFailureCard
+              title="API keys didn't load"
+              error={keys.error}
+              requestLine={`GET /orgs/${org}/api-keys`}
+              onRetry={() => keys.refetch()}
+            />
+          ) : isEmpty ? (
+            <EmptyState
+              compact
+              icon="s-key"
+              title="No API keys yet"
+              meaning={
+                <>
+                  keys are the org's robots — org-scoped, least-privilege, the secret shown once at
+                  creation and hashed after
+                </>
+              }
+              cta={
+                <Btn variant="p" onClick={() => setCreateOpen(true)}>
+                  Create key (U7)
+                </Btn>
+              }
+              cli="steloit keys create ci-deploy"
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Prefix</th>
+                    <th>Scope</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>Expires</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {keys.isPending ? (
+                    <SkeletonRows cols={7} />
+                  ) : (
+                    (keys.data ?? []).map((k) => {
+                      const d = DISPLAY[k.name];
+                      return (
+                        <tr key={k.id} className={cn(d?.stale && "opacity-60")}>
+                          <td className="mono text-11p5">{k.name}</td>
+                          <td className="mono text-11 text-ink3">{k.prefix}</td>
+                          <td>{d?.scope ?? k.scope}</td>
+                          <td className="text-ink2">{d?.created ?? "—"}</td>
+                          <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
+                          <td className="text-ink2">{d?.expires ?? "—"}</td>
+                          <td>
+                            <span className="flex items-center justify-end gap-2">
+                              {d?.stale ? <Pill tone="warn">stale — revoke?</Pill> : null}
+                              {/* openapi.yaml has no DELETE /orgs/{org}/api-keys/{key} —
                               only list + create exist, so revoke can't be wired (finding). */}
-                          <Btn
-                            variant="dgr"
-                            disabled
-                            disabledReason="Key revocation isn't in the API yet — openapi.yaml gap (finding)"
-                          >
-                            Revoke
-                          </Btn>
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                              <Btn
+                                variant="dgr"
+                                disabled
+                                disabledReason="Key revocation isn't in the API yet — openapi.yaml gap (finding)"
+                              >
+                                Revoke
+                              </Btn>
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <p className="text-11 text-ink3">
             The secret is shown once at creation — Steloit stores a hash. Keys are scoped

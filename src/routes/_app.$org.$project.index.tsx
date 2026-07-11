@@ -10,6 +10,8 @@ import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";
 import { Metric } from "@/design-system/metric";
 import { Dot, Pill, statusDotTone } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useBillingOverview } from "@/features/org/hooks";
 import { useEnvironments, useProject } from "@/features/projects/hooks";
 import { useEvents, useServices } from "@/features/services/hooks";
@@ -232,6 +234,37 @@ function EmptyProject({ org, project, env }: { org: string; project: string; env
   );
 }
 
+/**
+ * W3 pending — the populated layout's shape, no claims: until the services
+ * query resolves we can't assert vitals, emptiness or a topology (the shell
+ * previously rendered with an empty canvas — a lie).
+ */
+function ProjectSkeleton() {
+  return (
+    <>
+      <div className="grid grid-cols-5 gap-3" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells have no identity
+          <Skeleton key={i} className="h-[64px]" />
+        ))}
+      </div>
+      <div className="grid grid-cols-4 gap-3" aria-hidden="true">
+        {Array.from({ length: 4 }, (_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cells have no identity
+          <Skeleton key={i} className="h-[88px]" />
+        ))}
+      </div>
+      <div className="flex gap-3.5" aria-hidden="true">
+        <Skeleton className="h-[396px] flex-1" />
+        <div className="flex w-[352px] shrink-0 flex-col gap-3">
+          <Skeleton className="h-[196px]" />
+          <Skeleton className="h-[188px]" />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ProjectOverview() {
   const { org, project } = Route.useParams();
   const { env } = Route.useSearch();
@@ -271,9 +304,11 @@ function ProjectOverview() {
         <Pghead
           title={project}
           sub={
-            svcList.length > 0
-              ? `${svcList.length} services · ${degraded} degraded · viewing ${env} via the crumb ▾ · ${mtd !== undefined ? fmtMoney(mtd) : "$0"} so far this month · ${fmtMoney(estCents)}/mo estimated across environments`
-              : "No services yet — every price is shown before anything exists."
+            services.isSuccess
+              ? svcList.length > 0
+                ? `${svcList.length} services · ${degraded} degraded · viewing ${env} via the crumb ▾ · ${mtd !== undefined ? fmtMoney(mtd) : "$0"} so far this month · ${fmtMoney(estCents)}/mo estimated across environments`
+                : "No services yet — every price is shown before anything exists."
+              : "…"
           }
         >
           <span className="chip">
@@ -287,7 +322,19 @@ function ProjectOverview() {
           </Link>
         </Pghead>
 
-        {!services.isPending && svcList.length === 0 ? (
+        {/* Four-state grammar (16-qa) on the services query, which gates the
+            whole canvas: skeleton while unknown, failure card on error, E1
+            empty project, else the populated shell. */}
+        {services.isError ? (
+          <ApiFailureCard
+            title="Services didn't load"
+            error={services.error}
+            requestLine={`GET /envs/${env}/services`}
+            onRetry={() => services.refetch()}
+          />
+        ) : services.isPending ? (
+          <ProjectSkeleton />
+        ) : svcList.length === 0 ? (
           <EmptyProject org={org} project={project} env={env} />
         ) : (
           <>
@@ -307,6 +354,19 @@ function ProjectOverview() {
             </div>
 
             <div className="grid grid-cols-4 gap-3">
+              {/* The env cards are query-backed: skeletons while pending, a
+                  warn line if the query fails — the rest of the canvas stands
+                  on the services query and needn't fall with this one. */}
+              {environments.isPending ? (
+                Array.from({ length: 3 }, (_, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cards have no identity
+                  <Skeleton key={i} className="h-[88px]" />
+                ))
+              ) : environments.isError ? (
+                <div className="col-span-3 flex items-center text-10p5 text-warn">
+                  environments didn't load — switch via the env crumb ▾, or reload
+                </div>
+              ) : null}
               {(environments.data ?? []).map((e) => {
                 const flagged = (e.policy_flags ?? []).length > 0;
                 const isHome = e.name === "production";
@@ -341,7 +401,15 @@ function ProjectOverview() {
             </div>
 
             <div className="flex gap-3.5">
-              <Topology services={svcList} bindings={allBindings} env={env} />
+              {/* The topology's edges ride the bindings queries — a canvas of
+                  nodes with silently-missing edges would misstate the wiring,
+                  so it holds a skeleton until they resolve (isLoading, not
+                  isPending: the queries are disabled until api/worker exist). */}
+              {bindings.isLoading || workerBindings.isLoading ? (
+                <Skeleton className="h-[396px] flex-1" />
+              ) : (
+                <Topology services={svcList} bindings={allBindings} env={env} />
+              )}
               <div className="flex w-[352px] shrink-0 flex-col gap-3">
                 <Card className="flex flex-col gap-2.5 p-3.5">
                   <Eyebrow className="text-warn">Needs attention · 4</Eyebrow>

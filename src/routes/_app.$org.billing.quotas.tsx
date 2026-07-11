@@ -4,7 +4,9 @@ import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
 import { planLabel, useQuotas } from "@/features/billing/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import type { Quota } from "@/lib/api";
 
@@ -75,45 +77,62 @@ function QuotasPage() {
             </Btn>
           </Pghead>
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Allowance</th>
-                  <th>Used this cycle</th>
-                  <th>Type</th>
-                  <th>Beyond it</th>
-                  <th>At the limit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(quotas.data ?? []).map((q) => {
-                  const d = QUOTA_DISPLAY[q.name];
-                  const pct = q.included > 0 ? (q.used / q.included) * 100 : 0;
-                  const warn = pct >= 80;
-                  return (
-                    <tr key={q.name}>
-                      <td className="font-medium">{d?.label ?? q.name}</td>
-                      <td>
-                        <div className="mono">{d ? d.used(q) : `${q.used} / ${q.included}`}</div>
-                        <div className="mt-1.5 h-1.5 w-[120px] overflow-hidden rounded bg-surface2">
-                          <div
-                            className={`h-full rounded ${warn ? "bg-warn" : "bg-steel"}`}
-                            style={{ width: `${Math.min(100, pct)}%` }}
-                          />
-                        </div>
-                      </td>
-                      <td>
-                        <Pill tone={q.type === "hard" ? "st" : "mut"}>{q.type}</Pill>
-                      </td>
-                      <td className="mono text-ink2">{q.price_beyond ?? "—"}</td>
-                      <td className="text-12 text-ink2">{q.at_limit}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {/* Quota allowances are plan facts, never empty once loaded —
+              skeleton/error are the states this region can honestly hit. */}
+          {quotas.isError ? (
+            <ApiFailureCard
+              title="Quotas didn't load"
+              error={quotas.error}
+              requestLine={`GET /orgs/${org}/billing/quotas`}
+              onRetry={() => quotas.refetch()}
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Allowance</th>
+                    <th>Used this cycle</th>
+                    <th>Type</th>
+                    <th>Beyond it</th>
+                    <th>At the limit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {quotas.isPending ? (
+                    <SkeletonRows cols={5} rows={7} />
+                  ) : (
+                    (quotas.data ?? []).map((q) => {
+                      const d = QUOTA_DISPLAY[q.name];
+                      const pct = q.included > 0 ? (q.used / q.included) * 100 : 0;
+                      const warn = pct >= 80;
+                      return (
+                        <tr key={q.name}>
+                          <td className="font-medium">{d?.label ?? q.name}</td>
+                          <td>
+                            <div className="mono">
+                              {d ? d.used(q) : `${q.used} / ${q.included}`}
+                            </div>
+                            <div className="mt-1.5 h-1.5 w-[120px] overflow-hidden rounded bg-surface2">
+                              <div
+                                className={`h-full rounded ${warn ? "bg-warn" : "bg-steel"}`}
+                                style={{ width: `${Math.min(100, pct)}%` }}
+                              />
+                            </div>
+                          </td>
+                          <td>
+                            <Pill tone={q.type === "hard" ? "st" : "mut"}>{q.type}</Pill>
+                          </td>
+                          <td className="mono text-ink2">{q.price_beyond ?? "—"}</td>
+                          <td className="text-12 text-ink2">{q.at_limit}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3.5">
             <Card className="p-4">

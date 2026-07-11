@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavOrg } from "@/app/shell/snav-org";
+import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
@@ -86,6 +87,11 @@ function NewProjectPage() {
     estimate.mutate({ body: { services: [] } }, { onSuccess: (data) => setEst(data as Estimate) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimate.mutate]);
+
+  // A failed estimate previously fell through silently: every line summed to
+  // $0/mo — a price the API never quoted. The retry re-fires the same call.
+  const retryEstimate = () =>
+    estimate.mutate({ body: { services: [] } }, { onSuccess: (data) => setEst(data as Estimate) });
 
   const lineCents = new Map((est?.lines ?? []).map((l) => [l.name, l.monthly_cents ?? 0]));
   const rowCents = (row: (typeof RECOMMENDED)[number]) =>
@@ -192,8 +198,14 @@ function NewProjectPage() {
                       <div className="mt-0.5 text-11 leading-snug text-ink3">{row.reason}</div>
                     </div>
                     <span className="mono text-12 text-ink1">
-                      {row.key === "assets" ? "~" : ""}
-                      {fmtMoney(rowCents(row))}/mo
+                      {est ? (
+                        <>
+                          {row.key === "assets" ? "~" : ""}
+                          {fmtMoney(rowCents(row))}/mo
+                        </>
+                      ) : (
+                        "…"
+                      )}
                     </span>
                   </div>
                 ))}
@@ -210,9 +222,18 @@ function NewProjectPage() {
                 <Btn
                   variant="p"
                   onClick={submit}
-                  disabled={createProject.isPending || !name.trim()}
+                  disabled={createProject.isPending || !name.trim() || !est}
+                  disabledReason={
+                    estimate.isError
+                      ? "Estimate failed — retry above"
+                      : !est
+                        ? "Waiting for the estimate — nothing provisions without one"
+                        : !name.trim()
+                          ? "The project needs a name"
+                          : "Creating the project…"
+                  }
                 >
-                  Create project — {fmtMoney(totalCents)}/mo est.
+                  Create project — {est ? `${fmtMoney(totalCents)}/mo est.` : "…"}
                 </Btn>
                 <Link to="/$org/settings/templates/new" params={{ org }}>
                   <Btn variant="s">Save as template instead (T3)</Btn>
@@ -225,10 +246,23 @@ function NewProjectPage() {
             </div>
 
             <div className="flex w-[320px] shrink-0 flex-col gap-3">
+              {/* Estimate failure is loud, not a silent $0 (audit P1): the
+                  banner names it, retry re-fires, and the confirm button's
+                  reason points here instead of waiting forever. */}
+              {estimate.isError ? (
+                <Banner tone="warn">
+                  <span className="flex-1">
+                    Estimate failed — {errorMessage(estimate.error)}. No price, no create.
+                  </span>
+                  <Btn variant="s" className="h-6 px-2 text-10p5" onClick={retryEstimate}>
+                    Retry estimate
+                  </Btn>
+                </Banner>
+              ) : null}
               <Card className="flex flex-col gap-2 p-4">
                 <Eyebrow>Estimated monthly cost</Eyebrow>
                 <div className="mono text-[26px] font-semibold tracking-[-0.5px]">
-                  {fmtMoney(totalCents)}
+                  {est ? fmtMoney(totalCents) : "…"}
                   <span className="ml-1 text-11 font-normal text-ink3">
                     /month · production only
                   </span>
@@ -247,8 +281,14 @@ function NewProjectPage() {
                       <div key={line.key} className="flex justify-between text-11p5">
                         <span className="text-ink2">{line.label}</span>
                         <span className="mono">
-                          {line.key === "assets" ? "~" : ""}
-                          {fmtMoney(rowCents(row))}
+                          {est ? (
+                            <>
+                              {line.key === "assets" ? "~" : ""}
+                              {fmtMoney(rowCents(row))}
+                            </>
+                          ) : (
+                            "…"
+                          )}
                         </span>
                       </div>
                     );

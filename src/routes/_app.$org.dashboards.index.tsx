@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
@@ -8,6 +8,7 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import type { IconId } from "@/design-system/icon";
 import { Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
 import { FilterChips } from "@/features/dashboards/filter-chips";
 import { NewDashboardModal } from "@/features/dashboards/new-dashboard-modal";
 import { toSeries, useMetrics } from "@/features/observe/hooks";
@@ -101,6 +102,20 @@ function DashboardsHome() {
   const p95 = useMetrics("production", "service:api metric:p95");
   const requests = useMetrics("production", "service:api metric:requests");
 
+  // Query-backed regions on the pinned cards get the four-state treatment,
+  // scaled to the card: a Skeleton at the spark/stat's size while pending and
+  // a one-line warn on error. A full ApiFailureCard per pinned card would
+  // outweigh a 3-up grid of sparklines; the line names the failure and the
+  // card still links to the dashboard, which carries the full treatment.
+  const spark = (q: typeof p95, node: ReactNode) =>
+    q.isPending ? (
+      <Skeleton className="h-6 w-24" />
+    ) : q.isError ? (
+      <span className="text-10p5 text-warn">sparkline unavailable — the metrics query failed</span>
+    ) : (
+      node
+    );
+
   return (
     <main className="main">
       <div className="pgpad">
@@ -124,7 +139,7 @@ function DashboardsHome() {
                 <Pill tone="mut">personal</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
-              <Spark series={toSeries(p95.data)} />
+              {spark(p95, <Spark series={toSeries(p95.data)} />)}
               <span className="mono text-11 text-ok">p95 396 ms · DLQ 0</span>
             </Card>
           </Link>
@@ -135,7 +150,7 @@ function DashboardsHome() {
                 <Pill tone="st">pre-built</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
-              <Spark series={toSeries(requests.data)} tone="ok" />
+              {spark(requests, <Spark series={toSeries(requests.data)} tone="ok" />)}
               <span className="mono text-11 text-ok">all green · 7 services</span>
             </Card>
           </Link>
@@ -146,11 +161,19 @@ function DashboardsHome() {
                 <Pill tone="st">pre-built</Pill>
                 <span className="ml-auto text-ink3">★</span>
               </div>
-              <Spark series={toSeries(requests.data)} />
-              <span className="mono text-11 text-ink2">
-                MTD {billing.data ? fmtMoney(billing.data.mtd_cents ?? 0) : "…"} →{" "}
-                {billing.data ? fmtMoney(billing.data.forecast_cents ?? 0) : "…"}
-              </span>
+              {spark(requests, <Spark series={toSeries(requests.data)} />)}
+              {billing.isPending ? (
+                <Skeleton className="h-3 w-32" />
+              ) : billing.isError ? (
+                <span className="text-10p5 text-warn">
+                  spend unavailable — the billing query failed
+                </span>
+              ) : (
+                <span className="mono text-11 text-ink2">
+                  MTD {fmtMoney(billing.data?.mtd_cents ?? 0)} →{" "}
+                  {fmtMoney(billing.data?.forecast_cents ?? 0)}
+                </span>
+              )}
             </Card>
           </Link>
         </div>

@@ -8,6 +8,7 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Metric } from "@/design-system/metric";
 import { Dot, Pill } from "@/design-system/pill";
 import { planLabel } from "@/features/billing/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useBillingOverview, useOrgs } from "@/features/org/hooks";
 import { fmtMoney } from "@/lib/fmt";
 
@@ -195,6 +196,11 @@ function BillingOverviewPage() {
   const byProject = b?.by_project ?? [];
   const resourcesRollupMtd = byProject.reduce((sum, p) => sum + (p.mtd_cents ?? 0), 0);
 
+  // While the overview query is pending every money cell shows "…", never a
+  // lying $0.00 (16-qa: numbers are real or absent). On error the data region
+  // is one failure card — the states stay exclusive.
+  const money = (cents: number) => (billing.isPending ? "…" : fmtMoney(cents));
+
   return (
     <>
       <SnavSettings
@@ -218,184 +224,202 @@ function BillingOverviewPage() {
             </Btn>
           </Pghead>
 
-          <div className="grid grid-cols-4 gap-3.5">
-            <Metric
-              label="Month to date · Jul 1–6"
-              value={fmtMoney(mtd)}
-              mono
-              note={`${fmtMoney(mtd - planFee)} resources + ${fmtMoney(planFee)} plan`}
+          {billing.isError ? (
+            <ApiFailureCard
+              title="Billing overview didn't load"
+              error={billing.error}
+              requestLine={`GET /orgs/${org}/billing/overview`}
+              onRetry={() => billing.refetch()}
             />
-            <Metric
-              label="Forecast · Jul"
-              value={
-                <>
-                  {fmtMoney(b?.forecast_cents ?? 0)}
-                  <span className="text-12 text-ink3">
-                    {" "}
-                    ± {fmtMoney(b?.forecast_margin_cents ?? 0)}
-                  </span>
-                </>
-              }
-              mono
-              note="from live run-rates, not last month"
-            />
-            <Metric
-              label="Budget · Jul"
-              value={fmtMoney(b?.budget?.limit_cents ?? 0)}
-              mono
-              note={
-                <span className="flex flex-col gap-1.5">
-                  <span className="block h-1.5 overflow-hidden rounded bg-surface2">
-                    <span
-                      className="block h-full rounded bg-steel"
-                      style={{ width: `${Math.min(100, b?.budget?.used_percent ?? 0)}%` }}
-                    />
-                  </span>
-                  {/* Frame says "23% consumed · on pace for 92%" but the fixtures'
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-3.5">
+                <Metric
+                  label="Month to date · Jul 1–6"
+                  value={money(mtd)}
+                  mono
+                  note={`${money(mtd - planFee)} resources + ${money(planFee)} plan`}
+                />
+                <Metric
+                  label="Forecast · Jul"
+                  value={
+                    <>
+                      {money(b?.forecast_cents ?? 0)}
+                      <span className="text-12 text-ink3">
+                        {" "}
+                        ± {money(b?.forecast_margin_cents ?? 0)}
+                      </span>
+                    </>
+                  }
+                  mono
+                  note="from live run-rates, not last month"
+                />
+                <Metric
+                  label="Budget · Jul"
+                  value={money(b?.budget?.limit_cents ?? 0)}
+                  mono
+                  note={
+                    <span className="flex flex-col gap-1.5">
+                      <span className="block h-1.5 overflow-hidden rounded bg-surface2">
+                        <span
+                          className="block h-full rounded bg-steel"
+                          style={{ width: `${Math.min(100, b?.budget?.used_percent ?? 0)}%` }}
+                        />
+                      </span>
+                      {/* Frame says "23% consumed · on pace for 92%" but the fixtures'
                       budget.used_percent is 38.1 — fixtures win. */}
-                  {b?.budget?.used_percent ?? 0}% consumed
-                </span>
-              }
-            />
-            <Metric
-              label="Last invoice · Jun"
-              value={fmtMoney(b?.last_invoice?.total_cents ?? 0)}
-              mono
-              note={
-                <span className="flex items-center gap-1.5">
-                  <Pill tone="ok">paid</Pill>
-                  Visa ·· 4412 · Jul 1
-                </span>
-              }
-            />
-          </div>
+                      {billing.isPending ? "…" : (b?.budget?.used_percent ?? 0)}% consumed
+                    </span>
+                  }
+                />
+                <Metric
+                  label="Last invoice · Jun"
+                  value={money(b?.last_invoice?.total_cents ?? 0)}
+                  mono
+                  note={
+                    <span className="flex items-center gap-1.5">
+                      <Pill tone="ok">paid</Pill>
+                      Visa ·· 4412 · Jul 1
+                    </span>
+                  }
+                />
+              </div>
 
-          <div className="flex items-start gap-3.5">
-            <div className="flex min-w-0 flex-1 flex-col gap-3.5">
-              <Card className="flex flex-col gap-2 p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-12p5 font-semibold">Daily accrual → month-end forecast</div>
-                  <div className="text-10p5 text-ink3">
-                    solid = billed · dashed = projected · ▲ budget alerts at 50 / 80 / 100%
-                  </div>
-                </div>
-                <AccrualChart />
-              </Card>
+              <div className="flex items-start gap-3.5">
+                <div className="flex min-w-0 flex-1 flex-col gap-3.5">
+                  <Card className="flex flex-col gap-2 p-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <div className="text-12p5 font-semibold">
+                        Daily accrual → month-end forecast
+                      </div>
+                      <div className="text-10p5 text-ink3">
+                        solid = billed · dashed = projected · ▲ budget alerts at 50 / 80 / 100%
+                      </div>
+                    </div>
+                    <AccrualChart />
+                  </Card>
 
-              <div className="tblwrap">
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>Project</th>
-                      <th>MTD</th>
-                      <th>Run-rate /mo</th>
-                      <th>vs Jun</th>
-                      <th>30 d</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {PROJECT_DISPLAY.map((d) => {
-                      const row = byProject.find((p) => p.name === d.name);
-                      return (
-                        <tr key={d.name}>
-                          <td>
-                            <span className="flex items-center gap-2 font-medium">
-                              {d.dot ? <Dot tone={d.dot} /> : null}
-                              {d.name}
-                            </span>
-                          </td>
-                          <td className="mono">{fmtMoney(row?.mtd_cents ?? 0)}</td>
-                          <td className="mono">{fmtMoney(row?.forecast_cents ?? 0)}</td>
-                          <td className={d.vsTone ? VS_TONE[d.vsTone] : "text-ink3"}>{d.vsJun}</td>
-                          <td>
-                            {d.spark ? (
-                              <Spark series={d.spark} tone={d.dot === "warn" ? "warn" : "steel"} />
-                            ) : (
-                              <span className="text-11 text-ink3">{d.sparkNote}</span>
-                            )}
+                  <div className="tblwrap">
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Project</th>
+                          <th>MTD</th>
+                          <th>Run-rate /mo</th>
+                          <th>vs Jun</th>
+                          <th>30 d</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {PROJECT_DISPLAY.map((d) => {
+                          const row = byProject.find((p) => p.name === d.name);
+                          return (
+                            <tr key={d.name}>
+                              <td>
+                                <span className="flex items-center gap-2 font-medium">
+                                  {d.dot ? <Dot tone={d.dot} /> : null}
+                                  {d.name}
+                                </span>
+                              </td>
+                              <td className="mono">{money(row?.mtd_cents ?? 0)}</td>
+                              <td className="mono">{money(row?.forecast_cents ?? 0)}</td>
+                              <td className={d.vsTone ? VS_TONE[d.vsTone] : "text-ink3"}>
+                                {d.vsJun}
+                              </td>
+                              <td>
+                                {d.spark ? (
+                                  <Spark
+                                    series={d.spark}
+                                    tone={d.dot === "warn" ? "warn" : "steel"}
+                                  />
+                                ) : (
+                                  <span className="text-11 text-ink3">{d.sparkNote}</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        <tr>
+                          <td className="text-ink2">Resources</td>
+                          <td className="mono">{money(resourcesRollupMtd)}</td>
+                          <td className="mono">{money(b?.resources_cents ?? 0)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                        <tr>
+                          <td className="text-ink2">Business plan</td>
+                          {/* The FRAME prints run-rate "$29" on this row — a stale
+                          pre-re-anchor value; canon plan fee is $99. Finding. */}
+                          <td className="mono">$99.00</td>
+                          <td className="mono">{money(planFee)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                        <tr>
+                          <td className="font-semibold">Total</td>
+                          <td className="mono font-semibold">{money(mtd)}</td>
+                          <td className="mono font-semibold">{money(b?.forecast_cents ?? 0)}</td>
+                          <td colSpan={2} className="text-11 text-ink3">
+                            the same $482 every sidebar rolls up to — one arithmetic, everywhere
                           </td>
                         </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="flex w-[300px] shrink-0 flex-col gap-3.5">
+                  <Card className="flex flex-col gap-3 p-4">
+                    <Eyebrow>Budget & alerts</Eyebrow>
+                    <div className="flex items-center justify-between gap-2 text-12">
+                      <span>Alert at 50 / 80 / 100%</span>
+                      <Pill tone="st">in-app + email</Pill>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-12">
+                      <span className="text-ink3">Recipients</span>
+                      <span>Owners + Admins</span>
+                    </div>
+                    <p className="text-11 text-ink3">
+                      Budgets page humans, never stop services — a hard ceiling is a deliberate
+                      policy (compute-ceiling, G7), not a billing side effect.
+                    </p>
+                  </Card>
+
+                  <Card className="flex flex-col gap-2.5 p-4">
+                    <Eyebrow>What changed this month</Eyebrow>
+                    {(b?.change_feed ?? []).map((row) => {
+                      const display = row.event_id ? FEED_DISPLAY[row.event_id] : undefined;
+                      return (
+                        <div
+                          key={row.event_id ?? row.at}
+                          className="flex items-baseline gap-2 text-11p5"
+                        >
+                          <span className="mono w-12 shrink-0 text-ink3">
+                            {row.at ? fmtFeedDate(row.at) : ""}
+                          </span>
+                          <span className="flex-1">
+                            {display?.label ?? row.cause}
+                            {display?.note ? (
+                              <span className="text-ink3"> — {display.note}</span>
+                            ) : null}
+                          </span>
+                          <span className="mono">{fmtDelta(row.delta_cents ?? 0)}</span>
+                        </div>
                       );
                     })}
-                    <tr>
-                      <td className="text-ink2">Resources</td>
-                      <td className="mono">{fmtMoney(resourcesRollupMtd)}</td>
-                      <td className="mono">{fmtMoney(b?.resources_cents ?? 0)}</td>
-                      <td colSpan={2} />
-                    </tr>
-                    <tr>
-                      <td className="text-ink2">Business plan</td>
-                      {/* The FRAME prints run-rate "$29" on this row — a stale
-                          pre-re-anchor value; canon plan fee is $99. Finding. */}
-                      <td className="mono">$99.00</td>
-                      <td className="mono">{fmtMoney(planFee)}</td>
-                      <td colSpan={2} />
-                    </tr>
-                    <tr>
-                      <td className="font-semibold">Total</td>
-                      <td className="mono font-semibold">{fmtMoney(mtd)}</td>
-                      <td className="mono font-semibold">{fmtMoney(b?.forecast_cents ?? 0)}</td>
-                      <td colSpan={2} className="text-11 text-ink3">
-                        the same $482 every sidebar rolls up to — one arithmetic, everywhere
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                    {EXTRA_FEED.map((row) => (
+                      <div key={row.label} className="flex items-baseline gap-2 text-11p5">
+                        <span className="mono w-12 shrink-0 text-ink3">{row.date}</span>
+                        <span className="flex-1">{row.label}</span>
+                        <span className="mono text-ok">{row.delta}</span>
+                      </div>
+                    ))}
+                    <p className="border-hair border-t pt-2 text-11 text-ink3">
+                      Every entry links to the audit event that caused it.
+                    </p>
+                  </Card>
+                </div>
               </div>
-            </div>
-
-            <div className="flex w-[300px] shrink-0 flex-col gap-3.5">
-              <Card className="flex flex-col gap-3 p-4">
-                <Eyebrow>Budget & alerts</Eyebrow>
-                <div className="flex items-center justify-between gap-2 text-12">
-                  <span>Alert at 50 / 80 / 100%</span>
-                  <Pill tone="st">in-app + email</Pill>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-12">
-                  <span className="text-ink3">Recipients</span>
-                  <span>Owners + Admins</span>
-                </div>
-                <p className="text-11 text-ink3">
-                  Budgets page humans, never stop services — a hard ceiling is a deliberate policy
-                  (compute-ceiling, G7), not a billing side effect.
-                </p>
-              </Card>
-
-              <Card className="flex flex-col gap-2.5 p-4">
-                <Eyebrow>What changed this month</Eyebrow>
-                {(b?.change_feed ?? []).map((row) => {
-                  const display = row.event_id ? FEED_DISPLAY[row.event_id] : undefined;
-                  return (
-                    <div
-                      key={row.event_id ?? row.at}
-                      className="flex items-baseline gap-2 text-11p5"
-                    >
-                      <span className="mono w-12 shrink-0 text-ink3">
-                        {row.at ? fmtFeedDate(row.at) : ""}
-                      </span>
-                      <span className="flex-1">
-                        {display?.label ?? row.cause}
-                        {display?.note ? (
-                          <span className="text-ink3"> — {display.note}</span>
-                        ) : null}
-                      </span>
-                      <span className="mono">{fmtDelta(row.delta_cents ?? 0)}</span>
-                    </div>
-                  );
-                })}
-                {EXTRA_FEED.map((row) => (
-                  <div key={row.label} className="flex items-baseline gap-2 text-11p5">
-                    <span className="mono w-12 shrink-0 text-ink3">{row.date}</span>
-                    <span className="flex-1">{row.label}</span>
-                    <span className="mono text-ok">{row.delta}</span>
-                  </div>
-                ))}
-                <p className="border-hair border-t pt-2 text-11 text-ink3">
-                  Every entry links to the audit event that caused it.
-                </p>
-              </Card>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       </main>
     </>

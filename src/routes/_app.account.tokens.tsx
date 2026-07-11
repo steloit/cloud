@@ -5,8 +5,11 @@ import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import {
   useCreatePersonalToken,
   usePersonalTokens,
@@ -55,6 +58,11 @@ function TokensPage() {
   const [newName, setNewName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; created: TokenCreated } | null>(null);
   const [armedId, setArmedId] = useState<string | null>(null);
+
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the table (canon carries 2 tokens — empty is
+  // the fresh-account state).
+  const isEmpty = tokens.isSuccess && (tokens.data ?? []).length === 0;
 
   const onCreate = () => {
     if (!newName.trim()) return;
@@ -135,47 +143,78 @@ function TokensPage() {
           </Card>
         ) : null}
 
-        <div className="tblwrap">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th>Prefix</th>
-                <th>Scope</th>
-                <th>Created</th>
-                <th>Last used</th>
-                <th>Expires</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {(tokens.data ?? []).map((t) => {
-                const d = DISPLAY[t.name];
-                const armed = armedId === t.id;
-                return (
-                  <tr key={t.id}>
-                    <td className="mono text-11p5">{t.name}</td>
-                    <td className="mono text-11 text-ink3">{t.prefix}</td>
-                    <td>{d?.scope ?? <Pill tone="mut">{t.scope}</Pill>}</td>
-                    <td className="text-ink2">{d?.created ?? "—"}</td>
-                    <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
-                    <td className="text-ink2">{d?.expires ?? "—"}</td>
-                    <td className="text-right">
-                      <Btn
-                        variant="dgr"
-                        onClick={() => onRevoke(t.id, t.name)}
-                        disabled={revokeToken.isPending}
-                        disabledReason="Revoking…"
-                      >
-                        {armed ? "Confirm revoke" : "Revoke"}
-                      </Btn>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        {tokens.isError ? (
+          <ApiFailureCard
+            title="Personal tokens didn't load"
+            error={tokens.error}
+            requestLine="GET /me/tokens"
+            onRetry={() => tokens.refetch()}
+          />
+        ) : isEmpty ? (
+          <EmptyState
+            compact
+            icon="s-key"
+            title="No personal tokens yet"
+            meaning={
+              <>
+                tokens act as you — they carry your roles, scoped and expiring, and die with your
+                membership; the secret is shown once
+              </>
+            }
+            cta={
+              <Btn variant="p" onClick={() => setCreateOpen(true)}>
+                Create token (U7)
+              </Btn>
+            }
+            cli="steloit token create"
+          />
+        ) : (
+          <div className="tblwrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Prefix</th>
+                  <th>Scope</th>
+                  <th>Created</th>
+                  <th>Last used</th>
+                  <th>Expires</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {tokens.isPending ? (
+                  <SkeletonRows cols={7} />
+                ) : (
+                  (tokens.data ?? []).map((t) => {
+                    const d = DISPLAY[t.name];
+                    const armed = armedId === t.id;
+                    return (
+                      <tr key={t.id}>
+                        <td className="mono text-11p5">{t.name}</td>
+                        <td className="mono text-11 text-ink3">{t.prefix}</td>
+                        <td>{d?.scope ?? <Pill tone="mut">{t.scope}</Pill>}</td>
+                        <td className="text-ink2">{d?.created ?? "—"}</td>
+                        <td className="text-ink2">{d?.lastUsed ?? "—"}</td>
+                        <td className="text-ink2">{d?.expires ?? "—"}</td>
+                        <td className="text-right">
+                          <Btn
+                            variant="dgr"
+                            onClick={() => onRevoke(t.id, t.name)}
+                            disabled={revokeToken.isPending}
+                            disabledReason="Revoking…"
+                          >
+                            {armed ? "Confirm revoke" : "Revoke"}
+                          </Btn>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <p className="max-w-[640px] text-11 leading-relaxed text-ink3">
           Shown once, hash stored — same contract as org API keys (G8), different identity: these

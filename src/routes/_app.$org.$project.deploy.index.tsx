@@ -4,9 +4,12 @@ import { Pghead } from "@/app/shell/pghead";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Dot, Pill } from "@/design-system/pill";
+import { Skeleton, SkeletonRows } from "@/design-system/skeleton";
 import { useRollback } from "@/features/deploy/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useDeployments } from "@/features/services/hooks";
 import type { Deployment } from "@/lib/api";
 
@@ -59,6 +62,12 @@ function DeploymentsPage() {
   const [armed, setArmed] = useState(false);
 
   const rows = [...(deployments.data ?? [])].sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the lane + history. The promotion lane and the
+  // staging rows are frame-fixed canon for a project that deploys — a
+  // zero-deploy project's DP1 has nothing to promote, so they live only in
+  // the populated branch (and pending shows their shape, not their claims).
+  const isEmpty = deployments.isSuccess && rows.length === 0;
 
   const action = (dep: Deployment): ReactNode => {
     switch (dep.number) {
@@ -109,108 +118,146 @@ function DeploymentsPage() {
           <Copybit>steloit deploy --env staging</Copybit>
         </Pghead>
 
-        <Card className="flex flex-col gap-3 p-4">
-          <Eyebrow>
-            Promotion lane — same image, next environment's config, progressive rollout with gates
-          </Eyebrow>
-          <div className="flex items-center gap-4">
-            <Card className="flex-1 bg-surface2 p-3">
-              <div className="flex items-center gap-2">
-                <Dot tone="ok" />
-                <b className="text-12p5">staging</b>
-                <span className="mono ml-auto text-12">#143</span>
-              </div>
-              <div className="mt-1.5 text-11 text-ink3">
-                fix/orders-query · checks 4/4 ✓ · soaked 9 min
-              </div>
-            </Card>
-            <div className="flex flex-col items-center gap-1.5">
-              <Link
-                to="/$org/$project/deploy/$dep"
-                params={{ org, project, dep: "dep_143" }}
-                search={{ env }}
-              >
-                <Btn variant="p">Promoting →</Btn>
-              </Link>
-              <span className="mono text-10p5 text-prov">canary 33% · gates healthy</span>
-            </div>
-            <Card className="flex-1 bg-surface2 p-3">
-              <div className="flex items-center gap-2">
-                <Dot tone="warn" />
-                <b className="text-12p5">production</b>
-                <span className="mono ml-auto text-12">#142 → #143</span>
-              </div>
-              <div className="mt-1.5 text-11 text-ink3">
-                #142 live · p95 alert open · #143 carries the index fix
-              </div>
-            </Card>
-          </div>
-        </Card>
+        {deployments.isError ? (
+          <ApiFailureCard
+            title="Deployments didn't load"
+            error={deployments.error}
+            requestLine={`GET /envs/${env}/deployments`}
+            onRetry={() => deployments.refetch()}
+          />
+        ) : isEmpty ? (
+          <EmptyState
+            compact
+            icon="s-deploy"
+            title="No deployments yet"
+            meaning={
+              <>
+                the first git push creates #1 — every push becomes an immutable release, promoted
+                through environments with gates
+              </>
+            }
+            cli="git push steloit main"
+          />
+        ) : (
+          <>
+            {deployments.isPending ? (
+              <Skeleton className="h-[118px]" />
+            ) : (
+              <Card className="flex flex-col gap-3 p-4">
+                <Eyebrow>
+                  Promotion lane — same image, next environment's config, progressive rollout with
+                  gates
+                </Eyebrow>
+                <div className="flex items-center gap-4">
+                  <Card className="flex-1 bg-surface2 p-3">
+                    <div className="flex items-center gap-2">
+                      <Dot tone="ok" />
+                      <b className="text-12p5">staging</b>
+                      <span className="mono ml-auto text-12">#143</span>
+                    </div>
+                    <div className="mt-1.5 text-11 text-ink3">
+                      fix/orders-query · checks 4/4 ✓ · soaked 9 min
+                    </div>
+                  </Card>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Link
+                      to="/$org/$project/deploy/$dep"
+                      params={{ org, project, dep: "dep_143" }}
+                      search={{ env }}
+                    >
+                      <Btn variant="p">Promoting →</Btn>
+                    </Link>
+                    <span className="mono text-10p5 text-prov">canary 33% · gates healthy</span>
+                  </div>
+                  <Card className="flex-1 bg-surface2 p-3">
+                    <div className="flex items-center gap-2">
+                      <Dot tone="warn" />
+                      <b className="text-12p5">production</b>
+                      <span className="mono ml-auto text-12">#142 → #143</span>
+                    </div>
+                    <div className="mt-1.5 text-11 text-ink3">
+                      #142 live · p95 alert open · #143 carries the index fix
+                    </div>
+                  </Card>
+                </div>
+              </Card>
+            )}
 
-        <div className="tblwrap">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Deploy</th>
-                <th>Change</th>
-                <th>Env</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>By</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((dep) => {
-                const display = dep.number !== undefined ? DISPLAY[dep.number] : undefined;
-                return (
-                  <tr key={dep.id} className={display?.highlight ? "bg-steel-tint" : undefined}>
-                    <td className="mono">#{dep.number}</td>
-                    <td>{display?.change(dep) ?? dep.git_sha}</td>
-                    <td>production</td>
-                    <td>{display?.status ?? dep.state}</td>
-                    <td className="mono">{display?.duration}</td>
-                    <td>{display?.by ?? dep.actor}</td>
-                    <td className="text-right">{action(dep)}</td>
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Deploy</th>
+                    <th>Change</th>
+                    <th>Env</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>By</th>
+                    <th />
                   </tr>
-                );
-              })}
-              {/* Staging rows are frame-fixed (DP1 gallery) — fixtures only
-                  define production deployments, so these two render static. */}
-              <tr>
-                <td className="mono">#143</td>
-                <td>fix/orders-query</td>
-                <td>staging</td>
-                <td>
-                  <Pill tone="ok">live · 14:40</Pill>
-                </td>
-                <td className="mono">41 s</td>
-                <td>priya</td>
-                <td />
-              </tr>
-              <tr>
-                <td className="mono">#139</td>
-                <td>checkout-retry</td>
-                <td>staging</td>
-                <td>
-                  <Pill tone="ok">live · Jul 3</Pill>
-                </td>
-                <td className="mono">47 s</td>
-                <td>marco</td>
-                <td />
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {deployments.isPending ? (
+                    <SkeletonRows cols={7} rows={5} />
+                  ) : (
+                    <>
+                      {rows.map((dep) => {
+                        const display = dep.number !== undefined ? DISPLAY[dep.number] : undefined;
+                        return (
+                          <tr
+                            key={dep.id}
+                            className={display?.highlight ? "bg-steel-tint" : undefined}
+                          >
+                            <td className="mono">#{dep.number}</td>
+                            <td>{display?.change(dep) ?? dep.git_sha}</td>
+                            <td>production</td>
+                            <td>{display?.status ?? dep.state}</td>
+                            <td className="mono">{display?.duration}</td>
+                            <td>{display?.by ?? dep.actor}</td>
+                            <td className="text-right">{action(dep)}</td>
+                          </tr>
+                        );
+                      })}
+                      {/* Staging rows are frame-fixed (DP1 gallery) — fixtures only
+                          define production deployments, so these two render static. */}
+                      <tr>
+                        <td className="mono">#143</td>
+                        <td>fix/orders-query</td>
+                        <td>staging</td>
+                        <td>
+                          <Pill tone="ok">live · 14:40</Pill>
+                        </td>
+                        <td className="mono">41 s</td>
+                        <td>priya</td>
+                        <td />
+                      </tr>
+                      <tr>
+                        <td className="mono">#139</td>
+                        <td>checkout-retry</td>
+                        <td>staging</td>
+                        <td>
+                          <Pill tone="ok">live · Jul 3</Pill>
+                        </td>
+                        <td className="mono">47 s</td>
+                        <td>marco</td>
+                        <td />
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-        <div className="flex flex-col gap-1.5 text-11 leading-relaxed text-ink3">
-          <p>
-            Rollback = redeploy of the previous image, same gates, &lt; 60 s. Database migrations
-            don't auto-revert — expand-contract keeps old code compatible, and each migration states
-            its reverse.
-          </p>
-          <p>Every row is an ◆ event on every Observe chart.</p>
-        </div>
+            <div className="flex flex-col gap-1.5 text-11 leading-relaxed text-ink3">
+              <p>
+                Rollback = redeploy of the previous image, same gates, &lt; 60 s. Database
+                migrations don't auto-revert — expand-contract keeps old code compatible, and each
+                migration states its reverse.
+              </p>
+              <p>Every row is an ◆ event on every Observe chart.</p>
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

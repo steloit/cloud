@@ -2,8 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
+import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Dot, type DotTone, Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import { useServices } from "@/features/services/hooks";
@@ -46,23 +49,57 @@ function HealthPage() {
       <div className="pgpad !overflow-y-auto">
         <ObserveChrome env={env} lens="Health" />
 
-        <div className="grid grid-cols-7 gap-3">
-          {(services.data ?? []).map((s) => {
-            const line = HEALTH_LINES[s.name];
-            return (
-              <Card key={s.id} className="flex flex-col gap-1 p-3">
-                <div className="flex items-center gap-1.5 text-12 font-semibold">
-                  <Dot tone={line?.tone ?? "ok"} />
-                  {s.name}
-                </div>
-                <div className={cn("text-11p5", line?.tone === "warn" && "text-warn")}>
-                  {line?.l1 ?? s.product}
-                </div>
-                <div className="text-10p5 text-ink3">{line?.l2 ?? s.status}</div>
+        {/* Four-state grammar (16-qa) on the scoreboard — the SLO rows, timeline
+            and firing card below are frame-fixed canon and stay regardless. */}
+        {services.isError ? (
+          <ApiFailureCard
+            title="Services didn't load"
+            error={services.error}
+            requestLine={`GET /envs/${env}/services`}
+            onRetry={() => services.refetch()}
+          />
+        ) : services.isPending ? (
+          <div className="grid grid-cols-7 gap-3">
+            {Array.from({ length: 7 }, (_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: placeholder cards have no identity
+              <Card key={i} className="flex flex-col gap-1 p-3">
+                <Skeleton className="h-3 w-[70%]" />
+                <Skeleton className="h-3 w-[85%]" />
+                <Skeleton className="h-2.5 w-[55%]" />
               </Card>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (services.data ?? []).length === 0 ? (
+          <EmptyState
+            compact
+            icon="s-pulse"
+            title="No services in this environment"
+            meaning={
+              <>
+                the scoreboard fills as services land here — one live card per service: latency,
+                errors, saturation, on the shared timeline
+              </>
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-7 gap-3">
+            {(services.data ?? []).map((s) => {
+              const line = HEALTH_LINES[s.name];
+              return (
+                <Card key={s.id} className="flex flex-col gap-1 p-3">
+                  <div className="flex items-center gap-1.5 text-12 font-semibold">
+                    <Dot tone={line?.tone ?? "ok"} />
+                    {s.name}
+                  </div>
+                  <div className={cn("text-11p5", line?.tone === "warn" && "text-warn")}>
+                    {line?.l1 ?? s.product}
+                  </div>
+                  <div className="text-10p5 text-ink3">{line?.l2 ?? s.status}</div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
 
         <div className="flex gap-3.5">
           <div className="flex flex-1 flex-col gap-3.5">

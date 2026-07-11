@@ -3,6 +3,8 @@ import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
+import { SkeletonLines } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useTrace } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import { cn } from "@/lib/utils";
@@ -111,37 +113,53 @@ function TracesPage() {
                 </Link>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                {(trace.data?.spans ?? []).map((span) => {
-                  const isRoot = span.parent_id == null;
-                  const left = ((span.start_ms ?? 0) / total) * 100;
-                  const width = Math.max(((span.duration_ms ?? 0) / total) * 100, 0.8);
-                  const isDbMain = span.service === "db-main";
-                  return (
-                    <div key={span.id} className="flex items-center gap-2.5 text-10p5">
-                      <span className="mono w-[210px] shrink-0 truncate text-ink2">
-                        {span.service} · {span.name}
-                      </span>
-                      <span className="relative h-3.5 flex-1 rounded-sm bg-[var(--mono-bg)]">
+              {/* Four-state grammar: the waterfall rides the trace query — the
+                  header line above is frame-fixed (O6) and stays. */}
+              {trace.isPending ? (
+                <SkeletonLines lines={5} />
+              ) : trace.isError ? (
+                <ApiFailureCard
+                  title="Trace didn't load"
+                  error={trace.error}
+                  requestLine={`GET /envs/${env}/traces/tr_8814`}
+                  onRetry={() => trace.refetch()}
+                />
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {(trace.data?.spans ?? []).map((span) => {
+                    const isRoot = span.parent_id == null;
+                    const left = ((span.start_ms ?? 0) / total) * 100;
+                    const width = Math.max(((span.duration_ms ?? 0) / total) * 100, 0.8);
+                    const isDbMain = span.service === "db-main";
+                    return (
+                      <div key={span.id} className="flex items-center gap-2.5 text-10p5">
+                        <span className="mono w-[210px] shrink-0 truncate text-ink2">
+                          {span.service} · {span.name}
+                        </span>
+                        <span className="relative h-3.5 flex-1 rounded-sm bg-[var(--mono-bg)]">
+                          <span
+                            className="absolute top-0 h-full rounded-sm"
+                            style={{
+                              left: `${left}%`,
+                              width: `${width}%`,
+                              background: spanColor(span.service, isRoot),
+                              opacity: 0.85,
+                            }}
+                          />
+                        </span>
                         <span
-                          className="absolute top-0 h-full rounded-sm"
-                          style={{
-                            left: `${left}%`,
-                            width: `${width}%`,
-                            background: spanColor(span.service, isRoot),
-                            opacity: 0.85,
-                          }}
-                        />
-                      </span>
-                      <span
-                        className={cn("mono w-[90px] shrink-0 text-right", isDbMain && "text-warn")}
-                      >
-                        {span.duration_ms} ms{isDbMain ? " · 79%" : ""}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                          className={cn(
+                            "mono w-[90px] shrink-0 text-right",
+                            isDbMain && "text-warn",
+                          )}
+                        >
+                          {span.duration_ms} ms{isDbMain ? " · 79%" : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </Card>
 
             <Card className="border-warn/40 flex flex-col gap-2.5 p-4">

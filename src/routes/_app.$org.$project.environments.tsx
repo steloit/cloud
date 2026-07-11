@@ -4,8 +4,11 @@ import { Pghead } from "@/app/shell/pghead";
 import { PRODUCT_ICON } from "@/app/shell/rail";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyRow } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Dot } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useEnvironments } from "@/features/projects/hooks";
 import { useServices } from "@/features/services/hooks";
 import type { Product } from "@/lib/api";
@@ -113,41 +116,71 @@ function EnvironmentsPage() {
           </Btn>
         </Pghead>
 
-        <div className="tblwrap">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Environment</th>
-                {products.map((p) => (
-                  <th key={p}>
-                    <Icon id={PRODUCT_ICON[p]} className="h-3.5 w-3.5" />
-                  </th>
-                ))}
-                <th>Cost / mo</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {(environments.data ?? []).map((e) => (
-                <tr key={e.id}>
-                  <td>
-                    <b className="mono text-12p5">{e.name}</b>
-                    <span className="ml-2 text-10p5 text-ink3">{ENV_NOTE[e.name] ?? ""}</span>
-                  </td>
+        {/* Four-state grammar (16-qa) on the matrix — both queries feed it
+            (environments are the rows, services the columns), so pending and
+            error group across the pair. An empty env list is unreachable in
+            canon — a project is born with production — but the row states it
+            honestly rather than rendering a headerless void. */}
+        {environments.isError || services.isError ? (
+          <ApiFailureCard
+            title="The parity matrix didn't load"
+            error={environments.error ?? services.error}
+            requestLine={`GET /projects/${project}/envs`}
+            onRetry={() => {
+              environments.refetch();
+              services.refetch();
+            }}
+          />
+        ) : (
+          <div className="tblwrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Environment</th>
                   {products.map((p) => (
-                    <td key={p}>{cell(MATRIX[e.name]?.[p])}</td>
+                    <th key={p}>
+                      <Icon id={PRODUCT_ICON[p]} className="h-3.5 w-3.5" />
+                    </th>
                   ))}
-                  <td className="mono">{fmtMoney(e.monthly_cost_cents ?? 0)}</td>
-                  <td className="text-right">
-                    <Link to="/$org/$project" params={{ org, project }} search={{ env: e.name }}>
-                      <Btn variant="gh">Open →</Btn>
-                    </Link>
-                  </td>
+                  <th>Cost / mo</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {environments.isPending || services.isPending ? (
+                  <SkeletonRows cols={products.length + 3} />
+                ) : (environments.data ?? []).length === 0 ? (
+                  <EmptyRow cols={products.length + 3}>
+                    No environments — a project is born with production, so this state is
+                    unreachable in canon
+                  </EmptyRow>
+                ) : (
+                  (environments.data ?? []).map((e) => (
+                    <tr key={e.id}>
+                      <td>
+                        <b className="mono text-12p5">{e.name}</b>
+                        <span className="ml-2 text-10p5 text-ink3">{ENV_NOTE[e.name] ?? ""}</span>
+                      </td>
+                      {products.map((p) => (
+                        <td key={p}>{cell(MATRIX[e.name]?.[p])}</td>
+                      ))}
+                      <td className="mono">{fmtMoney(e.monthly_cost_cents ?? 0)}</td>
+                      <td className="text-right">
+                        <Link
+                          to="/$org/$project"
+                          params={{ org, project }}
+                          search={{ env: e.name }}
+                        >
+                          <Btn variant="gh">Open →</Btn>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <Card className="flex flex-col gap-2.5 p-4">
           <div className="flex items-center gap-2 text-12 font-semibold">

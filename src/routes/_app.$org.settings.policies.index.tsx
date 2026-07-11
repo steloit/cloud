@@ -4,7 +4,10 @@ import { SnavSettings } from "@/app/shell/snav-settings";
 import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { EmptyState } from "@/design-system/empty-state";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import { usePolicies } from "@/features/settings/hooks";
 
@@ -45,6 +48,10 @@ function OrgPoliciesPage() {
   const policies = usePolicies(org);
   const orgPolicies = (policies.data ?? []).filter((p) => p.scope?.project_id == null);
 
+  // Four-state grammar (16-qa): pending → skeleton, error → failure card,
+  // empty → EmptyState, else the table (canon carries 6 org policies).
+  const isEmpty = policies.isSuccess && orgPolicies.length === 0;
+
   return (
     <>
       <SnavSettings
@@ -79,35 +86,66 @@ function OrgPoliciesPage() {
             </span>
           </Banner>
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Policy</th>
-                  <th>Rule</th>
-                  <th>Scope</th>
-                  <th>Enforcement</th>
-                  <th>Last changed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orgPolicies.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <span className="flex items-center gap-2">
-                        <span className="mono text-11p5">{p.key}</span>
-                        {p.key === "ai-assistant" ? <Pill tone="ai">AI</Pill> : null}
-                      </span>
-                    </td>
-                    <td className="text-ink2">{p.description}</td>
-                    <td className="text-ink2">{SCOPE_LABELS[p.key] ?? "organization"}</td>
-                    <td>{enforcementPill(p.enforcement)}</td>
-                    <td className="mono text-11 text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
+          {policies.isError ? (
+            <ApiFailureCard
+              title="Policies didn't load"
+              error={policies.error}
+              requestLine={`GET /orgs/${org}/policies`}
+              onRetry={() => policies.refetch()}
+            />
+          ) : isEmpty ? (
+            <EmptyState
+              compact
+              icon="s-shield"
+              title="No policies yet"
+              meaning={
+                <>
+                  policies gate actions before they run — approval is a design primitive, not a
+                  favor; the first rule turns the platform's defaults into your rulebook
+                </>
+              }
+              cta={
+                <Link to="/$org/settings/policies/new" params={{ org }}>
+                  <Btn variant="p">New policy</Btn>
+                </Link>
+              }
+              cli="steloit policy create allowed-regions"
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Policy</th>
+                    <th>Rule</th>
+                    <th>Scope</th>
+                    <th>Enforcement</th>
+                    <th>Last changed</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {policies.isPending ? (
+                    <SkeletonRows cols={5} />
+                  ) : (
+                    orgPolicies.map((p) => (
+                      <tr key={p.id}>
+                        <td>
+                          <span className="flex items-center gap-2">
+                            <span className="mono text-11p5">{p.key}</span>
+                            {p.key === "ai-assistant" ? <Pill tone="ai">AI</Pill> : null}
+                          </span>
+                        </td>
+                        <td className="text-ink2">{p.description}</td>
+                        <td className="text-ink2">{SCOPE_LABELS[p.key] ?? "organization"}</td>
+                        <td>{enforcementPill(p.enforcement)}</td>
+                        <td className="mono text-11 text-ink3">{LAST_CHANGED[p.key] ?? "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <Card className="flex flex-col gap-2.5 border-assist/40 p-4">
             <div>

@@ -7,6 +7,8 @@ import { type DeployMarker, MetricChart, type SeriesPoint } from "@/design-syste
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon } from "@/design-system/icon";
 import { Dot, Pill, Stlab } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { queryMetricsOptions } from "@/lib/api";
 
 /**
@@ -139,13 +141,27 @@ function RolloutPage() {
                   <span className="text-ink3">—</span> #142 baseline
                 </span>
               </div>
-              <MetricChart
-                series={series}
-                threshold={800}
-                markers={markers}
-                unit="ms"
-                tone="warn"
-              />
+              {/* Four-state grammar (16-qa) on the only query-backed region of
+                  DP2 — the chart; no empty state, the canon telemetry always
+                  has the p95 series once it loads. */}
+              {metrics.isPending ? (
+                <Skeleton className="h-[120px]" />
+              ) : metrics.isError ? (
+                <ApiFailureCard
+                  title="Canary telemetry didn't load"
+                  error={metrics.error}
+                  requestLine={`GET /envs/${env}/metrics · service:api metric:p95`}
+                  onRetry={() => metrics.refetch()}
+                />
+              ) : (
+                <MetricChart
+                  series={series}
+                  threshold={800}
+                  markers={markers}
+                  unit="ms"
+                  tone="warn"
+                />
+              )}
               <p className="text-11 leading-relaxed text-ink3">
                 The fix visible before it's fully shipped — idx_orders_customer_created (proposal
                 prp_7c31a2, applied as a reversible migration).

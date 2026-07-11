@@ -5,6 +5,7 @@ import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
 import { Copybit } from "@/design-system/copybit";
 import { Pill } from "@/design-system/pill";
+import { Skeleton } from "@/design-system/skeleton";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
@@ -32,6 +33,9 @@ function MetricsPage() {
   const errorRate = useMetrics(env, "service:api metric:error_rate");
   const queueDepth = useMetrics(env, "service:jobs metric:queue_depth");
   const connections = useMetrics(env, "service:db-main metric:connections");
+
+  const smallPanes = [errorRate, queueDepth, connections];
+  const smallPaneError = smallPanes.find((pane) => pane.isError);
 
   const linkParams = { org, project };
   const search = { env };
@@ -111,32 +115,65 @@ function MetricsPage() {
               </div>
             </Card>
 
-            <div className="grid grid-cols-3 gap-3.5">
-              <Card className="flex flex-col gap-1.5 p-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-11p5 font-medium text-ink2">Error rate · all services</span>
-                  <span className="flex-1" />
-                  <span className="mono text-12">0.4%</span>
-                </div>
-                <MetricChart series={toSeries(errorRate.data)} tone="steel" size="sm" />
-              </Card>
-              <Card className="flex flex-col gap-1.5 p-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-11p5 font-medium text-ink2">jobs · queue depth</span>
-                  <span className="flex-1" />
-                  <span className="mono text-12 text-warn">12 ▲</span>
-                </div>
-                <MetricChart series={toSeries(queueDepth.data)} tone="warn" size="sm" />
-              </Card>
-              <Card className="flex flex-col gap-1.5 p-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-11p5 font-medium text-ink2">db-main · connections</span>
-                  <span className="flex-1" />
-                  <span className="mono text-12 text-warn">192/200</span>
-                </div>
-                <MetricChart series={toSeries(connections.data)} tone="warn" size="sm" />
-              </Card>
-            </div>
+            {/* The three small panes hit the same /metrics endpoint as the hero,
+                so they fail together — one shared failure card for the strip
+                (four-state grammar, 16-qa); pending panes show a chart-height
+                skeleton, never a blank strip. */}
+            {smallPaneError ? (
+              <ApiFailureCard
+                title="The small panes didn't load"
+                error={smallPaneError.error}
+                requestLine={`GET /envs/${env}/metrics`}
+                onRetry={() => {
+                  for (const pane of smallPanes) if (pane.isError) pane.refetch();
+                }}
+              />
+            ) : (
+              <div className="grid grid-cols-3 gap-3.5">
+                <Card className="flex flex-col gap-1.5 p-3.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-11p5 font-medium text-ink2">
+                      Error rate · all services
+                    </span>
+                    <span className="flex-1" />
+                    <span className="mono text-12">{errorRate.isPending ? "…" : "0.4%"}</span>
+                  </div>
+                  {errorRate.isPending ? (
+                    <Skeleton className="h-20" />
+                  ) : (
+                    <MetricChart series={toSeries(errorRate.data)} tone="steel" size="sm" />
+                  )}
+                </Card>
+                <Card className="flex flex-col gap-1.5 p-3.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-11p5 font-medium text-ink2">jobs · queue depth</span>
+                    <span className="flex-1" />
+                    <span className="mono text-12 text-warn">
+                      {queueDepth.isPending ? "…" : "12 ▲"}
+                    </span>
+                  </div>
+                  {queueDepth.isPending ? (
+                    <Skeleton className="h-20" />
+                  ) : (
+                    <MetricChart series={toSeries(queueDepth.data)} tone="warn" size="sm" />
+                  )}
+                </Card>
+                <Card className="flex flex-col gap-1.5 p-3.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-11p5 font-medium text-ink2">db-main · connections</span>
+                    <span className="flex-1" />
+                    <span className="mono text-12 text-warn">
+                      {connections.isPending ? "…" : "192/200"}
+                    </span>
+                  </div>
+                  {connections.isPending ? (
+                    <Skeleton className="h-20" />
+                  ) : (
+                    <MetricChart series={toSeries(connections.data)} tone="warn" size="sm" />
+                  )}
+                </Card>
+              </div>
+            )}
 
             <div className="flex flex-col gap-1 text-10p5 text-ink3">
               <span>Every pane is a query — ⋯ copies it for CLI and alerts.</span>

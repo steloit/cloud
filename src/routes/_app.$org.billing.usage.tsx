@@ -6,8 +6,11 @@ import { Banner } from "@/design-system/banner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
+import { EmptyRow } from "@/design-system/empty-state";
 import { Pill } from "@/design-system/pill";
+import { SkeletonRows } from "@/design-system/skeleton";
 import { planLabel, useUsage } from "@/features/billing/hooks";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useOrgs } from "@/features/org/hooks";
 import type { UsageReport } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
@@ -198,72 +201,99 @@ function UsagePage() {
             </Card>
           ) : null}
 
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Meter</th>
-                  <th>Included in Business</th>
-                  <th>Used · Jul 1–6</th>
-                  <th>Unit price</th>
-                  <th>MTD</th>
-                </tr>
-              </thead>
-              <tbody>
-                {meters.map((m) => {
-                  const key = m.meter ?? "";
-                  const d = METER_DISPLAY[key];
-                  const branch =
-                    key === "db_compute_hours"
-                      ? ((m.detail?.[0] ?? undefined) as BranchDetail | undefined)
-                      : undefined;
-                  return (
-                    <Fragment key={key}>
+          {/* Four-state grammar (16-qa) on the meters region: pending →
+              skeleton, error → failure card, empty → EmptyRow (canon always
+              carries 7 meters — the empty is for a brand-new org's first
+              minutes), else the table. */}
+          {usage.isError ? (
+            <ApiFailureCard
+              title="Usage didn't load"
+              error={usage.error}
+              requestLine={`GET /orgs/${org}/billing/usage`}
+              onRetry={() => usage.refetch()}
+            />
+          ) : (
+            <div className="tblwrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Meter</th>
+                    <th>Included in Business</th>
+                    <th>Used · Jul 1–6</th>
+                    <th>Unit price</th>
+                    <th>MTD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.isPending ? (
+                    <SkeletonRows cols={5} rows={7} />
+                  ) : meters.length === 0 ? (
+                    <EmptyRow cols={5}>
+                      No usage this cycle yet — meters appear within ~5 min of first consumption
+                    </EmptyRow>
+                  ) : (
+                    <>
+                      {meters.map((m) => {
+                        const key = m.meter ?? "";
+                        const d = METER_DISPLAY[key];
+                        const branch =
+                          key === "db_compute_hours"
+                            ? ((m.detail?.[0] ?? undefined) as BranchDetail | undefined)
+                            : undefined;
+                        return (
+                          <Fragment key={key}>
+                            <tr>
+                              <td>
+                                <div className="font-medium">{d?.label ?? key}</div>
+                                {d?.sub ? (
+                                  <div className="mt-0.5 text-10p5 text-ink3">{d.sub}</div>
+                                ) : null}
+                              </td>
+                              <td className="mono text-ink2">
+                                {d ? d.included(m) : (m.included ?? 0)}
+                              </td>
+                              <td className="mono">{d ? d.used(m) : (m.used ?? 0)}</td>
+                              <td className="mono text-ink2">{m.overage_price ?? ""}</td>
+                              <td>
+                                <span className="flex items-center gap-2">
+                                  <span className="mono">{fmtMoney(m.overage_cents ?? 0)}</span>
+                                  {key === "egress_gb" ? <Pill tone="ok">within plan</Pill> : null}
+                                </span>
+                              </td>
+                            </tr>
+                            {branch ? (
+                              <tr>
+                                <td className="pl-7">
+                                  <span className="flex items-center gap-2 text-12 text-ink2">
+                                    ↳ {branch.label}
+                                    {branch.note ? <Pill tone="mut">{branch.note}</Pill> : null}
+                                  </span>
+                                </td>
+                                <td />
+                                <td className="mono text-ink2">{branch.used_label}</td>
+                                <td className="mono text-ink2">{m.overage_price ?? ""}</td>
+                                <td className="mono text-ink2">
+                                  {fmtMoney(branch.mtd_cents ?? 0)}
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })}
                       <tr>
-                        <td>
-                          <div className="font-medium">{d?.label ?? key}</div>
-                          {d?.sub ? (
-                            <div className="mt-0.5 text-10p5 text-ink3">{d.sub}</div>
-                          ) : null}
-                        </td>
-                        <td className="mono text-ink2">{d ? d.included(m) : (m.included ?? 0)}</td>
-                        <td className="mono">{d ? d.used(m) : (m.used ?? 0)}</td>
-                        <td className="mono text-ink2">{m.overage_price ?? ""}</td>
-                        <td>
-                          <span className="flex items-center gap-2">
-                            <span className="mono">{fmtMoney(m.overage_cents ?? 0)}</span>
-                            {key === "egress_gb" ? <Pill tone="ok">within plan</Pill> : null}
-                          </span>
-                        </td>
-                      </tr>
-                      {branch ? (
-                        <tr>
-                          <td className="pl-7">
-                            <span className="flex items-center gap-2 text-12 text-ink2">
-                              ↳ {branch.label}
-                              {branch.note ? <Pill tone="mut">{branch.note}</Pill> : null}
-                            </span>
-                          </td>
-                          <td />
-                          <td className="mono text-ink2">{branch.used_label}</td>
-                          <td className="mono text-ink2">{m.overage_price ?? ""}</td>
-                          <td className="mono text-ink2">{fmtMoney(branch.mtd_cents ?? 0)}</td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-                <tr>
-                  <td className="font-semibold">Resources · month to date</td>
-                  <td colSpan={3} />
-                  {/* Canon resources-MTD is $72.42 (B1: mtd − plan fee); the fixture
+                        <td className="font-semibold">Resources · month to date</td>
+                        <td colSpan={3} />
+                        {/* Canon resources-MTD is $72.42 (B1: mtd − plan fee); the fixture
                       meters sum to $62.42 — frame/fixture arithmetic gap, rendered as
                       the canon rollup and flagged as a finding. */}
-                  <td className="mono font-semibold">$72.42</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                        <td className="mono font-semibold">$72.42</td>
+                      </tr>
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1 text-11 text-ink3">
             <p>
