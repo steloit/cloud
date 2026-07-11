@@ -6,6 +6,7 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Pill } from "@/design-system/pill";
 import { requireSession } from "@/features/auth/guards";
 import { OnboardingCard, OnboardingShell } from "@/features/onboarding/onboarding-shell";
+import { markWelcomePending } from "@/features/onboarding/welcome-widget";
 
 /** A9 · Onboarding step 4 — connect. All optional — nothing here gates anything. */
 function OnboardingConnectPage() {
@@ -53,7 +54,10 @@ function OnboardingConnectPage() {
         <Btn
           variant="p"
           className="w-full justify-center"
-          onClick={() => navigate({ to: "/$org", params: { org } })}
+          onClick={() => {
+            markWelcomePending();
+            navigate({ to: "/$org", params: { org } });
+          }}
         >
           Open {org}/{project} →
         </Btn>

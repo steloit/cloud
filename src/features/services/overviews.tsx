@@ -655,3 +655,48 @@ export function FreshPostgresOverview({ svc, projectTotalCents, consumers, nameO
     </>
   );
 }
+
+// --------------------------------------------------------------------------
+// M1 · The adaptive rail, explained on internal-tools' tools-db overview:
+// the rail is the project's shape — two products, so it shows exactly two.
+// --------------------------------------------------------------------------
+export function InternalToolsDbOverview({ svc, org, project }: OverviewCtx) {
+  return (
+    <>
+      <VitalsStrip
+        cells={[
+          { label: "Connections", value: "14/100", note: "worker binding · idle" },
+          { label: "Queries / sec", value: "64", note: "→ steady" },
+          { label: "Storage", value: "2.1 GB", note: "→ autogrow on" },
+          {
+            label: "Cost",
+            mono: true,
+            value: `${fmtMoney(svc.monthly_estimate_cents ?? 0)}/mo`,
+            note: "compute lives outside Steloit",
+          },
+          { label: "Status", value: "ready", note: "bindings still work" },
+        ]}
+      />
+      <RightNow mood="Activity">
+        <div className="flex flex-col gap-2">
+          <b className="text-[12.5px]">Why the rail is short here</b>
+          <p className="text-[12px] leading-relaxed text-ink2">
+            This project uses{" "}
+            <b>PostgreSQL and Object Storage — so the rail shows exactly those two</b>, plus + to
+            grow. The rail is never a catalog of everything Steloit sells; it is the shape of{" "}
+            <i>this</i> application. No Valkey here, no Valkey icon — nothing to explain, nothing to
+            dismiss.
+          </p>
+          <div className="flex items-center gap-3">
+            <Link to="/$org/create" params={{ org }} search={{ env: "production" }}>
+              <button type="button" className="btn s">
+                + Add a product to this project
+              </button>
+            </Link>
+            <Copybit>{`steloit valkey create cache --project ${project}`}</Copybit>
+          </div>
+        </div>
+      </RightNow>
+    </>
+  );
+}

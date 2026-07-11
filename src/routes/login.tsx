@@ -27,10 +27,13 @@ function LoginPage() {
       setError("Passwords are at least 12 characters.");
       return;
     }
+    // Canon members carry their fixture roles — signing in as marco@acme.dev
+    // (developer) makes the E3 permission grammar reachable for real.
+    const role = email === "marco@acme.dev" || email === "asha@acme.dev" ? "developer" : "admin";
     signIn({
       email,
       name: email === "priya@acme.dev" ? "Priya Sharma" : localPartName(email),
-      role: "admin",
+      role,
     });
     navigate({ to: resolveReturnTo(returnTo) });
   };

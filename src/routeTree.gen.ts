@@ -56,6 +56,7 @@ import { Route as AppOrgBillingPlansRouteImport } from './routes/_app.$org.billi
 import { Route as AppOrgBillingPaymentRouteImport } from './routes/_app.$org.billing.payment'
 import { Route as AppOrgBillingOverviewRouteImport } from './routes/_app.$org.billing.overview'
 import { Route as AppOrgBillingInvoicesRouteImport } from './routes/_app.$org.billing.invoices'
+import { Route as AppOrgBillingConfirmRouteImport } from './routes/_app.$org.billing.confirm'
 import { Route as AppOrgAssistantInsightsRouteImport } from './routes/_app.$org.assistant.insights'
 import { Route as AppOrgAssistantCapabilitiesRouteImport } from './routes/_app.$org.assistant.capabilities'
 import { Route as AppOrgAssistantAskRouteImport } from './routes/_app.$org.assistant.ask'
@@ -66,6 +67,7 @@ import { Route as AppOrgProjectEnvironmentsRouteImport } from './routes/_app.$or
 import { Route as AppOrgProjectDeployRouteImport } from './routes/_app.$org.$project.deploy'
 import { Route as AppOrgSettingsPoliciesIndexRouteImport } from './routes/_app.$org.settings.policies.index'
 import { Route as AppOrgProjectDeployIndexRouteImport } from './routes/_app.$org.$project.deploy.index'
+import { Route as AppOrgSettingsTemplatesNewRouteImport } from './routes/_app.$org.settings.templates_.new'
 import { Route as AppOrgSettingsPoliciesNewRouteImport } from './routes/_app.$org.settings.policies.new'
 import { Route as AppOrgSettingsPoliciesAiAssistantRouteImport } from './routes/_app.$org.settings.policies.ai-assistant'
 import { Route as AppOrgProjectSvcServiceRouteImport } from './routes/_app.$org.$project.svc.$service'
@@ -342,6 +344,11 @@ const AppOrgBillingInvoicesRoute = AppOrgBillingInvoicesRouteImport.update({
   path: '/billing/invoices',
   getParentRoute: () => AppOrgRoute,
 } as any)
+const AppOrgBillingConfirmRoute = AppOrgBillingConfirmRouteImport.update({
+  id: '/billing/confirm',
+  path: '/billing/confirm',
+  getParentRoute: () => AppOrgRoute,
+} as any)
 const AppOrgAssistantInsightsRoute = AppOrgAssistantInsightsRouteImport.update({
   id: '/insights',
   path: '/insights',
@@ -395,6 +402,12 @@ const AppOrgProjectDeployIndexRoute =
     id: '/',
     path: '/',
     getParentRoute: () => AppOrgProjectDeployRoute,
+  } as any)
+const AppOrgSettingsTemplatesNewRoute =
+  AppOrgSettingsTemplatesNewRouteImport.update({
+    id: '/settings/templates_/new',
+    path: '/settings/templates/new',
+    getParentRoute: () => AppOrgRoute,
   } as any)
 const AppOrgSettingsPoliciesNewRoute =
   AppOrgSettingsPoliciesNewRouteImport.update({
@@ -650,6 +663,7 @@ export interface FileRoutesByFullPath {
   '/$org/assistant/ask': typeof AppOrgAssistantAskRoute
   '/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
   '/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
+  '/$org/billing/confirm': typeof AppOrgBillingConfirmRoute
   '/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -688,6 +702,7 @@ export interface FileRoutesByFullPath {
   '/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceRouteWithChildren
   '/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
+  '/$org/settings/templates/new': typeof AppOrgSettingsTemplatesNewRoute
   '/$org/$project/deploy/': typeof AppOrgProjectDeployIndexRoute
   '/$org/settings/policies/': typeof AppOrgSettingsPoliciesIndexRoute
   '/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
@@ -742,6 +757,7 @@ export interface FileRoutesByTo {
   '/$org/assistant/ask': typeof AppOrgAssistantAskRoute
   '/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
   '/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
+  '/$org/billing/confirm': typeof AppOrgBillingConfirmRoute
   '/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -779,6 +795,7 @@ export interface FileRoutesByTo {
   '/$org/$project/settings/policies': typeof AppOrgProjectSettingsPoliciesRoute
   '/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
+  '/$org/settings/templates/new': typeof AppOrgSettingsTemplatesNewRoute
   '/$org/$project/deploy': typeof AppOrgProjectDeployIndexRoute
   '/$org/settings/policies': typeof AppOrgSettingsPoliciesIndexRoute
   '/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
@@ -838,6 +855,7 @@ export interface FileRoutesById {
   '/_app/$org/assistant/ask': typeof AppOrgAssistantAskRoute
   '/_app/$org/assistant/capabilities': typeof AppOrgAssistantCapabilitiesRoute
   '/_app/$org/assistant/insights': typeof AppOrgAssistantInsightsRoute
+  '/_app/$org/billing/confirm': typeof AppOrgBillingConfirmRoute
   '/_app/$org/billing/invoices': typeof AppOrgBillingInvoicesRoute
   '/_app/$org/billing/overview': typeof AppOrgBillingOverviewRoute
   '/_app/$org/billing/payment': typeof AppOrgBillingPaymentRoute
@@ -876,6 +894,7 @@ export interface FileRoutesById {
   '/_app/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceRouteWithChildren
   '/_app/$org/settings/policies/ai-assistant': typeof AppOrgSettingsPoliciesAiAssistantRoute
   '/_app/$org/settings/policies/new': typeof AppOrgSettingsPoliciesNewRoute
+  '/_app/$org/settings/templates_/new': typeof AppOrgSettingsTemplatesNewRoute
   '/_app/$org/$project/deploy/': typeof AppOrgProjectDeployIndexRoute
   '/_app/$org/settings/policies/': typeof AppOrgSettingsPoliciesIndexRoute
   '/_app/$org/$project/svc/$service/ai': typeof AppOrgProjectSvcServiceAiRoute
@@ -935,6 +954,7 @@ export interface FileRouteTypes {
     | '/$org/assistant/ask'
     | '/$org/assistant/capabilities'
     | '/$org/assistant/insights'
+    | '/$org/billing/confirm'
     | '/$org/billing/invoices'
     | '/$org/billing/overview'
     | '/$org/billing/payment'
@@ -973,6 +993,7 @@ export interface FileRouteTypes {
     | '/$org/$project/svc/$service'
     | '/$org/settings/policies/ai-assistant'
     | '/$org/settings/policies/new'
+    | '/$org/settings/templates/new'
     | '/$org/$project/deploy/'
     | '/$org/settings/policies/'
     | '/$org/$project/svc/$service/ai'
@@ -1027,6 +1048,7 @@ export interface FileRouteTypes {
     | '/$org/assistant/ask'
     | '/$org/assistant/capabilities'
     | '/$org/assistant/insights'
+    | '/$org/billing/confirm'
     | '/$org/billing/invoices'
     | '/$org/billing/overview'
     | '/$org/billing/payment'
@@ -1064,6 +1086,7 @@ export interface FileRouteTypes {
     | '/$org/$project/settings/policies'
     | '/$org/settings/policies/ai-assistant'
     | '/$org/settings/policies/new'
+    | '/$org/settings/templates/new'
     | '/$org/$project/deploy'
     | '/$org/settings/policies'
     | '/$org/$project/svc/$service/ai'
@@ -1122,6 +1145,7 @@ export interface FileRouteTypes {
     | '/_app/$org/assistant/ask'
     | '/_app/$org/assistant/capabilities'
     | '/_app/$org/assistant/insights'
+    | '/_app/$org/billing/confirm'
     | '/_app/$org/billing/invoices'
     | '/_app/$org/billing/overview'
     | '/_app/$org/billing/payment'
@@ -1160,6 +1184,7 @@ export interface FileRouteTypes {
     | '/_app/$org/$project/svc/$service'
     | '/_app/$org/settings/policies/ai-assistant'
     | '/_app/$org/settings/policies/new'
+    | '/_app/$org/settings/templates_/new'
     | '/_app/$org/$project/deploy/'
     | '/_app/$org/settings/policies/'
     | '/_app/$org/$project/svc/$service/ai'
@@ -1530,6 +1555,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgBillingInvoicesRouteImport
       parentRoute: typeof AppOrgRoute
     }
+    '/_app/$org/billing/confirm': {
+      id: '/_app/$org/billing/confirm'
+      path: '/billing/confirm'
+      fullPath: '/$org/billing/confirm'
+      preLoaderRoute: typeof AppOrgBillingConfirmRouteImport
+      parentRoute: typeof AppOrgRoute
+    }
     '/_app/$org/assistant/insights': {
       id: '/_app/$org/assistant/insights'
       path: '/insights'
@@ -1599,6 +1631,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/$org/$project/deploy/'
       preLoaderRoute: typeof AppOrgProjectDeployIndexRouteImport
       parentRoute: typeof AppOrgProjectDeployRoute
+    }
+    '/_app/$org/settings/templates_/new': {
+      id: '/_app/$org/settings/templates_/new'
+      path: '/settings/templates/new'
+      fullPath: '/$org/settings/templates/new'
+      preLoaderRoute: typeof AppOrgSettingsTemplatesNewRouteImport
+      parentRoute: typeof AppOrgRoute
     }
     '/_app/$org/settings/policies/new': {
       id: '/_app/$org/settings/policies/new'
@@ -2009,6 +2048,7 @@ interface AppOrgRouteChildren {
   AppOrgProjectEnvironmentsRoute: typeof AppOrgProjectEnvironmentsRoute
   AppOrgProjectNewEnvRoute: typeof AppOrgProjectNewEnvRoute
   AppOrgProjectObserveRoute: typeof AppOrgProjectObserveRouteWithChildren
+  AppOrgBillingConfirmRoute: typeof AppOrgBillingConfirmRoute
   AppOrgBillingInvoicesRoute: typeof AppOrgBillingInvoicesRoute
   AppOrgBillingOverviewRoute: typeof AppOrgBillingOverviewRoute
   AppOrgBillingPaymentRoute: typeof AppOrgBillingPaymentRoute
@@ -2032,6 +2072,7 @@ interface AppOrgRouteChildren {
   AppOrgProjectSvcServiceRoute: typeof AppOrgProjectSvcServiceRouteWithChildren
   AppOrgSettingsPoliciesAiAssistantRoute: typeof AppOrgSettingsPoliciesAiAssistantRoute
   AppOrgSettingsPoliciesNewRoute: typeof AppOrgSettingsPoliciesNewRoute
+  AppOrgSettingsTemplatesNewRoute: typeof AppOrgSettingsTemplatesNewRoute
   AppOrgSettingsPoliciesIndexRoute: typeof AppOrgSettingsPoliciesIndexRoute
 }
 
@@ -2046,6 +2087,7 @@ const AppOrgRouteChildren: AppOrgRouteChildren = {
   AppOrgProjectEnvironmentsRoute: AppOrgProjectEnvironmentsRoute,
   AppOrgProjectNewEnvRoute: AppOrgProjectNewEnvRoute,
   AppOrgProjectObserveRoute: AppOrgProjectObserveRouteWithChildren,
+  AppOrgBillingConfirmRoute: AppOrgBillingConfirmRoute,
   AppOrgBillingInvoicesRoute: AppOrgBillingInvoicesRoute,
   AppOrgBillingOverviewRoute: AppOrgBillingOverviewRoute,
   AppOrgBillingPaymentRoute: AppOrgBillingPaymentRoute,
@@ -2070,6 +2112,7 @@ const AppOrgRouteChildren: AppOrgRouteChildren = {
   AppOrgSettingsPoliciesAiAssistantRoute:
     AppOrgSettingsPoliciesAiAssistantRoute,
   AppOrgSettingsPoliciesNewRoute: AppOrgSettingsPoliciesNewRoute,
+  AppOrgSettingsTemplatesNewRoute: AppOrgSettingsTemplatesNewRoute,
   AppOrgSettingsPoliciesIndexRoute: AppOrgSettingsPoliciesIndexRoute,
 }
 

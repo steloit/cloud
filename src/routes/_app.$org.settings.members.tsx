@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -6,6 +6,7 @@ import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
+import { Eyebrow } from "@/design-system/eyebrow";
 import { Pill } from "@/design-system/pill";
 import { useOrgs } from "@/features/org/hooks";
 import { useChangeRole, useMembers, useRemoveMember } from "@/features/settings/hooks";
@@ -109,6 +110,58 @@ function OrgMembersPage() {
               Invite member (U1)
             </Btn>
           </Pghead>
+
+          {/* B6 · Feature gating — both sides of a gate, one grammar (card → button). */}
+          <div className="flex gap-3.5">
+            <Card className="flex flex-1 flex-col gap-2 p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-ok">✓</span>
+                <b className="text-[13px]">SAML SSO · enabled</b>
+                <Pill tone="st">Business</Pill>
+              </div>
+              <p className="text-[12px] leading-relaxed text-ink2">
+                via Okta — enforced for all members. A Business capability, in use: this is what the
+                far side of a gate looks like.
+              </p>
+              <div>
+                <Btn
+                  variant="s"
+                  disabled
+                  disabledReason="SSO configuration lands with identity providers"
+                >
+                  Configure
+                </Btn>
+              </div>
+            </Card>
+            <Card dashed className="flex flex-1 flex-col gap-2 p-4">
+              <div className="flex items-center gap-2">
+                <b className="text-[13px]">Audit log streaming &amp; export</b>
+                <Pill tone="mut">🔒 Enterprise</Pill>
+              </div>
+              <p className="text-[12px] leading-relaxed text-ink2">
+                Stream every org event to your SIEM and export the full audit trail. Gated because
+                it's compliance-grade governance — an org-wide capability priced with the Enterprise
+                contract, not a per-user toggle.
+              </p>
+              <div className="flex items-center gap-2.5">
+                <Btn variant="s">Talk to us about Enterprise</Btn>
+                <Link to="/$org/billing/plans" params={{ org }}>
+                  <Btn variant="gh">Compare plans (B5)</Btn>
+                </Link>
+                <span className="text-[10.5px] text-ink3">
+                  Not an Owner? This button asks one for you instead.
+                </span>
+              </div>
+            </Card>
+            <Card className="flex w-[240px] shrink-0 flex-col gap-1.5 p-4 text-[11.5px] text-ink2">
+              <Eyebrow>The gating rules</Eyebrow>
+              <span>Visible, never hidden.</span>
+              <span>Explained — why it's gated.</span>
+              <span>Priced — a plan, not a mystery.</span>
+              <span>Never a dead end — always a path.</span>
+              <span>Never a safety feature.</span>
+            </Card>
+          </div>
 
           <div className="tblwrap">
             <table className="tbl">

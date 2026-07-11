@@ -213,11 +213,12 @@ function CurrentView({ org, sub }: { org: string; sub: Subscription | undefined 
 
 /** B9 — the Borealis Pro trial, reachable via the org switcher. */
 function TrialView({ org, sub }: { org: string; sub: Subscription }) {
+  const navigate = useNavigate();
   const changePlan = useChangePlan(org);
   const cancelPlan = useCancelPlan(org);
   const days = trialDaysLeft(sub);
 
-  const choosePro = () =>
+  const _choosePro = () =>
     changePlan.mutate(
       { path: { org }, body: { plan: "pro" } },
       {
@@ -236,7 +237,10 @@ function TrialView({ org, sub }: { org: string; sub: Subscription }) {
           nag — it appears here and in the org switcher, nowhere else.
         </span>
         <span className="ml-auto shrink-0">
-          <Btn variant="p" onClick={choosePro}>
+          <Btn
+            variant="p"
+            onClick={() => navigate({ to: "/$org/billing/confirm", params: { org } })}
+          >
             Choose Pro — $29/mo
           </Btn>
         </span>
@@ -305,7 +309,7 @@ function TrialView({ org, sub }: { org: string; sub: Subscription }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Btn variant="p" onClick={choosePro}>
+        <Btn variant="p" onClick={() => navigate({ to: "/$org/billing/confirm", params: { org } })}>
           Choose Pro — $29/mo
         </Btn>
         <Btn
@@ -400,7 +404,8 @@ function PaymentPage() {
   const { org } = Route.useParams();
   const orgs = useOrgs();
   const orgRecord = orgs.data?.find((o) => o.slug === org || o.id === org);
-  const sub = useSubscription(org);
+  const { state } = Route.useSearch();
+  const sub = useSubscription(org, state);
 
   return (
     <>
@@ -415,7 +420,11 @@ function PaymentPage() {
       />
       <main className="main">
         <div className="pgpad">
-          {sub.data?.status === "trial" ? (
+          {sub.data?.status === "grace" ||
+          sub.data?.status === "provisioning_paused" ||
+          sub.data?.dunning?.state === "provisioning_paused" ? (
+            <DunningView org={org} sub={sub.data} />
+          ) : sub.data?.status === "trial" ? (
             <TrialView org={org} sub={sub.data} />
           ) : sub.data?.status === "cancelled_at_anchor" ? (
             <CancelledView org={org} sub={sub.data} />
@@ -428,6 +437,130 @@ function PaymentPage() {
   );
 }
 
+/**
+ * B10 · Failed payment — the dunning contract from Payment & plan, now
+ * lived, with the exact position marked. Reachable in canon mode via the
+ * ?state=dunning_day8 demo param (the canon subscription never enters grace
+ * on its own — finding). Frame Apr dates reconciled to the fixtures' cycle.
+ */
+function DunningView({ sub }: { org?: string; sub: Subscription }) {
+  const day = sub.dunning?.day ?? 8;
+  return (
+    <>
+      <Banner tone="warn">
+        <span className="flex-1">
+          <b>Payment failed {day} days ago.</b> Grace continues — services run normally; new
+          provisioning is paused (day 7–21 of the policy). Next retry tomorrow.
+        </span>
+        <Btn
+          variant="s"
+          className="h-6 px-2 text-[10.5px]"
+          disabled
+          disabledReason="Card updates land with the payment processor"
+        >
+          Update card
+        </Btn>
+        <Btn
+          variant="gh"
+          className="h-6 px-2 text-[10.5px]"
+          disabled
+          disabledReason="Retries run on the printed schedule"
+        >
+          Retry now
+        </Btn>
+      </Banner>
+      <Pghead
+        title={
+          <span className="flex items-center gap-2.5">
+            Billing · Overview <Pill tone="err">payment failed</Pill>
+          </span>
+        }
+        sub="Borealis · the dunning contract from Payment & plan, now lived — with your exact position marked. No step here is a surprise."
+      />
+      <div className="flex gap-3.5">
+        <Card className="flex flex-[1.3] flex-col gap-3 p-4">
+          <Eyebrow>Where you are in the policy</Eyebrow>
+          <div className="flex items-start gap-3 text-[12px]">
+            <span className="text-ok">✓</span>
+            <span>
+              <b>Day 0 — charge failed</b>
+              <span className="mono block text-[10.5px] text-ink3">
+                Visa ··8841 declined · Owner + Admins notified (bell + email)
+              </span>
+            </span>
+          </div>
+          <div className="flex items-start gap-3 text-[12px]">
+            <span className="text-ok">✓</span>
+            <span>
+              <b>Day 0–7 — automatic retries</b>
+              <span className="mono block text-[10.5px] text-ink3">
+                3 retries · backup card first (none on file) · all declined
+              </span>
+            </span>
+          </div>
+          <div className="flex items-start gap-3 rounded-lg border border-warn/40 bg-warn-tint/40 p-2.5 text-[12px]">
+            <span className="dot warn mt-1" />
+            <span>
+              <b>Day 7–21 — you are here (day {day})</b>
+              <span className="block text-[10.5px] text-ink3">
+                Console banner for Admins · new provisioning paused · running services untouched ·
+                retries continue
+              </span>
+            </span>
+          </div>
+          <div className="flex items-start gap-3 text-[12px] text-ink3">
+            <span>4</span>
+            <span>
+              <b className="text-ink2">Day 21+ — suspension</b>
+              <span className="block text-[10.5px]">
+                Services suspend with state kept · resume instantly on payment
+              </span>
+            </span>
+          </div>
+          <div className="flex items-start gap-3 text-[12px] text-ink3">
+            <span>5</span>
+            <span>
+              <b className="text-ink2">Day 90</b>
+              <span className="block text-[10.5px]">
+                Only now can data be deleted for billing reasons — with 14 days' final notice
+              </span>
+            </span>
+          </div>
+        </Card>
+        <div className="flex flex-1 flex-col gap-3">
+          <Card className="flex flex-col gap-2.5 p-4">
+            <Eyebrow>Fix it</Eyebrow>
+            <div className="flex justify-between text-[12px]">
+              <span className="text-ink3">Outstanding</span>
+              <span className="mono">$29.00 + $4.12 usage</span>
+            </div>
+            <div className="flex justify-between text-[12px]">
+              <span className="text-ink3">Card on file</span>
+              <span className="mono">Visa ··8841 declined</span>
+            </div>
+            <Btn variant="p" disabled disabledReason="Card updates land with the payment processor">
+              Update card & pay now
+            </Btn>
+            <Btn variant="s" disabled disabledReason="Backup cards land with the payment processor">
+              Add a backup card
+            </Btn>
+            <p className="text-[10.5px] text-ink3">
+              Payment clears everything instantly — banner gone, provisioning unpaused, no residue.
+            </p>
+          </Card>
+          <Card className="p-3.5 text-[11.5px] leading-relaxed text-ink3">
+            Grace period is a promise, not a favor: it's the same schedule printed on Payment & plan
+            (B4) since day one.
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export const Route = createFileRoute("/_app/$org/billing/payment")({
+  validateSearch: (search: Record<string, unknown>): { state?: string } => ({
+    state: typeof search.state === "string" ? search.state : undefined,
+  }),
   component: PaymentPage,
 });

@@ -13,6 +13,7 @@ import { useBindings, useServices } from "@/features/services/hooks";
 import { ConnectPanel, VitalsStrip } from "@/features/services/overview-zones";
 import {
   FreshPostgresOverview,
+  InternalToolsDbOverview,
   type OverviewCtx,
   QueueOverview,
   StorageOverview,
@@ -23,6 +24,7 @@ import {
 import { ProvisioningView } from "@/features/services/provisioning";
 import type { Service } from "@/lib/api";
 import { ageOf } from "@/lib/canon/now";
+import { resolveEnvKey } from "@/lib/canon-env";
 import { fmtMoney } from "@/lib/fmt";
 
 /**
@@ -253,6 +255,10 @@ function overviewFor(ctx: OverviewCtx) {
   if (svc.status === "provisioning") return <ProvisioningView svc={svc} env={ctx.env} />;
   switch (svc.product) {
     case "postgres":
+      if (ctx.project === "internal-tools" && svc.name === "tools-db") {
+        // M1 — the adaptive-rail exemplar lives on this instance's overview.
+        return <InternalToolsDbOverview {...ctx} />;
+      }
       return svc.name === "db-main" ? (
         <DbMainOverview {...ctx} />
       ) : (
@@ -280,7 +286,7 @@ function overviewFor(ctx: OverviewCtx) {
 function ServiceOverview() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const projectQuery = useProject(project);
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   const bindings = useBindings(svc?.id ?? "");

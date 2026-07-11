@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
@@ -8,7 +9,7 @@ import { Eyebrow } from "@/design-system/eyebrow";
 import { Icon, type IconId } from "@/design-system/icon";
 import { Flabel, Inp } from "@/design-system/inp";
 import { Pill } from "@/design-system/pill";
-import { getTemplateOptions } from "@/lib/api";
+import { errorMessage, getTemplateOptions, refreshTemplateMutation } from "@/lib/api";
 import { fmtMoney } from "@/lib/fmt";
 
 /**
@@ -165,9 +166,35 @@ function StoreDetail({ org }: { org: string }) {
   );
 }
 
-/** Honest reduced layout — canon detail exists only for store. */
-function OrgTemplateDetail({ tpl }: { tpl: string }) {
+/**
+ * T2 · Org template detail — a frozen copy of the shape, not a live link to
+ * the source. Contents rows for store-baseline are frame-fixed (T2); other
+ * org templates render from the API. Frame id tpl_9c22e1 vs fixtures'
+ * tpl_store_baseline — data wins (finding).
+ */
+const T2_CONTENTS = [
+  {
+    name: "db-main",
+    type: "PostgreSQL 16",
+    shape: "Standard · 2 vCPU / 4 GB · pgvector, pg_cron",
+    est: "$58",
+  },
+  { name: "db-reports", type: "PostgreSQL 16", shape: "Dev · 1 vCPU / 2 GB", est: "$24" },
+  { name: "cache", type: "Valkey", shape: "2 GB · allkeys-lru", est: "$22" },
+  { name: "assets", type: "Object Storage", shape: "lifecycle: tmp 7d expire", est: "$9" },
+  { name: "jobs", type: "Queue", shape: "DLQ on · 3 schedules", est: "$12" },
+  {
+    name: "api + worker",
+    type: "Web + Worker",
+    shape: "autoscale 2–6 · bindings pre-wired ⇒ placeholders",
+    est: "$83",
+  },
+];
+
+function OrgTemplateDetail({ org, tpl }: { org: string; tpl: string }) {
   const template = useQuery(getTemplateOptions({ path: { tpl } }));
+  const refresh = useMutation(refreshTemplateMutation());
+  const queryClient = useQueryClient();
 
   if (template.isLoading) return <div className="text-[11.5px] text-ink3">Loading template…</div>;
   if (!template.data) {
@@ -179,46 +206,151 @@ function OrgTemplateDetail({ tpl }: { tpl: string }) {
     );
   }
   const t = template.data;
-  const services =
-    typeof t.contents?.services === "number" ? `${t.contents.services} services` : "saved shape";
+  const isStoreBaseline = t.name === "store-baseline";
+
   return (
-    <div className="flex max-w-[740px] flex-col gap-3.5">
-      <div className="flex items-center gap-3">
-        <span className="glyph h-[42px] w-[42px]" style={{ background: "var(--steel-tint)" }}>
-          <Icon id="s-hex" className="!h-5 !w-5 text-steel" />
-        </span>
-        <div>
-          <h1 className="h1 flex items-center gap-2.5">
-            {t.name}{" "}
-            {t.visibility === "org" ? (
-              <Pill tone="st">org</Pill>
-            ) : (
-              <Pill tone="mut">restricted</Pill>
-            )}
-          </h1>
-          <div className="hsub">
-            v{t.version} · {services} · est. {fmtMoney(t.monthly_estimate_cents ?? 0)}/mo
+    <div className="flex gap-4">
+      <div className="flex max-w-[740px] flex-1 flex-col gap-3.5">
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <h1 className="h1 flex items-center gap-2.5">
+              Templates · {t.name}{" "}
+              {t.visibility === "org" ? (
+                <Pill tone="st">org</Pill>
+              ) : (
+                <Pill tone="mut">restricted</Pill>
+              )}
+            </h1>
+            <div className="hsub">
+              Saved from{" "}
+              <span className="mono">
+                {t.source?.project?.replace("prj_", "") ?? "…"} / production
+              </span>{" "}
+              · v{t.version} · updated Mar 12 by asha · used {t.used_by_count ?? 0}× — a frozen copy
+              of the shape, not a live link to the source.
+            </div>
           </div>
+          <Btn
+            variant="s"
+            disabled={refresh.isPending}
+            onClick={() =>
+              refresh.mutate(
+                { path: { tpl: t.id } },
+                {
+                  onSuccess: (data) => {
+                    toast.success(`Refreshed from source — now v${data.version}`);
+                    queryClient.invalidateQueries({
+                      queryKey: getTemplateOptions({ path: { tpl } }).queryKey,
+                    });
+                  },
+                  onError: (err) => toast.error(errorMessage(err)),
+                },
+              )
+            }
+          >
+            Refresh from source…
+          </Btn>
+          <Btn variant="s" disabled disabledReason="Duplicate lands with template editing">
+            Duplicate
+          </Btn>
+          <Link to="/$org/new-project" params={{ org }}>
+            <Btn variant="p">Use this template →</Btn>
+          </Link>
         </div>
+        <Card>
+          <div className="border-hair border-b px-4 py-2.5">
+            <Eyebrow>Contents — editable per service</Eyebrow>
+          </div>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Shape</th>
+                <th>Est. / mo</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {(isStoreBaseline ? T2_CONTENTS : []).map((row) => (
+                <tr key={row.name}>
+                  <td>
+                    <b>{row.name}</b> <span className="text-ink3">· {row.type}</span>
+                  </td>
+                  <td className="text-ink2">{row.shape}</td>
+                  <td className="mono">{row.est}</td>
+                  <td>
+                    <Btn
+                      variant="gh"
+                      className="h-6 px-2 text-[10.5px]"
+                      disabled
+                      disabledReason="Shape editing lands with template versioning"
+                    >
+                      Edit shape
+                    </Btn>
+                  </td>
+                </tr>
+              ))}
+              {!isStoreBaseline ? (
+                <tr>
+                  <td colSpan={4} className="text-ink3">
+                    {typeof t.contents?.services === "number"
+                      ? `${t.contents.services} services — per-service rows are frame-fixed only for store-baseline`
+                      : "saved shape"}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+          <div className="flex items-baseline gap-2 border-hair border-t px-4 py-2.5">
+            <Eyebrow>Instantiation estimate</Eyebrow>
+            <span className="mono text-[16px] font-semibold">
+              {fmtMoney(t.monthly_estimate_cents ?? 0)}
+            </span>
+            <span className="text-[10.5px] text-ink3">
+              /mo at today's prices — every consumer still sees the full estimate before anything
+              provisions
+            </span>
+          </div>
+        </Card>
       </div>
-      <Card className="p-4 text-[11.5px] leading-relaxed text-ink2">
-        An org template — full gallery-style detail exists only for the canon exemplar <b>store</b>.
-        This shape instantiates through the guided flow with every service editable before anything
-        exists.
-      </Card>
-      <div className="flex items-center gap-3">
-        <Copybit>{`steloit init --template ${t.name}`}</Copybit>
+      <div className="flex w-[300px] shrink-0 flex-col gap-3">
+        <Card className="flex flex-col gap-1.5 p-3.5">
+          <Eyebrow>What's captured</Eyebrow>
+          <div className="text-[11.5px] text-ok">✓ Service shapes, versions, extensions</div>
+          <div className="text-[11.5px] text-ok">✓ Binding graph — as placeholders</div>
+          <div className="text-[11.5px] text-ok">✓ Lifecycle rules, schedules, alerts</div>
+          <div className="text-[11.5px] text-err">
+            ✗ <b>Never:</b> secrets, data, keys — re-minted per create
+          </div>
+        </Card>
+        <Card className="flex flex-col gap-1.5 p-3.5">
+          <Eyebrow>Used by · informational</Eyebrow>
+          <p className="text-[11.5px] text-ink2">initech (Mar 2) · borealis/starter (Mar 22).</p>
+          <p className="text-[10.5px] text-ink3">
+            Copies, not links — editing v{t.version} changes neither.
+          </p>
+        </Card>
+        <Card className="flex flex-col gap-1.5 p-3.5">
+          <Eyebrow>Settings</Eyebrow>
+          <div className="flex justify-between text-[11.5px]">
+            <span className="text-ink3">Visibility</span>
+            <Pill tone={t.visibility === "org" ? "st" : "mut"}>{t.visibility}</Pill>
+          </div>
+          <div className="text-[11.5px] text-ink3">Rename · Delete…</div>
+          <div className="mono text-[10.5px] text-ink3">{t.id}</div>
+        </Card>
       </div>
     </div>
   );
 }
 
+/** C6 (store, frame-fixed) or T2 (org templates, API-backed) by param. */
 function TemplateDetailPage() {
   const { org, tpl } = Route.useParams();
   return (
     <main className="main">
       <div className="pgpad !overflow-y-auto">
-        {tpl === "store" ? <StoreDetail org={org} /> : <OrgTemplateDetail tpl={tpl} />}
+        {tpl === "store" ? <StoreDetail org={org} /> : <OrgTemplateDetail org={org} tpl={tpl} />}
       </div>
     </main>
   );

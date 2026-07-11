@@ -460,6 +460,55 @@ export const schedules = [
   { id: "sch_cleanup", name: "cleanup-tmp", cron: "0 * * * *", tz: "Asia/Kolkata" },
 ];
 
+/**
+ * internal-tools canon (frames M1/AI5): tools-db is fully frame-specced
+ * (svc_4nn810, $19/mo, 14/100 conns); the storage instance's name is not
+ * frame-fixed — "files" follows fixtures' own $representative convention.
+ * Finding: these services don't reconcile to the project's fixture total
+ * ($96) — the gallery's internal-tools card said $41 (the name↔cost swap).
+ */
+export const internalToolsEnv: Environment = {
+  id: "env_it_prod",
+  project_id: "prj_internal_tools",
+  name: "production",
+  region: "aws/ap-south-1",
+  kind: "standard",
+  monthly_cost_cents: 4100,
+  policy_flags: [],
+  expires_at: null,
+};
+
+export const internalToolsServices: Service[] = [
+  {
+    id: "svc_4nn810",
+    env_id: "env_it_prod",
+    name: "tools-db",
+    product: "postgres",
+    status: "ready",
+    shape: {
+      version: "16.4",
+      size: "dev",
+      storage_gb: 10,
+      ha: false,
+      connections: { used: 14, max: 100 },
+    },
+    region: "aws/ap-south-1",
+    monthly_estimate_cents: 1900,
+    created_at: "2026-01-10T11:00:00+05:30",
+  },
+  {
+    id: "svc_it_files",
+    env_id: "env_it_prod",
+    name: "files",
+    product: "storage",
+    status: "ready",
+    shape: { public: false, versioning: true, $representative: "name not frame-fixed" },
+    region: "aws/ap-south-1",
+    monthly_estimate_cents: 2200,
+    created_at: "2026-01-10T11:00:00+05:30",
+  },
+];
+
 export function findOrg(orgParam: string): Org | undefined {
   return orgs.find((o) => o.slug === orgParam || o.id === orgParam);
 }

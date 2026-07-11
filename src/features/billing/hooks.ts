@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Subscription } from "@/lib/api";
 import {
   cancelSubscriptionMutation,
   changePlanMutation,
@@ -25,8 +26,20 @@ export function useInvoices(org: string) {
   return useQuery({ ...listInvoicesOptions({ path: { org } }), select: (r) => r.data ?? [] });
 }
 
-export function useSubscription(org: string) {
-  return useQuery(getSubscriptionOptions({ path: { org } }));
+export function useSubscription(org: string, state?: string) {
+  const options = getSubscriptionOptions({ path: { org } });
+  // `state` is the canon-mode demo affordance (?state=dunning_day8 → B10) —
+  // a plain query alongside the generated one, so the strict key type stays.
+  const demo = useQuery<Subscription>({
+    queryKey: ["subscription-demo", org, state ?? ""],
+    enabled: Boolean(state),
+    queryFn: async () => {
+      const res = await fetch(`/v1/orgs/${org}/subscription?state=${state}`);
+      return (await res.json()) as Subscription;
+    },
+  });
+  const live = useQuery({ ...options, enabled: !state });
+  return state ? demo : live;
 }
 
 export function useChangePlan(org: string) {

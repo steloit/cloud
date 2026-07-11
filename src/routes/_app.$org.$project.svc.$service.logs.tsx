@@ -2,12 +2,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@/design-system/card";
 import { useServices } from "@/features/services/hooks";
 import { PostgresLogsTab } from "@/features/services/tabs/postgres";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /** Per-product Logs tab dispatcher — D10 (postgres) is the framed exemplar. */
 function LogsTab() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
 

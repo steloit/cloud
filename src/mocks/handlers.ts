@@ -155,11 +155,10 @@ export const handlers = [
   http.get("/v1/projects/:project/envs", ({ params }) => {
     const project = world.findProject(String(params.project));
     if (!project) return notFound(`Project ${String(params.project)}`);
-    return list(
-      project.id === "prj_ecommerce"
-        ? [...world.environments, ...createdEnvironments]
-        : createdEnvironments.filter((e) => e.project_id === project.id),
-    );
+    if (project.id === "prj_ecommerce")
+      return list([...world.environments, ...createdEnvironments]);
+    if (project.id === "prj_internal_tools") return list([world.internalToolsEnv]);
+    return list(createdEnvironments.filter((e) => e.project_id === project.id));
   }),
 
   // estimates — estimate-before-provision; W2's rail is canon est_w2_demo
@@ -207,6 +206,7 @@ export const handlers = [
   }),
   http.get("/v1/envs/:env/services", ({ params }) => {
     const env = String(params.env);
+    if (env === "env_it_prod") return list(world.internalToolsServices);
     const known = world.environments.some((e) => e.id === env || e.name === env);
     if (!known) return list([]);
     return list([...world.services, ...createdServices.map(withProvisioningProgress)]);
@@ -215,6 +215,8 @@ export const handlers = [
     const key = String(params.service);
     const created = createdServices.find((s) => s.id === key || s.name === key);
     if (created) return HttpResponse.json(withProvisioningProgress(created));
+    const itSvc = world.internalToolsServices.find((s) => s.id === key || s.name === key);
+    if (itSvc) return HttpResponse.json(itSvc);
     const service = world.findService(key);
     return service ? HttpResponse.json(service) : notFound(`Service ${key}`);
   }),
@@ -501,9 +503,15 @@ export const handlers = [
   http.get("/v1/orgs/:org/billing/usage", () => HttpResponse.json(world.usageReport)),
   http.get("/v1/orgs/:org/billing/invoices", () => list(world.invoices)),
   http.get("/v1/orgs/:org/payment-methods", () => list(world.paymentMethods)),
-  http.get("/v1/orgs/:org/subscription", ({ params }) => {
+  http.get("/v1/orgs/:org/subscription", ({ params, request }) => {
     const org = world.findOrg(String(params.org));
     if (!org) return notFound(`Organization ${String(params.org)}`);
+    // Canon-mode demo affordance: ?state=dunning_day8 serves the B10 fixture
+    // state (the canon subscription never enters grace on its own).
+    const state = new URL(request.url).searchParams.get("state");
+    if (state && state in world.borealisLifecycle) {
+      return HttpResponse.json(world.borealisLifecycle[state as "trial" | "dunning_day8"]);
+    }
     if (org.id === "org_borealis") {
       return HttpResponse.json(borealisSubscription ?? world.borealisLifecycle.trial);
     }
@@ -551,6 +559,38 @@ export const handlers = [
     return HttpResponse.json(cancelled);
   }),
   http.get("/v1/orgs/:org/templates", () => list(world.templates)),
+  http.post("/v1/orgs/:org/templates", async ({ request }) => {
+    // T3 capture: server strips ALL secret material (checked at write).
+    const body = (await request.json()) as {
+      name: string;
+      visibility?: string;
+      source: { project: string; env: string };
+      services: string[];
+    };
+    return HttpResponse.json(
+      {
+        id: `tpl_${body.name.replace(/-/g, "_")}`,
+        name: body.name,
+        visibility: body.visibility ?? "org",
+        version: 1,
+        source: body.source,
+        contents: { services: body.services.length },
+        required_inputs: [
+          { name: "DATABASE_URL", description: "binding to an excluded db — wired at create" },
+        ],
+        monthly_estimate_cents: 11700,
+        used_by_count: 0,
+        updated_by: "priya",
+        updated_at: world.CANON_NOW.toISOString(),
+      },
+      { status: 201 },
+    );
+  }),
+  http.post("/v1/templates/:tpl/refresh", ({ params }) => {
+    const tpl = world.templates.find((t) => t.id === params.tpl || t.name === params.tpl);
+    if (!tpl) return notFound(`Template ${String(params.tpl)}`);
+    return HttpResponse.json({ ...tpl, version: (tpl.version ?? 1) + 1 });
+  }),
   http.get("/v1/templates/:tpl", ({ params }) => {
     const tpl = world.templates.find((t) => t.id === params.tpl || t.name === params.tpl);
     return tpl ? HttpResponse.json(tpl) : notFound(`Template ${String(params.tpl)}`);

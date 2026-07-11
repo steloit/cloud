@@ -1,13 +1,15 @@
 import { createFileRoute, Outlet, useChildMatches } from "@tanstack/react-router";
 import { SnavProduct } from "@/app/shell/snav-product";
 import { useProject } from "@/features/projects/hooks";
+import { GatewayPage } from "@/features/services/gateway-page";
 import { useServices } from "@/features/services/hooks";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /** Service layout: product snav (variant B) + the selected tab. */
 function ServiceLayout() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const projectQuery = useProject(project);
   const childMatches = useChildMatches();
 
@@ -18,6 +20,10 @@ function ServiceLayout() {
   const active = segment === "" || segment === "/" ? "overview" : segment.replaceAll("/", "");
   if (!svc) {
     if (services.isPending) return <main className="main" />;
+    // X1 exemplar — see gateway-page.tsx for the canon-arithmetic finding.
+    if (service === "gateway" || service === "ai-gateway") {
+      return <GatewayPage org={org} project={project} />;
+    }
     return (
       <main className="main">
         <div className="pgpad">

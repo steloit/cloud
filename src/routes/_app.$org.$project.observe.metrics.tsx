@@ -5,6 +5,7 @@ import { Card } from "@/design-system/card";
 import { MetricChart } from "@/design-system/chart";
 import { Copybit } from "@/design-system/copybit";
 import { Pill } from "@/design-system/pill";
+import { ApiFailureCard } from "@/features/errors/failure-states";
 import { toMarkers, toSeries, useMetrics } from "@/features/observe/hooks";
 import { ObserveChrome } from "@/features/observe/observe-chrome";
 import { cn } from "@/lib/utils";
@@ -71,6 +72,14 @@ function MetricsPage() {
                   split by: route ▾ · ghost = yesterday
                 </span>
               </div>
+              {p95.isError ? (
+                <ApiFailureCard
+                  title="Metrics couldn't load"
+                  error={p95.error}
+                  requestLine="GET /metrics → 502 upstream · req_19fa4c · 2 retries attempted"
+                  onRetry={() => p95.refetch()}
+                />
+              ) : null}
               <MetricChart
                 series={toSeries(p95.data)}
                 threshold={800}

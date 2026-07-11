@@ -4,6 +4,7 @@ import { CommandPalette } from "@/app/command-palette";
 import { AssistantDrawer } from "@/features/assistant/assistant-drawer";
 import { Coachmark } from "@/features/assistant/coachmark";
 import { requireSession } from "@/features/auth/guards";
+import { WelcomeWidget } from "@/features/onboarding/welcome-widget";
 import { useUIStore } from "@/lib/store";
 
 /** Pathless authed group: session guard + global shortcuts (⌘K, ADR-020). */
@@ -34,6 +35,7 @@ function AppLayout() {
       <CommandPalette />
       <AssistantDrawer />
       <Coachmark />
+      <WelcomeWidget />
     </>
   );
 }

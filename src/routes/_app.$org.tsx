@@ -6,6 +6,7 @@ import { useOrgs } from "@/features/org/hooks";
 import { useEnvironments, useProjects } from "@/features/projects/hooks";
 import type { Product } from "@/lib/api";
 import { listServicesOptions } from "@/lib/api";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
  * The org shell: context bar + icon rail (ADR-011). The rail renders the
@@ -29,7 +30,7 @@ function OrgShell() {
   const envValid = environments.data?.some((e) => e.name === envName) ?? false;
 
   const services = useQuery({
-    ...listServicesOptions({ path: { env: envName } }),
+    ...listServicesOptions({ path: { env: resolveEnvKey(activeProject?.name, envName) } }),
     select: (r) => r.data ?? [],
     enabled: envValid,
   });

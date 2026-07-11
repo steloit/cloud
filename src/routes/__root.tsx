@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import sprite from "@/assets/sprite.svg?raw";
 import "@/lib/api";
 import { NotFoundPage, ServerErrorPage } from "@/features/errors/error-pages";
+import { NetworkLossBanner } from "@/features/errors/failure-states";
 import { queryClient } from "@/lib/api/query-client";
 import { useUIStore } from "@/lib/store";
 import { applyTheme, DEFAULT_THEME } from "@/lib/theme";
@@ -24,6 +25,7 @@ function RootComponent() {
       {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static sprite asset from 15-assets */}
       <div hidden dangerouslySetInnerHTML={{ __html: sprite }} />
       <ThemeEffect />
+      <NetworkLossBanner />
       <Outlet />
       <Toaster position="bottom-right" />
     </QueryClientProvider>

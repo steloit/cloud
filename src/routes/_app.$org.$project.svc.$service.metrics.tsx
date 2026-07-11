@@ -3,12 +3,13 @@ import { Card } from "@/design-system/card";
 import { useServices } from "@/features/services/hooks";
 import { PostgresMetricsTab } from "@/features/services/tabs/postgres";
 import { ValkeyMetricsTab } from "@/features/services/tabs/valkey";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /** Per-product Metrics tab dispatcher — D9 (postgres) and D13 (valkey) have frames. */
 function MetricsTab() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
 

@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServices } from "@/features/services/hooks";
 import { BindingsTab } from "@/features/services/tabs/bindings-tab";
+import { resolveEnvKey } from "@/lib/canon-env";
 
 /** D11 — bindings are one grammar for every product. */
 function BindingsRoute() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
-  const services = useServices(env);
+  const services = useServices(resolveEnvKey(project, env));
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
 

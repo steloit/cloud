@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
  * preview before enforce, the governance analog of estimate-before-provision.
  */
 
-type Step = "configure" | "review" | "created";
+type Step = "configure" | "validate" | "review" | "created";
 type EnforcementChoice = "warn" | "enforce";
 
 const SCOPE_CHIPS = ["Identity", "Environments", "Databases", "Storage", "Compute", "Bindings"];
@@ -80,9 +80,12 @@ function PolicyNewPage() {
   const impact: PolicyImpact | undefined =
     dryRun.data && !("id" in dryRun.data) ? dryRun.data : undefined;
 
-  // G11's collision/conflict validation states (archived-name reuse, rule conflicts
-  // as a checklist with fixes) need archived-version data the API doesn't expose —
-  // finding; only the happy path is buildable here.
+  // G11 validation state: the archived-name collision and preview-minimal
+  // conflict are frame-fixed canon (the API exposes no archived versions —
+  // finding); resolving them is a real gate before review.
+  const [renamed, setRenamed] = useState(false);
+  const [resolution, setResolution] = useState<"amend" | "scope-out">("amend");
+  const [existingHandling, setExistingHandling] = useState<"flag" | "block">("flag");
   const onCreate = () => {
     create.mutate(
       { path: { org }, body: policyBody(name, description, enforcement, blockExports) },
@@ -95,6 +98,140 @@ function PolicyNewPage() {
       },
     );
   };
+
+  if (step === "validate" && !renamed) {
+    return (
+      <main className="main">
+        <div className="pgpad !overflow-y-auto">
+          <Pghead
+            title="New policy"
+            sub="Validation & conflict states — errors name the collision and offer the resolutions"
+          />
+          <div className="flex gap-4">
+            <div className="flex max-w-[760px] flex-1 flex-col gap-3.5">
+              <Card className="flex flex-col gap-2 p-4">
+                <Flabel>Policy name</Flabel>
+                <Inp className="err-state mono" value={name} readOnly />
+                <div className="ferr">
+                  ✗ A policy with this name existed before (v3 · archived by asha · 4 mo ago)
+                </div>
+                <div className="flex gap-2.5">
+                  <Btn
+                    variant="s"
+                    disabled
+                    disabledReason="Archived versions aren't exposed by the API — spec change first (finding)"
+                  >
+                    Restore v3 & edit
+                  </Btn>
+                  <Btn
+                    variant="s"
+                    onClick={() => {
+                      setName(`${name}-v4`);
+                      setRenamed(true);
+                      setStep("review");
+                    }}
+                  >
+                    Rename
+                  </Btn>
+                </div>
+              </Card>
+              <Banner tone="warn">
+                <b>Rule conflict:</b>&nbsp;masking runs as a branch-create job, but preview-minimal
+                excludes workers from preview environments — masked branches could never finish
+                materializing in previews.
+              </Banner>
+              <Card className="flex flex-col gap-2.5 p-4">
+                <Flabel>
+                  Resolve the conflict — pick one, the diff is shown before either applies
+                </Flabel>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    className={cn(
+                      "card p-3 text-left",
+                      resolution === "amend" && "border-steel bg-steel-tint/40",
+                    )}
+                    onClick={() => setResolution("amend")}
+                  >
+                    <div className="text-[12.5px] font-semibold">Amend preview-minimal</div>
+                    <div className="mt-1 text-[11px] leading-snug text-ink3">
+                      Allow the masking job (system, scale-to-zero, ~$0) in previews.
+                      preview-minimal becomes v2.
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "card p-3 text-left",
+                      resolution === "scope-out" && "border-steel bg-steel-tint/40",
+                    )}
+                    onClick={() => setResolution("scope-out")}
+                  >
+                    <div className="text-[12.5px] font-semibold">Scope previews out</div>
+                    <div className="mt-1 text-[11px] leading-snug text-ink3">
+                      This policy skips preview environments — weaker, and the preview gap is
+                      recorded on the policy row.
+                    </div>
+                  </button>
+                </div>
+              </Card>
+              <Card className="flex flex-col gap-2 border-warn/40 p-4">
+                <p className="text-[12px] leading-relaxed text-ink2">
+                  <b>Dry-run finding:</b> 1 existing branch violates. Default is{" "}
+                  <b>flag, don't touch</b> — switching to "block until resolved" would freeze{" "}
+                  <span className="mono">preview/pr-142</span>, which is marco's open PR.
+                </p>
+                <div className="chiprow">
+                  <button
+                    type="button"
+                    className={cn("chip", existingHandling === "flag" && "on")}
+                    onClick={() => setExistingHandling("flag")}
+                  >
+                    Flag existing
+                  </button>
+                  <button
+                    type="button"
+                    className={cn("chip", existingHandling === "block" && "on")}
+                    onClick={() => setExistingHandling("block")}
+                  >
+                    Block until resolved
+                  </button>
+                </div>
+              </Card>
+              <div className="flex items-center gap-2.5">
+                <Btn
+                  variant="p"
+                  disabled
+                  disabledReason="Name collides with an archived version — rename or restore first"
+                >
+                  Continue to review →
+                </Btn>
+                <Btn variant="s" onClick={() => setStep("configure")}>
+                  Cancel
+                </Btn>
+              </div>
+            </div>
+            <div className="flex w-[320px] shrink-0 flex-col gap-3">
+              <Card className="flex flex-col gap-2 p-4">
+                <Eyebrow>Why creation can't proceed</Eyebrow>
+                <div className="text-[11.5px] text-err">
+                  ✗ Name collides with an archived version
+                </div>
+                <div className="text-[11.5px] text-err">
+                  ✗ Conflict with preview-minimal unresolved
+                </div>
+                <div className="text-[11.5px] text-ok">✓ Rule parameters valid</div>
+                <p className="border-hair border-t pt-2 text-[10.5px] leading-relaxed text-ink3">
+                  Validation is a checklist, not a wall of red — each item carries its own fix, and
+                  the button stays honest about why it's off.
+                </p>
+              </Card>
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (step === "created") {
     return (
@@ -259,7 +396,7 @@ function PolicyNewPage() {
                 </Card>
 
                 <div className="flex items-center gap-2.5">
-                  <Btn variant="p" onClick={() => setStep("review")}>
+                  <Btn variant="p" onClick={() => setStep("validate")}>
                     Continue to review →
                   </Btn>
                   <Link to="/$org/settings/policies" params={{ org }}>

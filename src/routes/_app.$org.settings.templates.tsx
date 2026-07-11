@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Pghead } from "@/app/shell/pghead";
 import { SnavSettings } from "@/app/shell/snav-settings";
@@ -75,12 +75,12 @@ function TemplatesPage() {
             title="Organization · Templates"
             sub="Your saved shapes — org assets, managed here, consumed anywhere you create (C1, C5, onboarding, CLI). Editing a template never touches anything created from it."
           >
-            <Btn variant="s" disabled disabledReason="Templates gallery (C5) lands in Phase 4">
-              Official gallery (C5) ↗
-            </Btn>
-            <Btn variant="p" disabled disabledReason="Template capture (T3) lands in Phase 4">
-              ＋ New template
-            </Btn>
+            <Link to="/$org/new-project/templates" params={{ org }}>
+              <Btn variant="s">Official gallery (C5) ↗</Btn>
+            </Link>
+            <Link to="/$org/settings/templates/new" params={{ org }}>
+              <Btn variant="p">＋ New template</Btn>
+            </Link>
           </Pghead>
 
           <div className="flex items-center gap-2">

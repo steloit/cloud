@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Pghead } from "@/app/shell/pghead";
@@ -214,9 +214,9 @@ function NewProjectPage() {
                 >
                   Create project — {fmtMoney(totalCents)}/mo est.
                 </Btn>
-                <Btn variant="s" disabled disabledReason="Template capture (T3) lands in Phase 3">
-                  Save as template instead (T3)
-                </Btn>
+                <Link to="/$org/settings/templates/new" params={{ org }}>
+                  <Btn variant="s">Save as template instead (T3)</Btn>
+                </Link>
                 <span className="flex items-center gap-2 text-[11px] text-ink3">
                   or:{" "}
                   <Copybit>{`steloit project create ${name || "ecommerce"} --template store`}</Copybit>
