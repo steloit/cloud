@@ -9,6 +9,8 @@ import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Stlab, statusDotTone } from "@/design-system/pill";
 import { useProject } from "@/features/projects/hooks";
+import { resolveService } from "@/features/services/gateway";
+import { GatewayOverview } from "@/features/services/gateway-page";
 import { useBindings, useServices } from "@/features/services/hooks";
 import { ConnectPanel, VitalsStrip } from "@/features/services/overview-zones";
 import {
@@ -55,6 +57,14 @@ function identityChips(svc: Service): string[] {
     chips.push(shape.public ? "public" : "private · signed URLs");
     if (shape.versioning) chips.push("versioning on");
   }
+  if (svc.product === "ai-gateway") {
+    // X1's identity line is a sentence, not chips — kept verbatim.
+    return [
+      "One endpoint in ecommerce / production",
+      "4 models behind 3 routes",
+      "a service with no fleet — config, not instances",
+    ];
+  }
   if (svc.region) chips.push(svc.region.replace("/", " · "));
   if (svc.product === "postgres") chips.push(`HA ${shape.ha ? "on" : "off"}`);
   if (svc.created_at) chips.push(ageOf(svc.created_at));
@@ -67,6 +77,7 @@ function cap(s: string): string {
 
 /** Status label per the S-frames: healthy for ready, the incident's suffixes for amber. */
 function statusLabel(svc: Service): string {
+  if (svc.product === "ai-gateway") return "healthy";
   if (svc.status === "ready")
     return svc.name === "db-reports" ? "ready · just provisioned" : "healthy";
   if (svc.status === "degraded") {
@@ -118,6 +129,16 @@ function headerActions(svc: Service) {
       return (
         <Btn variant="s" disabled disabledReason="Manual runs land with schedules in Phase 3">
           Run a job now
+        </Btn>
+      );
+    case "ai-gateway":
+      return (
+        <Btn
+          variant="s"
+          disabled
+          disabledReason="Model management needs a canon gateway service (X1 finding)"
+        >
+          Add model
         </Btn>
       );
     default:
@@ -264,6 +285,8 @@ function overviewFor(ctx: OverviewCtx) {
       ) : (
         <FreshPostgresOverview {...ctx} />
       );
+    case "ai-gateway":
+      return <GatewayOverview {...ctx} />;
     case "valkey":
       return <ValkeyOverview {...ctx} />;
     case "storage":
@@ -288,7 +311,7 @@ function ServiceOverview() {
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
   const projectQuery = useProject(project);
-  const svc = services.data?.find((s) => s.name === service || s.id === service);
+  const svc = resolveService(services.data, service);
   const bindings = useBindings(svc?.id ?? "");
   const byId = new Map((services.data ?? []).map((s) => [s.id, s]));
 
@@ -328,10 +351,12 @@ function ServiceOverview() {
                 {identityChips(svc).map((chip) => (
                   <span key={chip}>{chip}</span>
                 ))}
-                <span className="inline-flex items-center gap-1">
-                  {svc.id}
-                  <Icon id="s-copy" className="h-2.5 w-2.5" />
-                </span>
+                {svc.product !== "ai-gateway" ? (
+                  <span className="inline-flex items-center gap-1">
+                    {svc.id}
+                    <Icon id="s-copy" className="h-2.5 w-2.5" />
+                  </span>
+                ) : null}
               </span>
             )
           }

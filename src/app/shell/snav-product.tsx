@@ -120,10 +120,18 @@ const MATRIX: Record<Service["product"], ProductMatrix> = {
     browse: [{ label: "Shell", frame: "D20", route: "shell", icon: "s-term" }],
     manage: [{ label: "Settings", frame: "D23", route: "settings", icon: "s-gear" }],
   },
+  // X1: a flat capability workspace — routes/models, not instances; no
+  // Metrics/Logs pair and no Browse/Manage split in the frame.
   "ai-gateway": {
-    top: [],
+    top: [
+      { label: "Models", frame: "X1", route: "models", count: "4", icon: "s-ai" },
+      { label: "Routes", frame: "X1", route: "routes", count: "3", icon: "s-branch" },
+      { label: "Usage & cost", frame: "X1", route: "usage", icon: "s-card" },
+      { label: "Policies", frame: "X1", route: "policies", icon: "s-shield" },
+      { label: "Keys & bindings", frame: "X1", route: "keys", icon: "s-key" },
+    ],
     browse: [],
-    manage: [{ label: "Settings", frame: "X1", icon: "s-gear" }],
+    manage: [{ label: "Settings", frame: "X1", route: "settings", icon: "s-gear" }],
   },
 };
 
@@ -197,8 +205,9 @@ export function SnavProduct({
       <div>
         <div className="t">{PRODUCT_LABEL[service.product]}</div>
         <div className="u">
-          {service.name}
-          {siblings.length > 1 ? " ▾" : ""} · {env}
+          {service.product === "ai-gateway"
+            ? "capability · one endpoint"
+            : `${service.name}${siblings.length > 1 ? " ▾" : ""} · ${env}`}
         </div>
       </div>
     </div>
@@ -340,12 +349,18 @@ export function SnavProduct({
           <span>This service</span>
           <span className="mono">{costLabel}</span>
         </div>
-        <div className="flex justify-between px-1.5 pt-1">
-          <span>{project} total</span>
-          <span className="mono">
-            {projectTotalCents !== undefined ? fmtMoneyPerMonth(projectTotalCents) : "…"}
-          </span>
-        </div>
+        {service.product === "ai-gateway" ? (
+          // X1: usage-priced capability — no project rollup line (adding it
+          // to the $208 would misstate the canon arithmetic).
+          <div className="px-1.5 pt-1">usage-priced · no instances to scale</div>
+        ) : (
+          <div className="flex justify-between px-1.5 pt-1">
+            <span>{project} total</span>
+            <span className="mono">
+              {projectTotalCents !== undefined ? fmtMoneyPerMonth(projectTotalCents) : "…"}
+            </span>
+          </div>
+        )}
       </Nfoot>
     </Snav>
   );

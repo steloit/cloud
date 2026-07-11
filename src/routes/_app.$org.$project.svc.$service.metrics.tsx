@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@/design-system/card";
+import { resolveService } from "@/features/services/gateway";
 import { useServices } from "@/features/services/hooks";
 import { PostgresMetricsTab } from "@/features/services/tabs/postgres";
 import { ValkeyMetricsTab } from "@/features/services/tabs/valkey";
@@ -10,7 +11,7 @@ function MetricsTab() {
   const { org, project, service } = Route.useParams();
   const { env } = Route.useSearch();
   const services = useServices(resolveEnvKey(project, env));
-  const svc = services.data?.find((s) => s.name === service || s.id === service);
+  const svc = resolveService(services.data, service);
   if (!svc) return <main className="main" />;
 
   const props = { svc, org, project, env };

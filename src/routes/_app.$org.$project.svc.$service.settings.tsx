@@ -1,6 +1,8 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Card } from "@/design-system/card";
 import { PermissionDenied } from "@/features/errors/failure-states";
+import { resolveService } from "@/features/services/gateway";
+import { GatewaySettingsTab } from "@/features/services/gateway-tabs";
 import { useServices } from "@/features/services/hooks";
 import { PostgresSettingsTab } from "@/features/services/tabs/postgres";
 import { QueueSettingsTab } from "@/features/services/tabs/queue";
@@ -17,7 +19,7 @@ function SettingsTab() {
   const services = useServices(resolveEnvKey(project, env));
   const session = useSession();
   const navigate = useNavigate();
-  const svc = services.data?.find((s) => s.name === service || s.id === service);
+  const svc = resolveService(services.data, service);
   if (!svc) return <main className="main" />;
 
   // E3: Developers can operate services but not change their configuration
@@ -56,6 +58,8 @@ function SettingsTab() {
       <QueueSettingsTab {...props} />
     ) : svc.product === "web" || svc.product === "worker" ? (
       <WebSettingsTab {...props} />
+    ) : svc.product === "ai-gateway" ? (
+      <GatewaySettingsTab {...props} />
     ) : (
       <Card className="p-4 text-[12px] text-ink2">
         Settings for {svc.product} land in a later phase.

@@ -1,19 +1,16 @@
-import { Pghead } from "@/app/shell/pghead";
-import { Nfoot, NitDisabled, NitLink, Nsec, Snav } from "@/app/shell/snav";
 import { Banner } from "@/design-system/banner";
 import { Card } from "@/design-system/card";
 import { Copybit } from "@/design-system/copybit";
 import { Eyebrow } from "@/design-system/eyebrow";
-import { Icon } from "@/design-system/icon";
-import { Metric } from "@/design-system/metric";
-import { Pill, Stlab } from "@/design-system/pill";
+import { Stlab } from "@/design-system/pill";
+import { ConnectPanel, type VitalCell, VitalsStrip } from "./overview-zones";
+import type { OverviewCtx } from "./overviews";
 
 /**
- * X1 · AI Gateway — a capability-shaped Service proving the rail generalizes:
- * no ×n badge, no instance switcher; the sidebar holds routes/models, not
- * instances. Finding: no ai-gateway service exists in 19-canon — adding one
- * would break the $208 arithmetic invariant (7 services = $208), so this
- * exemplar is URL-reachable (svc/gateway) but absent from the rail/topology.
+ * X1 · AI Gateway overview — the shared Overview grammar over the capability
+ * exemplar: vitals with cost last, the models table in the standard .tbl
+ * contract, ConnectPanel for the bindings story. Rendered through the normal
+ * service layout + SnavProduct like every other product.
  */
 
 const MODELS = [
@@ -51,92 +48,25 @@ const MODELS = [
   },
 ];
 
-export function GatewayPage({ org, project }: { org: string; project: string }) {
+const VITALS: VitalCell[] = [
+  { label: "Requests · 24h", value: "128k", note: "+9%" },
+  { label: "p95", value: "840 ms", note: "upstream-dominated" },
+  { label: "Cache hit", value: "31%", note: "semantic cache · saves $" },
+  { label: "Tokens · mtd", value: "18.2M", note: "in 12.1M · out 6.1M" },
+  { label: "Cost", mono: true, value: "$34", note: "usage-priced" },
+];
+
+export function GatewayOverview({ nameOf: _nameOf }: OverviewCtx) {
   return (
     <>
-      <Snav>
-        <div className="snhead">
-          <span className="glyph">
-            <Icon id="s-ai" />
-          </span>
-          <div>
-            <div className="t">AI Gateway</div>
-            <div className="u">capability · one endpoint</div>
-          </div>
-        </div>
-        <NitLink
-          to="/$org/$project/svc/$service"
-          params={{ org, project, service: "gateway" }}
-          search={{ env: "production" }}
-          icon="s-eye"
-          label="Overview"
-          on
-        />
-        <NitDisabled
-          icon="s-ai"
-          label="Models"
-          count="4"
-          reason="Model management lands with a canon gateway service"
-        />
-        <NitDisabled
-          icon="s-branch"
-          label="Routes"
-          count="3"
-          reason="Route weights land with a canon gateway service"
-        />
-        <NitDisabled
-          icon="s-card"
-          label="Usage & cost"
-          reason="Usage lands with a canon gateway service"
-        />
-        <NitDisabled
-          icon="s-shield"
-          label="Policies"
-          reason="Gateway policies land with a canon gateway service"
-        />
-        <NitDisabled
-          icon="s-key"
-          label="Keys & bindings"
-          reason="Bindings land with a canon gateway service"
-        />
-        <NitDisabled
-          icon="s-gear"
-          label="Settings"
-          reason="Settings land with a canon gateway service"
-        />
-        <Nsec> </Nsec>
-        <Nfoot>
-          <div className="flex justify-between px-1.5">
-            <span>AI Gateway</span>
-            <span className="mono">$34/mo</span>
-          </div>
-          <div className="px-1.5 pt-1">usage-priced · no instances to scale</div>
-        </Nfoot>
-      </Snav>
-      <main className="main">
-        <div className="pgpad !overflow-y-auto">
-          <Banner tone="default">
-            X1 exemplar — the canon world's ecommerce runs 7 services totaling $208; adding the
-            gateway would break that arithmetic (finding), so this page is URL-reachable but off the
-            rail.
-          </Banner>
-          <Pghead
-            title={
-              <span className="flex items-center gap-2.5">
-                AI Gateway <Pill tone="st">capability</Pill>
-              </span>
-            }
-            sub="One endpoint in ecommerce / production · 4 models behind 3 routes · a service with no fleet — config, not instances"
-          >
-            <Copybit>POST https://gw.acme-store.com/v1/chat</Copybit>
-          </Pghead>
-          <div className="grid grid-cols-5 gap-3">
-            <Metric label="Requests · 24h" value="128k" note="+9%" />
-            <Metric label="p95" value="840 ms" note="upstream-dominated" />
-            <Metric label="Cache hit" value="31%" note="semantic cache · saves $" />
-            <Metric label="Tokens · mtd" value="18.2M" note="in 12.1M · out 6.1M" />
-            <Metric label="Cost" mono value="$34" note="usage-priced" />
-          </div>
+      <Banner tone="default">
+        X1 exemplar — the canon world's ecommerce runs 7 services totaling $208; adding the gateway
+        to the data would break that arithmetic (finding), so this capability is chrome + this page,
+        not a billed service.
+      </Banner>
+      <VitalsStrip cells={VITALS} />
+      <div className="flex gap-3.5">
+        <div className="flex flex-1 flex-col gap-3.5">
           <div className="tblwrap">
             <table className="tbl">
               <thead>
@@ -169,25 +99,35 @@ export function GatewayPage({ org, project }: { org: string; project: string }) 
             Scaling is <b>weights &amp; fallbacks</b>, not instance counts — so no ×n rail badge and
             no instance switcher (SW3).
           </p>
-          <div className="grid grid-cols-2 gap-3.5">
-            <Card className="flex flex-col gap-2 p-4">
-              <Eyebrow>Connect</Eyebrow>
-              <div className="mono text-[11px] text-ink2">AI_GATEWAY_URL gw.acme-store.com</div>
-              <div className="mono text-[11px] text-ink2">AI_GATEWAY_KEY •••• bnd_api_gw</div>
-              <p className="text-[11px] text-ink3">
-                Consumed by <b>api</b> and <b>worker</b> via bindings.
-              </p>
-            </Card>
-            <Card className="flex flex-col gap-2 p-4">
-              <Eyebrow>Why it's a Service, not a new primitive</Eyebrow>
-              <p className="text-[11.5px] leading-relaxed text-ink2">
-                It satisfies the Service primitive (GOV-002). It differs only in <b>cardinality</b>:
-                one endpoint, config-shaped.
-              </p>
-            </Card>
-          </div>
+          <Card className="flex flex-col gap-2 p-4">
+            <Eyebrow>Why it's a Service, not a new primitive</Eyebrow>
+            <p className="text-[11.5px] leading-relaxed text-ink2">
+              It satisfies the Service primitive (GOV-002). It differs only in <b>cardinality</b>:
+              one endpoint, config-shaped.
+            </p>
+          </Card>
         </div>
-      </main>
+        <ConnectPanel
+          envPills={["AI_GATEWAY_URL — gw.acme-store.com", "AI_GATEWAY_KEY •••• · bnd_api_gw"]}
+          cli={<Copybit>POST https://gw.acme-store.com/v1/chat</Copybit>}
+          consumersEyebrow="Consumers · via bindings"
+          consumers={[
+            {
+              icon: "s-globe",
+              name: "api",
+              pill: { tone: "mut", label: "invoke" },
+              note: "rotated 12 d",
+            },
+            {
+              icon: "s-worker",
+              name: "worker",
+              pill: { tone: "mut", label: "invoke" },
+              note: "rotated 12 d",
+            },
+          ]}
+          footer="Gateway keys are minted per consumer like every binding — no static secrets, rotated on policy."
+        />
+      </div>
     </>
   );
 }
