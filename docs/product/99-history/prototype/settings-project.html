@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project settings — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "proj-settings", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+
+  window.renderPage = function (ctx) {
+    content.innerHTML = `
+      <div id="grace-slot"></div>
+      <div class="page-head"><h1>Project settings</h1><span class="sub u-mono">${ctx.project}</span></div>
+      <div class="settings">
+        <nav class="set-rail" aria-label="Settings sections">
+          <a href="#general" class="is-on">General</a><a href="#labels">Labels</a>
+          <a href="#notifications">Notifications</a><a href="#danger">Danger zone</a>
+        </nav>
+        <div>
+          <section class="set-sec" id="general"><h2>General</h2>
+            <div class="set-row"><div class="set-info"><div class="set-name">Project name</div>
+              <div class="set-desc">Renaming keeps the old address redirecting for 90 days.</div></div>
+              <input class="input input--mono" value="${ctx.project}" style="width:220px" aria-label="Project name">
+              <button class="btn" onclick="Shell.toast('Renamed (prototype). The old slug redirects for 90 days.')">Rename</button></div>
+            <div class="set-row"><div class="set-info"><div class="set-name">Project ID</div>
+              <div class="set-desc">Stable identifier used by the API and CLI.</div></div>
+              <span class="u-mono u-12 u-dim">prj_8f3ka92x</span></div>
+          </section>
+          <section class="set-sec" id="labels"><h2>Labels</h2>
+            <div class="set-row"><div class="set-info"><div class="set-name">Labels</div>
+              <div class="set-desc">Filter chips on the projects home. Key:value pairs.</div></div>
+              <span class="u-row">${ctx.p.labels.map(l => `<span class="chip">${l} <button aria-label="Remove ${l}" onclick="Shell.toast('Removed (prototype).')">×</button></span>`).join("")}
+              <button class="btn btn--s" onclick="Shell.toast('Label editor (prototype).')">Add label</button></span></div>
+          </section>
+          <section class="set-sec" id="notifications"><h2>Notifications</h2>
+            <div class="slot-note">${Shell.icon("info", "ic--s")} Project channels (Slack, webhooks) arrive in v0.5 — configured once per project, routed by category.</div>
+          </section>
+          <section class="set-sec" id="danger"><h2>Danger zone</h2>
+            <div class="danger-zone">
+              <div class="set-row"><div class="set-info"><div class="set-name">Archive project</div>
+                <div class="set-desc">Stops services and compute billing. Data snapshotted and kept. Restore anytime.</div></div>
+                <button class="btn btn--danger-outline" id="btn-archive">Archive…</button></div>
+              <div class="set-row"><div class="set-info"><div class="set-name">Destroy project</div>
+                <div class="set-desc">Deletes everything after a 7-day grace period. Restorable until then.</div></div>
+                <button class="btn btn--danger-outline" id="btn-destroy">Destroy…</button></div>
+            </div>
+          </section>
+        </div>
+      </div>`;
+
+    document.getElementById("btn-archive").addEventListener("click", () => { // SH-22, T1 + summary
+      Shell.dialog({
+        title: `Archive ${ctx.project}?`,
+        body: `<p>Archiving stops all services and compute billing. Data is snapshotted and kept. You can restore <b class="u-mono">${ctx.project}</b> anytime.</p>
+          <ul class="consequences" style="margin-top:12px">
+            <li>${Shell.icon("check", "ic--s")} <span>${ctx.p.envs.reduce((n, e) => n + e.services.length, 0)} services stop — <b>$${DB.projectMtd(ctx.p).toFixed(2)}/mo → $0</b></span></li>
+            <li>${Shell.icon("check", "ic--s")} <span>All data kept in final snapshots</span></li></ul>`,
+        confirmLabel: "Archive project", confirmClass: "btn--danger",
+        onConfirm: (close) => { close(); Shell.toast(`<b class="u-mono">${ctx.project}</b> archived — services stopping (prototype: resets on reload).`); },
+      });
+    });
+
+    document.getElementById("btn-destroy").addEventListener("click", () => { // SH-23, T3
+      Shell.dialog({
+        title: `Destroy ${ctx.project}?`, danger: true, typed: ctx.project,
+        body: `<p>This deletes <b class="u-mono">${ctx.project}</b> and every environment, service, and byte of data in it. It stays restorable for <b>7 days</b>, then it's gone permanently.</p>
+          <ul class="consequences">
+            <li>${Shell.icon("x", "ic--s")} <span>${ctx.p.envs.length} environments, ${ctx.p.envs.reduce((n, e) => n + e.services.length, 0)} services</span></li>
+            <li>${Shell.icon("x", "ic--s")} <span>All databases, files, and queues — including backups after the grace period</span></li>
+            <li>${Shell.icon("x", "ic--s")} <span>All bindings — connected apps lose access at deletion</span></li></ul>`,
+        confirmLabel: "Delete in 7 days", confirmClass: "btn--danger",
+        onConfirm: (close) => {
+          close();
+          document.getElementById("grace-slot").innerHTML = `
+            <div class="banner banner--grace" role="alert">${Shell.icon("warn", "ic--s")}
+              <span class="u-grow"><b class="u-mono">${ctx.project}</b> deletes <b>July 13, 2026</b>.</span>
+              <button class="btn btn--s" id="btn-restore">Restore</button></div>`;
+          document.getElementById("btn-restore").addEventListener("click", () => {
+            document.getElementById("grace-slot").innerHTML = "";
+            Shell.toast(`<b class="u-mono">${ctx.project}</b> restored. Nothing was deleted.`);
+          });
+          Shell.announce(ctx.project + " is scheduled for deletion in 7 days. A restore option is available.");
+        },
+      });
+    });
+  };
+
+  Shell.protoStates([
+    { label: "Grace banner (C-39)", fn: () => document.getElementById("btn-destroy").click() },
+  ]);
+  renderPage(Shell.ctx());
+})();
+</script>
+</body>
+</html>

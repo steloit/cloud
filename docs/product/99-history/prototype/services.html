@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Services — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "services", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+  let filter = "all"; // resolution of GOV-002's "Data" nav item: a filter, not a destination (§4.4)
+
+  function spark(vals) {
+    const max = Math.max(...vals), pts = vals.map((v, i) => `${(i / (vals.length - 1)) * 62 + 1},${17 - (v / max) * 14}`);
+    return `<svg class="spark" viewBox="0 0 64 18" aria-hidden="true"><path d="M${pts.join(" L")}"/></svg>`;
+  }
+
+  window.renderPage = function (ctx) {
+    const env = ctx.e;
+    let list = env.services;
+    if (filter === "data") list = list.filter(s => ["postgres", "valkey", "storage", "queue"].includes(s.type));
+    if (filter === "compute") list = [];
+
+    content.innerHTML = `
+      <div class="page-head">
+        <h1>Services</h1><span class="sub">${list.length} in <span class="u-mono">${ctx.env}</span></span>
+        <div class="u-right u-row">
+          <div role="tablist" aria-label="Service family" class="u-row" style="gap:4px">
+            <button class="chip chip--btn ${filter === "all" ? "chip--on" : ""}" data-f="all" role="tab" aria-selected="${filter === "all"}">All</button>
+            <button class="chip chip--btn ${filter === "data" ? "chip--on" : ""}" data-f="data" role="tab" aria-selected="${filter === "data"}">Data</button>
+            <button class="chip chip--btn" data-f="compute" role="tab" aria-selected="false" aria-disabled="true" title="Compute arrives in v2">Compute <span class="tag-ver">v2</span></button>
+          </div>
+          <a class="btn btn--primary" href="wizard.html${Shell.q({ mode: "service" })}">${Shell.icon("plus", "ic--s")} Add service</a>
+        </div>
+      </div>
+      ${env.services.length === 0 ? `
+        <div class="empty"><div class="empty-art">${Shell.icon("layers")}</div>
+          <h2>No services in ${ctx.env}</h2>
+          <p>Services are the databases, caches, storage, and queues your app uses. Each environment provisions its own.</p>
+          <a class="btn btn--primary" href="wizard.html${Shell.q({ mode: "service" })}">${Shell.icon("plus", "ic--s")} Add service</a></div>`
+      : `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Service</th><th>Type</th><th>Status</th><th>Activity</th><th>Size</th><th style="text-align:right">Cost mtd</th></tr></thead>
+          <tbody>
+          ${list.map(s => {
+            const t = DATA.svcTypes[s.type];
+            return `<tr class="is-clickable" data-href="service.html${Shell.q({ id: s.id })}">
+              <td><span class="u-row">${Shell.icon(t.icon)}<span class="u-mono">${s.id}</span></span></td>
+              <td class="u-dim">${t.label}</td>
+              <td><span class="badge badge--${s.state}"><span class="dot"></span>${s.state}</span></td>
+              <td>${spark(s.spark)}</td>
+              <td class="u-mono u-12 u-dim">${s.size}</td>
+              <td class="u-num cost-chip">${t.fixed ? "" : '<span class="u-approx">~</span>'}$${s.mtd.toFixed(2)}</td></tr>`;
+          }).join("")}
+          ${filter === "compute" ? `<tr><td colspan="6" class="u-dim" style="text-align:center;padding:28px">Compute services arrive in v2 \u2014 previews with database branches are the flagship.</td></tr>` : ""}
+          </tbody></table></div>`}
+    `;
+    content.querySelectorAll("[data-f]").forEach(b => b.addEventListener("click", () => {
+      if (b.getAttribute("aria-disabled") === "true") { filter = "compute"; } else filter = b.dataset.f;
+      renderPage(Shell.ctx());
+    }));
+    content.querySelectorAll("tr[data-href]").forEach(r => r.addEventListener("click", () => location.href = r.dataset.href));
+  };
+
+  Shell.protoStates([
+    { label: "Loading skeletons", fn: () => {
+        content.innerHTML = `<div class="page-head"><div class="sk" style="width:110px;height:22px"></div></div>
+          <div class="tbl-wrap" style="padding:12px">` + Array(4).fill(`<div class="u-row" style="padding:10px 4px;gap:16px"><div class="sk" style="width:140px;height:14px"></div><div class="sk" style="width:90px;height:14px"></div><div class="sk u-grow" style="height:14px"></div><div class="sk" style="width:60px;height:14px"></div></div>`).join("") + `</div>
+          <p class="u-12 u-faint" style="margin-top:12px"><button class="btn btn--s" onclick="renderPage(Shell.ctx())">Back to ready</button></p>`;
+      } },
+    { label: "Empty environment", fn: () => {
+        const c = Shell.ctx(); const saved = c.e.services; c.e = { ...c.e, services: [] };
+        const realRender = window.renderPage; realRender(c);
+        c.e.services = saved;
+      } },
+  ]);
+
+  renderPage(Shell.ctx());
+})();
+</script>
+</body>
+</html>

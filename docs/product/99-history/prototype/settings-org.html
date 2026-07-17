@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Organization settings — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  Shell.init({ section: "org-members", scope: "org" });
+  const content = document.getElementById("content");
+  const hash = () => location.hash.replace("#", "") || "general";
+
+  function render() {
+    const cur = hash();
+    const railLink = (id, label) => `<a href="#${id}" class="${cur === id ? "is-on" : ""}">${label}</a>`;
+    const sections = {
+      general: `<section class="set-sec"><h2>General</h2>
+        <div class="set-row"><div class="set-info"><div class="set-name">Organization name</div>
+          <div class="set-desc">Shown everywhere; the slug is your address.</div></div>
+          <input class="input" value="Acme" style="width:200px" aria-label="Organization name">
+          <button class="btn" onclick="Shell.toast('Saved (prototype).')">Save</button></div>
+        <div class="set-row"><div class="set-info"><div class="set-name">Slug</div>
+          <div class="set-desc">Renameable for 30 days after creation, then locked.</div></div>
+          <span class="u-mono u-dim">acme</span> <span class="chip">locked</span></div>
+        <div class="set-row"><div class="set-info"><div class="set-name">Plan</div>
+          <div class="set-desc">Pro — 20 projects, 10 members.</div></div>
+          <a class="btn" href="billing.html">Manage plan</a></div></section>`,
+      members: `<section class="set-sec"><h2>Members</h2>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Member</th><th>Role</th><th></th></tr></thead><tbody>
+          <tr><td><b>Priya Sharma</b> <span class="u-dim u-12">priya@acme.dev</span></td><td>Admin</td><td class="u-12 u-faint" style="text-align:right">you</td></tr>
+          <tr><td><b>Diego Fernandes</b> <span class="u-dim u-12">diego@acme.dev</span></td><td>Developer</td><td style="text-align:right"><button class="btn btn--s" onclick="location.href='members.html'">Edit</button></td></tr>
+          </tbody></table></div>
+        <div class="u-row" style="margin-top:12px"><button class="btn btn--primary" onclick="location.href='members.html'">Invite member</button></div>
+        <div class="slot-note" style="margin-top:16px">${Shell.icon("users", "ic--s")} Full membership — roles, 2FA status, API keys — lives on the <a href="members.html">Members page</a>. This section is the settings summary.</div></section>`,
+      billing: `<section class="set-sec"><h2>Billing <span class="tag-ver">v0.5</span></h2>
+        <div class="set-row"><div class="set-info"><div class="set-name">Month to date</div>
+          <div class="set-desc">All projects, actual usage.</div></div>
+          <span class="cost-chip" style="font-size:1rem">$23.30</span></div>
+        <div class="set-row"><div class="set-info"><div class="set-name">Budget alert</div>
+          <div class="set-desc">Notify at 80% of a monthly amount. Alerts only — nothing is stopped.</div></div>
+          <span class="u-mono u-dim">$20.00</span>
+          <button class="btn" onclick="location.href='billing.html'">Edit</button></div>
+        <div class="slot-note" style="margin-top:8px">${Shell.icon("card", "ic--s")} Invoices, daily spend, per-project splits, and plans live on the <a href="billing.html">Billing page</a>.</div></section>`,
+      policies: `<section class="set-sec"><h2>Policies <span class="tag-ver">v0.5</span></h2>
+        <div class="set-row"><div class="set-info"><div class="set-name">AI assistance</div>
+          <div class="set-desc">Allow the provisioning assistant and ask mode. Off removes them entirely — no teasing.</div></div>
+          <span class="switch"><input type="checkbox" checked aria-label="AI assistance"><span class="tr"></span></span></div>
+        <div class="set-row"><div class="set-info"><div class="set-name">Production protection</div>
+          <div class="set-desc">Block destroy on production environments (default on).</div></div>
+          <span class="switch"><input type="checkbox" checked aria-label="Production protection"><span class="tr"></span></span></div>
+        <div class="slot-note" style="margin-top:8px">${Shell.icon("doc", "ic--s")} The full policy engine is FND-007's; these rows render its two shell-relevant defaults.</div></section>`,
+      audit: `<section class="set-sec"><h2>Audit log <span class="tag-ver">v0.5</span></h2>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>When</th><th>Actor</th><th>Action</th></tr></thead><tbody>
+          <tr><td class="u-mono u-12">2h ago</td><td>system</td><td>backup.completed · ecommerce/production/db-main</td></tr>
+          <tr><td class="u-mono u-12">6d ago</td><td>diego</td><td>binding.created · app → jobs <span class="u-faint">(via assistant, proposal rec_9a2)</span></td></tr>
+          <tr><td class="u-mono u-12">8d ago</td><td>priya</td><td>service.provisioned · media</td></tr>
+          <tr><td class="u-mono u-12">12d ago</td><td>priya</td><td>member.invited · diego@acme.dev</td></tr>
+          </tbody></table></div></section>`,
+    };
+    content.innerHTML = `
+      <div class="page-head"><h1>Organization settings</h1><span class="sub">Acme · identity and money live here</span></div>
+      <div class="settings">
+        <nav class="set-rail" aria-label="Settings sections">
+          ${railLink("general", "General")}${railLink("members", "Members")}${railLink("billing", "Billing")}${railLink("policies", "Policies")}${railLink("audit", "Audit")}
+        </nav>
+        <div>${sections[cur] || sections.general}</div>
+      </div>`;
+  }
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script>
+</body>
+</html>

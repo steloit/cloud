@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Not found — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  Shell.init({ section: "", scope: "org", allowBadCtx: true });
+  const params = new URLSearchParams(location.search);
+  const kase = params.get("case") || "404";
+  const what = Shell.esc(params.get("what") || "that");
+  const content = document.getElementById("content");
+
+  const frames = {
+    "404": `<div class="error-frame"><div class="err-code">E-CTX-404</div>
+      <h2><span class="u-mono">${what}</span> wasn't found</h2>
+      <p>It may not exist, or you may not have access. The address is kept deliberately ambiguous — we don't confirm what exists to people who can't see it.</p>
+      <div class="u-row" style="margin-top:16px">
+        <a class="btn btn--primary" href="index.html">Your projects</a>
+        <button class="btn" onclick="document.querySelector('.palette-hint').click()">Search <span class="kbd">⌘K</span></button>
+      </div><div class="err-ref">ref: ctx-7f21</div></div>`,
+    "410": `<div class="error-frame"><div class="err-code">E-CTX-410</div>
+      <h2><span class="u-mono">${what}</span> is scheduled for deletion</h2>
+      <p>It deletes <b>July 13, 2026</b>. Until then it can be restored by anyone with permission.</p>
+      <div class="u-row" style="margin-top:16px">
+        <button class="btn btn--primary" onclick="Shell.toast('Restored (prototype).')">Restore</button>
+        <a class="btn" href="index.html">Your projects</a>
+      </div><div class="err-ref">ref: ctx-3a90</div></div>`,
+    "403": `<div class="error-frame"><div class="err-code">E-PERM-403</div>
+      <h2>You don't have access to this</h2>
+      <p>Your role: <b>Developer</b>. Ask an org admin, or request access — they'll get a notification.</p>
+      <div class="u-row" style="margin-top:16px">
+        <button class="btn btn--primary" onclick="Shell.toast('Access request sent to org admins.')">Request access</button>
+        <a class="btn" href="index.html">Your projects</a>
+      </div><div class="err-ref">ref: perm-9c2e</div></div>`,
+  };
+  content.innerHTML = frames[kase] || frames["404"];
+
+  Shell.protoStates([
+    { label: "E-CTX-404 · not found / no access", fn: () => location.href = "error.html?case=404&what=payments-api" },
+    { label: "E-CTX-410 · delete-grace", fn: () => location.href = "error.html?case=410&what=old-blog" },
+    { label: "E-PERM-403 · forbidden", fn: () => location.href = "error.html?case=403" },
+  ]);
+})();
+</script>
+</body>
+</html>

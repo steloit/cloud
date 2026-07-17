@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Observe — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "observe", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+  let tab = new URLSearchParams(location.search).get("tab") || "metrics";
+  if (!["metrics", "logs", "alerts", "events"].includes(tab)) tab = "metrics";
+  function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+  window.renderPage = function (cx) {
+    const firing = DB.firingAlerts();
+    content.innerHTML = `
+      <div class="tbl-toolbar"><div><h1 class="page-title">Observe <span class="tag-ver">v0.5</span></h1>
+        <p class="mini-note">Metrics, logs, and alerts for <b class="u-mono">${esc(cx.project)}/${esc(cx.env)}</b>. Every event elsewhere in the Console deep-links back here at its moment.</p></div>
+        ${firing.length ? `<span class="chip-pill chip-pill--fire">${firing.length} alert${firing.length>1?"s":""} firing</span>` : `<span class="chip-pill chip-pill--ok">all quiet</span>`}</div>
+      <div class="tabs" role="tablist">
+        ${["metrics","logs","alerts","events"].map(x => `<button class="tab ${x===tab?"is-on":""}" role="tab" aria-selected="${x===tab}" data-tab="${x}">${x[0].toUpperCase()+x.slice(1)}</button>`).join("")}
+      </div><div id="tabbody"></div>`;
+    content.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; renderPage(Shell.ctx()); }));
+    ({ metrics, logs, alerts, events })[tab](document.getElementById("tabbody"), cx);
+  };
+
+  function metrics(body, cx) {
+    const m = DB.metrics(cx.project, cx.env);
+    const svcs = Object.keys(m);
+    if (!svcs.length) { body.innerHTML = `<div class="empty-inline">No metrics in <b class="u-mono">${esc(cx.env)}</b> yet — they appear as soon as a service is provisioned.</div>`; return; }
+    body.innerHTML = `<div class="metric-grid">${svcs.flatMap(id => m[id].map(() => `<div class="ch-card"></div>`)).join("")}</div>`;
+    const cards = body.querySelectorAll(".ch-card"); let i = 0;
+    svcs.forEach(id => m[id].forEach(mm => Charts.line(cards[i++], { title: `${id} · ${mm.name}`, unit: mm.unit, series: [{ name: "last 24h", s: mm.s }], h: 110 })));
+  }
+
+  function logs(body, cx) {
+    const rows = DB.logs(cx.project, cx.env);
+    const svcs = ["all", ...new Set(rows.map(r => r.svc))];
+    body.innerHTML = `
+      <div class="log-bar">
+        <span class="live-pill" id="lv" role="button" tabindex="0" aria-label="Toggle live tail"><span class="live-dot"></span><span>live tail</span></span>
+        <select class="input input--s" id="lf-lvl" aria-label="Level"><option value="all">All levels</option><option>info</option><option>warn</option><option>error</option></select>
+        <select class="input input--s" id="lf-svc" aria-label="Service">${svcs.map(s => `<option value="${s}">${s === "all" ? "All services" : s}</option>`).join("")}</select>
+        <input class="input input--s" id="lf-q" placeholder="Filter…" aria-label="Filter" style="max-width:240px">
+      </div><div class="log-list" id="loglist" role="log" aria-label="Environment logs"></div>
+      <p class="mini-note" style="margin-top:8px">CLI parity: <span class="u-mono">steloit logs --env ${esc(cx.env)} --level warn -f</span></p>`;
+    const paint = () => Charts.logRows(body.querySelector("#loglist"), rows, { lvl: body.querySelector("#lf-lvl").value, svc: body.querySelector("#lf-svc").value, q: body.querySelector("#lf-q").value });
+    ["lf-lvl","lf-svc"].forEach(id => body.querySelector("#"+id).addEventListener("change", paint));
+    body.querySelector("#lf-q").addEventListener("input", paint);
+    body.querySelector("#lv").addEventListener("click", e => e.currentTarget.classList.toggle("is-paused"));
+    paint();
+  }
+
+  function alerts(body) {
+    body.innerHTML = `
+      <div class="tbl-toolbar"><p class="mini-note" style="max-width:60ch">Alerts route by category and respect quiet-by-default (§6.8): only firing states interrupt.</p>
+        <button class="btn btn--primary" id="new-alert">${Shell.icon("plus","ic--s")} New alert rule</button></div>
+      <table class="tbl"><thead><tr><th>Rule</th><th>Scope</th><th>Channels</th><th>State</th><th></th></tr></thead><tbody>
+        ${DATA.alerts.rules.map(r => `<tr>
+          <td><b>${esc(r.name)}</b></td><td class="u-mono u-12">${esc(r.scope)}</td><td class="u-12">${esc(r.channel)}</td>
+          <td>${r.state === "firing" ? `<span class="chip-pill chip-pill--fire">firing · ${esc(r.since)}</span>` : `<span class="chip-pill chip-pill--ok">ok</span>`}</td>
+          <td class="tbl-actions"><button class="btn btn--s btn--ghost" data-mute="${r.id}">Mute 1h</button></td></tr>`).join("")}
+      </tbody></table>`;
+    body.querySelector("#new-alert").addEventListener("click", () => {
+      Shell.dialog({ title: "New alert rule", body: `
+        <label class="field"><span class="field-label">Condition</span><select class="input"><option>p95 query time > threshold</option><option>Hit rate < threshold</option><option>DLQ depth > 0</option><option>5xx rate > threshold</option><option>Storage > 80%</option></select></label>
+        <div style="display:flex;gap:10px"><label class="field" style="flex:1"><span class="field-label">Threshold</span><input class="input u-mono" value="250 ms"></label>
+        <label class="field" style="flex:1"><span class="field-label">For</span><input class="input u-mono" value="10 min"></label></div>
+        <label class="field"><span class="field-label">Notify</span><select class="input"><option>in-app</option><option>in-app + email</option><option>in-app + Slack (#alerts)</option></select></label>`,
+        confirmLabel: "Create rule", onConfirm: (close) => { close(); Shell.toast("Alert rule created — it evaluates immediately."); } });
+    });
+    body.querySelectorAll("[data-mute]").forEach(b => b.addEventListener("click", () => { b.outerHTML = `<span class="mini-note">muted 1h</span>`; Shell.toast("Muted for 1 hour — it will re-fire after if still true."); }));
+  }
+
+  function events(body, cx) {
+    body.innerHTML = `<ul class="ev-list">${DB.events(cx.project, cx.env).map(e => `<li class="ev-item"><span class="ev-dot ev--${e.kind || "info"}" aria-hidden="true"></span><span>${e.text}</span><time>${e.time}</time></li>`).join("") || `<li class="u-faint">No recent activity in ${esc(cx.env)}.</li>`}</ul>`;
+  }
+
+  Shell.protoStates([
+    { label: "Metrics loading", fn: () => { document.getElementById("tabbody").innerHTML = `<div class="metric-grid">${'<div class="ch-card"><div class="sk-row" style="height:110px"></div></div>'.repeat(4)}</div>`; } },
+    { label: "Reset", fn: () => renderPage(Shell.ctx()) },
+  ]);
+  renderPage(ctx0);
+})();
+</script>
+</body>
+</html>

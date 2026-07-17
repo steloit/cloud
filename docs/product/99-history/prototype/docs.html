@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docs — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+<style>
+.docs-wrap{max-width:820px}
+.docs-sec{margin:26px 0}
+.docs-sec h2{font-size:15px;margin:0 0 4px}
+.docs-sec p{font-size:13px;color:var(--text-dim);max-width:66ch;line-height:1.6}
+.docs-toc{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 6px}
+.docs-sec:target{scroll-margin-top:70px}
+.docs-sec:target h2{color:var(--accent)}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content">
+    <div class="docs-wrap">
+      <h1 class="page-title">Documentation</h1>
+      <p class="mini-note">The prototype's docs hub. In the product, every Console concept links here — and the assistant cites these exact pages. Learn / Do / Fix / Look up (EXP-007).</p>
+      <div class="docs-toc">
+        <a class="chip-pill" href="#how-steloit-is-organized">Concepts</a>
+        <a class="chip-pill" href="#task-create-a-project">Tasks</a>
+        <a class="chip-pill" href="#runbook-valkey-memory-pressure">Runbooks</a>
+        <a class="chip-pill" href="#reference">Reference</a>
+      </div>
+
+      <section class="docs-sec" id="how-steloit-is-organized"><h2>Concept · How Steloit is organized</h2>
+        <p>Everything lives in a project. A project has environments (production, staging, previews); an environment has services; services connect through bindings. The region belongs to the environment, and identity belongs to the organization. If you remember one sentence: <b>the URL is the state</b> — org/project/environment reads left to right, exactly like the CLI's context.</p></section>
+
+      <section class="docs-sec" id="how-estimates-work"><h2>Concept · How estimates work</h2>
+        <p>Anything that changes what you pay shows the number <i>before</i> you confirm, marked with <span class="u-mono">~</span> because it's honest about being an estimate. If Steloit can't produce an estimate, it won't let you create the thing — no estimate, no create (E-EST-503). Actual spend never wears the tilde.</p></section>
+
+      <section class="docs-sec" id="how-recommendations-work"><h2>Concept · How recommendations work</h2>
+        <p>AI recommendations are proposals, not actions. Each one shows its reasons as evidence quoted verbatim from your own description or telemetry, its cost, and toggles you control. Low-confidence items default to off. The assistant answers questions and links to real surfaces; it never executes anything itself.</p></section>
+
+      <section class="docs-sec" id="concept-topology"><h2>Concept · Topology</h2>
+        <p>The topology view draws your environment as it actually is: services as nodes, bindings as edges, the connected app at the top. Healthy nodes stay visually quiet; only degraded, provisioning, or suspended states color the ring. It's a map, not a dashboard — click any node to operate on it.</p></section>
+
+      <section class="docs-sec" id="concept-branching"><h2>Concept · Branching</h2>
+        <p>A PostgreSQL branch is a copy-on-write copy of your database at a moment in time. Creating one is instant and costs cents per day, growing only with divergence from the parent. Branches power safe experiments, point-in-time restores (restores always land on a <i>new</i> branch), and — in v2 — preview environments that give every pull request production-shaped data with zero production risk.</p></section>
+
+      <section class="docs-sec" id="concept-queues-dlq"><h2>Concept · Queues &amp; DLQ</h2>
+        <p>Delivery is at-least-once: your handlers must be idempotent. Messages that fail repeatedly move to the dead-letter queue instead of vanishing; inspect them, fix the cause, then redrive. A non-empty DLQ is a signal worth an alert — one exists by default.</p></section>
+
+      <section class="docs-sec" id="task-create-a-project"><h2>Task · Create a project</h2>
+        <p>Console: <b>New project</b> → name it → pick services (or describe your app and review the AI's proposal) → check the estimate → create. CLI: <span class="u-mono">steloit init</span> asks the same questions in the same order. Both end at the same place: a provisioning environment and a connect step.</p></section>
+
+      <section class="docs-sec" id="task-connect-your-app"><h2>Task · Connect your app</h2>
+        <p>Run <span class="u-mono">steloit env pull</span> in your app directory. It writes <span class="u-mono">.env.steloit</span> with connection URLs and secrets for the current environment, and updates them when things rotate. Manually copied credentials don't update — the Console warns you every time you reveal one (C-41).</p></section>
+
+      <section class="docs-sec" id="task-delete-safely"><h2>Task · Delete safely</h2>
+        <p>Reversible things are easy; irreversible things are deliberately slow. Archiving is one confirm. Destroying an environment types its name and waits 72 hours. Destroying a project types its slug and waits 7 days, cancellable the whole time. Production environments cannot be destroyed while marked production — demote first (C-38).</p></section>
+
+      <section class="docs-sec" id="task-working-with-context"><h2>Task · Working with context</h2>
+        <p>The bar at the top isn't breadcrumbs — it's the working context, same as <span class="u-mono">steloit ctx</span>. Switching environment never navigates away; it re-filters the page you're on. <span class="u-mono">[</span> and <span class="u-mono">]</span> cycle environments from the keyboard. If the current page has no meaning in the target environment, you land on Services with a note.</p></section>
+
+      <section class="docs-sec" id="runbook-valkey-memory-pressure"><h2>Runbook · Valkey memory pressure</h2>
+        <p>Symptoms: hit rate falls, evictions exceed 5%/min, state shows degraded. Check the Keyspaces tab for patterns without TTLs — unbounded keyspaces are the usual cause. Fixes, in order of preference: add TTLs to unbounded patterns; flush stale fixture data (typed confirm); raise the size one step — the new monthly price is shown before you confirm. The staging cache in this prototype demonstrates the full scenario.</p></section>
+
+      <section class="docs-sec" id="reference"><h2>Reference</h2>
+        <p id="prd-001-4"><b>PRD-001 §4 · Branch pricing.</b> Branches bill on delta bytes-hours from parent. Formula and worked examples live here in the real docs.</p>
+        <p id="fnd-006"><b>FND-006 · Binding contract.</b> Environment variable naming, rotation semantics, scopes (read-write, read-only, produce, consume).</p>
+        <p id="fnd-010"><b>FND-010 · Estimation contract.</b> What estimates include, their error bars, and the no-estimate-no-create rule.</p>
+        <p id="pds-012"><b>PDS-012 · Assistant.</b> Grounding, citation, and the never-executes law.</p>
+        <p><b>CLI exit codes:</b> <span class="u-mono">0</span> ok · <span class="u-mono">1</span> error · <span class="u-mono">3</span> needs auth · <span class="u-mono">4</span> not found in context · <span class="u-mono">7</span> confirmation required (<span class="u-mono">--yes</span> to script it).</p></section>
+    </div>
+  </div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>Shell.init({ section: "docs", scope: "org" });</script>
+</body>
+</html>

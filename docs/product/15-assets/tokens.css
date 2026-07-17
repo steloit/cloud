@@ -1,0 +1,49 @@
+:root{
+  --canvas: #0B0E11;
+  --surface: #12161B;
+  --surface2: #1A2027;
+  --ink1: #E6EAEE;
+  --ink2: #9AA6B2;
+  --ink3: #5C6773;
+  --hair: #232B33;
+  --steel: #4D7CFE;
+  --steel-tint: #16233F;
+  --ok: #34C98E;
+  --ok-tint: #0E2A20;
+  --warn: #E3B341;
+  --warn-tint: #2E2712;
+  --err: #E5534B;
+  --err-tint: #331512;
+  --prov: #58A6FF;
+  --assist: #9D8CFF;
+  --assist-tint: #221F3A;
+  --mono-bg: #0D1117;
+  --page: #07090B;
+  --e1: 0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);
+  --e2: 0 10px 32px rgba(0,0,0,.5);
+}
+/* Light theme — class swap only, zero component forks (spec §1.1). Values extracted verbatim from the gallery's .light block. */
+.light{
+  --canvas: #F6F8FA;
+  --surface: #FFFFFF;
+  --surface2: #EFF2F5;
+  --ink1: #1A2129;
+  --ink2: #57606A;
+  --ink3: #8B949E;
+  --hair: #E3E8EE;
+  --steel: #3D63DD;
+  --steel-tint: #E8EEFF;
+  --ok: #1F9D6B;
+  --ok-tint: #E2F5EC;
+  --warn: #B58A1F;
+  --warn-tint: #F8F0DA;
+  --err: #CF3F38;
+  --err-tint: #FBE9E7;
+  --prov: #2E7CD6;
+  --assist: #7561E8;
+  --assist-tint: #EEEBFF;
+  --mono-bg: #F0F3F7;
+  --page: #E9EDF1;
+  --e1: 0 1px 2px rgba(26,33,41,.06),0 4px 12px rgba(26,33,41,.06);
+  --e2: 0 10px 30px rgba(26,33,41,.14);
+}
