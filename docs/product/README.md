@@ -3,6 +3,7 @@
 Everything required to build the Steloit developer-cloud console, for human engineers **and** AI coding agents. Three artifacts are the ground truth; everything else is derived from them and cross-referenced by frame id:
 
 - `00-sources/GOV-002-product-architecture.md` — the **product architecture**: nine primitives, the hierarchy, product families and boundaries, lifecycle, the AI four laws (§7), the Cell/BYOC model, the v0→v4 rhythm, and the five tests. The design spec is grounded solely in this document.
+- `00-sources/INF-001-infrastructure-constitution.md` — the **infrastructure constitution** (locked, 2026-07-09): what Steloit itself runs on and when it's allowed to spend. Governing principle: *cheap on capacity, never on shape*. Decisions D1–D11, day-one invariants, phase gates with budgets, verified costs, unit economics. Agents cite decision IDs; §8 is binding.
 - `00-sources/Steloit-Console-Screens.html` — **152 validated frames** (1440×900) of every page, state, and overlay. Frame labels are authoritative one-line purposes; frame ids (W3, B10, U6, DB7, AI3…) are the cross-reference currency used throughout this package.
 - `00-sources/Steloit-Console-Design-Spec.md` — the design spec: every decision, rule, and reversal, with reasoning.
 
@@ -16,7 +17,7 @@ Everything required to build the Steloit developer-cloud console, for human engi
 ## Index
 | Dir | Contents |
 |---|---|
-| 00-sources | The three ground-truth artifacts (GOV-002 architecture · frame gallery · design spec) |
+| 00-sources | The four ground-truth artifacts (GOV-002 architecture · INF-001 infrastructure · frame gallery · design spec) |
 | 01-design-system | design-system.md · tokens.json · icons/ (sprite.svg + inventory) |
 | 02-information-architecture | ia.md — context model, rail, sidebars, URLs |
 | 03-screens | screen-inventory.csv (all 152) · screen-states.md |
@@ -40,6 +41,7 @@ Everything required to build the Steloit developer-cloud console, for human engi
 | 21-playbooks | new-product.md — how to ship a product without breaking the grammar |
 | 22-agents | agent-guide.md — canonical onboarding for AI coding agents (CLAUDE.md is a pointer into it) |
 | 23-emails | emails.md — transactional email inventory, subject grammar, skeleton |
+| 24-rung0 | Rung 0 execution artifacts (design-partner pitch · interview script · interview logs) — consumes 17-brand + INF-001 §4 |
 | 99-history | Superseded program archive (pre-LATTICE docs + Instrument prototype) — **never cite as authority**; see its README status map |
 
 ## Non-negotiable product rules (the short list)

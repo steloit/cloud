@@ -1,0 +1,177 @@
+# Spec-change proposals — findings from building the console
+
+**Provenance:** `steloit/console` main `9dd8dfa`→`85e96ca` (the six-pass design audit, 2026-07-11). Every finding below lives as a comment or `disabledReason` in the console source; representative citations are `console:src/...` paths. Nothing here was resolved locally — per `22-agents/agent-guide.md` §3/§4 ("spec change first" · "propose the owner-level change") each item is filed against its owner for human sign-off. `00-sources/`, the constitution, and the ADR log change by human decision only; the ADR drafts in §7 are *proposals*, not entries.
+
+**Resolution rules the console applied while waiting:** fixtures win for data facts (ADR-026), frame copy wins for microcopy, and every conflict is carried as an in-code finding. Gated verbs are visible-but-disabled with the gap named (B6 grammar) — the `disabledReason` strings in the UI are the canonical statement of each missing capability.
+
+**Cross-checked against the ADR rejection list:** nothing below re-proposes a new primitive (ADR-001), a never-build class (ADR-003), AI auto-apply (ADR-005), env-as-container (ADR-013), the create-dialog (ADR-014), new rail items (ADR-017), inline forms (ADR-019), the FAB (ADR-020), or template linking (ADR-021). Where a proposal *touches* one of these, the tension is stated.
+
+---
+
+## 1 · The headline: the data plane vs the API's own promise
+
+`08-api/openapi.yaml` (info.description, lines 5–8) promises:
+
+> "CLI (`steloit …`) is a thin client of the same endpoints; **no console-only capabilities exist.**"
+
+But the D-series depth tabs — specced in full by the gallery — require an entire data plane the API doesn't carry. Today every one of these is a designed surface whose verbs are honestly gated:
+
+| Capability | Frames | Console evidence |
+|---|---|---|
+| SQL execution + table data + pg_stat_statements | D1, D2, D4 | `svc.$service.sql-editor.tsx:15`, `tables.tsx:14`, `insights.tsx:18` |
+| Key browse / TTL edit / CLI exec (Valkey) | D3, D6, D14 | `data-browser.tsx:196`, `cli.tsx:11` |
+| Messages: ready/in-flight lists, payloads, redrive, discard, purge | D8, D18 | `messages.tsx:16`, `overviews.tsx:309`, `tabs/queue.tsx:118` |
+| Object list/upload/signed URLs, public-access request | D7, D16 | `objects.tsx:72`, `overviews.tsx:244` |
+| Backups: list, snapshot-now, restore-to-branch, drills | D5 | `backups.tsx:21` |
+| Branches: list/create/promote/delete | W5, D5 | `branches.tsx:143` |
+| Shell exec (web/worker) | D20 | frame-fixed transcript only |
+| FLUSHALL / flush | D14 | `tabs/valkey.tsx:310` |
+
+**Decision needed (ADR draft in §7.1):** either the v1 API grows a data-plane section, or the promise is scoped ("no console-only *control-plane* capabilities") and the D-tabs are re-labeled as a later API phase. The console can render either outcome; it cannot honestly render the current contradiction. Note: operating one's own provisioned services is not an ADR-003 never-build class — this is product depth, not IaaS.
+
+## 2 · 08-api: proposed new endpoints
+
+All paths follow the spec's own `x-conventions` (plural nouns, `:verb` action sub-resources, prefixed ids, problem+json with required `remediation`, cursor pagination, `?env=` filter, `x-streamable` where live). Grouped by area; each row cites one representative gated surface.
+
+### 2a · Data plane (pending the §1 decision)
+
+| Proposed | Blocks today | Evidence |
+|---|---|---|
+| `POST /services/{service}/queries` (SQL exec) + `GET /services/{service}/tables` | D1/D2 run + table viewer | `sql-editor.tsx:15` |
+| `GET /services/{service}/insights` (pg_stat_statements) | D4 rows | `insights.tsx:18` |
+| `GET /services/{service}/keys` + `PATCH /keys/{key}` (TTL) + `POST /services/{service}/commands:exec` | D3 browse, TTL edit, D6 CLI | `data-browser.tsx:196` |
+| `GET /services/{service}/messages?state=` + `POST /messages/{msg}:redrive` · `:discard` + `POST /services/{service}:purge` | D8/D18 | `messages.tsx:16` |
+| `GET/POST /services/{service}/objects` (+ signed-URL grant) | D7 | `objects.tsx:72` |
+| `GET /services/{service}/backups` + `POST /backups/{bkp}:restore` (into a new branch, never in place) | D5 | `backups.tsx:21` |
+| `GET/POST /services/{service}/branches` + `POST /branches/{branch}:promote` + `DELETE` | W5/D5 | `branches.tsx:143` |
+| `POST /services/{service}/shell:exec` (audited, TTL'd unlock) | D20, D6 write-unlock | `cli.tsx:54` |
+| `POST /services/{service}:flush` | D14 | `tabs/valkey.tsx:310` |
+
+### 2b · Control plane & lifecycle
+
+| Proposed | Blocks today | Evidence |
+|---|---|---|
+| `POST /bindings/{binding}:rotate` | D11 rotate | `bindings-tab.tsx:187` |
+| `POST /domains/{dom}:recheck` + per-domain resource (`DELETE`, make-primary) | U5/D21 | `domain-drawer.tsx:60` |
+| `GET/PATCH/DELETE /schedules/{sch}` + `POST /schedules/{sch}:run` | D17 per-row actions, manual run | `schedules.tsx:161`, `overviews.tsx:566` |
+| `GET/PATCH/DELETE /lifecycle-rules/{rule}` | D15 per-row actions | `lifecycle.tsx:144` |
+| `POST /deployments/{dep}:pause` · `:abort` | DP2 controls | `deploy.$dep.tsx:28` |
+| `DELETE /envs/{env}` (preview teardown, U6 typed-confirm) | DP3 | `deploy.previews.tsx:117` |
+| `POST /projects:batch` or estimate-linked multi-create | AI1 review-and-create | `create.tsx:569` |
+| `DELETE /orgs/{org}/api-keys/{key}` | G4 revoke (list+create only today) | `api-keys.tsx:200` |
+| `POST /orgs/{org}:transfer` + `POST /projects/{project}:transfer` | G5/G1 transfer | `settings.general.tsx:90` |
+| Template revisions (`GET/POST /templates/{tpl}/revisions`) | T2 shape editing | `templates.tsx:55` |
+| Git integration (`/orgs/{org}/git` connect/disconnect) | G12 | `settings.git.tsx:111` |
+| Cell ops (`POST /cells/{cell}:drain` · `:detach`) | X2 (connect is already spec'd) | `settings.cells.tsx:60` |
+
+### 2c · Observe & notifications
+
+| Proposed | Blocks today | Evidence |
+|---|---|---|
+| **Notifications family** — `GET /me/notifications`, `POST /notifications/{ntf}:read`, approval threads, webhook routes + test delivery | N1–N3 bell/inbox, U8 webhook, policy Review/Deny (highest-frequency gap: 8 surfaces) | `notifications/data.ts:6` |
+| `GET/POST /projects/{project}/silences` | O5 Silences | `alerts.tsx:164` |
+| `GET /projects/{project}/alert-firings` | O5 History | `alerts.tsx:116` |
+| Logs: `?around=` context param, saved searches, message deep-links | O3 | `logs.tsx:177,232` |
+| Metrics: `?compare=` and `?group_by=` params | O2 compare/split-by | `metrics.tsx:302` |
+| `GET /envs/{env}/traces` (list; spans for more than one trace) | O6 selection | `traces.tsx:17` |
+| Dashboards: `POST /dashboards/{dash}:fork` · `:duplicate`, `DELETE /dashboards/{dash}/widgets/{wdg}`, share grants | DB2/3/5/7 | `dashboards.$dashId.tsx:77` |
+
+### 2d · Account, auth & billing
+
+| Proposed | Blocks today | Evidence |
+|---|---|---|
+| **Auth section** — sign-in/session, password change, MFA/WebAuthn, recovery codes, session list/revoke | A-series + P3/P4 (today the console fakes a local session seam — `login.tsx:10`) | `security.tsx:16`, `sessions.tsx:13` |
+| `PATCH /me` notification settings + avatar upload | P6, P2 | `account.notifications.tsx:149` |
+| Leave-org / account-delete (grace-windowed) | P2 | `profile.tsx:90` |
+| `PUT /orgs/{org}/billing/budget` | B1 set-budget | `billing.overview.tsx:192` |
+| Billing exports (PDF/CSV), invoice line→usage breakdown (schema carries `usage_ref` already), disputes/billing threads | B3/B4 | `invoices.tsx:39,256` |
+| Payment-method management (replace/add-backup — POST exists, no update/delete) | B5 | `payment.tsx:60` |
+| Project-scoped membership & roles (today "the API only models org membership") | G-project members | `$project.settings.members.tsx:23` |
+| Per-service AI policy override (within ADR-005's laws — an override *tightens*, never loosens) | AI3 per-service | `svc.$service.ai.tsx:326` |
+| Assistant activity ledger (`GET /assistant/activity`) | AI7 | `assistant.activity.tsx:10` |
+
+## 3 · 08-api: schema amendments
+
+| Schema | Change | Evidence |
+|---|---|---|
+| `PATCH /services` body | add `name` (rename re-derives binding env-vars — consequence documented in the console's rename modal) | `tabs/postgres.tsx:621` |
+| `PATCH /services` body | add `vars` (env-var CRUD) and a mode/restart contract for shape changes (D14) | `tabs/web.tsx:155` |
+| `Token.scope` | enum too narrow (`full`\|`read_only`) for the frame's scope strings | `api-keys.tsx:32` |
+| `/invites/{invite}/renew` | **spec defect:** path param `{invite}` missing → generated client has `path?: never` | `invites/hooks.ts:23` |
+| `DELETE /invites/{invite}` | missing entirely (console calls it via raw client) | `settings.members.tsx:72` |
+| `Widget.viz` | enum (`area`,`list`) diverges from the DB8 drawer's `bar`/`log stream` | `dashboards.$dashId.tsx:161` |
+| `PATCH /assistant/insights/{ins}` | add snooze `duration` | `assistant.insights.tsx:137` |
+| Domains / lifecycle-rules / schedules | add ownership (`service_id`) — fixtures carry none; the console scopes them by hand to D21 api / D15 assets / D17 jobs + S5 worker | `mocks/handlers.ts:272` |
+| Schedule / LifecycleRule | add run history (`last_run_at`, `next_run_at`, outcome) | `schedules.tsx:20` |
+| Policy | expose archived versions; add changed-by; scope finer than org/project if G7's chips are real | `policies.new.tsx:85` |
+| Dashboard create body | project scoping beyond the current project id | `new-dashboard-modal.tsx:98` |
+| Create-service body | more than one lifecycle rule; a catalog endpoint for type-block options | `type-blocks.tsx:730` |
+| W2 create | accept a `template` param (template-prefilled create) | `template.$tpl.tsx:161` |
+
+## 4 · 19-canon: fixture additions & corrections
+
+Additions must keep every arithmetic invariant green (`19-canon/canon.md` §invariants) and conform to schemas (ADR-026).
+
+**Additions (sections that don't exist):** billing usage/invoices/payment-methods (`world.ts:190`); domains/lifecycle-rules/schedules *with ownership* (`world.ts:438`); deploy `dep_141` (frames reference it, fixtures lack it — `deploy.$dep.tsx:124`); message payload for `msg_9f224`; spans for at least one more trace; widget data for the DB5/prebuilt dashboards beyond checkout-health/PostgreSQL-Health/Infrastructure/Cost (`dashboards.index.tsx:43`); alert-firing history (the Jul 2 incident as data); a canon cost series for O2's Cost tab (`metrics.tsx:221`).
+
+**Corrections (fixture-internal defects):** B3 invoice lines don't sum to their printed subtotal (`world.ts:194`); B2 egress 41.3 GB contradicts the quotas fixture 87/100 (`world.ts:193`); internal-tools services total $96 vs the gallery card's $41 — the name↔cost swap (`world.ts:467`).
+
+**Two canon decisions (ADR drafts §7.2–7.3):** whether canon mode should be *stateful* for mutations (today renames/deletes echo once and fixtures win on refetch — the DB8 precedent, ~8 sites, `handlers.ts:70`), and whether the X1 gateway becomes a canon service (today it's a client-side exemplar because adding $34 breaks `7 services = $208` — a new invariant or a revised one is required, `gateway-tabs.tsx:77`).
+
+## 5 · 00-sources: frame ↔ fixture/spec conflicts (human decision only)
+
+Each needs a ruling: update the frame, update the fixture, or record the divergence as intended.
+
+| # | Conflict | Citations |
+|---|---|---|
+| 1 | Typed-confirm grammar: G1 frame says "type the project **slug**", the U6 contract types the **name** | `$project.settings.general.tsx:122` |
+| 2 | Alert rule names: frame `api-p95-burn` (+6-rule set) vs fixtures `p95-slo` (+4 rules) | `alerts.tsx:18,119` |
+| 3 | DP1 frame shas (`a41f2c`, `88ba02`) vs fixtures' `git_sha` (`a71c9e2`, `b3f19d0`); #141 in frames, not fixtures | `deploy.$dep.tsx:39,124` |
+| 4 | Events actor: frame says asha, fixtures differ | `events.tsx:19` |
+| 5 | B-series numerics: B7 quota "6.2M/50M", budget 38.1%, env costs, billing dates (frame Mar/Apr vs fixtures' July cycle) | `quotas.tsx:29`, `overview.tsx:350`, `payment.tsx:32` |
+| 6 | U2 bindings: frame shows api→assets selectable, fixtures already bind it | `bindings-tab.tsx:309` |
+| 7 | X1 gateway: sub-tab frames don't exist; "3 routes" never named | `gateway-tabs.tsx:18` |
+| 8 | O2 category tabs (Databases/Queue/Network/Cost) unspecced by any frame | `metrics.tsx:18` |
+| 9 | Frames show bare page titles ("SQL Editor") vs the design system's "Area · Thing" grammar (~30 pages; console follows the grammar) | `account.tokens.tsx:105` |
+
+## 6 · 01-design-system: adopt what the console had to invent
+
+Per agent-guide §3 ("never invent a component… design-system change first") these were built out of necessity during the audit and should be ratified or replaced by the owner (ADR-010 pioneer check applies):
+
+1. **`--scrim` token** (`rgba(6,9,12,.44)`) — the value already lives verbatim in the overlay recipes; it was never a token. → add to `15-assets/tokens.css` + `tokens.json`.
+2. **Type ramp** — a discrete scale `10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14` px (10px floor), materialized from the gallery's own values; design-system.md says "8–22px" loosely. → document the ramp; the console's audit found 41 sub-10px uses worth prohibiting.
+3. **Chart height tiers** `sm 80 / md 120 / lg 160` — no chart-height scale exists anywhere in the spec.
+4. **Dot tones `none` (hair) and `ai` (assist)** — the six-mark vocabulary lacked a neutral/read dot and an assistant-provenance dot; both were needed by N1's design.
+5. **Sprite additions** — the inventory (35 ids) lacks: up-caret/trend arrow (▲), alert triangle (⚠), star (★), and a small select-caret distinct from `s-chevd`; these render as unicode text today. Also: `icons.md` says 24×24 grid while `21-playbooks/new-product.md` Step 1 says 20px/1.5px — reconcile.
+6. **Tooltip primitive** — none exists; every hint is native `title=` (invisible to keyboard users). The B6 disabled-reason grammar deserves a real component.
+7. **Org-avatar gradient** — `linear-gradient(135deg,#E36C4B,#B34A2E)` appeared inline in four gallery-derived spots; the console extracted `.orggrad`. → token or documented exception.
+8. **Title grammar ruling** — see §5.9; if "Area · Thing" is confirmed, the frames should be annotated so future readers don't re-diverge.
+
+## 7 · Proposed ADR drafts (for `18-philosophy/decisions.md`, human sign-off)
+
+**7.1 — Data-plane API scope.**
+*Decision (proposed):* v1 grows a data-plane section (§2a) behind the same auth, with destructive verbs policy-gated and audited; the "no console-only capabilities" promise stands.
+*Context & alternatives:* the D-series frames spec a full data plane the API lacks (§1); alternative is scoping the promise to the control plane and re-labeling the D-tab verbs as phase-2 API.
+*Why:* the promise is load-bearing for the CLI story ("CLI verbs fall out of the noun-verb grammar", playbook §4); a console that shows what the CLI can't do breaks it.
+*Consequences:* ~20 endpoints; canon needs data-plane fixtures; not an ADR-003 violation (operating owned services ≠ IaaS product).
+*Refs:* openapi.yaml info.description; D1–D22 frames; console findings A1–A17.
+
+**7.2 — Canon statefulness.**
+*Decision (proposed):* canon mode stays stateless for fixture entities (mutations echo; fixtures win on refetch) and stateful only for user-created entities — ratifying the console's existing behavior (stateful createdServices/createdEnvironments; echo for renames/deletes of canon objects).
+*Refs:* ADR-026; `console:src/mocks/handlers.ts:70`.
+
+**7.3 — X1 gateway canonization.**
+*Decision (proposed):* either (a) the gateway joins canon as an 8th ecommerce service and the invariant becomes `208 + 34 = 242`, with frame updates to every $208 mention, or (b) X1 stays a documented exemplar (status quo, client-side synthetic service).
+*Refs:* X1 frame; `console:src/features/services/gateway.ts`; canon.md invariants.
+
+**7.4 — Auth surface.**
+*Decision (proposed):* the API gains an auth/session section (§2d) — today sign-in exists only as a console-local seam, which is itself a "console-only capability" in the inverse direction.
+*Refs:* `console:src/lib/session.ts`, `login.tsx:10`.
+
+## 8 · 02-information-architecture: route registrations
+
+Routes the console added minimally (each carried as a finding) that the URL map should adopt: `/forgot-password`, `/reset-password`, `/$org/new-project`, `/$org/$project/new-env`, `/$org/$project/environments`, `/$org/notifications`, `/account/sessions`, `/$org/$project/deploy/$dep` (per-deployment detail), `/$org/$project/instances/$product`, org-level `/$org/assistant/*`. Citations: `forgot-password.tsx:11`, `new-env.tsx:23`, `environments.tsx:20`, `deploy.$dep.tsx:24`, `assistant.tsx:8`.
+
+## 9 · Priorities
+
+By number of blocked surfaces: **notifications endpoints** (8 surfaces) → **the §1 data-plane decision** (~20 surfaces across all D-tabs) → **gateway canonization** (6) → **dashboard fixture coverage** (6) → **auth section** (the whole A/P plane rests on a local seam) → **the two spec defects** (invite renew path param; invite DELETE missing) which are mechanical and unblock generated-client cleanliness immediately.
