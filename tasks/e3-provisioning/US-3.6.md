@@ -1,0 +1,32 @@
+---
+id: US-3.6
+title: Failed provisioning never bills and never strands state
+epic: E3
+status: stub
+phase: MVP
+priority: critical
+sprint: 4
+estimate: 0.5ew
+deps: [S7, US-3.3]
+issue: 60
+labels: [Backend, Billing]
+module: M4 Provisioning
+contexts: [provisioning, api-conventions, canon-testing]
+files: []
+verify: []
+owner: agent
+---
+
+## Goal
+
+Failed provisioning never bills and never strands state
+
+## Summary
+
+Implements the S7 idempotency ruling.
+
+## Acceptance criteria
+
+- [ ] kill provisioning mid-flight → no meter events, clean desired/actual state, retry-safe.
+
+> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
