@@ -1,2 +1,7 @@
+packages:
+  - apps/*
+  - services/*
+  - packages/*
+
 allowBuilds:
   msw: true

@@ -1,0 +1,10 @@
+{
+  "name": "steloit-cloud",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter console build",
+    "test": "pnpm --filter console test",
+    "typecheck": "pnpm --filter console typecheck",
+    "lint": "pnpm --filter console lint"
+  }
+}
