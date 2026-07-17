@@ -1,0 +1,27 @@
+name: converge
+on:
+  schedule:
+    - cron: "0 3 * * 1" # weekly, Monday 03:00 UTC
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Validate (schema, deps, caps — AGENTS.md/pack budgets enforced here)
+        run: node scripts/spec-sync/validate.mjs
+      - name: Report stale in-progress tasks (>7 days) and done tasks to archive
+        run: |
+          node -e '
+            import("./scripts/spec-sync/lib.mjs").then(({loadTasks}) => {
+              const t = loadTasks();
+              const stale = t.filter(x => x.meta.status === "in-progress");
+              const done = t.filter(x => x.meta.status === "done" && !x.file.includes("_archive"));
+              if (stale.length) console.log("in-progress (check for staleness):", stale.map(x=>x.meta.id).join(", "));
+              if (done.length) console.log("done, eligible for archive sweep:", done.map(x=>x.meta.id).join(", "));
+            })'
