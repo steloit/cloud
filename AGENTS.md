@@ -54,15 +54,20 @@ never hand-written · demo data from `19-canon` only.
 - **Platform architecture is FROZEN** (`docs/architecture.md` v1.2, ADR-0001/0003/0004/0005): Go/stdlib-http/
   sqlc/River/REST+SSE, CNPG+ZFS substrate, the **product surface `[postgres, valkey, web, worker]`**, and
   BYOC (Enterprise/v3, exit-criteria-gated — ADR-0005) are decided. Storage & AI are external **Bindings**;
-  queue is a **Postgres capability** (pgmq); GPU is out. The Engineering OS (this file, tasks/, contexts/,
-  spec-sync) is frozen too.
-- **New-managed-product gate — the State Test first (ADR-038):** classification is decided by *state*,
+  queue is a **Postgres capability** (pgmq); GPU is out. The enum names the *architecture* plane only —
+  the **catalog is outcome-first** (ADR-039/040): it sells intents the Composer resolves to named
+  resolutions with stated semantics; **execution models are replaceable, semantic contracts are not.**
+  The Engineering OS (this file, tasks/, contexts/, spec-sync) is frozen too.
+- **New-managed-product gate — the Developer-First test, then the State Test (ADR-038/040):** first:
+  what developer problem does it solve, which execution model gives the best DX, does it strengthen
+  the certainty story? Then classification is decided by *state*,
   because lifecycle, backup, branching, scaling, permissions, billing, and ownership all follow state:
   **Service** iff independent state lifecycle + isolation boundary · **Capability** iff its state is *of*
   a parent (branches/joins/transacts with it) · **Binding** iff state lives outside the platform. A
   proposed managed product must first fail Binding, capability, and integration — only then, via a new
   ADR. Dependencies are satisfied by the composer (catalog sells intents), never surfaced as homework.
-  Architecture deltas require evidence from implementation or real customer feedback, never speculation.
+  Architecture deltas require evidence from implementation or real customer feedback, never speculation;
+  a cleaner abstraction is never a trigger (ADR-040).
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**

@@ -54,6 +54,30 @@ The dependency is satisfied **by composition, never by error message.** The cust
 
 **"I only want a Vector database"** resolves the same way — and more pointedly: a Postgres with pgvector *is* a vector database, one whose vectors can also join, transact, and branch. **"I only want Search"** likewise. The persona these intents don't serve — someone shopping for a bare commodity queue/vector/search endpoint with no app on the platform — is the customer ADR-0004's evidence says not to chase.
 
+## 4b · The two-plane rule (founder refinement, 2026-07-18 — ratified as ADR-039)
+
+**Architecture answers "what is this?" (the State Test, frozen). The catalog answers "what problem does this solve?" (intents). The planes never leak into each other.**
+
+- **Catalog plane:** flat and outcome-first — **Jobs, Search, Vector are catalog peers of PostgreSQL**; parentage is never displayed as structure. A catalog entry is an *intent*, not a product identity. Rationale (founder): the customer with an existing PostgreSQL isn't buying Jobs because they can't install pgmq — **they're buying the managed experience** (queue UI, retries, scheduling, DLQ, observability, lifecycle, branch-coherent previews). The outcome+experience is the product; the backing is the Composer's concern. One intent entry also means future backends never duplicate catalog entries under multiple services.
+- **The bridge:** the Composer fans an intent out to resolutions ("create a new PostgreSQL for it / enable on existing `db-main` / *(future)* use your connected Kafka"), and **the accepted estimate is the reconciliation contract** between intent and architecture — the customer sees "Jobs — runs on managed Postgres `jobs` · $X/mo" before accepting, and the invoice matches that line (one arithmetic). Intent-first cataloging creates no billing ambiguity because the estimate translates planes at the moment of consent.
+- **The guard (preserves the ADR-038 scope clause):** intents fan out to **named products with stated semantics — never to backend dropdowns.** When Kafka-class execution someday joins the fan-out, the Composer offers *differently named* resolutions with tradeoffs stated ("database-native Jobs — transactional, branch-coherent" vs "Streams — high-throughput, replay; no transactional coupling"), and the customer picks an outcome variant whose semantics they've seen: **estimate-before-provision extended to semantics.** "Backend" is never a customer-facing word; nothing named Jobs ever silently changes semantics; the *intent* simply gains more answers over time.
+- **Console honesty for free:** the rail shows the architecture truthfully via instance naming (canon's queue-shaped Postgres is literally named `jobs`) with capability tabs prominent — the outcome reads first, the architecture remains inspectable.
+
+## 4c · Product-first pricing presentation + the generalized exact-sum invariant (founder refinements, 2026-07-18 — part of ADR-039)
+
+**Label by outcome, account by cost components — same numbers at every level.** Estimates and invoices default to the **product view** and expand, B3-style, one level deeper than today: *product line → cost components → meter rows.* The customer buys the outcome they came for; the machinery stays one interaction away, never gated, never approximated. This is not a transparency concession — it is the console's existing grammar (ten-second truth first, expansion for depth) applied to commerce.
+
+**The generalized invariant (founder wording, adopted):** *Every Product expands into the complete set of cost components that generated its price.* For infrastructure products those components are managed services; for platform products they may be shared compute, token usage, storage, bandwidth, or other metered resources. The invariant is not that every product maps to services — it is that **every price is completely explainable and expands to its underlying cost model without hidden arithmetic.**
+
+**Guards:**
+1. **Exact-sum rule, generalized:** the product line equals the sum of its cost-component lines, byte-for-byte, at every expansion level. No blending, no rounding across levels, no "from $X."
+2. **Terminal condition (closes the loophole):** expansion bottoms out at **published unit price × metered quantity** or a **stated plan allowance** — never an opaque composite ("platform fee"). Unified rule: *every line on any Steloit surface is either a metered quantity at a published unit price, or a stated plan allowance; nothing else exists.* (This collapses F9's two axes under one auditable rule and subsumes the B3 line→meter contract.)
+3. **No value markup hiding in grouping:** grouping is presentation; value capture stays on the plan axis; the infra/meter axis stays cost-transparent.
+4. **Ranges are honest and bounded:** shape costs are exact; usage components show workload-informed ranges **with the cap** (US-11.7) — a range with a hard bound is a stronger promise than fake precision. "Search: $9/mo base · usage est. $3–8 · capped at your $25."
+5. **Mechanism — the intent tag:** services (and meter groups) carry the intent they were provisioned from (`intent: search`, stamped by the Composer at creation) — the structural grouping key that lets estimates/invoices label by outcome while accounting by component; survives renames; one column.
+
+API/CLI stay explicit (components + meters; the product label is a grouping key, `--json` returns the full structure). Any future *platform* product still passes the standing gates (State Test first, new-managed-product gate, ADR-0004 boundaries) — this section governs how its price is *presented and explained*, not whether it may exist.
+
 ## 5 · Deliverables, point by point
 
 1. **Model chosen:** Model A's taxonomy + the intent catalog (call it **"capabilities with a front door"**), + the Atlas seam (engine evolution happens *inside* a capability, scoped to the parent's data, never as a silent backend swap of a standalone product).

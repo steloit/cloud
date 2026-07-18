@@ -79,6 +79,8 @@ For product leadership. It says **what not to build**.
 
 The moat is not any product — everyone has Postgres, queues, compute. The moat is that every product behaves like a Steloit product: **deployed, estimated, observed, billed, secured, and audited the same way.** One mental model, compounding as the catalog grows.
 
+**The catalog principle (ADR-040).** Developers buy outcomes, not infrastructure. The public catalog sells Products — outcome-named intents — and the Composer resolves each into an execution model, priced, in the estimate the customer accepts. Infrastructure powers the experience and never defines it: no catalog entry exists because the infrastructure exists, though an infrastructure name may be a Product when it is itself the outcome developers seek (PostgreSQL). **Execution models are replaceable; semantic contracts are not** — engines may change invisibly, meanings may not.
+
 **The grammar is the shared language of Steloit.** Concretely, it is:
 - the **context model** — Org → Project → Environment, env-as-filter (`02-information-architecture`)
 - the **page anatomy** — the service page contract, product overview zones, settings grammar (spec §4.3, Overview grammar)
@@ -153,6 +155,8 @@ The constitution. When the team grows, nobody will remember every discussion —
 - **We never ship a product that breaks the grammar.**
 - **We never duplicate ownership of a developer question.**
 - **We never build two rooms for one job.** Many doors, one room — entry points may multiply, canonical surfaces may not.
+- **We never make the developer think in infrastructure to buy an outcome.** The catalog sells Products; the Composer composes; dependencies are satisfied by composition, never surfaced as homework.
+- **We never silently change a product's semantics.** Execution models are replaceable; semantic contracts are not — a semantic change ships as a new named variant, consented through its estimate.
 - **We never leave a failure state without a way forward.** No silent limbo, no dead ends.
 - **We never capture secrets in templates, and we never reveal a token twice.**
 - **We never use magic where proof is possible.** If we can show the evidence, the math, or the state, we do — "trust us" is a last resort, and a design smell.
