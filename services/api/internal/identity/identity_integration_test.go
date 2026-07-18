@@ -31,7 +31,11 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
+
+// testKEK is a fixed 32-byte key (base64) — test worlds only.
+const testKEK = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 type world struct {
 	srv   *httptest.Server
@@ -40,6 +44,7 @@ type world struct {
 	authz *identity.Authorizer
 	hub   *events.Hub
 	prov  *provisioning.Service
+	vault *secrets.Vault
 }
 
 func newWorld(t *testing.T, ttl time.Duration) *world {
@@ -84,7 +89,12 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(q))
 	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies), recorder)
-	prov := provisioning.NewService(pool, recorder)
+	kek, err := secrets.NewEnvKEK("test-v1", testKEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault := secrets.NewVault(q, kek)
+	prov := provisioning.NewService(pool, recorder, vault)
 	mux := http.NewServeMux()
 	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov)
 	idHandlers.Mount(mux, &testAPI{
@@ -98,7 +108,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, prov: prov}
+	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, prov: prov, vault: vault}
 }
 
 // testAPI composes the module handler sets exactly like the composition root.

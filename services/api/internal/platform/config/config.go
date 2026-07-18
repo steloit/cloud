@@ -19,6 +19,11 @@ type Config struct {
 
 	// Argon2id parameters — OWASP-recommended defaults; tune only with
 	// measured evidence.
+	// SecretsKEK is the base64 32-byte key-encryption key (D5 envelope);
+	// GCP KMS replaces the env source behind the same seam at P1.
+	SecretsKEK   string `env:"SECRETS_KEK,required"`
+	SecretsKEKID string `env:"SECRETS_KEK_ID" envDefault:"env-v1"`
+
 	ArgonMemoryKiB uint32 `env:"ARGON_MEMORY_KIB" envDefault:"19456"`
 	ArgonTime      uint32 `env:"ARGON_TIME" envDefault:"2"`
 	ArgonThreads   uint8  `env:"ARGON_THREADS" envDefault:"1"`

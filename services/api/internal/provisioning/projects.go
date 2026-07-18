@@ -20,6 +20,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
 
 // problemError carries a catalog problem through the one strict-server error
@@ -46,13 +47,14 @@ func nextPlanFor(plan string) string {
 }
 
 type Service struct {
-	db  *pgxpool.Pool
-	q   *store.Queries
-	rec *events.Recorder
+	db    *pgxpool.Pool
+	q     *store.Queries
+	rec   *events.Recorder
+	vault *secrets.Vault // consumed by bindings (T3.6); credentials never at rest in plaintext
 }
 
-func NewService(db *pgxpool.Pool, rec *events.Recorder) *Service {
-	return &Service{db: db, q: store.New(db), rec: rec}
+func NewService(db *pgxpool.Pool, rec *events.Recorder, vault *secrets.Vault) *Service {
+	return &Service{db: db, q: store.New(db), rec: rec, vault: vault}
 }
 
 func (s *Service) record(ctx context.Context, in events.Input) {
