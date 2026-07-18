@@ -27,6 +27,6 @@ Status walks provisioning → ready (ADR-024); metering starts at `ready`, never
 
 ## Acceptance criteria
 
-- [ ] end-to-end: desired row → cell agent → Neon tenant + gVisor endpoint pod → ready; usage events flowing.
+- [ ] end-to-end: desired row → cell agent → CNPG cluster in the env namespace (ADR-0003) → ready; usage events flowing.
 
 > **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.

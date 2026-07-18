@@ -2,6 +2,7 @@
 
 **Status:** Execution roadmap · 2026-07-18
 **Scope:** From "handoff package complete + console UI built" to a running product with paying customers. Five clients have committed to using the platform; the plan optimizes for getting them onboarded and converting them to revenue.
+**Amended 2026-07-18:** database substrate re-decided per ADR-0003 / INF-001 A4 — CNPG + CoW volume snapshots replace Neon OSS; substrate references below are updated (branching remains a product capability; no customer contract changes).
 **Provenance:** Derived from `00-sources/` (GOV-002, INF-001 incl. A1–A3, 152-frame gallery, design spec), the derived docs 01–23, the console build's findings ledger (`claudedocs/spec-change-proposals.md`), and the current state of `steloit/console`. Decision IDs (D1–D11, ADR-###) are cited per INF-001 §8.
 
 ---
@@ -27,7 +28,7 @@ Three facts shape everything below — ignore any one of them and the plan is wr
 | API contract | `08-api/openapi.yaml` v1 — 51 operations, conventions locked (problem+json, cursor pagination, `*_cents`, `?env=`) | agent-verified inventory (§7) |
 | Backend | **Does not exist.** No auth service, no control plane, no data plane, no billing, no AI plane | console runs on a local session seam + MSW |
 | CLI | **Does not exist** (grammar fully specced in `20-clients/cli.md`) | — |
-| Infra | **Does not exist**; Neon↔GCS spike not yet run (D3 open item) | INF-001 §3 |
+| Infra | **Does not exist**; substrate spike (ZFS→CNPG branch e2e) not yet run (ADR-0003) | INF-001 §3 |
 | Customers | **Five clients committed** and ready to use the platform | founder-confirmed, 2026-07-18 |
 | Spec debt | ~40 missing endpoints, 13 schema amendments, 9 frame↔fixture conflicts, 4 ADR drafts awaiting human sign-off | `claudedocs/spec-change-proposals.md` |
 
@@ -44,7 +45,7 @@ Not engineering tasks; they are the founder-owned decisions and account/registra
 | P1 | GCP account + billing set up; trial credit activated ($300 covers the entire MVP phase — GKE zonal management is free-tier, permanent) | Sprint 1 infrastructure | Open |
 | P2 | Register the customer-content domain (separate eTLD+1, A2.4 — shape-locked) | Preview URLs and object URLs are served from it (E4, E9) | Open |
 | P3 | File Google for Startups / AWS Activate credit applications + staged GCP quota increases (both have weeks of lead time; fresh accounts won't get 50-node CPU quota) | Cell-1 scale-out and larger node pools later | Open |
-| P4 | Ratify the alpha RPO value (≤ 5 min recommended, A1.3 — open since 2026-07-13) | ToS wording, Safekeeper configuration, and partner expectations all quote it | **Open** |
+| P4 | Ratify the alpha RPO value (≤ 5 min recommended, A1.3 — open since 2026-07-13) | ToS wording, WAL-archiving configuration, and partner expectations all quote it | **Open** |
 | P5 | Onboard the five committed clients as design partners: named contacts, expectations doc (alpha = the wedge path, CLI-first, invite-only, support commitment), onboarding schedule targeting M4 | They are the alpha cohort and the first revenue | Open |
 
 ### 2.2 Spec rulings (from the console build's findings ledger)
@@ -71,7 +72,7 @@ Modules follow the backend structure in `14-development/architecture.md` and GOV
 
 | # | Module | Contents | Primitives | Epics |
 |---|---|---|---|---|
-| M1 | **Platform substrate** (data plane) | Cell-0: zonal GKE, gVisor, namespaces, Neon fleet (Pageserver/Safekeeper), GCS buckets, per-cell agent | — (beneath the grammar, D8) | E1 |
+| M1 | **Platform substrate** (data plane) | Cell-0: zonal GKE, gVisor, namespaces, CNPG fleet + ZFS storage pool (ADR-0003), GCS buckets, per-cell agent | — (beneath the grammar, D8) | E1 |
 | M2 | **Identity & access** | Users, sessions, MFA, personal tokens, org API keys, RBAC two-layer evaluation, policy engine hook | Organization, Policy | E2, E7 |
 | M3 | **Control plane core** | Orgs, members, invites, projects, environments, cells registry, desired-state store, reconciler protocol | Organization, Project, Environment | E2, E3 |
 | M4 | **Provisioning & estimates** | Estimate engine, service CRUD (estimate-gated), shape/scaling, secrets, bindings, per-product drivers | Service, Binding, Secret | E3, E9 |
@@ -93,7 +94,7 @@ Modules follow the backend structure in `14-development/architecture.md` and GOV
 
 This is the path the five clients committed to; it ships first, alone, so they get real value in ~90 days instead of a broader platform in twice that.
 
-- **In:** Cell-0, identity core, orgs/projects/envs, estimate engine, Postgres provisioning (Neon tenant/timeline), secrets + bindings (incl. bind-to-external-host — a first-class v0 mode per GOV-002 §1.4), one compute service type (web) via push-to-deploy, PR-triggered branched previews, metering events from first deploy (D10 — cannot defer; backfill is impossible), baseline DB metrics/logs, **CLI as the primary client** (D11: "CLI or minimal UI is acceptable"), audit/events ledger.
+- **In:** Cell-0, identity core, orgs/projects/envs, estimate engine, Postgres provisioning (CNPG cluster + snapshot branches, ADR-0003), secrets + bindings (incl. bind-to-external-host — a first-class v0 mode per GOV-002 §1.4), one compute service type (web) via push-to-deploy, PR-triggered branched previews, metering events from first deploy (D10 — cannot defer; backfill is impossible), baseline DB metrics/logs, **CLI as the primary client** (D11: "CLI or minimal UI is acceptable"), audit/events ledger.
 - **Deferred to V1:** Valkey, Queue, Object-storage API, AI layer, billing/charging (metering only), the full console (a thin login + read-only project/estimate view rides along as E8-lite because it's nearly free), dashboards, alerts UI, templates, BYOC.
 - **Users:** the five design partners, invite-only (no anonymous compute — abuse control per A1.8).
 
@@ -107,7 +108,7 @@ Maps to GOV-002 v0.5→v1: data layer completes, console goes live against the r
 - Billing end-to-end (usage → quotas → plans → dunning → invoices) + payment provider
 - Governance (policies + dry-run, templates, dashboards)
 - AI plane (four laws, proposals, insights) — last, per GOV-002 Law 4: the platform must already be whole without it
-- Capacity knob-turns at first payment: Safekeepers 1→3, core-pool floor, Mumbai cell for partner-touchable envs (A1.7)
+- Capacity knob-turns at first payment: CNPG replicas for paid tiers, core-pool floor, Mumbai cell for partner-touchable envs (A1.7)
 
 ### Future — V2+ (not planned in sprints here; recorded so nobody re-litigates)
 - v2: Workers, Cron, autoscaling depth, `steloit dev` GA, canary/blue-green (compute expansion — ADR-006: data before compute)
@@ -127,17 +128,17 @@ Format: scope → representative user stories (US) → technical tasks (T). Stor
 
 The data plane's skeleton, shaped per D6/D7 from day one, sized per "cheap on capacity."
 
-**Scope:** GCP org/project structure (control-plane project + cell-0 project), Terraform for everything (invariant 3), zonal GKE Standard cluster (free mgmt tier), scale-to-zero workload pool + core pool floor of 1 (A1.6), gVisor node class (invariant 6), namespace-per-project-env with default-deny NetworkPolicies + quotas (invariant 5), Neon fleet at N=1 (1 Pageserver, 1 Safekeeper), GCS bucket layout, per-cell reconciler agent skeleton (D9), workload identity + zero static keys + signed images (invariant 11), pod CIDR sized for the full-grown cell (invariant 8).
+**Scope:** GCP org/project structure (control-plane project + cell-0 project), Terraform for everything (invariant 3), zonal GKE Standard cluster (free mgmt tier), scale-to-zero workload pool + core pool floor of 1 (A1.6), gVisor node class (invariant 6), namespace-per-project-env with default-deny NetworkPolicies + quotas (invariant 5), CNPG operator + ZFS-LocalPV storage pool (ADR-0003), GCS bucket layout, per-cell reconciler agent skeleton (D9), workload identity + zero static keys + signed images (invariant 11), pod CIDR sized for the full-grown cell (invariant 8).
 
 **The week-1 spike (gates everything technical):**
-- T1.0 **Neon Pageserver remote-storage against GCS** via S3-interop/HMAC: write → restart → restore. Verify the three named divergence areas: multipart-upload semantics, conditional writes/generation fencing (split-brain protection), list pagination. Fallbacks: native GCS backend patch, or S3-shim. **Go/no-go decision recorded as an ADR by end of week 1.** (D3 open item, A1.10)
+- T1.0 **ZFS snapshot → CNPG branch end-to-end** (ADR-0003): cluster → write → VolumeSnapshot → recovered cluster → CoW divergence; hibernate/wake latency; WAL-to-GCS RPO ≤5 min; PITR-to-new-cluster. All documented paths — the spike measures cost/latency numbers for the estimate engine. **Findings ADR by end of week 1.**
 
 **Stories & tasks:**
 - US-1.1 *As the platform, every resource row carries `cell_id` and provisioning routes through a cell-selection function, even though the answer is always cell-0.* (invariant 1)
 - US-1.2 *As a founder, I can rebuild the entire environment from scratch in one afternoon from git.* → T: monthly fire-drill runbook + first drill executed before M2. (invariant 3)
 - US-1.3 *As the control plane, I write desired state; the cell agent converges actual state and reports back.* → T: reconciler protocol (desired-state tables, agent poll/apply loop, status writeback, drift report). (D9, A2.5)
 - T1.1 Terraform: GCP projects, GKE, node pools, workload identity, GCS, IAM floors
-- T1.2 Neon fleet deployment (Pageserver, Safekeeper, storage broker) + compute-endpoint pod template (tenant=DB, timeline=branch mapping per D3)
+- T1.2 CNPG operator (pinned ≤1.30) + ZFS-LocalPV storage class on a storage node pool + cluster-per-project-env template (hibernation defaults, WAL/base-backups to GCS) (ADR-0003)
 - T1.3 Image pipeline: build → sign → provenance from the first build (invariant 11)
 - T1.4 Control-plane Postgres (Cloud SQL or self-run on core pool) + PITR backups to a **separate** GCS location, restore-tested (invariant 10)
 - T1.5 In-cluster Loki + OTel collector (logs routed away from Cloud Logging's paid tier; labels stamped by our collector, never trusted from customer — D7)
@@ -173,12 +174,12 @@ The estimate-before-provision law made real. This epic is the product's soul; th
 **Stories:**
 - US-3.1 *As a developer I create a project and a production environment; the environment sets the region; services inherit it.* (ADR-004; alpha regions: us-central1 founders-only, asia-south1 once partner-touchable per A1.7)
 - US-3.2 *As a developer I request a Postgres service shape and receive an estimate (`est_`) whose line grammar is byte-identical to the eventual invoice line; nothing provisions or bills before I accept it.* AC: `POST /estimates` → `createService` requires `estimate_id`; a service created without one is impossible at the API layer, not the UI layer.
-- US-3.3 *As a developer my accepted service provisions through the reconciler: desired row → cell agent → Neon tenant + compute endpoint pod (gVisor, own namespace) → status walks `provisioning → ready`; metering starts at `ready`, not before.* (ADR-024; D10)
+- US-3.3 *As a developer my accepted service provisions through the reconciler: desired row → cell agent → CNPG cluster in the env namespace (ADR-0003) → status walks `provisioning → ready`; metering starts at `ready`, not before.* (ADR-024; D10)
 - US-3.4 *As a developer I bind my external app to the database: credentials minted at bind, `<TARGET>_URL` injected/displayed, rotate on unbind.* AC: bindings cost $0; read-only scope enforced by the datastore itself, not middleware. (F3; GOV-002 v0's "bind to external apps" first-class mode)
 - US-3.5 *As a developer, deleting anything takes a final backup first and typed-confirm names dependents.* AC: QA scenario 10.
 - US-3.6 *As the platform, a failed provisioning never bills and never strands state.* → needs S7 (idempotency ruling).
 
-**Tasks:** T3.1 estimate engine (pricing tables as data; shape → line items; the `$208`-family canon numbers as regression fixtures) · T3.2 project/env CRUD (7 ops) · T3.3 service CRUD + shape jsonb + status machine (`provisioning|ready|degraded|failed|suspended|deleting`) · T3.4 Neon driver (tenant create, timeline branch, endpoint pod lifecycle) behind the provisioner interface (per-product drivers, 14-development) · T3.5 secrets (versioned, scoped, envelope-encrypted via KMS — D5; no CRUD API in v1 yaml, internal service only — flag as finding) · T3.6 bindings (mint/rotate/restrict; `UNIQUE(source,target)`, `ON DELETE RESTRICT`) · T3.7 metering emitters on every resource lifecycle edge (compute-seconds, CU-hours, GB-months, egress) tagged org/project/env.
+**Tasks:** T3.1 estimate engine (pricing tables as data; shape → line items; the `$208`-family canon numbers as regression fixtures) · T3.2 project/env CRUD (7 ops) · T3.3 service CRUD + shape jsonb + status machine (`provisioning|ready|degraded|failed|suspended|deleting`) · T3.4 CNPG driver (cluster create, snapshot branch, hibernate/wake, PITR-to-new-branch) behind the provisioner interface (per-product drivers, 14-development) · T3.5 secrets (versioned, scoped, envelope-encrypted via KMS — D5; no CRUD API in v1 yaml, internal service only — flag as finding) · T3.6 bindings (mint/rotate/restrict; `UNIQUE(source,target)`, `ON DELETE RESTRICT`) · T3.7 metering emitters on every resource lifecycle edge (compute-seconds, CU-hours, GB-months, egress) tagged org/project/env.
 
 **Exit:** CLI (E5) can run `steloit db create` → estimate → `--yes` → ready, end-to-end on cell-0; canon arithmetic invariants imported (never retyped) and green against the estimate engine.
 
@@ -190,7 +191,7 @@ The wedge's flagship, and the thing the five partners are waiting for: *PR gets 
 
 **Stories:**
 - US-4.1 *As a developer I `git push` (or connect a GitHub repo) and get a built, deployed web service with a URL.* AC: buildpack or Dockerfile path; image signed; deploy states walk `queued → building → live`; time-to-first-connection contributes to the <5-min test (GOV-002 five-minute test).
-- US-4.2 *As a developer, opening a PR creates a preview environment with a **branched** database (Neon timeline), and closing the PR tears it down.* AC: preview env `kind=preview`, `expires_at` enforced by a background job; the bot comment carries the canon grammar: `db: branch of production (masked · policy) · $0.07/day`.
+- US-4.2 *As a developer, opening a PR creates a preview environment with a **branched** database (CoW snapshot, ADR-0003), and closing the PR tears it down.* AC: preview env `kind=preview`, `expires_at` enforced by a background job; the bot comment carries the canon grammar: `db: branch of production (masked · policy) · $0.07/day`.
 - US-4.3 *As a developer I roll back a bad deploy in one click/command in <60s (redeploy previous image).*
 - US-4.4 *As the platform, deploy markers land on the events spine so every chart of the affected env can show them.* (F4; QA scenario 1's #142/#143 replay)
 - US-4.5 *As a developer my preview URL is on the customer-content domain, never the console origin.* (A2.4 — needs P2)
@@ -256,7 +257,7 @@ Per GOV-002 v0.5, in this order:
 
 1. **Valkey** (2 EW): per-project-env pods (never shared — D5), driver + estimate shapes + bindings. Frames S2/D3/D6/D14.
 2. **Object storage** (3 EW): proxied GCS (D4), one bucket per project, STS-scoped presigned URLs rewritten to Steloit content-domain (A1.4/A2.4), lifecycle rules (expire/tier_cold). Frames S3/D7/D15/D16.
-3. **Queue** (3 EW + design review): **the A3.1 design review comes first** — WAL-derived signals at the safekeeper/CDC layer (direct-CDC vs trigger-outbox variants), dispatcher-driven consumer wake; queues must not defeat scale-to-zero (A1.2), and the NATS fallback is last resort (loses branch-coherence). The review is a Sprint 8 deliverable with its own ADR; implementation follows its outcome. Frames S4/D8/D17/D18.
+3. **Queue** (3 EW + design review): **the A3.1 design review comes first** — WAL-derived signals via logical-decoding CDC on vanilla Postgres (A3.1 as amended by INF-001 A4; direct-CDC vs trigger-outbox variants), dispatcher-driven consumer wake; queues must not defeat scale-to-zero (A1.2), and the NATS fallback is last resort (loses branch-coherence). The review is a Sprint 8 deliverable with its own ADR; implementation follows its outcome. Frames S4/D8/D17/D18.
 
 Each product instantiates the same anatomy (21-playbooks: one pioneer at a time — Postgres is the pioneer; these instantiate).
 
@@ -289,7 +290,7 @@ Nearly all backend rules (F9). Metering already flows (E6); this epic prices, ga
 
 **Tasks:** T11.1 pricing/quota tables as data · T11.2 subscription state machine (incl. trial, `cancelled_at_anchor`, dunning states) · T11.3 invoice generator (accrue → open → paid/failed) · T11.4 payment provider integration (Stripe or Razorpay — decide by partner geography; INR-first suggests Razorpay + Stripe for intl; needs a founder call) · T11.5 quota evaluator middleware (soft → `confirm=true` overage path; hard → 402/429 catalog) · T11.6 budget endpoint + exports (spec-change §2d, per ruling).
 
-**Milestone M7 = first real payment clears** → lifts D11's hiring freeze; triggers capacity knob-turns (Safekeepers 1→3, core-pool floor, retention up).
+**Milestone M7 = first real payment clears** → lifts D11's hiring freeze; triggers capacity knob-turns (CNPG replicas for paid tiers, core-pool floor, retention up).
 
 ---
 
@@ -353,7 +354,7 @@ S2 ruling ──▶ E14 data-plane depth
 First payment (M7) ──▶ capacity knob-turns · hiring unfreeze (D11) · Mumbai cell (A1.7)
 ```
 
-**Critical path to alpha:** P1 → E1 (spike!) → E2 → E3 → E4 → M4. E5/E6 run parallel off E2/E3. The single highest-risk item on the path is the week-1 Neon↔GCS spike — it can invalidate D3's substrate choice and has named fallbacks; run it before anything else.
+**Critical path to alpha:** P1 → E1 (spike!) → E2 → E3 → E4 → M4. E5/E6 run parallel off E2/E3. The week-1 substrate spike (ZFS→CNPG branch e2e, ADR-0003) runs first and produces the branch cost/latency numbers; post-A4 it is measurement, not an existential gate.
 
 ---
 
@@ -384,7 +385,7 @@ Two engineers can't hold five swimlanes concurrently; these are *interleaved con
 | Workstream | Contents | Peak sprints |
 |---|---|---|
 | **W-BE Backend/control plane** | E2, E3, E7, E10–E12 API + domain logic | 2–13 |
-| **W-PLAT Platform/data plane** | E1, Neon ops, drivers (E3/E9), deploy pipeline (E4), capacity knob-turns | 1–6, then on-call |
+| **W-PLAT Platform/data plane** | E1, CNPG/ZFS ops, drivers (E3/E9), deploy pipeline (E4), capacity knob-turns | 1–6, then on-call |
 | **W-FE Console integration** | E8 slices, SSE, four-state verification | 6–11, 14 |
 | **W-CLI Clients** | E5, SDK-core extraction, `steloit dev` stub | 3–5 |
 | **W-QA Quality** | §10 below — suites are built *with* each epic, owned per-epic, audited per-release | continuous |
@@ -402,7 +403,7 @@ Suggested split: Engineer A owns W-PLAT+W-BE-infra-adjacent; Engineer B owns W-B
 
 | Sprint | Focus | Deliverables | Load (EW) |
 |---|---|---|---|
-| **1** | E1 | **Week-1 Neon↔GCS spike + go/no-go ADR** · GCP/Terraform skeleton · GKE up, gVisor pool, image signing | 5 |
+| **1** | E1 | **Week-1 substrate spike (ZFS→CNPG branch e2e) + findings ADR** · GCP/Terraform skeleton · GKE up, gVisor pool, image signing | 5 |
 | **2** | E1→E2 | Reconciler agent v0 · control-plane DB + PITR · first fire drill · users/orgs/sessions · problem+json framework | 5.5 |
 | **3** | E2→E3, E5 starts | RBAC evaluator + matrix tests · events ledger + SSE · members/invites/tokens · projects/envs · CLI skeleton+auth | 6 |
 | **4** | E3→E4 | Estimate engine + canon invariants green · Postgres provisioning e2e via reconciler · bindings · CLI create-path | 6 |
@@ -410,7 +411,7 @@ Suggested split: Engineer A owns W-PLAT+W-BE-infra-adjacent; Engineer B owns W-B
 | **6** | E4 finish | **PR → branched preview → teardown** · masking v0 · content-domain ingress/TLS · E8-lite console · alpha hardening, docs, partner onboarding runbook | 5.5 |
 
 **Milestones:**
-- **M1** (end S1): cell-0 alive; spike ADR recorded. *Checkpoint: if the spike fails both fallbacks, stop and amend D3 before proceeding.*
+- **M1** (end S1): cell-0 alive; spike findings ADR recorded with branch cost/latency numbers (ADR-0003).
 - **M2** (end S3): identity + RBAC + audit real; QA scenarios 6 & 8 green.
 - **M3** (end S4): `steloit db create` → estimate → approved → `ready`, metered.
 - **M4** (end S6, ≈ day 90): **full alpha path live; the five design partners onboard.** Demo = the wedge, for real.
@@ -483,17 +484,17 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 |---|---|---|
 | B1 | GCP account/billing not set up (P1) | Sprint 1 |
 | B2 | Content domain unregistered (P2) | E4 previews, E9 object URLs |
-| B3 | RPO value unratified (P4) | ToS, partner expectations doc, Safekeeper config |
+| B3 | RPO value unratified (P4) | ToS, partner expectations doc, WAL-archiving config |
 | B4 | S1 auth-surface & S7 idempotency rulings | E2, E3 |
 | B5 | Credit apps + quota filings not submitted (P3) | Cell-1; large node pools |
 
 ### Top risks
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | **Neon Pageserver↔GCS incompatibility** (multipart, generation fencing, list pagination) | Medium | Critical — invalidates D3 | Week-1 spike with two named fallbacks; go/no-go ADR before anything depends on it |
+| R1 | Substrate spike surprises (ZFS snapshot semantics, CNPG recovery/hibernation edge cases) | Low | Medium — all documented paths; the prior Critical Neon↔GCS risk was retired by ADR-0003 | Week-1 spike measures; CNPG pinned ≤1.30 until barman-cloud plugin stabilizes |
 | R2 | **Partner expectations exceed alpha scope** — five clients ready to *use* the platform; the alpha ships one path | High | High — churn before revenue | P5 expectations doc up front; visible V1 roadmap; weekly partner check-ins; E8-lite gives early visual progress |
 | R3 | Queue scale-to-zero constraint unsolvable at the WAL layer | Medium | High — queues slip or lose branch-coherence via NATS | A3.1 design review is a Sprint 8 deliverable with its own ADR; queues are not on the alpha path |
-| R4 | Two-founder ops load (Neon fleet, support commitment to five partners) | High | High | Duty-cycle discipline pre-partner; alerting hygiene; M7 unfreezes hiring (D3 budgets 2–3 seniors when hiring starts) |
+| R4 | Two-founder ops load (CNPG/ZFS fleet, support commitment to five partners) | High | High | Duty-cycle discipline pre-partner; alerting hygiene; M7 unfreezes hiring (D3 budgets 2–3 seniors when hiring starts) |
 | R5 | GCP quota walls on fresh account | High | Medium — days of stall | Staged quota filings in Sprint 0 and at each scale-out; track headroom per sprint review |
 | R6 | Free-compute abuse post-open-signup | High (if opened) | High | Invite-only through V1; abuse controls are a GA entry criterion |
 | R7 | Estimate ≠ invoice drift as pricing evolves | Medium | High — breaks the product's soul | One pricing table, three consumers; invariant tests at all layers (§10.2) |
@@ -540,4 +541,4 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 
 ---
 
-*Next actions:* (1) the Sprint-0 founder session — setup items P1–P5 + spec rulings S1–S7 in one sitting; (2) commit the S3 mechanical yaml fixes; (3) Sprint 1, starting with the Neon↔GCS spike.
+*Next actions:* (1) the Sprint-0 founder session — setup items P1–P5 + spec rulings S1–S7 in one sitting; (2) commit the S3 mechanical yaml fixes; (3) Sprint 1, starting with the substrate spike (ADR-0003).

@@ -24,7 +24,7 @@ Cell-0 alive
 ## Summary
 
 **Exit criteria:**
-- [ ] Spike ADR recorded (go/no-go on Neon↔GCS)
+- [ ] Spike findings ADR recorded (ZFS snapshot → CNPG branch e2e, wake latency, branch cost — ADR-0003)
 - [ ] `terraform apply` from empty → working cell
 - [ ] If the spike fails both fallbacks: STOP, amend D3 before proceeding
 

@@ -17,7 +17,7 @@ create_ms() { # title, due (YYYY-MM-DD), description
 create_ms "Sprint 0" "$(sprint_due 0)" "Setup & spec rulings (P1-P5, S1-S7). Exit: Sprint 1 unblocked."
 for n in $(seq 1 16); do
   case $n in
-    1) d="E1: cell-0, Neon-GCS spike + go/no-go ADR";;
+    1) d="E1: cell-0, substrate spike (ZFS-CNPG branch e2e, ADR-0003) + findings ADR";;
     2) d="E1 finish + E2 start: reconciler v0, control-plane DB, users/orgs/sessions";;
     3) d="E2 finish + E3/E5 start: RBAC, events, projects/envs, CLI skeleton";;
     4) d="E3 finish + E4 start: estimate engine, Postgres provisioning e2e, bindings";;

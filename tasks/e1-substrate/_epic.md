@@ -17,7 +17,7 @@ owner: founders
 
 ## Scope
 
-The data plane's skeleton, shaped per D6/D7 from day one, sized per 'cheap on capacity' (INF-001). Zonal GKE + gVisor + namespaces + Neon fleet N=1 + reconciler agent + metering skeleton.
+The data plane's skeleton, shaped per D6/D7 from day one, sized per 'cheap on capacity' (INF-001). Zonal GKE + gVisor + namespaces + CNPG operator + ZFS-LocalPV storage pool (ADR-0003) + reconciler agent + metering skeleton.
 
 **Exit:** spike ADR recorded; `terraform apply` from empty → working cell; first tenant DB created/branched/destroyed by hand; metering events from a test pod. (implementation-plan §5 E1)
 

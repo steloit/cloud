@@ -17,7 +17,7 @@ owner: founders
 
 ## Scope
 
-Estimate-before-provision made real: estimate engine (one arithmetic, ADR-025), service CRUD gated on `estimate_id`, Neon tenant/timeline provisioning via the reconciler, secrets, bindings (incl. bind-to-external-host), metering emitters.
+Estimate-before-provision made real: estimate engine (one arithmetic, ADR-025), service CRUD gated on `estimate_id`, CNPG cluster provisioning + snapshot branching via the reconciler (ADR-0003), secrets, bindings (incl. bind-to-external-host), metering emitters.
 
 **Exit:** `steloit db create` → estimate → `--yes` → ready end-to-end on cell-0; canon arithmetic invariants imported and green. (implementation-plan §5 E3)
 
