@@ -19,6 +19,18 @@ type Environment struct {
 	CreatedAt      pgtype.Timestamptz
 }
 
+type Estimate struct {
+	ID         string
+	OrgID      pgtype.Text
+	EnvID      pgtype.Text
+	Services   []byte
+	Lines      []byte
+	TotalCents int64
+	ExpiresAt  pgtype.Timestamptz
+	AcceptedAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Event struct {
 	ID      string
 	OrgID   string

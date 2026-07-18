@@ -18,6 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
@@ -88,7 +89,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov)
 	idHandlers.Mount(mux, &testAPI{
 		Handlers:  idHandlers,
-		Handlers2: provisioning.NewHandlers(prov, authz, q, svc),
+		Handlers2: provisioning.NewHandlers(prov, authz, q, svc, estimates.NewService(q)),
 	})
 	streamer := &events.Streamer{
 		Q: q, Hub: hub, Envs: prov,
@@ -126,6 +127,9 @@ func (s *testAPI) CreateEnvironment(ctx context.Context, r gen.CreateEnvironment
 }
 func (s *testAPI) ListEnvironments(ctx context.Context, r gen.ListEnvironmentsRequestObject) (gen.ListEnvironmentsResponseObject, error) {
 	return s.Handlers2.ListEnvironments(ctx, r)
+}
+func (s *testAPI) CreateEstimate(ctx context.Context, r gen.CreateEstimateRequestObject) (gen.CreateEstimateResponseObject, error) {
+	return s.Handlers2.CreateEstimate(ctx, r)
 }
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
