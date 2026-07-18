@@ -32,10 +32,10 @@ All environments run on GCP (GKE Standard, GCS, Compute Engine) until a paying e
 **Rationale:** continuity from the 90-day sprint; GKE Sandbox gives managed gVisor; free zonal-cluster credit; sustained-use discounts are automatic; Google for Startups credits up to $200k. The grammar (D8) keeps this reversible.
 **Consequence:** no multi-cloud work of any kind pre-revenue. Manifests stay plain Kubernetes to keep the exit cheap.
 
-### D3 — Postgres substrate: operate Neon OSS ourselves
-The Postgres product is built on Neon's Apache-2.0 storage engine (Pageservers + Safekeepers + object storage), run in our infrastructure. Not white-labeled, not snapshot-based CoW, not a custom engine.
-**Rationale:** branch-per-PR is the category-defining feature and lives in the storage engine; Neon's is the only open, production-proven implementation; operating it ourselves preserves unit-economics visibility that the cost-estimate promise requires. Native multi-tenancy (tenant = database, timeline = branch) makes free tiers and PR previews economically survivable.
-**Known risks:** operational complexity (budget 2–3 senior engineers when hiring begins); Databricks controls the upstream roadmap (mitigation: Apache 2.0, forkable); Neon quirks (no true superuser, extension constraints) become our product quirks and must be documented in our grammar, never exposed as "Neon."
+### D3 — Postgres substrate: operate Neon OSS ourselves *(amended: A4 — CNPG-operated vanilla PostgreSQL + CoW volume snapshots; the branching REQUIREMENT stands, the engine changes)*
+The Postgres product is built on Neon's Apache-2.0 storage engine (Pageservers + Safekeepers + object storage), run in our infrastructure. Not white-labeled, not snapshot-based CoW, not a custom engine. *(amended: A4 — it is now precisely snapshot-based CoW)*
+**Rationale:** branch-per-PR is the category-defining feature and lives in the storage engine; Neon's is the only open, production-proven implementation; operating it ourselves preserves unit-economics visibility that the cost-estimate promise requires. Native multi-tenancy (tenant = database, timeline = branch) makes free tiers and PR previews economically survivable. *(amended: A4 — the "only open, production-proven implementation" premise no longer holds for outside operators; see A4 evidence)*
+**Known risks:** operational complexity (budget 2–3 senior engineers when hiring begins); Databricks controls the upstream roadmap (mitigation: Apache 2.0, forkable); Neon quirks (no true superuser, extension constraints) become our product quirks and must be documented in our grammar, never exposed as "Neon." *(amended: A4 — the Databricks-upstream risk fired pre-build; recorded in §7)*
 **Open item (verify in sprint week 1):** Pageserver remote-storage backend against GCS. *(amended: A1.10 — spike checklist: multipart semantics, conditional writes/generation fencing, list pagination)* Docs list S3 and Azure natively; test GCS S3-interoperability mode (HMAC keys) with write → restart → restore. Fallbacks: native GCS backend in current repo, or thin S3-compatible layer in front of GCS.
 
 ### D4 — Object storage: proxy the hyperscaler, never self-host
@@ -49,15 +49,15 @@ Compute: GKE + gVisor (GKE Sandbox). Cache: Valkey (per-project pods, never shar
 
 ### D6 — Two planes, cell-based data plane
 **Control plane:** Steloit-the-application (console, API, provisioner, estimate engine, billing, IAM). One multi-tenant deployment, its own project/account, never runs customer code.
-**Data plane:** cells. One cell = one zonal GKE Standard cluster + one Neon storage fleet + GCS bucket set + observability pipeline, in its own GCP project.
+**Data plane:** cells. One cell = one zonal GKE Standard cluster + one Neon storage fleet *(amended: A4 — CNPG fleet + ZFS storage node pool)* + GCS bucket set + observability pipeline, in its own GCP project.
 **Cell caps (policy, not physics):** ~500–1,000 paying customers or ~5,000–10,000 total signups per cell, ~50–60 workload nodes, 1–2 Pageservers. Chosen for blast radius, staged rollouts, quota headroom, and clean unit economics (one cell ≈ $2–3k/mo ≈ $25–50k MRR). *(amended: A1.1 — this figure is the cell baseline, not at-capacity cost)* A dedicated cell is the future enterprise SKU.
 **Capacity rules of thumb:** active project ≈ 0.6 vCPU / 1.5 GB across pods; ~12–18 active projects per 8-vCPU node; idle projects ≈ zero pods (scale-to-zero) and are nearly free; one Pageserver serves thousands of idle tenants but only a few hundred concurrently busy databases.
 
 ### D7 — Tenancy mapping and isolation (non-negotiable)
-Org → control-plane row (billing + IAM boundary, no infrastructure). Project → exactly one cell (`cell_id` column). Environment → Kubernetes namespace (`proj--env`) with default-deny NetworkPolicies, ResourceQuota, LimitRange. Service → pods in that namespace. Customer code ALWAYS runs under gVisor (GKE Sandbox); plain containers are not a tenant boundary. Databases: Neon tenant per database, timeline per branch, compute endpoint pod in the customer's namespace. Buckets: one GCS bucket per project (cost attribution, lifecycle, hard delete); access via our API or STS-scoped presigned URLs only. *(amended: A1.4, A2.4 — customer-visible URLs are Steloit-controlled domains, never raw provider URLs)* Caches: dedicated small Valkey pods per project-environment. Observability: shared per-cell pipeline; `project_id`/`environment_id` labels stamped by our collector (never trusted from the customer), enforced at the query layer.
+Org → control-plane row (billing + IAM boundary, no infrastructure). Project → exactly one cell (`cell_id` column). Environment → Kubernetes namespace (`proj--env`) with default-deny NetworkPolicies, ResourceQuota, LimitRange. Service → pods in that namespace. Customer code ALWAYS runs under gVisor (GKE Sandbox); plain containers are not a tenant boundary. Databases: Neon tenant per database, timeline per branch, compute endpoint pod in the customer's namespace. *(amended: A4 — one CNPG cluster per project-environment; branch = CoW volume snapshot → recovered cluster, hibernated by default)* Buckets: one GCS bucket per project (cost attribution, lifecycle, hard delete); access via our API or STS-scoped presigned URLs only. *(amended: A1.4, A2.4 — customer-visible URLs are Steloit-controlled domains, never raw provider URLs)* Caches: dedicated small Valkey pods per project-environment. Observability: shared per-cell pipeline; `project_id`/`environment_id` labels stamped by our collector (never trusted from the customer), enforced at the query layer.
 
 ### D8 — The grammar is the only surface
-No substrate concept (Neon, GKE, GCS, gVisor) ever appears in a customer-visible URL, response body, error message, metric name, or docs page. Every substrate concept has a Steloit-grammar name. This is the swap insurance that keeps D2, D3, D4 reversible.
+No substrate concept (Neon, GKE, GCS, gVisor) *(amended: A4 — read CNPG/ZFS for the database layer)* ever appears in a customer-visible URL, response body, error message, metric name, or docs page. Every substrate concept has a Steloit-grammar name. This is the swap insurance that keeps D2, D3, D4 reversible.
 
 ### D9 — Reconciler pattern, never imperative provisioning
 The control plane writes desired state; a per-cell agent converges actual state toward it. The control plane's database is the single source of truth for "what is running" (which the observability promise also needs). A control-plane outage degrades to "cannot make changes," never "customer apps down." *(amended: A2.5 — desired-state vs actual-state clarification)*
@@ -105,7 +105,7 @@ Founders only until the first payment clears. Alpha scope is ONE path end-to-end
 |---|---|---|---|
 | **Rung 0 — demand validation** | Now | ₹0 | Clickable prototype from the 152 screens; landing page + waitlist on Cloud Run free tier; 30–50 developer conversations; ask for costly commitments (pre-order, design-partner LOI); register the customer-content domain *(extended: A2.4)* |
 | **Rung 0.5 — estimate tool** | Parallel with Rung 0 | ₹0 | The estimate engine as a free standalone web tool; tests the core promise, builds audience |
-| **90-day sprint** | GCP trial activated | $300 trial credit (≈$0 cash) | One zonal GKE cluster (free mgmt fee), scale-to-zero node pool, Neon at N=1, full alpha path working by day 90 |
+| **90-day sprint** | GCP trial activated | $300 trial credit (≈$0 cash) | One zonal GKE cluster (free mgmt fee), scale-to-zero node pool, Neon at N=1 *(amended: A4 — CNPG + ZFS-LocalPV)*, full alpha path working by day 90 |
 | **Post-90 holding pattern** | Trial expired, no revenue yet | ~$34–40/mo (~₹3,000) duty-cycled | Same setup on own card; sustainable indefinitely |
 | **Cell #1 production** | Design partners active AND credits approved | Credits (Google for Startups / AWS Activate — apply NOW, approval takes weeks) | Turn §3 knobs; Mumbai; invite-only |
 | **Scale** | First payments clearing | Funded by revenue + credits | Hire against D3 ops load; cell #2 per trigger |
@@ -138,12 +138,12 @@ Most fragile assumption: conversion (at 2%, Scenario B needs ~34k signups). Prof
 
 | Risk | Exposure | Mitigation |
 |---|---|---|
-| Neon OSS stagnation under Databricks | D3 substrate | Apache 2.0 fork option; ecosystem co-users; grammar isolation (D8) |
+| Neon OSS stagnation under Databricks | D3 substrate | Apache 2.0 fork option; ecosystem co-users; grammar isolation (D8) | *(amended: A4 — risk REALIZED 2025-07→2026: public releases stopped, upstream dark; resolved by substrate change, not fork)* |
 | GCS backend incompatibility with Pageserver | D3 on D2 | Week-1 spike (D3 open item); S3-interop or shim fallback |
 | Egress/inter-zone bleed | Margins | AZ/zone-locality by design; GCS via private access; egress priced transparently to customers |
 | Supplier-as-competitor (Google/AWS) | Strategy | Value lives in our layer (estimate, grammar, branching, evidence-citing AI); margin discipline |
 | Conversion below 4% | Break-even | Estimate tool + content build top-of-funnel early; watch cohort data from day one |
-| Solo-founder ops load on Neon stack | D3 | N=1 alpha honesty; first hires are substrate ops; alpha label buys forgiveness |
+| Solo-founder ops load on Neon stack *(amended: A4 — CNPG stack; materially lower)* | D3 | N=1 alpha honesty; first hires are substrate ops; alpha label buys forgiveness |
 
 ## 8. Instructions for AI agents working in this repo
 
@@ -163,7 +163,7 @@ Most fragile assumption: conversion (at 2%, Scenario B needs ~34k signups). Prof
 **Trigger:** external review conducted per §8 (findings 1–10, filed in repo alongside this document). All findings accepted; #2 and #7 accepted with modified resolutions. Rationale per finding below.
 
 ### A1.1 — D6 cell economics corrected (finding 1)
-D6's "one cell ≈ $2–3k/mo" is the **cell baseline** (Neon fleet, observability, node floor, LBs) — not the at-capacity cost. Corrected model: **baseline ~$2–3k/mo + ~$15/paying-customer marginal (per §6); fully loaded at the 500–1,000 paying cap ≈ $10–18k/mo**, against $25–50k MRR at the same cap. Budget cells from this formula, never from the baseline alone.
+D6's "one cell ≈ $2–3k/mo" is the **cell baseline** (Neon fleet *(amended: A4 — CNPG fleet + storage pool; baseline shape unchanged)*, observability, node floor, LBs) — not the at-capacity cost. Corrected model: **baseline ~$2–3k/mo + ~$15/paying-customer marginal (per §6); fully loaded at the 500–1,000 paying cap ≈ $10–18k/mo**, against $25–50k MRR at the same cap. Budget cells from this formula, never from the baseline alone.
 
 ### A1.2 — Queues design constraint (finding 2)
 D5's pgmq-on-substrate choice conflicts with D6's idle economics: polled queues keep compute endpoints awake, defeating scale-to-zero for exactly the projects most likely to hold queues. Queues are outside the alpha path (D11), so no mechanism is locked now. **Blocking constraint recorded:** the queues product MUST NOT require always-awake computes for idle projects. If no design satisfies this on the D3 substrate (note: LISTEN/NOTIFY and naive shared pollers both still require a held connection), queues move to a dedicated broker (NATS JetStream per D5), accepting loss of branch-coherence. This constraint gates the queues product's design review. *(extended: A2.2; candidates consolidated in A3.1)*
@@ -180,7 +180,7 @@ D7's "STS-scoped presigned URLs" as written violates D8: a GCS presigned URL exp
 11. **Security floor:** workload identity everywhere; zero static service-account keys (CI included); signed images with provenance from the first build. Retrofit cost is brutal; day-one cost is near zero.
 
 ### A1.6 — Starter topology precision (finding 6)
-§3 corrected: scale-to-zero applies to the **workload node pool only**. The core pool (control plane app + Neon fleet) has a floor of one node — the Neon fleet cannot scale to zero. Pre-revenue duty-cycling of the core pool = **scheduled platform downtime**, a deliberate, stated choice that ends at first design-partner onboarding (from then: core pool 24/7, workload pool remains scale-to-zero).
+§3 corrected: scale-to-zero applies to the **workload node pool only**. The core pool (control plane app + Neon fleet) has a floor of one node — the Neon fleet cannot scale to zero. *(amended: A4 — read "CNPG operator + active customer clusters"; hibernated customer clusters DO scale to zero, strengthening this economics)* Pre-revenue duty-cycling of the core pool = **scheduled platform downtime**, a deliberate, stated choice that ends at first design-partner onboarding (from then: core pool 24/7, workload pool remains scale-to-zero).
 
 ### A1.7 — Region rule (finding 7)
 Founder-only, destroyable dev environments may run in us-central1 for price. **Anything a design partner can touch is born in asia-south1 (Mumbai).** No environment is ever scheduled for region migration; per §3's closing rule, a required migration is an incident.
@@ -195,7 +195,7 @@ Founder-only, destroyable dev environments may run in us-central1 for price. **A
 Beyond transparent pricing: evaluate **Standard-tier networking** for non-SLA paths and **CDN in front of object/static paths** (jointly with A1.4's proxy) at cell-1 buildout. Decision recorded then; until then egress is priced to customers with margin per D4.
 
 ### A1.10 — Housekeeping (finding 10)
-- D3 spike checklist named: multipart-upload semantics, **conditional writes / generation fencing** (Neon's split-brain protection depends on these), list pagination — the three known divergence areas of GCS S3-interop.
+- D3 spike checklist named: multipart-upload semantics, **conditional writes / generation fencing** (Neon's split-brain protection depends on these), list pagination — the three known divergence areas of GCS S3-interop. *(amended: A4 — spike redefined: ZFS-LocalPV snapshot→clone→CNPG recovery end-to-end + hibernation wake time; the GCS S3-interop question is moot)*
 - Metrics backend "VictoriaMetrics/Mimir" restated honestly as **deferred choice**; decision due at cell-1 buildout; Loki + OpenTelemetry remain locked.
 - gVisor compatibility stance: a documented unsupported-syscall list (io_uring et al.), surfaced in grammar-named errors per D8 — never "gVisor doesn't support this."
 
@@ -231,6 +231,22 @@ A2.2's design (a) has no clean substrate implementation as an independent mechan
 
 ### A3.2 — Stamp vocabulary defined (F4)
 A2.1's permitted mechanical stamps come in exactly two forms: ***(amended: X)*** — the stamped text is superseded or corrected by X — and ***(extended: X)*** — X adds to the stamped text without contradicting it. The pre-existing *(extended: A1.8)* stamp on §7 is hereby legitimate. No other verbs are permitted without a convention amendment.
+
+---
+
+## Amendment A4 — 2026-07-18
+
+*Founder-ratified 2026-07-18. Full evidence, candidate matrix, and consequences: `steloit/cloud` `docs/adr/0003-database-substrate.md` (this constitution records the decision; the ADR records the analysis). Product ADR log entry: ADR-033.*
+
+### A4.1 — D3 substrate re-decided: CNPG + copy-on-write volume snapshots replace Neon OSS
+
+D3 is amended. The Postgres substrate is **CloudNativePG-operated vanilla PostgreSQL — one cluster per project-environment — with copy-on-write branching via CSI/ZFS volume snapshots (OpenEBS ZFS-LocalPV on a storage node pool), orchestrated by the Steloit control plane** (Xata OSS, Apache-2.0, as reference implementation; DBLab noted for internal CI only).
+
+**Evidence (measured, 2026-07-18):** Neon OSS self-hosting was never a supported product (staff-stated ~2-week binary/config compatibility window; shipped compose "not intended for deploying a usable system"); the control plane was never open source; the public repo's release tags stopped 2025-07-29 with commits at ~1/month through 2026 post-Databricks; the only serious third-party operator was dev/test-grade. The §7 risk "Neon OSS stagnation under Databricks" is recorded as having **fired before build start** — the fork mitigation is rejected as economically absurd at founder scale. Meanwhile CNPG reached CNCF process, PG18-current, declarative fleet operation with a documented 450-cluster production precedent, and Xata open-sourced a CNPG-based CoW branching platform on this exact stack.
+
+**What is unchanged:** D3's *requirement* — branch-per-PR as the category-defining feature with delta-priced previews — stands in full; it is satisfied at the storage-snapshot layer instead of the storage-engine layer. Unit-economics visibility stands (snapshot deltas + hibernated computes are directly meterable). D7 tenancy mapping now reads: one CNPG cluster per project-environment (a *stronger* isolation boundary than shared pageservers); branch = snapshot-recovered cluster, hibernated by default. D8 grammar isolation is what made this swap free — no customer surface changes.
+
+**Consequences:** the week-1 spike is redefined (ZFS snapshot → clone → CNPG recovery e2e; hibernation wake latency; branch cost measurement). RPO ≤5 min (A1.3) is met by `archive_timeout`-bounded WAL archiving to GCS. A3.1's queue family simplifies to standard logical-decoding CDC on vanilla Postgres (no safekeeper layer exists; the constraint and fallback ordering are unchanged). The 2–3-substrate-engineer budget (D3 risk note) is expected to relax; re-verify at Cell-1. Ops-load risk (§7) drops accordingly.
 
 ---
 
