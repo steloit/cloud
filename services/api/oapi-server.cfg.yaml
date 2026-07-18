@@ -1,10 +1,12 @@
 # §17 ①b: strict server scoped to IMPLEMENTED operations — the list grows as
 # tasks land their handlers (staged conformance-by-construction; no
 # generated-but-unimplemented surface ever exists). T2.1: the auth core.
+# T2.5: the events spine reads (SSE variant handled pre-strict — strict
+# handlers buffer; text/event-stream needs the raw ResponseWriter).
 package: gen
 output: internal/httpapi/gen/server.gen.go
 generate:
   std-http-server: true
   strict-server: true
 output-options:
-  include-operation-ids: [signup, login, logout, getSession, createPersonalToken, listPersonalTokens, revokePersonalToken]
+  include-operation-ids: [signup, login, logout, getSession, createPersonalToken, listPersonalTokens, revokePersonalToken, listAuditEvents, listEvents]

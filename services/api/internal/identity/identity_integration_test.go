@@ -18,6 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
 	"github.com/steloit/cloud/services/api/internal/identity/policy"
@@ -34,6 +35,8 @@ type world struct {
 	pool  *pgxpool.Pool
 	svc   *identity.Service
 	authz *identity.Authorizer
+	hub   *events.Hub
+	envs  *fakeEnvs
 }
 
 func newWorld(t *testing.T, ttl time.Duration) *world {
@@ -65,7 +68,10 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 
 	hasher := password.NewHasher(password.Params{MemoryKiB: 8192, Time: 1, Threads: 1, SaltLen: 16, KeyLen: 32})
 	mgr := session.NewManager(ttl, false)
-	svc, err := identity.NewService(store.New(pool), hasher, mgr, ratelimit.New(100, time.Minute))
+	q := store.New(pool)
+	hub := events.NewHub()
+	recorder := events.NewRecorder(q, hub)
+	svc, err := identity.NewService(q, hasher, mgr, ratelimit.New(100, time.Minute), recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,13 +79,30 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policies := policy.NewEngine(identity.NewPolicySource(store.New(pool)))
-	authz := identity.NewAuthorizer(store.New(pool), rbac.NewEvaluator(matrix, policies))
+	policies := policy.NewEngine(identity.NewPolicySource(q))
+	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies))
+	envs := &fakeEnvs{orgs: map[string]string{}}
 	mux := http.NewServeMux()
-	identity.NewHandlers(svc, mgr).Mount(mux)
-	srv := httptest.NewServer(problem.Recover(mux))
+	identity.NewHandlers(svc, mgr, authz, events.NewReader(q), envs).Mount(mux)
+	streamer := &events.Streamer{
+		Q: q, Hub: hub, Envs: envs,
+		Principal: svc.PrincipalFromRequest,
+		Authorize: authz.Require,
+	}
+	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool, svc: svc, authz: authz}
+	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, envs: envs}
+}
+
+// fakeEnvs stands in for the T3.2 environments module: tests attach env ids
+// to orgs directly.
+type fakeEnvs struct{ orgs map[string]string }
+
+func (f *fakeEnvs) OrgForEnv(_ context.Context, envID string) (string, error) {
+	if org, ok := f.orgs[envID]; ok {
+		return org, nil
+	}
+	return "", events.ErrEnvNotFound
 }
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
