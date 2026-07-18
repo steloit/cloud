@@ -8,6 +8,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Event struct {
+	ID      string
+	OrgID   string
+	Kind    string
+	Via     string
+	Actor   string
+	Action  string
+	Subject string
+	At      pgtype.Timestamptz
+	Detail  []byte
+}
+
 type Member struct {
 	ID        string
 	OrgID     string

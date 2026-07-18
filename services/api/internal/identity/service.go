@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -50,16 +51,17 @@ type Service struct {
 	hasher  *password.Hasher
 	mgr     *session.Manager
 	limiter *ratelimit.Limiter
+	rec     *events.Recorder
 	now     func() time.Time
 	dummy   string
 }
 
-func NewService(q *store.Queries, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter) (*Service, error) {
+func NewService(q *store.Queries, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder) (*Service, error) {
 	dummy, err := h.Hash(dummyPassword)
 	if err != nil {
 		return nil, fmt.Errorf("identity: dummy hash: %w", err)
 	}
-	return &Service{q: q, hasher: h, mgr: mgr, limiter: limiter, now: time.Now, dummy: dummy}, nil
+	return &Service{q: q, hasher: h, mgr: mgr, limiter: limiter, rec: rec, now: time.Now, dummy: dummy}, nil
 }
 
 // Established is the outcome of signup/login: the user, the session row, and

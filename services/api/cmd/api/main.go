@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
@@ -55,7 +56,9 @@ func main() {
 	sessions := session.NewManager(cfg.SessionTTL, cfg.CookieSecure)
 	loginLimiter := ratelimit.New(10, time.Minute)
 
-	svc, err := identity.NewService(queries, hasher, sessions, loginLimiter)
+	hub := events.NewHub()
+	recorder := events.NewRecorder(queries, hub)
+	svc, err := identity.NewService(queries, hasher, sessions, loginLimiter, recorder)
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
@@ -67,18 +70,26 @@ func main() {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies))
-	_ = authz // consumed by the org/project handlers as their tasks land (T2.7+)
+	envs := events.NoEnvs{} // env→org seam; real environments arrive with T3.2
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	identity.NewHandlers(svc, sessions).Mount(mux)
+	identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs).Mount(mux)
+
+	// SSE sits BEFORE the strict server: strict handlers buffer; streams need
+	// the raw ResponseWriter (x-streamable listEvents).
+	streamer := &events.Streamer{
+		Q: queries, Hub: hub, Envs: envs,
+		Principal: svc.PrincipalFromRequest,
+		Authorize: authz.Require,
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           problem.Recover(mux),
+		Handler:           problem.Recover(streamer.Intercept(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -29,6 +30,9 @@ type ServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(w http.ResponseWriter, r *http.Request, params SignupParams)
+	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
+	// (GET /envs/{env}/events)
+	ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams)
 	// ListPersonalTokens Returns prefix + metadata only — never the secret
 	// (GET /me/tokens)
 	ListPersonalTokens(w http.ResponseWriter, r *http.Request)
@@ -38,6 +42,9 @@ type ServerInterface interface {
 
 	// (DELETE /me/tokens/{tok})
 	RevokePersonalToken(w http.ResponseWriter, r *http.Request, tok string)
+	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
+	// (GET /orgs/{org}/audit)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -132,6 +139,61 @@ func (siw *ServerInterfaceWrapper) Signup(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// ListEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "env" -------------
+	var envPathParam EnvPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "env", r.PathValue("env"), &envPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "env", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListEventsParams
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListEvents(w, r, envPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPersonalTokens operation middleware
 func (siw *ServerInterfaceWrapper) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
 
@@ -177,6 +239,74 @@ func (siw *ServerInterfaceWrapper) RevokePersonalToken(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokePersonalToken(w, r, tok)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "actor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "action" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "action", r.URL.Query(), &params.Action, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "action"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, orgPathParam, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -306,6 +436,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
@@ -446,6 +578,29 @@ func (response Signup429Response) VisitSignupResponse(w http.ResponseWriter) err
 	return nil
 }
 
+type ListEventsRequestObject struct {
+	EnvPathParam EnvPathParam `json:"env"`
+	Params       ListEventsParams
+}
+
+type ListEventsResponseObject interface {
+	VisitListEventsResponse(w http.ResponseWriter) error
+}
+
+type ListEvents200JSONResponse EventList
+
+func (response ListEvents200JSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPersonalTokensRequestObject struct {
 }
 
@@ -505,6 +660,29 @@ func (response RevokePersonalToken204Response) VisitRevokePersonalTokenResponse(
 	return nil
 }
 
+type ListAuditEventsRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListAuditEvents200JSONResponse EventList
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
@@ -519,6 +697,9 @@ type StrictServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(ctx context.Context, request SignupRequestObject) (SignupResponseObject, error)
+	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
+	// (GET /envs/{env}/events)
+	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
 	// ListPersonalTokens Returns prefix + metadata only — never the secret
 	// (GET /me/tokens)
 	ListPersonalTokens(ctx context.Context, request ListPersonalTokensRequestObject) (ListPersonalTokensResponseObject, error)
@@ -528,6 +709,9 @@ type StrictServerInterface interface {
 
 	// (DELETE /me/tokens/{tok})
 	RevokePersonalToken(ctx context.Context, request RevokePersonalTokenRequestObject) (RevokePersonalTokenResponseObject, error)
+	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
+	// (GET /orgs/{org}/audit)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -681,6 +865,33 @@ func (sh *strictHandler) Signup(w http.ResponseWriter, r *http.Request, params S
 	}
 }
 
+// ListEvents operation middleware
+func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams) {
+	var request ListEventsRequestObject
+
+	request.EnvPathParam = envPathParam
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListEvents(ctx, request.(ListEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListEventsResponseObject); ok {
+		if err := validResponse.VisitListEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListPersonalTokens operation middleware
 func (sh *strictHandler) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
 	var request ListPersonalTokensRequestObject
@@ -755,6 +966,33 @@ func (sh *strictHandler) RevokePersonalToken(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokePersonalTokenResponseObject); ok {
 		if err := validResponse.VisitRevokePersonalTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

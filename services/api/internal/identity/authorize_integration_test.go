@@ -42,10 +42,10 @@ func TestAuthorizeAgainstMembership(t *testing.T) {
 	if !strings.HasPrefix(org.ID, "org_") {
 		t.Fatalf("org id not prefixed: %s", org.ID)
 	}
-	if err := w.svc.AddMember(ctx, org.ID, dev, "developer"); err != nil {
+	if err := w.svc.AddMember(ctx, org.ID, dev, "developer", owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.svc.AddMember(ctx, org.ID, billing, "billing"); err != nil {
+	if err := w.svc.AddMember(ctx, org.ID, billing, "billing", owner); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +80,7 @@ func TestAuthorizeAgainstMembership(t *testing.T) {
 		t.Fatalf("outsider denial wrong: %v", err)
 	}
 	// duplicate membership rejected by the unique constraint
-	if err := w.svc.AddMember(ctx, org.ID, dev, "admin"); err == nil {
+	if err := w.svc.AddMember(ctx, org.ID, dev, "admin", owner); err == nil {
 		t.Fatal("duplicate membership accepted")
 	}
 }

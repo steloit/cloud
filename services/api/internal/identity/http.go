@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -17,12 +18,15 @@ import (
 // module owns (oapi-server.cfg.yaml include-operation-ids — the list and this
 // type grow together; nothing generated goes unimplemented).
 type Handlers struct {
-	svc *Service
-	mgr *session.Manager
+	svc    *Service
+	mgr    *session.Manager
+	authz  *Authorizer
+	reader *events.Reader
+	envs   events.EnvResolver
 }
 
-func NewHandlers(svc *Service, mgr *session.Manager) *Handlers {
-	return &Handlers{svc: svc, mgr: mgr}
+func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver) *Handlers {
+	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs}
 }
 
 // Mount wires the strict server onto mux under /v1 with the module's
@@ -47,22 +51,34 @@ func (h *Handlers) contextMiddleware(f gen.StrictHandlerFunc, _ string) gen.Stri
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
 		ctx, carrier := session.WithCarrier(ctx)
 		ctx = session.WithMeta(ctx, session.Meta{IP: clientIP(r), Device: deviceOf(r)})
-		if ck, err := r.Cookie(session.CookieName); err == nil && ck.Value != "" {
-			if sess, u, err := h.svc.Resolve(ctx, ck.Value); err == nil {
-				ctx = session.WithPrincipal(ctx, session.Principal{
-					Kind: "session", UserID: u.ID, SessionID: sess.ID, Device: sess.Device,
-					CreatedAt: sess.CreatedAt.Time, LastSeenAt: sess.LastSeenAt.Time,
-				})
-			}
-		} else if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
-			if p, err := h.svc.ResolveBearer(ctx, strings.TrimPrefix(ah, "Bearer ")); err == nil {
-				ctx = session.WithPrincipal(ctx, p)
-			}
+		if p, ok := h.svc.PrincipalFromRequest(ctx, r); ok {
+			ctx = session.WithPrincipal(ctx, p)
 		}
 		resp, err := f(ctx, w, r, request)
 		carrier.Apply(w)
 		return resp, err
 	}
+}
+
+// PrincipalFromRequest resolves the request's credentials — session cookie or
+// bearer token (both kinds share one hash lookup). Shared by the strict
+// middleware and the pre-strict SSE path (events.Streamer).
+func (s *Service) PrincipalFromRequest(ctx context.Context, r *http.Request) (session.Principal, bool) {
+	if ck, err := r.Cookie(session.CookieName); err == nil && ck.Value != "" {
+		if sess, u, err := s.Resolve(ctx, ck.Value); err == nil {
+			return session.Principal{
+				Kind: "session", UserID: u.ID, SessionID: sess.ID, Device: sess.Device,
+				CreatedAt: sess.CreatedAt.Time, LastSeenAt: sess.LastSeenAt.Time,
+			}, true
+		}
+		return session.Principal{}, false
+	}
+	if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
+		if p, err := s.ResolveBearer(ctx, strings.TrimPrefix(ah, "Bearer ")); err == nil {
+			return p, true
+		}
+	}
+	return session.Principal{}, false
 }
 
 // requestError: malformed request bodies → 422 (catalog validation_failed).
@@ -91,6 +107,11 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrScopeDenied):
 		problem.Write(w, r, problem.PermissionDenied("read_only token",
 			"Use a full-scope token or a browser session for this operation."))
+	case errors.As(err, new(AccessDeniedError)):
+		var ad AccessDeniedError
+		errors.As(err, &ad)
+		problem.Write(w, r, problem.PermissionDenied(ad.DeniedBy,
+			"Ask an org owner or admin to grant the missing role, or adjust the denying policy."))
 	case errors.As(err, new(notFoundError)):
 		var nf notFoundError
 		errors.As(err, &nf)
