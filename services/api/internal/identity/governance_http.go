@@ -10,6 +10,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
+	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
@@ -58,11 +59,17 @@ func (h *Handlers) ListMyOrgs(ctx context.Context, _ gen.ListMyOrgsRequestObject
 	return gen.ListMyOrgs200JSONResponse(gen.OrgList{Data: &data}), nil
 }
 
-// requireOrg authorizes a permission in an org and returns the principal.
+// requireOrg authorizes a permission in an org and returns the acting user.
+// Unlike requireUser it accepts org-key principals (no UserID): they are
+// AUTHENTICATED, so a missing grant is 403 through the evaluator
+// (membership:none until the G8 scope model lands), never a 401.
 func (h *Handlers) requireOrg(ctx context.Context, orgID string, perm rbac.Permission, mutating bool) (string, error) {
-	p, err := requireUser(ctx, mutating)
-	if err != nil {
-		return "", err
+	p, ok := session.PrincipalFrom(ctx)
+	if !ok {
+		return "", ErrNoSession
+	}
+	if mutating && p.Kind == "token" && p.Scope != "full" {
+		return "", ErrScopeDenied
 	}
 	if err := h.authz.Require(ctx, p, perm, rbac.Scope{OrgID: orgID}); err != nil {
 		return "", err
