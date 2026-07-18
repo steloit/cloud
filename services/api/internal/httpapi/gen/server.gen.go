@@ -31,6 +31,9 @@ type ServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(w http.ResponseWriter, r *http.Request, params SignupParams)
+	// DeleteBinding Unbind — rotates credentials immediately
+	// (DELETE /bindings/{binding})
+	DeleteBinding(w http.ResponseWriter, r *http.Request, binding string)
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams)
@@ -136,6 +139,12 @@ type ServerInterface interface {
 	// UpdateService Shape/scale changes state blast radius pre-apply (D12 grammar); temporary scale overrides require reason and auto-expire 24h (D22)
 	// (PATCH /services/{service})
 	UpdateService(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam)
+
+	// (GET /services/{service}/bindings)
+	ListBindings(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam)
+	// CreateBinding Bindings are wiring — $0; credentials minted at bind, rotated at unbind; effective next deploy; edge appears `pending` on topology immediately (U2/F3)
+	// (POST /services/{service}/bindings)
+	CreateBinding(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -221,6 +230,32 @@ func (siw *ServerInterfaceWrapper) Signup(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Signup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteBinding operation middleware
+func (siw *ServerInterfaceWrapper) DeleteBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "binding" -------------
+	var binding string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", r.PathValue("binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteBinding(w, r, binding)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1245,6 +1280,58 @@ func (siw *ServerInterfaceWrapper) UpdateService(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "service" -------------
+	var servicePathParam ServicePathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "service", r.PathValue("service"), &servicePathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBindings(w, r, servicePathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreateBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "service" -------------
+	var servicePathParam ServicePathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "service", r.PathValue("service"), &servicePathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateBinding(w, r, servicePathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1393,6 +1480,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/services/{service}", wrapper.DeleteService)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/services/{service}", wrapper.GetService)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/services/{service}", wrapper.UpdateService)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/services/{service}/bindings", wrapper.ListBindings)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/services/{service}/bindings", wrapper.CreateBinding)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/bindings/{binding}", wrapper.DeleteBinding)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
@@ -1536,6 +1626,22 @@ type Signup429Response struct {
 
 func (response Signup429Response) VisitSignupResponse(w http.ResponseWriter) error {
 	w.WriteHeader(429)
+	return nil
+}
+
+type DeleteBindingRequestObject struct {
+	Binding string `json:"binding"`
+}
+
+type DeleteBindingResponseObject interface {
+	VisitDeleteBindingResponse(w http.ResponseWriter) error
+}
+
+type DeleteBinding204Response struct {
+}
+
+func (response DeleteBinding204Response) VisitDeleteBindingResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
 	return nil
 }
 
@@ -2430,6 +2536,65 @@ func (response UpdateService200JSONResponse) VisitUpdateServiceResponse(w http.R
 	return err
 }
 
+type ListBindingsRequestObject struct {
+	ServicePathParam ServicePathParam `json:"service"`
+}
+
+type ListBindingsResponseObject interface {
+	VisitListBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListBindings200JSONResponse BindingList
+
+func (response ListBindings200JSONResponse) VisitListBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateBindingRequestObject struct {
+	ServicePathParam ServicePathParam `json:"service"`
+	Body             *CreateBindingJSONRequestBody
+}
+
+type CreateBindingResponseObject interface {
+	VisitCreateBindingResponse(w http.ResponseWriter) error
+}
+
+type CreateBinding201JSONResponse Binding
+
+func (response CreateBinding201JSONResponse) VisitCreateBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateBinding409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateBinding409ApplicationProblemPlusJSONResponse) VisitCreateBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
@@ -2444,6 +2609,9 @@ type StrictServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(ctx context.Context, request SignupRequestObject) (SignupResponseObject, error)
+	// DeleteBinding Unbind — rotates credentials immediately
+	// (DELETE /bindings/{binding})
+	DeleteBinding(ctx context.Context, request DeleteBindingRequestObject) (DeleteBindingResponseObject, error)
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
@@ -2549,6 +2717,12 @@ type StrictServerInterface interface {
 	// UpdateService Shape/scale changes state blast radius pre-apply (D12 grammar); temporary scale overrides require reason and auto-expire 24h (D22)
 	// (PATCH /services/{service})
 	UpdateService(ctx context.Context, request UpdateServiceRequestObject) (UpdateServiceResponseObject, error)
+
+	// (GET /services/{service}/bindings)
+	ListBindings(ctx context.Context, request ListBindingsRequestObject) (ListBindingsResponseObject, error)
+	// CreateBinding Bindings are wiring — $0; credentials minted at bind, rotated at unbind; effective next deploy; edge appears `pending` on topology immediately (U2/F3)
+	// (POST /services/{service}/bindings)
+	CreateBinding(ctx context.Context, request CreateBindingRequestObject) (CreateBindingResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2695,6 +2869,32 @@ func (sh *strictHandler) Signup(w http.ResponseWriter, r *http.Request, params S
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SignupResponseObject); ok {
 		if err := validResponse.VisitSignupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteBinding operation middleware
+func (sh *strictHandler) DeleteBinding(w http.ResponseWriter, r *http.Request, binding string) {
+	var request DeleteBindingRequestObject
+
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteBinding(ctx, request.(DeleteBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteBindingResponseObject); ok {
+		if err := validResponse.VisitDeleteBindingResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3697,6 +3897,65 @@ func (sh *strictHandler) UpdateService(w http.ResponseWriter, r *http.Request, s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateServiceResponseObject); ok {
 		if err := validResponse.VisitUpdateServiceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListBindings operation middleware
+func (sh *strictHandler) ListBindings(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam) {
+	var request ListBindingsRequestObject
+
+	request.ServicePathParam = servicePathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBindings(ctx, request.(ListBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListBindingsResponseObject); ok {
+		if err := validResponse.VisitListBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateBinding operation middleware
+func (sh *strictHandler) CreateBinding(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam) {
+	var request CreateBindingRequestObject
+
+	request.ServicePathParam = servicePathParam
+
+	var body CreateBindingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateBinding(ctx, request.(CreateBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateBindingResponseObject); ok {
+		if err := validResponse.VisitCreateBindingResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

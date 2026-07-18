@@ -261,7 +261,20 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 		return problemError{p: problem.Conflict([]string{"deletion already in progress"},
 			"The service is already deleting; the final backup will be recorded.")}
 	}
-	_, err := s.Transition(ctx, svc, "deleting", "user", actorID, orgID)
+	// U6: dependents that will knowingly break are NAMED, all of them.
+	deps, err := s.q.ActiveBindingsToTarget(ctx, pgtype.Text{String: svc.ID, Valid: true})
+	if err != nil {
+		return err
+	}
+	if len(deps) > 0 {
+		reasons := make([]string, 0, len(deps))
+		for _, d := range deps {
+			reasons = append(reasons, "service "+d.SourceName+" binds to this service ("+d.ID+")")
+		}
+		return problemError{p: problem.Conflict(reasons,
+			"Unbind the listed services first — deleting would knowingly break them (U6).")}
+	}
+	_, err = s.Transition(ctx, svc, "deleting", "user", actorID, orgID)
 	return err
 }
 
