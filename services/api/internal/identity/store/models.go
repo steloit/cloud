@@ -91,6 +91,23 @@ type Project struct {
 	CreatedAt           pgtype.Timestamptz
 }
 
+type Service struct {
+	ID                   string
+	EnvID                string
+	Name                 string
+	Product              string
+	Intent               pgtype.Text
+	Status               string
+	Shape                []byte
+	Scaling              []byte
+	Override             []byte
+	ProvisioningSteps    []byte
+	MonthlyEstimateCents int64
+	EstimateID           pgtype.Text
+	CellID               string
+	CreatedAt            pgtype.Timestamptz
+}
+
 type Session struct {
 	ID         string
 	UserID     string

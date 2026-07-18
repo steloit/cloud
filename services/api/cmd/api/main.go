@@ -58,6 +58,21 @@ func (s *apiServer) ListEnvironments(ctx context.Context, r gen.ListEnvironments
 func (s *apiServer) CreateEstimate(ctx context.Context, r gen.CreateEstimateRequestObject) (gen.CreateEstimateResponseObject, error) {
 	return s.Handlers2.CreateEstimate(ctx, r)
 }
+func (s *apiServer) CreateService(ctx context.Context, r gen.CreateServiceRequestObject) (gen.CreateServiceResponseObject, error) {
+	return s.Handlers2.CreateService(ctx, r)
+}
+func (s *apiServer) ListServices(ctx context.Context, r gen.ListServicesRequestObject) (gen.ListServicesResponseObject, error) {
+	return s.Handlers2.ListServices(ctx, r)
+}
+func (s *apiServer) GetService(ctx context.Context, r gen.GetServiceRequestObject) (gen.GetServiceResponseObject, error) {
+	return s.Handlers2.GetService(ctx, r)
+}
+func (s *apiServer) UpdateService(ctx context.Context, r gen.UpdateServiceRequestObject) (gen.UpdateServiceResponseObject, error) {
+	return s.Handlers2.UpdateService(ctx, r)
+}
+func (s *apiServer) DeleteService(ctx context.Context, r gen.DeleteServiceRequestObject) (gen.DeleteServiceResponseObject, error) {
+	return s.Handlers2.DeleteService(ctx, r)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
