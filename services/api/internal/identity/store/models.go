@@ -19,6 +19,21 @@ type Session struct {
 	RevokedAt  pgtype.Timestamptz
 }
 
+type Token struct {
+	ID         string
+	Kind       string
+	UserID     pgtype.Text
+	OrgID      pgtype.Text
+	Name       string
+	Scope      string
+	Prefix     string
+	TokenHash  []byte
+	ExpiresAt  pgtype.Timestamptz
+	LastUsedAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	RevokedAt  pgtype.Timestamptz
+}
+
 type User struct {
 	ID           string
 	Email        string

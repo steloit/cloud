@@ -29,6 +29,15 @@ type ServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(w http.ResponseWriter, r *http.Request, params SignupParams)
+	// ListPersonalTokens Returns prefix + metadata only — never the secret
+	// (GET /me/tokens)
+	ListPersonalTokens(w http.ResponseWriter, r *http.Request)
+	// CreatePersonalToken Personal token (P5/U7): acts as YOU, carries your roles and shrinks the moment they do; plaintext returned exactly once, only hash stored
+	// (POST /me/tokens)
+	CreatePersonalToken(w http.ResponseWriter, r *http.Request)
+
+	// (DELETE /me/tokens/{tok})
+	RevokePersonalToken(w http.ResponseWriter, r *http.Request, tok string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -114,6 +123,60 @@ func (siw *ServerInterfaceWrapper) Signup(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Signup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPersonalTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPersonalTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePersonalToken operation middleware
+func (siw *ServerInterfaceWrapper) CreatePersonalToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePersonalToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokePersonalToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokePersonalToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tok" -------------
+	var tok string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tok", r.PathValue("tok"), &tok, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tok", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokePersonalToken(w, r, tok)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -247,6 +310,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetSession)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tokens", wrapper.ListPersonalTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/tokens", wrapper.CreatePersonalToken)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/tokens/{tok}", wrapper.RevokePersonalToken)
 
 	return m
 }
@@ -380,6 +446,65 @@ func (response Signup429Response) VisitSignupResponse(w http.ResponseWriter) err
 	return nil
 }
 
+type ListPersonalTokensRequestObject struct {
+}
+
+type ListPersonalTokensResponseObject interface {
+	VisitListPersonalTokensResponse(w http.ResponseWriter) error
+}
+
+type ListPersonalTokens200JSONResponse TokenList
+
+func (response ListPersonalTokens200JSONResponse) VisitListPersonalTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePersonalTokenRequestObject struct {
+	Body *CreatePersonalTokenJSONRequestBody
+}
+
+type CreatePersonalTokenResponseObject interface {
+	VisitCreatePersonalTokenResponse(w http.ResponseWriter) error
+}
+
+type CreatePersonalToken201JSONResponse TokenCreated
+
+func (response CreatePersonalToken201JSONResponse) VisitCreatePersonalTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokePersonalTokenRequestObject struct {
+	Tok string `json:"tok"`
+}
+
+type RevokePersonalTokenResponseObject interface {
+	VisitRevokePersonalTokenResponse(w http.ResponseWriter) error
+}
+
+type RevokePersonalToken204Response struct {
+}
+
+func (response RevokePersonalToken204Response) VisitRevokePersonalTokenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
@@ -394,6 +519,15 @@ type StrictServerInterface interface {
 	// Signup Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
 	// (POST /auth/signup)
 	Signup(ctx context.Context, request SignupRequestObject) (SignupResponseObject, error)
+	// ListPersonalTokens Returns prefix + metadata only — never the secret
+	// (GET /me/tokens)
+	ListPersonalTokens(ctx context.Context, request ListPersonalTokensRequestObject) (ListPersonalTokensResponseObject, error)
+	// CreatePersonalToken Personal token (P5/U7): acts as YOU, carries your roles and shrinks the moment they do; plaintext returned exactly once, only hash stored
+	// (POST /me/tokens)
+	CreatePersonalToken(ctx context.Context, request CreatePersonalTokenRequestObject) (CreatePersonalTokenResponseObject, error)
+
+	// (DELETE /me/tokens/{tok})
+	RevokePersonalToken(ctx context.Context, request RevokePersonalTokenRequestObject) (RevokePersonalTokenResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -540,6 +674,87 @@ func (sh *strictHandler) Signup(w http.ResponseWriter, r *http.Request, params S
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SignupResponseObject); ok {
 		if err := validResponse.VisitSignupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPersonalTokens operation middleware
+func (sh *strictHandler) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
+	var request ListPersonalTokensRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPersonalTokens(ctx, request.(ListPersonalTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPersonalTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPersonalTokensResponseObject); ok {
+		if err := validResponse.VisitListPersonalTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePersonalToken operation middleware
+func (sh *strictHandler) CreatePersonalToken(w http.ResponseWriter, r *http.Request) {
+	var request CreatePersonalTokenRequestObject
+
+	var body CreatePersonalTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePersonalToken(ctx, request.(CreatePersonalTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePersonalToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePersonalTokenResponseObject); ok {
+		if err := validResponse.VisitCreatePersonalTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokePersonalToken operation middleware
+func (sh *strictHandler) RevokePersonalToken(w http.ResponseWriter, r *http.Request, tok string) {
+	var request RevokePersonalTokenRequestObject
+
+	request.Tok = tok
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokePersonalToken(ctx, request.(RevokePersonalTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokePersonalToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokePersonalTokenResponseObject); ok {
+		if err := validResponse.VisitRevokePersonalTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

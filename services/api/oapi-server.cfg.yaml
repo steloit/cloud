@@ -7,4 +7,4 @@ generate:
   std-http-server: true
   strict-server: true
 output-options:
-  include-operation-ids: [signup, login, logout, getSession]
+  include-operation-ids: [signup, login, logout, getSession, createPersonalToken, listPersonalTokens, revokePersonalToken]
