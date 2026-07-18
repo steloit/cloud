@@ -1,6 +1,6 @@
 # ADR-0003 · Database substrate: CNPG + CoW snapshots replaces Neon OSS
 
-**Status:** Proposed · 2026-07-18 · Supersedes architecture.md §3 (customer-database row) and requires INF-001 Amendment A4 (founder ratification — D3 is constitutional).
+**Status:** **Accepted** · ratified by founder 2026-07-18 · INF-001 Amendment A4 applied (see 00-sources §A4; product ADR log entry ADR-033) · supersedes architecture.md §3 (Architecture v1.1).
 **Trigger (measured, per ADR-0001's rule):** fresh first-principles review requested by founder; research sweep 2026-07-18 found the Neon OSS upstream risk named in INF-001 §7 has **already materialized** — before we wrote a line of data-plane code.
 
 ## The three facts that decide it

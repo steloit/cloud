@@ -1,6 +1,6 @@
 # ADR-0001 · Architecture v1 frozen
 
-**Status:** Accepted · 2026-07-18 · Founder-approved
+**Status:** Accepted · 2026-07-18 · Founder-approved · **Amended same day:** the database row of the decision set (Neon OSS per D3) is superseded by [ADR-0003](0003-database-substrate.md) — Architecture v1.1
 **Decision:** The production technical architecture in [`docs/architecture.md`](../architecture.md) is frozen as **Architecture v1**. From this date, all implementation, Context Packs, AGENTS.md content, task specifications, and code reviews follow it. Any delta requires a superseding ADR here that names the section it changes and the **measured trigger** that justifies the change — anticipated scale is never a trigger.
 
 **Decision set (index; full text and rationale live in architecture.md — never restated here):**
