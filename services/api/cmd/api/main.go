@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
@@ -53,6 +54,9 @@ func (s *apiServer) CreateEnvironment(ctx context.Context, r gen.CreateEnvironme
 }
 func (s *apiServer) ListEnvironments(ctx context.Context, r gen.ListEnvironmentsRequestObject) (gen.ListEnvironmentsResponseObject, error) {
 	return s.Handlers2.ListEnvironments(ctx, r)
+}
+func (s *apiServer) CreateEstimate(ctx context.Context, r gen.CreateEstimateRequestObject) (gen.CreateEstimateResponseObject, error) {
+	return s.Handlers2.CreateEstimate(ctx, r)
 }
 
 func main() {
@@ -112,7 +116,7 @@ func main() {
 	// One strict server, module handler sets composed by embedding (§15).
 	idHandlers.Mount(mux, &apiServer{
 		Handlers:  idHandlers,
-		Handlers2: provisioning.NewHandlers(prov, authz, queries, svc),
+		Handlers2: provisioning.NewHandlers(prov, authz, queries, svc, estimates.NewService(queries)),
 	})
 
 	// SSE sits BEFORE the strict server: strict handlers buffer; streams need

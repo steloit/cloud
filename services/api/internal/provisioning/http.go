@@ -8,6 +8,8 @@ package provisioning
 import (
 	"context"
 
+	"github.com/steloit/cloud/services/api/internal/estimates"
+
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
@@ -21,10 +23,11 @@ type Handlers struct {
 	authz *identity.Authorizer
 	q     *store.Queries
 	idsvc *identity.Service
+	est   *estimates.Service
 }
 
-func NewHandlers(svc *Service, authz *identity.Authorizer, q *store.Queries, idsvc *identity.Service) *Handlers {
-	return &Handlers{svc: svc, authz: authz, q: q, idsvc: idsvc}
+func NewHandlers(svc *Service, authz *identity.Authorizer, q *store.Queries, idsvc *identity.Service, est *estimates.Service) *Handlers {
+	return &Handlers{svc: svc, authz: authz, q: q, idsvc: idsvc, est: est}
 }
 
 // memberOrg 404s non-members (no id probing) and returns the acting user.

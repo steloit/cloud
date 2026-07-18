@@ -34,6 +34,9 @@ type ServerInterface interface {
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams)
+	// CreateEstimate Price a shape or template BEFORE anything provisions — the estimate-before-provision law. Estimate line grammar == invoice line grammar.
+	// (POST /estimates)
+	CreateEstimate(w http.ResponseWriter, r *http.Request, params CreateEstimateParams)
 	// DeclineInvite Decline — notifies inviter, invalidates the link
 	// (DELETE /invites/{invite})
 	DeclineInvite(w http.ResponseWriter, r *http.Request, invite string)
@@ -258,6 +261,47 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListEvents(w, r, envPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateEstimate operation middleware
+func (siw *ServerInterfaceWrapper) CreateEstimate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateEstimateParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKeyHeader IdempotencyKeyHeader
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKeyHeader, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKeyHeader = &IdempotencyKeyHeader
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateEstimate(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1174,6 +1218,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/projects/{project}", wrapper.UpdateProject)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{project}/envs", wrapper.ListEnvironments)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{project}/envs", wrapper.CreateEnvironment)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/estimates", wrapper.CreateEstimate)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
@@ -1332,6 +1377,29 @@ type ListEventsResponseObject interface {
 type ListEvents200JSONResponse EventList
 
 func (response ListEvents200JSONResponse) VisitListEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEstimateRequestObject struct {
+	Params CreateEstimateParams
+	Body   *CreateEstimateJSONRequestBody
+}
+
+type CreateEstimateResponseObject interface {
+	VisitCreateEstimateResponse(w http.ResponseWriter) error
+}
+
+type CreateEstimate200JSONResponse Estimate
+
+func (response CreateEstimate200JSONResponse) VisitCreateEstimateResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2070,6 +2138,9 @@ type StrictServerInterface interface {
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
+	// CreateEstimate Price a shape or template BEFORE anything provisions — the estimate-before-provision law. Estimate line grammar == invoice line grammar.
+	// (POST /estimates)
+	CreateEstimate(ctx context.Context, request CreateEstimateRequestObject) (CreateEstimateResponseObject, error)
 	// DeclineInvite Decline — notifies inviter, invalidates the link
 	// (DELETE /invites/{invite})
 	DeclineInvite(ctx context.Context, request DeclineInviteRequestObject) (DeclineInviteResponseObject, error)
@@ -2327,6 +2398,39 @@ func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, envP
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListEventsResponseObject); ok {
 		if err := validResponse.VisitListEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateEstimate operation middleware
+func (sh *strictHandler) CreateEstimate(w http.ResponseWriter, r *http.Request, params CreateEstimateParams) {
+	var request CreateEstimateRequestObject
+
+	request.Params = params
+
+	var body CreateEstimateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateEstimate(ctx, request.(CreateEstimateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateEstimate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateEstimateResponseObject); ok {
+		if err := validResponse.VisitCreateEstimateResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
