@@ -34,3 +34,15 @@ GitHub Actions federates via WIF (`project-base`: pool `github-ci`, provider
 `github-oidc`, plan-only service account `ci-terraform-plan`). **CI plans;
 the founder applies.** Zero static keys anywhere (D5) — the repo must stay
 `google_service_account_key`-free (T1.1 AC, grep-enforced).
+
+## Image trust chain (T1.3)
+
+`image.yml` (path-gated on `services/**`) builds with BuildKit, pushes to the
+`steloit` Artifact Registry repo, and **signs keylessly**: the GitHub OIDC
+job identity federates through WIF (`ci-image-push` SA, writer on the one
+repo), cosign records the signature against the Fulcio cert for that
+identity, and the cluster's `ClusterImagePolicy`
+(`infra/k8s/policy/cluster-image-policy.yaml`, applied with T1.2) admits only
+images whose subject matches this repo's `image.yml`. No cosign keys exist
+anywhere — keyless or nothing (D5). Unsigned-rejection evidence lands with
+the T1.2 apply (cluster-gated AC).

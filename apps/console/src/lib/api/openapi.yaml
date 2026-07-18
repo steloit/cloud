@@ -1080,11 +1080,11 @@ components:
       scheme: bearer
       description: "Personal token (stp_…) or org API key. Tokens act as their user and shrink with role changes."
   parameters:
-    org: {name: org, in: path, required: true, schema: {type: string}, description: "org_… or slug"}
-    project: {name: project, in: path, required: true, schema: {type: string}}
-    env: {name: env, in: path, required: true, schema: {type: string}}
-    service: {name: service, in: path, required: true, schema: {type: string}}
-    idempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 255}, description: "S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409"}
+    org: {name: org, in: path, required: true, schema: {type: string}, description: "org_… or slug", x-go-name: OrgPathParam}
+    project: {name: project, in: path, required: true, schema: {type: string}, x-go-name: ProjectPathParam}
+    env: {name: env, in: path, required: true, schema: {type: string}, x-go-name: EnvPathParam}
+    service: {name: service, in: path, required: true, schema: {type: string}, x-go-name: ServicePathParam}
+    idempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 255}, description: "S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409", x-go-name: IdempotencyKeyHeader}
   responses:
     Conflict:
       description: Conflict with blocking reasons

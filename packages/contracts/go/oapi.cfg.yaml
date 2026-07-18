@@ -1,0 +1,7 @@
+# §17 pipeline ②: Go client + types for apps/cli and services/cell-agent —
+# the agent speaks /v1 like every other client.
+package: contracts
+output: contracts.gen.go
+generate:
+  client: true
+  models: true

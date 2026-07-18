@@ -1,0 +1,8 @@
+# §17 pipeline ①: strict server + types. Generated code is committed;
+# CI regenerates and fails on diff (make gen-go).
+package: gen
+output: internal/httpapi/gen/api.gen.go
+generate:
+  std-http-server: true
+  strict-server: true
+  models: true

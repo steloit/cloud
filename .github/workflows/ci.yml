@@ -21,6 +21,20 @@ jobs:
           pnpm --filter console typecheck
           pnpm --filter console test
           pnpm --filter console build
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache-dependency-path: "services/api/go.sum" }
+      - name: Generate (drift fails the build — §16/§17)
+        run: |
+          make gen-go
+          git diff --exit-code -- services packages
+      - name: Build + vet
+        run: |
+          cd services/api && go build ./... && go vet ./...
+          cd ../../packages/contracts/go && go build ./...
   infra:
     runs-on: ubuntu-latest
     steps:
