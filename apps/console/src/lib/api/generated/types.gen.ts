@@ -66,6 +66,46 @@ export type ServiceStatus = 'provisioning' | 'ready' | 'degraded' | 'failed' | '
  */
 export type Product = 'postgres' | 'valkey' | 'web' | 'worker';
 
+/**
+ * catalog intents (ADR-039/040/041, S11): the outcome a resource was provisioned for — the grouping key that lets estimates/invoices label by outcome while accounting by component. app/database/jobs/search/vector/cache appear on services; storage/ai are Binding-backed. Optional at create (the Composer stamps it); the server defaults by product when absent: postgres→database, valkey→cache, web/worker→app.
+ */
+export type Intent = 'app' | 'database' | 'jobs' | 'search' | 'vector' | 'cache' | 'storage' | 'ai';
+
+export type CatalogIntent = {
+    intent: Intent;
+    /**
+     * outcome-named display title (App, Database, Jobs, …)
+     */
+    title: string;
+    /**
+     * the one-line semantic contract — what the state is, what it branches/joins with, what the meter is. Execution models are replaceable; semantic contracts are not (ADR-040).
+     */
+    contract: string;
+    resolutions?: Array<{
+        /**
+         * named resolution the customer picks — never a backend dropdown (ADR-039)
+         */
+        title: string;
+        /**
+         * stated semantics (e.g. transactional enqueue, branch-coherent previews)
+         */
+        semantics: string;
+        product?: Product;
+        /**
+         * set instead of product for Binding-backed resolutions
+         */
+        binding_target_type?: 'storage' | 'ai';
+        /**
+         * starting price; the accepted estimate is the reconciliation contract (ADR-039)
+         */
+        from_cents?: number;
+    }>;
+};
+
+export type CatalogIntentList = {
+    data?: Array<CatalogIntent>;
+};
+
 export type Org = {
     id: string;
     /**
@@ -181,6 +221,7 @@ export type EnvironmentList = {
 
 export type ServiceShapeInput = {
     product: Product;
+    intent?: Intent;
     name?: string;
     /**
      * product-specific type block (C2/C3/C9–C12): version, size, memory, mode, HA…
@@ -212,6 +253,7 @@ export type Service = {
      */
     name: string;
     product: Product;
+    intent?: Intent;
     status: ServiceStatus;
     shape?: {
         [key: string]: unknown;
@@ -271,6 +313,7 @@ export type Binding = {
      * reference to the Secret holding provider credentials; reveal-once, rotated, never returned
      */
     secret_ref?: string;
+    intent?: Intent;
     scope: 'read_only' | 'read_write';
     /**
      * pending until next deploy
@@ -726,6 +769,7 @@ export type Estimate = {
     lines: Array<{
         name?: string;
         product?: Product;
+        intent?: Intent;
         monthly_cents?: number;
         /**
          * fixed | usage_projection ($0 if unused, labeled a projection)
@@ -1501,6 +1545,22 @@ export type CreateEnvironmentResponses = {
 };
 
 export type CreateEnvironmentResponse = CreateEnvironmentResponses[keyof CreateEnvironmentResponses];
+
+export type ListCatalogData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/catalog';
+};
+
+export type ListCatalogResponses = {
+    /**
+     * OK
+     */
+    200: CatalogIntentList;
+};
+
+export type ListCatalogResponse = ListCatalogResponses[keyof ListCatalogResponses];
 
 export type CreateEstimateData = {
     body: {

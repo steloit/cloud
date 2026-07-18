@@ -248,6 +248,14 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EnvironmentList"}}}}
 
+  /catalog:
+    get:
+      tags: [services]
+      operationId: listCatalog
+      summary: "The catalog: live intents with named resolutions and semantic contracts (ADR-039/040, S11). What C1 and `steloit add` render; resolutions are named products with stated semantics — never backend dropdowns."
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/CatalogIntentList"}}}}
+
   /estimates:
     post:
       tags: [billing]
@@ -991,6 +999,32 @@ components:
       enum: [provisioning, ready, degraded, failed, suspended, deleting]
       description: "The one status vocabulary (spec §1.2): ✓ ◌ ! ✕ ○ · — metering starts at ready"
     Product: {type: string, enum: [postgres, valkey, web, worker], description: "managed services Steloit builds (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed."}
+    Intent:
+      type: string
+      enum: [app, database, jobs, search, vector, cache, storage, ai]
+      description: "catalog intents (ADR-039/040/041, S11): the outcome a resource was provisioned for — the grouping key that lets estimates/invoices label by outcome while accounting by component. app/database/jobs/search/vector/cache appear on services; storage/ai are Binding-backed. Optional at create (the Composer stamps it); the server defaults by product when absent: postgres→database, valkey→cache, web/worker→app."
+    CatalogIntent:
+      type: object
+      required: [intent, title, contract]
+      properties:
+        intent: {$ref: "#/components/schemas/Intent"}
+        title: {type: string, description: "outcome-named display title (App, Database, Jobs, …)"}
+        contract: {type: string, description: "the one-line semantic contract — what the state is, what it branches/joins with, what the meter is. Execution models are replaceable; semantic contracts are not (ADR-040)."}
+        resolutions:
+          type: array
+          items:
+            type: object
+            required: [title, semantics]
+            properties:
+              title: {type: string, description: "named resolution the customer picks — never a backend dropdown (ADR-039)"}
+              semantics: {type: string, description: "stated semantics (e.g. transactional enqueue, branch-coherent previews)"}
+              product: {$ref: "#/components/schemas/Product"}
+              binding_target_type: {type: string, enum: [storage, ai], description: "set instead of product for Binding-backed resolutions"}
+              from_cents: {type: integer, description: "starting price; the accepted estimate is the reconciliation contract (ADR-039)"}
+    CatalogIntentList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/CatalogIntent"}}
     Org:
       type: object
       required: [id, slug, name, home_region, plan, created_at]
@@ -1086,6 +1120,7 @@ components:
       required: [product]
       properties:
         product: {$ref: "#/components/schemas/Product"}
+        intent: {$ref: "#/components/schemas/Intent"}
         name: {type: string}
         shape: {type: object, description: "product-specific type block (C2/C3/C9–C12): version, size, memory, mode, HA…"}
     ServiceCreate:
@@ -1104,6 +1139,7 @@ components:
         env_id: {type: string}
         name: {type: string, description: "unique within env"}
         product: {$ref: "#/components/schemas/Product"}
+        intent: {$ref: "#/components/schemas/Intent"}
         status: {$ref: "#/components/schemas/ServiceStatus"}
         shape: {type: object}
         region: {type: string, description: "provider-faceted; ≠ env home only via the C7 exception"}
@@ -1137,6 +1173,7 @@ components:
         provider: {type: string, nullable: true, description: "external provider when target_type∈{storage,ai}, e.g. s3|gcs|r2 or openai|anthropic; the only substrate name that may reach a customer surface (D8)"}
         provider_config: {type: object, nullable: true, additionalProperties: true, description: "region, model allow-list, bucket, etc. Credentials live in Secrets (secret_ref), never here."}
         secret_ref: {type: string, nullable: true, description: "reference to the Secret holding provider credentials; reveal-once, rotated, never returned"}
+        intent: {$ref: "#/components/schemas/Intent"}
         scope: {type: string, enum: [read_only, read_write]}
         status: {type: string, enum: [pending, active, revoked], description: "pending until next deploy"}
         env_vars: {type: object, additionalProperties: {type: string}, description: "deterministic injected config (<TARGET>_URL, PROVIDER_API_KEY, ...); values always masked in reads"}
@@ -1474,6 +1511,7 @@ components:
             properties:
               name: {type: string}
               product: {$ref: "#/components/schemas/Product"}
+              intent: {$ref: "#/components/schemas/Intent"}
               monthly_cents: {type: integer}
               basis: {type: string, description: "fixed | usage_projection ($0 if unused, labeled a projection)"}
               egress_note: {type: [string, "null"], description: "cross-region: egress priced here, never a billing surprise (C7)"}
