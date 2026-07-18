@@ -156,6 +156,15 @@ func (s *testAPI) UpdateService(ctx context.Context, r gen.UpdateServiceRequestO
 func (s *testAPI) DeleteService(ctx context.Context, r gen.DeleteServiceRequestObject) (gen.DeleteServiceResponseObject, error) {
 	return s.Handlers2.DeleteService(ctx, r)
 }
+func (s *testAPI) CreateBinding(ctx context.Context, r gen.CreateBindingRequestObject) (gen.CreateBindingResponseObject, error) {
+	return s.Handlers2.CreateBinding(ctx, r)
+}
+func (s *testAPI) ListBindings(ctx context.Context, r gen.ListBindingsRequestObject) (gen.ListBindingsResponseObject, error) {
+	return s.Handlers2.ListBindings(ctx, r)
+}
+func (s *testAPI) DeleteBinding(ctx context.Context, r gen.DeleteBindingRequestObject) (gen.DeleteBindingResponseObject, error) {
+	return s.Handlers2.DeleteBinding(ctx, r)
+}
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
 	t.Helper()

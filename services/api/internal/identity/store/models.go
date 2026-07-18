@@ -8,6 +8,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Binding struct {
+	ID             string
+	SourceID       string
+	TargetType     string
+	TargetID       pgtype.Text
+	Provider       pgtype.Text
+	ProviderConfig []byte
+	SecretRef      pgtype.Text
+	Intent         pgtype.Text
+	Scope          string
+	Status         string
+	RotatedAt      pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Environment struct {
 	ID             string
 	ProjectID      string

@@ -74,6 +74,15 @@ func (s *apiServer) UpdateService(ctx context.Context, r gen.UpdateServiceReques
 func (s *apiServer) DeleteService(ctx context.Context, r gen.DeleteServiceRequestObject) (gen.DeleteServiceResponseObject, error) {
 	return s.Handlers2.DeleteService(ctx, r)
 }
+func (s *apiServer) CreateBinding(ctx context.Context, r gen.CreateBindingRequestObject) (gen.CreateBindingResponseObject, error) {
+	return s.Handlers2.CreateBinding(ctx, r)
+}
+func (s *apiServer) ListBindings(ctx context.Context, r gen.ListBindingsRequestObject) (gen.ListBindingsResponseObject, error) {
+	return s.Handlers2.ListBindings(ctx, r)
+}
+func (s *apiServer) DeleteBinding(ctx context.Context, r gen.DeleteBindingRequestObject) (gen.DeleteBindingResponseObject, error) {
+	return s.Handlers2.DeleteBinding(ctx, r)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
