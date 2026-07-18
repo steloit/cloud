@@ -8,6 +8,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Member struct {
+	ID        string
+	OrgID     string
+	UserID    string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Org struct {
+	ID        string
+	Name      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Session struct {
 	ID         string
 	UserID     string

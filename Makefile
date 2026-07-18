@@ -8,6 +8,7 @@ SPEC := docs/product/08-api/openapi.yaml
 gen: gen-go gen-ts
 
 gen-go:
+	cp docs/product/11-permissions/rbac-matrix.csv services/api/internal/identity/rbac/matrix.csv
 	cd services/api && $(OAPI) -config oapi-types.cfg.yaml ../../$(SPEC)
 	cd services/api && $(OAPI) -config oapi-server.cfg.yaml ../../$(SPEC)
 	cd packages/contracts/go && $(OAPI) -config oapi.cfg.yaml ../../../$(SPEC)

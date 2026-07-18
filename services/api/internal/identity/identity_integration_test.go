@@ -20,6 +20,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
+	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
@@ -28,8 +29,10 @@ import (
 )
 
 type world struct {
-	srv  *httptest.Server
-	pool *pgxpool.Pool
+	srv   *httptest.Server
+	pool  *pgxpool.Pool
+	svc   *identity.Service
+	authz *identity.Authorizer
 }
 
 func newWorld(t *testing.T, ttl time.Duration) *world {
@@ -65,11 +68,16 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
+	matrix, err := rbac.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authz := identity.NewAuthorizer(store.New(pool), rbac.NewEvaluator(matrix, nil))
 	mux := http.NewServeMux()
 	identity.NewHandlers(svc, mgr).Mount(mux)
 	srv := httptest.NewServer(problem.Recover(mux))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool}
+	return &world{srv: srv, pool: pool, svc: svc, authz: authz}
 }
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
