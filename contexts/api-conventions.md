@@ -42,3 +42,6 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
 - First-blocker-only 409s — `reasons[]` carries ALL blockers.
 - Hand-editing generated types in `packages/contracts` (regenerate instead).
 - Forgetting `remediation` on an error path — schema requires it; tests should too.
+- Untagged test structs decoding snake_case API JSON — Go's case-insensitive match does
+  NOT fold underscores (`OveragePriceCents` ≠ `overage_price_cents` silently reads zero);
+  always write explicit `json:` tags in assertions (caught by CI on T2.7).
