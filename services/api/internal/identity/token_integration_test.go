@@ -146,10 +146,16 @@ func TestPersonalTokenLifecycle(t *testing.T) {
 	}
 
 	// --- BOTH KINDS (T2.2 AC): org key seeded at store level authenticates ---
+	// T2.3's migration added the tokens.org_id FK — the org row must exist
+	// (this line is the fix for the FK violation CI caught on #210).
+	seededOrg, err := store.New(w.pool).CreateOrg(ctx, store.CreateOrgParams{ID: ids.New("org"), Name: "seeded"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orgSecret := "stk_orgkeyorgkeyorgkeyorgkeyorgkey1234567890ab"
 	_, err = store.New(w.pool).CreateToken(ctx, store.CreateTokenParams{
 		ID: ids.New("key"), Kind: "org",
-		OrgID: pgtype.Text{String: "org_seeded", Valid: true},
+		OrgID: pgtype.Text{String: seededOrg.ID, Valid: true},
 		Name:  "automation", Scope: "read_only", Prefix: orgSecret[:12],
 		TokenHash: session.HashToken(orgSecret),
 	})
