@@ -3197,6 +3197,12 @@ type CreateInviteJSONBody struct {
 	Role  Role                `json:"role"`
 }
 
+// CreateInviteParams defines parameters for CreateInvite.
+type CreateInviteParams struct {
+	// Confirm accept the shown seat overage — the x-error-catalog quota_exceeded contract (soft 402 proceeds only on explicit confirm=true). S-process gap fill with T2.7.
+	Confirm *bool `form:"confirm,omitempty" json:"confirm,omitempty"`
+}
+
 // ChangeMemberRoleJSONBody defines parameters for ChangeMemberRole.
 type ChangeMemberRoleJSONBody struct {
 	Role Role `json:"role"`

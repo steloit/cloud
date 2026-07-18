@@ -52,22 +52,6 @@ func (q *Queries) CountActiveSessionsForUser(ctx context.Context, userID string)
 	return count, err
 }
 
-const createOrg = `-- name: CreateOrg :one
-INSERT INTO orgs (id, name) VALUES ($1, $2) RETURNING id, name, created_at
-`
-
-type CreateOrgParams struct {
-	ID   string
-	Name string
-}
-
-func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error) {
-	row := q.db.QueryRow(ctx, createOrg, arg.ID, arg.Name)
-	var i Org
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
-	return i, err
-}
-
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, user_id, token_hash, device, expires_at)
 VALUES ($1, $2, $3, $4, $5)

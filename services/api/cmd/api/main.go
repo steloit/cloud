@@ -58,7 +58,7 @@ func main() {
 
 	hub := events.NewHub()
 	recorder := events.NewRecorder(queries, hub)
-	svc, err := identity.NewService(queries, hasher, sessions, loginLimiter, recorder)
+	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder)
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)

@@ -99,6 +99,31 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrEmailTaken):
 		problem.Write(w, r, problem.Conflict([]string{"email already registered"},
 			"Sign in with this email instead, or use password reset when it ships (T7.2)."))
+	case errors.Is(err, ErrSlugTaken):
+		problem.Write(w, r, problem.Conflict([]string{"organization slug already taken"},
+			"Pick a different name — the slug is derived from it and is immutable."))
+	case errors.Is(err, ErrLastOwner):
+		problem.Write(w, r, problem.Conflict([]string{"last owner cannot be demoted or removed"},
+			"Promote another member to owner first (F1: an organization keeps at least one owner)."))
+	case errors.Is(err, ErrOrgDeleting):
+		problem.Write(w, r, problem.Conflict([]string{"deletion already scheduled"},
+			"The organization is already scheduled for deletion; state is kept per the 90-day rule."))
+	case errors.Is(err, ErrAlreadyMember):
+		problem.Write(w, r, problem.Conflict([]string{"already a member"},
+			"No invite needed — this person already has access."))
+	case errors.Is(err, ErrAlreadyInvited):
+		problem.Write(w, r, problem.Conflict([]string{"already invited"},
+			"A pending invitation exists for this email; revoke it first to change the role."))
+	case errors.Is(err, ErrInviteGone):
+		problem.Write(w, r, problem.Conflict([]string{"invite expired, used or revoked"},
+			"If you accepted earlier — even on another device — you're a member; just sign in."))
+	case errors.Is(err, ErrInviteNotExpired):
+		problem.Write(w, r, problem.Conflict([]string{"invite is not expired"},
+			"The original link still works — renewal is only for expired invitations."))
+	case errors.As(err, new(SeatOverageError)):
+		var so SeatOverageError
+		errors.As(err, &so)
+		problem.Write(w, r, problem.QuotaSoft(so.PriceCents))
 	case errors.Is(err, ErrInvalidCredentials):
 		problem.Write(w, r, problem.AuthFailed("invalid credentials",
 			"Check the email and password and try again."))

@@ -125,6 +125,8 @@ paths:
       tags: [orgs]
       operationId: createInvite
       summary: "Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending"
+      parameters:
+        - {name: confirm, in: query, schema: {type: boolean, default: false}, description: "accept the shown seat overage — the x-error-catalog quota_exceeded contract (soft 402 proceeds only on explicit confirm=true). S-process gap fill with T2.7."}
       requestBody:
         required: true
         content:

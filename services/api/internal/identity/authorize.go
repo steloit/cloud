@@ -52,33 +52,6 @@ func (a *Authorizer) Require(ctx context.Context, p session.Principal, perm rbac
 	return nil
 }
 
-// --- org bootstrap (consumed by T2.7's endpoints; used by tests now) --------
-
-// CreateOrgWithOwner creates the org and its owner membership atomically-ish
-// (two inserts; the org endpoints task wraps them in a tx when it lands).
-// Every state change writes to the events spine (GOV-002 primitive 9).
-func (s *Service) CreateOrgWithOwner(ctx context.Context, name, ownerUserID string) (store.Org, error) {
-	org, err := s.q.CreateOrg(ctx, store.CreateOrgParams{ID: ids.New("org"), Name: name})
-	if err != nil {
-		return store.Org{}, fmt.Errorf("identity: create org: %w", err)
-	}
-	if _, err := s.q.AddMember(ctx, store.AddMemberParams{
-		ID: ids.New("mbr"), OrgID: org.ID, UserID: ownerUserID, Role: "owner",
-	}); err != nil {
-		return store.Org{}, fmt.Errorf("identity: owner membership: %w", err)
-	}
-	s.record(ctx, events.Input{
-		OrgID: org.ID, Kind: "lifecycle", Via: "user", Actor: ownerUserID,
-		Action: "org.created", Subject: org.ID,
-		Detail: []byte(`{"name":` + strconv.Quote(name) + `}`),
-	})
-	s.record(ctx, events.Input{
-		OrgID: org.ID, Kind: "membership", Via: "user", Actor: ownerUserID,
-		Action: "member.added", Subject: ownerUserID, Detail: []byte(`{"role":"owner"}`),
-	})
-	return org, nil
-}
-
 // AddMember is the raw membership insert (role validity is DB-checked).
 // actorID is who performed the change — never inferred from the added user.
 func (s *Service) AddMember(ctx context.Context, orgID, userID, role, actorID string) error {
