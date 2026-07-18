@@ -15,6 +15,10 @@ quota evaluator, invoice generator. If they can diverge, the design is wrong.
 
 - **Hybrid model:** subscription (Free $0 / Pro $29 / Business $99 / Enterprise) buys platform
   capabilities; pay-as-you-go covers infrastructure; overage = beyond included quotas.
+- **Product-first presentation (ADR-039):** estimates and invoices label by outcome via the `intent`
+  tag (stamped by the Composer at creation) and account by cost components — product line = Σ component
+  lines byte-for-byte at every expansion level, bottoming out at published unit price × metered quantity
+  or a stated plan allowance; nothing else exists. Usage ranges are honest and bounded by the cap.
 - **Plans gate capabilities, never safety.** Never gated at any tier: TLS, backups, MFA, policies,
   alerts, dunning protections, self-deletion. (Table-driven test.)
 - **Soft quotas keep working and bill** (egress $0.09/GB · seats $7 · builds $0.01/min · events

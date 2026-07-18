@@ -41,9 +41,18 @@ visibility (provider usage API), lifecycle audit, **soft** spend control. It is 
 **no proxy, no routing, no hard in-line caps** (that is the AI-gateway commodity, never built). There is
 no AI Gateway product. Don't conflate the two: the assistant proposes; the AI Binding governs a dependency.
 
+## The Composer (ADR-039/040 — describe-to-provision, T13.7)
+
+AI1/describe-to-provision is the **Composer**: it maps an intent to one or more *named resolutions with
+stated semantics*, each priced (`price_estimate`), and proposes — never provisions (Law 1: the human
+accepts; the accepted estimate is the reconciliation contract between catalog and architecture). It
+stamps `intent:` on everything it creates (the billing grouping key). Execution-model migrations it
+suggests are proposals like any other: visible, priced, consented.
+
 ## Mistake bank
 
 - Any endpoint whose effect is "AI applies a change" (Law 1 is architectural — it must not exist).
+- A Composer path that selects or migrates an execution model without a consented estimate (ADR-040).
 - Passing resolved data (not ids) in a context envelope (breaks Law 3's re-check point).
 - Insights/threads deleted on disable (retain-and-hide; QA scenario 7 checks byte-identity).
 - Evidence-free assertions in assistant output (Law 2: cite or say you can't verify).

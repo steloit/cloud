@@ -68,6 +68,10 @@ never hand-written · demo data from `19-canon` only.
   ADR. Dependencies are satisfied by the composer (catalog sells intents), never surfaced as homework.
   Architecture deltas require evidence from implementation or real customer feedback, never speculation;
   a cleaner abstraction is never a trigger (ADR-040).
+- **Review order (ADR-040):** developer experience first, implementation simplicity second, architectural
+  elegance third. Reviews default to implementation thinking — every proposal answers: does it improve
+  DX? does it reduce customer uncertainty? is there implementation or customer evidence for an
+  architecture change? If not, the architecture stands.
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**

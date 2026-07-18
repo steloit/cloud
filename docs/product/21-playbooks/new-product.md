@@ -6,6 +6,7 @@ The constitution says *we don't ship products that break the grammar* (18-philos
 
 ## Step 0 — The admission tests (before any design)
 
+0. **The Developer-First test (ADR-040) — before anything:** what developer problem does this solve? Is it a Product, Capability, Binding, or Infrastructure Service (the State Test, ADR-038, answers)? Which execution model provides the best developer experience? Does it strengthen the certainty story? The State Test decides what may exist; the catalog decides how it is *sold* — as an outcome-named intent (ADR-039). Review order throughout: DX first, implementation simplicity second, architectural elegance third.
 1. **Primitive test (X1):** is it a Service — provisioned, holds secrets, emits events, costs money, bound by others? Then it takes a **service slot on the rail**, never a new rail zone. A new *zone* requires a new *primitive* (there are nine; adding one is a deliberate, versioned act — GOV-002 §9.2).
 2. **Cardinality:** **fleet** (pointable instances — Postgres, Valkey, Web, Worker) or **capability** (one endpoint, config-shaped — Storage, AI Gateway)? This decides: count badge and instance switcher (fleet, rendered only at n>1) vs. neither, ever (capability). See spec §Extensibility.
 3. **GOV-002 §3's three tests:** Project test (makes a Project more capable?), Coherence test (expressible in the nine primitives and standard grammar?), Focus test (serves "default platform for starting a project"?). Fail any → escalate as a *product* question; do not proceed to design.
@@ -18,7 +19,7 @@ The constitution says *we don't ship products that break the grammar* (18-philos
 
 ## Step 2 — Create surface (C1 grammar)
 
-A new product is **a new card + type block on the one create surface — never a new page** (C1's revision note is the precedent). Deliverables:
+A new product is **a new card + type block on the one create surface — never a new page** (C1's revision note is the precedent). The card is an **intent** (outcome-named, ADR-039/040): the Composer resolves it to named resolutions with stated semantics; dependencies are satisfied by composition, never surfaced as homework; the accepted estimate is the contract and stamps the `intent:` tag. Deliverables:
 - Product card: one-liner, from-price, availability honesty (beta pill, "not in <region> yet — request it" where true — C7's pattern).
 - **Type block** in the shared skeleton `name → type block → pre-wire bindings → included defaults → live estimate → confirm` (C2). Region is inherited from the environment, never chosen per service.
 - `/estimates` support **before** provision support: the estimate line for this product must speak the invoice line grammar. Nothing provisions before estimate acceptance; metering starts at `ready`; failed provisioning never bills (C4).

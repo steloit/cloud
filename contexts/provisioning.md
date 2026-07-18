@@ -38,7 +38,10 @@ if a task requires violating an invariant, STOP and surface it (§8).
 
 ## Drivers
 
-**The managed `Product` surface is exactly `[postgres, valkey, web, worker]` (ADR-0004/A5).** Per-product
+**The managed `Product` surface is exactly `[postgres, valkey, web, worker]` (ADR-0004/A5).** It names the
+*architecture plane* only — the catalog is outcome-first (ADR-039/040): intents resolved by the Composer
+to named resolutions with stated semantics; **execution models are replaceable, semantic contracts are not.**
+Per-product
 drivers behind one provisioner interface (Postgres/CNPG is the pioneer — cluster create, snapshot-branch,
 hibernate/wake, PITR-to-new-branch; **Valkey** instantiates the anatomy — one pioneer at a time, ADR-010).
 Reference for branching mechanics: Xata OSS (Apache-2.0); substrate record: `docs/adr/0003-database-substrate.md` + INF-001 §A4.
@@ -63,4 +66,6 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Surfacing a capability's dependency as a prerequisite or error instead of composing it (the catalog sells intents; the composer proposes the shaped service + estimate — "Jobs without Postgres" is a proposal, never homework).
 - Backend-swapping a capability into different semantics ("Jobs on Kafka") — a semantic divergence is a NEW named service via the gate, never a swap (ADR-038 scope clause).
 - An external Binding that proxies bytes/traffic, routes across providers, or enforces a hard in-line cap — that is the commodity we don't build (A5.3/A5.4).
+- Letting an execution model change silently under a Product, or migrating one without a visible, priced,
+  consented estimate (ADR-040: the Composer proposes; the accepted estimate is the contract).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.
