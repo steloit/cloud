@@ -111,7 +111,11 @@ func TestOrgGovernance(t *testing.T) {
 	}
 	var ml struct {
 		Data  []struct{ Id, Role string }
-		Seats struct{ Included, Used, OveragePriceCents int }
+		Seats struct {
+			Included          int `json:"included"`
+			Used              int `json:"used"`
+			OveragePriceCents int `json:"overage_price_cents"`
+		}
 	}
 	_ = json.Unmarshal([]byte(body), &ml)
 	if ml.Seats.Included != 3 || ml.Seats.Used != 1 || ml.Seats.OveragePriceCents != 700 {
