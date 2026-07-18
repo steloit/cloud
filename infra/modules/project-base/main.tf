@@ -72,6 +72,24 @@ resource "google_storage_bucket" "wal_control" {
   labels                      = local.labels
 }
 
+# Image home (T1.3): AR docker repo; images are keyless-cosign-signed with
+# provenance from the FIRST build (invariant 11).
+resource "google_artifact_registry_repository" "images" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "steloit"
+  format        = "DOCKER"
+  labels        = local.labels
+
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 20
+    }
+  }
+}
+
 resource "google_kms_key_ring" "core" {
   name     = "${var.cell_id}-core"
   project  = var.project_id
@@ -127,6 +145,27 @@ resource "google_storage_bucket_iam_member" "ci_plan_state" {
   bucket = google_storage_bucket.state.name
   role   = "roles/storage.objectAdmin" # state lock/read requires object write
   member = "serviceAccount:${google_service_account.ci_plan.email}"
+}
+
+# Image-push identity: separate from plan SA; writer on the ONE repo only.
+resource "google_service_account" "ci_image" {
+  project      = var.project_id
+  account_id   = "ci-image-push"
+  display_name = "CI image build/push (keyless signing via GitHub OIDC)"
+}
+
+resource "google_artifact_registry_repository_iam_member" "ci_image_writer" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.images.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.ci_image.email}"
+}
+
+resource "google_service_account_iam_member" "ci_image_wif" {
+  service_account_id = google_service_account.ci_image.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.ci.name}/attribute.repository/${var.github_repo}"
 }
 
 resource "google_service_account_iam_member" "ci_plan_wif" {
