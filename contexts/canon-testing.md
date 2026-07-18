@@ -12,7 +12,7 @@ arithmetic-verified. **No demo data exists outside canon.** Import fixtures and 
 
 ## The arithmetic invariants (imported at every layer)
 
-- `61+22+58+24+22+9+12 = 208` (ecommerce services → project)
+- `61+22+58+24+22+21 = 208` (ecommerce services → project; assets = external Storage Binding, outside totals — P4 ruling 2026-07-18)
 - `199.10+6.70+2.20 = 208` (environments → project)
 - `208+96+41+38+0 = 383` (projects → org resources) · `383+99 = 482` (org total, everywhere)
 - Estimate line grammar == invoice line grammar; org total == Σ projects + plan fee on every surface.

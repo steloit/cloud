@@ -229,25 +229,11 @@ export const usageReport = {
       overage_cents: 588,
     },
     {
-      meter: "object_storage_gb_mo",
-      included: 5,
-      used: 43.1,
-      overage_price: "$0.023 / GB-mo",
-      overage_cents: 191,
-    },
-    {
       meter: "egress_gb",
       included: 100,
       used: 87,
       overage_price: "$0.09 / GB after included",
       overage_cents: 0,
-    },
-    {
-      meter: "queue_requests_m",
-      included: 1,
-      used: 2.84,
-      overage_price: "$0.40 / M after included",
-      overage_cents: 74,
     },
     {
       meter: "backups_gb_mo",

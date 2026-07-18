@@ -25,13 +25,13 @@ Facts below are **frame-fixed** (visible in the gallery — changing one is a ca
 | analytics *(representative name)* | $38 | provisioning | SW2's provisioning row |
 | sandbox *(representative name)* | $0 | ok | SW2's $0 row |
 
-## ecommerce — seven services, three environments
+## ecommerce — six services + one Storage Binding, three environments
 
-**Services** (production; db ×2 is the only rail count badge): `api` Web **$61** · `worker` Worker **$22** · `db-main` PostgreSQL Standard **$58** (192/200 connections) · `db-reports` PostgreSQL Dev **$24** (consumed read-only by worker via `bnd_worker_dbreports`) · `cache` Valkey **$22** · `assets` Storage **~$9** · `jobs` Queue **$12** — Σ **$208**.
+**Services** (production; db ×3 is the rail count badge — frames still show ×2, reconciled via S9): `api` Web **$61** · `worker` Worker **$22** · `db-main` PostgreSQL Standard **$58** (192/200 connections) · `db-reports` PostgreSQL Dev **$24** (consumed read-only by worker via `bnd_worker_dbreports`) · `cache` Valkey **$22** · `jobs` **PostgreSQL Dev + 4 GB $21** (pgmq — the Jobs product; P4 canon ruling 2026-07-18, ADR-038/039) — Σ **$208**. **External:** `assets` → **Storage Binding** (`bnd_api_assets`, provider aws-s3; the provider's ~$9 shows at bind and never enters Steloit totals — A5.3).
 
-**Environments:** `production` $199.10 · `staging` $6.70 · `preview/pr-142` $2.20 (Σ $208) — preview carries `preview-minimal v2` (jobs + worker excluded) and the `branch-data-masking` flag, expires by policy. `pr-142` has a masked branch of db-main linked to it; steloit-bot's PR comment: URL + "db: production data (masked · policy) · $0.07/day · capped".
+**Environments:** `production` $199.10 · `staging` $6.70 · `preview/pr-142` $2.20 (Σ $208) — preview carries `preview-minimal v2` (the dedicated `jobs` database + worker excluded by template policy — a policy choice, not a limitation: the branch-coherence story, queue state branching with previews, is fully realized when Jobs rides in `db-main`; canon demonstrates the dedicated-instance resolution) and the `branch-data-masking` flag, expires by policy. `pr-142` has a masked branch of db-main linked to it; steloit-bot's PR comment: URL + "db: production data (masked · policy) · $0.07/day · capped".
 
-**In-flight (never in any total):** admin (binding *issued · activates at ready*), sessions, uploads, emails, mailer, gpu-encoder (beta GPU Worker, C7 region exception), env `production-us` (C8). Depicted at their moment of creation only.
+**In-flight (never in any total):** admin (binding *issued · activates at ready*), sessions, emails, mailer, env `production-us` (C8) — *uploads and gpu-encoder retired with ADR-0004 (P4 ruling)*. Depicted at their moment of creation only.
 
 ## The incident — one story, every lens (Jul 2, 2026, IST)
 
@@ -49,21 +49,21 @@ History context: **#140** rolled back · auto · gate `error rate 2.4×`. #142's
 
 ## The four proposals (one per product panel)
 
-`prp_7c31a2` PostgreSQL — index on orders (the incident's fix; applied via #143) · `prp_ca11e0` Valkey — eviction policy + maxmemory (AI6; AI9's follow-up thread attaches here) · `prp_st77a4` Storage — lifecycle rules, dry-run first, no immediate deletes (AI7) · `prp_qu20b9` Queue — recognizes the dead letters as a *code* fix, routes through #143 before replay (AI8).
+`prp_7c31a2` PostgreSQL — index on orders (the incident's fix; applied via #143) · `prp_ca11e0` Valkey — eviction policy + maxmemory (AI6; AI9's follow-up thread attaches here) · `prp_ap77a4` Web — api off-peak scale window, window-bound and auto-reverting (AI7 re-cast per the P4 ruling; frame reconciles via S9) · `prp_qu20b9` Queue — recognizes the dead letters as a *code* fix, routes through #143 before replay (AI8).
 
 ## Templates, dashboards, quotas, cells
 
-**Templates:** `store-baseline` v4 · 7 services · $208 · used by initech and borealis/starter — the `store` gallery template is the canonical origin of ecommerce · `api-worker-pair` v2 · $95 · used 4× · `analytics-starter` v1 · restricted. T3's capture example: `checkout-stack` (api, worker, jobs, cache) = **$117/mo**.
+**Templates:** `store-baseline` v4 · 6 services + 1 Storage Binding · $208 · used by initech and borealis/starter — the `store` gallery template is the canonical origin of ecommerce · `api-worker-pair` v2 · $95 · used 4× · `analytics-starter` v1 · restricted. T3's capture example: `checkout-stack` (api, worker, jobs, cache) = **$126/mo** (jobs now the $21 Postgres).
 
 **Dashboard:** `checkout-health` — ecommerce-scoped (org badge was the error), personal→shared, five widgets: api p95 (with #143 marker), order.paid errors, DLQ depth, MTD spend, deploy list.
 
 **Quota canon:** egress **87/100 GB**, warned at 80% — banner + bell + email with the math (~**$1.62** overage); recommendation is a calculator, "do nothing" valid.
 
-**Cells:** Acme Production Cell (customer AWS · healthy) · Acme EU Cell (customer GCP · upgrade available) — the two cells that justify BYOC-at-Business.
+**Cells:** Acme Production Cell (regional · aws ap-south-1 · healthy) · Acme EU Cell (regional · gcp europe-west4 · upgrade available) — regional/dedicated cells in Steloit's account (Business+, ADR-022 as refined); cross-account BYOC is Enterprise/v3 (ADR-035).
 
 ## Arithmetic invariants (tests import these; nobody retypes them)
 
-- `61 + 22 + 58 + 24 + 22 + 9 + 12 = 208` (ecommerce services → project)
+- `61 + 22 + 58 + 24 + 22 + 21 = 208` (ecommerce services → project; the assets Storage Binding is external — provider ~$9, never in Steloit totals)
 - `199.10 + 6.70 + 2.20 = 208` (environments → project)
 - `208 + 96 + 41 + 38 + 0 = 383` (projects → org resources)
 - `383 + 99 = 482` (resources + plan = org total — the number on every surface)
