@@ -2,7 +2,7 @@
 id: US-3.6
 title: Failed provisioning never bills and never strands state
 epic: E3
-status: stub
+status: blocked
 phase: MVP
 priority: critical
 sprint: 4
@@ -29,4 +29,6 @@ Implements the S7 idempotency ruling.
 
 - [ ] kill provisioning mid-flight → no meter events, clean desired/actual state, retry-safe.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Blocked
+
+Blocked on P1: "failed provisioning never bills" is proven (T3.7 integration); "never strands state" is the reconciler cleanup path (T3.4+).

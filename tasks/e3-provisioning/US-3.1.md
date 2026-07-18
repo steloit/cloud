@@ -2,7 +2,7 @@
 id: US-3.1
 title: Project + environment creation; environment sets the region
 epic: E3
-status: stub
+status: done
 phase: MVP
 priority: high
 sprint: 3
@@ -13,7 +13,8 @@ labels: [Backend, API]
 module: M4 Provisioning
 contexts: [provisioning, api-conventions, canon-testing]
 files: []
-verify: []
+verify:
+  - cd services/api && go test ./...
 owner: agent
 ---
 
@@ -29,6 +30,13 @@ ADR-004: services inherit the env region; overrides are explicit priced exceptio
 
 ## Acceptance criteria
 
-- [ ] region flows env → service; `UNIQUE(org_id,name)` on projects.
+- [x] `POST /orgs/{org}/projects` creates project + `production` in ONE transaction
+      (T3.2); the env is real in every response and audit row from birth; env_count 1 in
+      the create response.
+- [x] Region flows org home → env (override explicit) → service (the env's region is
+      what estimates price against); `UNIQUE(org_id,name)` enforced, 409 on collision.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Outcome
+
+Carried by T3.2 (implicit production in-tx, region inheritance, uniqueness) and verified
+in `TestProjectsAndEnvironments`. No new code — evidence recorded.

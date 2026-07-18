@@ -2,7 +2,7 @@
 id: US-3.5
 title: Deleting anything takes a final backup; typed-confirm names dependents
 epic: E3
-status: stub
+status: blocked
 phase: MVP
 priority: high
 sprint: 4
@@ -25,4 +25,6 @@ Deleting anything takes a final backup; typed-confirm names dependents
 
 **AC:** QA scenario 10 — delete disabled until exact name typed; 409 names dependents; final backup recorded.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Blocked
+
+Blocked on P1: the 409-dependents half landed (T3.6, U6-tested); "final backup recorded" requires the driver (T3.4). Typed-confirm is client-side (console/CLI).
