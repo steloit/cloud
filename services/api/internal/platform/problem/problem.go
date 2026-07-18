@@ -29,12 +29,12 @@ type Problem struct {
 	Detail      string `json:"detail,omitempty"`
 	Remediation string `json:"remediation"`
 
-	Errors            []FieldError `json:"errors,omitempty"`             // 422
-	Reasons           []string     `json:"reasons,omitempty"`            // 409
-	RequiredPlan      string       `json:"required_plan,omitempty"`      // 402 plan gate
+	Errors            []FieldError `json:"errors,omitempty"`              // 422
+	Reasons           []string     `json:"reasons,omitempty"`             // 409
+	RequiredPlan      string       `json:"required_plan,omitempty"`       // 402 plan gate
 	OveragePriceCents *int64       `json:"overage_price_cents,omitempty"` // 402 soft quota
-	EventID           string       `json:"event_id,omitempty"`           // 5xx
-	RetryAfterS       int          `json:"retry_after_s,omitempty"`      // 429
+	EventID           string       `json:"event_id,omitempty"`            // 5xx
+	RetryAfterS       int          `json:"retry_after_s,omitempty"`       // 429
 }
 
 const typeBase = "https://api.steloit.app/problems/"

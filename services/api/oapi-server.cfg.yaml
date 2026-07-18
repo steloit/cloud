@@ -1,0 +1,10 @@
+# §17 ①b: strict server scoped to IMPLEMENTED operations — the list grows as
+# tasks land their handlers (staged conformance-by-construction; no
+# generated-but-unimplemented surface ever exists). T2.1: the auth core.
+package: gen
+output: internal/httpapi/gen/server.gen.go
+generate:
+  std-http-server: true
+  strict-server: true
+output-options:
+  include-operation-ids: [signup, login, logout, getSession]
