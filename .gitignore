@@ -6,3 +6,6 @@ dist
 tsconfig.tsbuildinfo
 
 CLAUDE.local.md
+
+# Terraform working dirs (provider binaries) — lock files ARE committed
+.terraform/
