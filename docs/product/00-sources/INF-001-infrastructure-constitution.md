@@ -38,13 +38,13 @@ The Postgres product is built on Neon's Apache-2.0 storage engine (Pageservers +
 **Known risks:** operational complexity (budget 2–3 senior engineers when hiring begins); Databricks controls the upstream roadmap (mitigation: Apache 2.0, forkable); Neon quirks (no true superuser, extension constraints) become our product quirks and must be documented in our grammar, never exposed as "Neon." *(amended: A4 — the Databricks-upstream risk fired pre-build; recorded in §7)*
 **Open item (verify in sprint week 1):** Pageserver remote-storage backend against GCS. *(amended: A1.10 — spike checklist: multipart semantics, conditional writes/generation fencing, list pagination)* Docs list S3 and Azure natively; test GCS S3-interoperability mode (HMAC keys) with write → restart → restore. Fallbacks: native GCS backend in current repo, or thin S3-compatible layer in front of GCS.
 
-### D4 — Object storage: proxy the hyperscaler, never self-host
+### D4 — Object storage: proxy the hyperscaler, never self-host *(amended: A5.3 — DORMANT: no managed object-storage product is built in the planning horizon; storage is a Binding to the customer's own provider. D4 applies only if managed storage is ever revived by a future ADR, on a zero-egress backend.)*
 Customer buckets are GCS (later optionally S3/R2) behind the Steloit API and grammar. We do not run MinIO/Ceph/Garage for customer data at any current scale.
 **Rationale:** eleven-nines durability is fleet statistics + scrubbing discipline we cannot match; failure mode is permanent data loss (the one unforgivable sin); no signature feature depends on bucket internals; object storage is the bottom turtle (everything else's backups live there).
 **Consequence:** margin here is a markup on public prices — priced transparently, which is on-message.
 
 ### D5 — Everything else: foundation-governed open source, assembled under the grammar
-Compute: GKE + gVisor (GKE Sandbox). Cache: Valkey (per-project pods, never shared instances). Queues: Postgres-backed (pgmq-style) on the D3 substrate so queue state branches with the database; dedicated broker (NATS JetStream) only when throughput demands. *(amended: A1.2, A2.2 — idle-economics design constraint applies)* Observability: VictoriaMetrics/Mimir *(amended: A1.10 — metrics backend is a deferred choice)* + Loki + OpenTelemetry, multi-tenant modes, tenant labels stamped at ingest by our collector. Secrets: OpenBao or KMS-backed envelope encryption (never invent crypto). AuthZ model: built (inseparable from org→project→environment); authN plumbing: adopted (OIDC libraries, Dex/Zitadel for SSO later). AI layer: inference bought via API (swappable); citation/evidence machinery built (it IS the differentiator).
+Compute: GKE + gVisor (GKE Sandbox). Cache: Valkey (per-project pods, never shared instances) *(amended: A5.1 — cache is OPTIONAL, provisioned only on explicit add, idle-suspended, hard-quota'd; never a pod per project by default; shared-multi-tenant-with-isolation permitted if idle economics require)*. Queues: Postgres-backed (pgmq-style) on the D3 substrate so queue state branches with the database; dedicated broker (NATS JetStream) only when throughput demands. *(amended: A1.2, A2.2 — idle-economics design constraint applies)* *(amended: A5.2 — the customer queue is NOT a separate service or broker; it is pgmq inside the customer's Postgres, consumed by a worker; the NATS fallback and the A1.2/A3.1 queue constraint are struck for the customer product, retained only for internal control-plane jobs via River)* Observability: VictoriaMetrics/Mimir *(amended: A1.10 — metrics backend is a deferred choice)* + Loki + OpenTelemetry, multi-tenant modes, tenant labels stamped at ingest by our collector. Secrets: OpenBao or KMS-backed envelope encryption (never invent crypto). AuthZ model: built (inseparable from org→project→environment); authN plumbing: adopted (OIDC libraries, Dex/Zitadel for SSO later). AI layer: inference bought via API (swappable); citation/evidence machinery built (it IS the differentiator).
 **Standing rule:** prefer foundation-governed projects over single-vendor open source (Redis→Valkey, Elastic, MinIO, Vault→OpenBao all rhyme). D3 is the one deliberate exception.
 
 ### D6 — Two planes, cell-based data plane
@@ -247,6 +247,27 @@ D3 is amended. The Postgres substrate is **CloudNativePG-operated vanilla Postgr
 **What is unchanged:** D3's *requirement* — branch-per-PR as the category-defining feature with delta-priced previews — stands in full; it is satisfied at the storage-snapshot layer instead of the storage-engine layer. Unit-economics visibility stands (snapshot deltas + hibernated computes are directly meterable). D7 tenancy mapping now reads: one CNPG cluster per project-environment (a *stronger* isolation boundary than shared pageservers); branch = snapshot-recovered cluster, hibernated by default. D8 grammar isolation is what made this swap free — no customer surface changes.
 
 **Consequences:** the week-1 spike is redefined (ZFS snapshot → clone → CNPG recovery e2e; hibernation wake latency; branch cost measurement). RPO ≤5 min (A1.3) is met by `archive_timeout`-bounded WAL archiving to GCS. A3.1's queue family simplifies to standard logical-decoding CDC on vanilla Postgres (no safekeeper layer exists; the constraint and fallback ordering are unchanged). The 2–3-substrate-engineer budget (D3 risk note) is expected to relax; re-verify at Cell-1. Ops-load risk (§7) drops accordingly.
+
+---
+
+## Amendment A5 — 2026-07-18
+
+*Founder-ratified 2026-07-18. Full evidence, candidate analysis, and ripple: `steloit/cloud` `docs/plan/product-family-review.md` + `docs/adr/0004-product-families.md`. Product ADR log entry: ADR-034. Outcome of the adversarial product-family review — the boundary sharpens to "build only the differentiated products; everything commodity becomes a Postgres capability or a Binding."*
+
+### A5.1 — D5 cache clause: optional, never default
+Valkey remains the cache substrate. The "per-project pods, never shared" implication is amended: a cache is an **optional** service, **provisioned only on explicit add**, **idle-suspended**, and hard-quota'd — never a pod per project by default. Shared-multi-tenant-with-strong-isolation is a permitted implementation if idle economics require it. Rationale: cache cannot scale to zero, so a default dedicated pod per project is a permanent idle-cost floor hostile to §3 scale-to-zero economics.
+
+### A5.2 — D5 queue clause: a Postgres capability, not a service
+The customer queue is **not a separate service or broker**. Queue capability is **pgmq inside the customer's Postgres** (branches with the database for free; consumed by a worker that scales to zero like any compute). The A1.2/A3.1 scale-to-zero-queue constraint and the NATS-JetStream fallback are **struck for the customer product** and retained only as guidance for internal control-plane jobs (River, Architecture v1 §12). Risk R3 (queue scale-to-zero unsolvable) is retired with the apparatus it described.
+
+### A5.3 — Object storage → integration (Storage Binding)
+No managed object-storage product is built in the planning horizon. Storage is delivered as a **Storage Binding** to the customer's own provider (S3/GCS/R2): credentials, config injection, policy, lifecycle, audit — Steloit never proxies the bytes and never bears egress. D4 is marked dormant (above). A managed storage product may return only via a future ADR on a zero-egress backend.
+
+### A5.4 — AI → integration (AI Binding, not a gateway)
+AI is governed as an **AI Binding** to an external provider: allow-policy, credentials-in-Secrets, config injection, estimate-at-bind, cost visibility (provider usage API), lifecycle audit, soft spend control. Steloit **does not** proxy LLM traffic, route/failover across providers, or enforce hard in-line spend caps — those are the AI-gateway commodity, joining §3.7's never-build set in spirit. The four-laws assistant (ADR-005) is unaffected — that is Steloit's own AI; the AI Binding governs the customer app's AI dependency.
+
+### A5.5 — Bindings extend to external providers
+The Binding primitive (GOV-002 #6) may target an external provider (type + provider + region + secret-ref), not only an internal service — the shared mechanism for A5.3 and A5.4. Grammar isolation (D8) holds: no substrate/provider concept leaks into a customer surface beyond the provider name the customer chose. The managed `Product` surface is now exactly `[postgres, valkey, web, worker]`; `gpu-worker` is removed, `storage`/`ai-gateway`/`queue` are not managed products.
 
 ---
 
