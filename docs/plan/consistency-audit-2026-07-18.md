@@ -1,0 +1,42 @@
+# Pre-Implementation Consistency Audit — 2026-07-18
+
+**Status:** Founder-requested execution-readiness audit · architecture treated as FROZEN (ADR-0001–0006, product ADRs → 040) · four parallel audit passes: product-docs corpus · execution layer (tasks/plan) · GitHub planning artifacts (`steloit/cloud`) · built surface + canon + vault. Read-only except two same-day fixes to `catalog-structure-review.md` (its own Model-A/B label inversion warning; dead `dx-first-review.md` citation).
+**Headline:** the constitution is coherent and the machine-checked layers are green (validator 179/17/8 OK · typecheck/lint/tests pass · $208 canon arithmetic exact · GitHub issue bodies 196/196 byte-identical with sync). The drift is concentrated in four places: **the decision log itself (ADR-039/040 unstamped), the console's API-contract copy + generated client (pre-ADR-0004), the canon demo world (pre-ADR-0004), and the surfaces spec-sync does not own (state maps, board fields, two milestones).** Nothing found contradicts the ratified architecture as *intent*; everything found is propagation lag.
+
+## Critical (fix before implementation starts)
+
+- **C1 · ADR-039/040 absent from `decisions.md`** while AGENTS.md:58/70–71, product-philosophy.md:82, glossary.md:9, playbook:9/22, three context packs, and both plan reviews cite them as ratified. Founder-only fix (hook): apply the prepared stamped copy, then commit. Everything else in this audit is subordinate to the log being right.
+- **C2 · Canon world predates ADR-0004** — fixtures (both byte-identical copies) carry `product: "storage"` (svc_assets) and `"queue"` (svc_jobs) inside the load-bearing Σ$208; canon.md prose counts a 7-service world with Storage $9 + Queue $12 + a `gpu-encoder` beta; `src/mocks/world.ts:503` adds a storage service + old meter ids. Q1/Q2 build on canon, so this blocks QA-backbone work. Fix = one canon-migration ruling (extend S9/S5): assets→Storage Binding, jobs→Postgres-with-`intent: jobs` (canon naming already anticipates this), GPU removed, $208 invariant re-balanced deliberately.
+- **C3 · Console API contract drift** — `apps/console/src/lib/api/openapi.yaml` is missing the entire external-Binding surface (`target_type`, `provider`, `provider_config`, `secret_ref`) and `types.gen.ts` still exports the 8-value enum; regeneration breaks 22 mapped files (rail, snav MATRIX, instances route, create surface, 11 svc tabs, mocks, templates). The removed AI Gateway ships ~600 lines of chrome + a hardcoded `project === "ecommerce"` rail injection. No task owns this. Fix = one mechanical migration task: recopy spec verbatim → `gen:api` → 22-file sweep → X1 chrome removal, one commit.
+- **C4 · Stale spec-sync state maps are a duplicate-issue hazard** — `.state/issue-map.json`/`item-map.json` miss the 6 newest tasks (S8/S9/S10/T4.9/US-11.7/E7-1 → #193–198) and still hold retired E9-5/T14.5; re-running `04-issues.sh` would create 6 duplicates. (`sync.mjs` itself is currently a pure no-op — safe.) Fix the maps before anyone touches the legacy scripts.
+
+## Important
+
+- **I1 · Ordering bugs:** T4.9 (sprint 10) depends on T12.1 (sprint 11); E9-4 is `phase: Future` with `sprint: 15`, and V1 task T14.4 depends on it. Fix: T4.9→S11; E9-4 `sprint: null`; T14.4 defer-or-drop-dep.
+- **I2 · The Composer (T13.7) is sprint 15 / priority medium** despite its ratified critical-path status; deps (T13.2, T3.1) permit pulling the intent-resolution core much earlier. Fix: priority high + record the pull-forward.
+- **I3 · Eight ratified follow-ons have no owning task:** openapi `intent` field + catalog read surface (fold into S2 or new S-ruling) · E8-S3 still reads as product-grid not intent canvas · Composer-via-MCP (E13) · ADR-022 amendment tracking (+ Pro $19-vs-$29 + Team/Business tier-name mismatch in INF-001 §6) · M4 pre-registered partner questions (CK-M4/P5) · CLI `steloit add <intent>` (T5.3) · types regen (→C3) · canon reconciliation (→C2).
+- **I4 · S9's scope predates ADR-038/039/040** — it reconciles frames to the enum only; must grow to intent-catalog reconciliation (its §7 routing already expects this).
+- **I5 · Retired products linger in derived docs:** cli.md nouns `storage`/`queue` (:52, `steloit queue` example :13); ia.md AI Gateway as capability example + dashboard (:11, :17); F7 dashboard list (feature-specs.md:25); playbook cardinality examples (:20). 00-sources instances (design-spec X1/§326-344, GOV-002 §3.8, INF-001 §6) are human-only → S9 pass.
+- **I6 · GitHub surfaces sync doesn't own:** board fields unset on #193–198; E9-4 (#119) milestone/board still Sprint 8/V1; E9-3 (#118) milestone Sprint 9 vs frontmatter 8; stale "⛔ Blocked by" comments on #118/#121; label config still says "Neon" in the Platform description.
+- **I7 · AGENTS.md map vs reality:** `packages/` and `services/` don't exist; "import via `packages/canon`" is currently impossible (console imports its own copy). Add the born-with-first-tasks caveat to the packages row.
+- **I8 · Atlas vault 5 days stale:** INDEX (2026-07-13) predates all four ratifications; `decisions/` empty; log ends 07-13; positioning line pre-pivot; repo described as console-only. Offer-based update.
+- **I9 · Plan/table defects:** implementation-plan.md:427 Sprint-8 lists nonexistent "E9-7" (should be E9-1/E9-2/E9-3/E9-6); product-family-review.md:143 states a 6-value enum contradicted by its own §190 final (needs a superseded stamp).
+
+## Nice
+
+Composer term fence in the glossary (capital-C Composer vs U3 lifecycle-composer vs rung-0 pricing-composer vs AI2 message composer) · ADR numbering convention line in docs/adr/README (product = 3-digit, engineering = 4-digit; also its `NNN-` filename claim vs actual `000N-`) · "four-plane model" pointer in glossary/philosophy · docs/product/README start-here pointer to ADR-034/038/039/040 · glossary catalog line noting Storage/AI are Binding-backed intents · `lifecycle-drawer.tsx:143` hand-formats money instead of `fmtMoney` · type-blocks dollar-float illustrative prices must become API-cents when the create flow is wired · prune 8 unused default GitHub labels · uncommitted `product-taxonomy-review.md` modifications in the working tree.
+
+## Clean bill (verified, no action)
+
+Validator OK (179 tasks/17 epics/8 packs) · dep graph acyclic, no orphans, no retired-dep targets, no duplicate deliverables · typecheck/lint/tests pass (21/21) · $208/$482 arithmetic exact, X1 synthetic properly quarantined · status vocabulary and integer-cents discipline clean in console code · authority chain (architecture.md, openapi, models.md, ADR-0004, AGENTS.md) fully consistent on the 4-value enum · GitHub: 196/196 issue bodies byte-identical with sync output, S8 closed, retired issues tombstoned with ADR citations, board Status column 100% consistent, zero dangling deps, zero duplicate titles, milestones aligned (epic-milestone = completion sprint is by-design).
+
+## Prioritized action plan
+
+**P0 (founder, one command):** apply the ADR-039/040 stamp to decisions.md (prepared copy exists); agent commits.
+**P1 (guard, minutes):** repair `.state` maps (+6 entries, −2 retired); fix Platform label description in 01-labels.sh.
+**P2 (execution-layer hygiene, one commit):** I1 ordering fixes · T13.7 re-rating · S9 scope extension · Sprint-8 table fix · add the I3 missing stubs/scope-lines · then `sync.mjs` + board-field pass (05) once P1 lands.
+**P3 (console contract migration, one task):** C3 — recopy spec → regen → 22-file sweep → X1 removal.
+**P4 (canon migration ruling, founder-gated):** C2 — decide the demo-world representation, then fixtures (both copies) + canon.md + world.ts in one commit, invariants green.
+**P5 (docs polish batch):** I5 derived-doc cleanups + Nice items.
+**P6 (offer-based):** vault INDEX/log/decisions update.
+S9 (human pass) remains the vehicle for all 00-sources reconciliation.

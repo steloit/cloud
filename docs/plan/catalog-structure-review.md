@@ -1,5 +1,7 @@
 # Catalog Structure Review — Model A (independent products) vs Model B (database modules)
 
+**Label warning:** this review's Model A/B follow the founder's research brief and are **inverted** relative to `product-taxonomy-review.md` (there: Model A = capability-of-database, chosen; Model B = independent products, rejected). Here: Model A = independent products, Model B = database modules. Read each document's own definitions; the labels do not transfer.
+
 **Status:** Founder-requested research review · 2026-07-18 · Four parallel web-research passes (hyperscaler/PaaS catalogs · developer-platform catalogs · developer search psychology · BYOD landscape), all facts verified against live sources this week. Full agent reports preserved in session; citations inline below are the load-bearing subset.
 **Verdict up front:** **The evidence confirms the ratified hybrid (ADR-038/039/040) — Model A at the catalog plane, Model B at the architecture plane, the Composer as the bridge — and it does so more strongly than the ratification itself argued.** The market's two fastest-growing platforms sit at the two poles, but the pole nearest Steloit's shape (Supabase: modules-on-one-Postgres, $2B → $10.5B in ~12 months) is also the one whose *presentation* mistakes Steloit's two-plane rule already avoids. Four refinements fall out of the evidence (pricing of in-database capabilities, Scheduler folded into Jobs, console discoverability, agent-native provisioning). **BYOD is rejected on evidence** for the capability products at launch. Under ADR-040's stability clause this review is *evidence arriving and confirming* — no architecture changes.
 
@@ -47,7 +49,7 @@ Could Jobs/Scheduler/Search/Vector migrate off Postgres without changing the pro
 ## 6 · Risks
 
 - **Trust cost of catalog churn** (documented on every platform that did it: Upstash Kafka, Firebase Dynamic Links/Studio, Neon Auth v1/pg_search, PlanetScale Hobby/Boost): never launch a catalog entry that might be revoked — this is the evidence backing ADR-040's evidence-gated roadmap intents. Ship eight real things, not eight promises.
-- **Supabase's gravity:** the modules-on-Postgres lane has a $10.5B incumbent with builder-default distribution. Steloit does not out-breadth it (dx-first-review evidence, reconciled); it differentiates on certainty (priced/capped/masked previews) — the one thing absent from every complaint-thread-generating platform surveyed.
+- **Supabase's gravity:** the modules-on-Postgres lane has a $10.5B incumbent with builder-default distribution. Steloit does not out-breadth it (evidence preserved in `developer-first-review.md` §7, absorbed from the removed companion review); it differentiates on certainty (priced/capped/masked previews) — the one thing absent from every complaint-thread-generating platform surveyed.
 - **The two-plane rule's own failure mode:** planes drifting apart (the Supabase marketing-vs-dashboard gap). Mitigation is refinement 3 + the intent tag as the single structural key.
 
 ## 7 · Disposition
