@@ -30,9 +30,11 @@ func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *
 }
 
 // Mount wires the strict server onto mux under /v1 with the module's
-// middleware chain and the problem-catalog error mapping.
-func (h *Handlers) Mount(mux *http.ServeMux) {
-	strict := gen.NewStrictHandlerWithOptions(h,
+// middleware chain and the problem-catalog error mapping. ssi is the COMPOSED
+// server (identity + other modules' handler sets embedded in one struct by
+// the composition root); pass h itself when identity is the whole surface.
+func (h *Handlers) Mount(mux *http.ServeMux, ssi gen.StrictServerInterface) {
+	strict := gen.NewStrictHandlerWithOptions(ssi,
 		[]gen.StrictMiddlewareFunc{h.contextMiddleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  h.requestError,
@@ -88,7 +90,14 @@ func (h *Handlers) requestError(w http.ResponseWriter, r *http.Request, err erro
 
 // responseError maps typed domain errors onto the closed problem catalog
 // (auth_failed 401 ratified via S-process 2026-07-19, closing the T2.1 finding).
+// Other modules' errors arrive here too (one strict server, one error seam):
+// any error implementing problem.Carrier writes its own catalog problem.
 func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err error) {
+	var carrier problem.Carrier
+	if errors.As(err, &carrier) {
+		problem.Write(w, r, carrier.Problem())
+		return
+	}
 	var weak WeakPasswordError
 	var limited RateLimitedError
 	switch {

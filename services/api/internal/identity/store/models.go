@@ -8,6 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Environment struct {
+	ID             string
+	ProjectID      string
+	Name           string
+	RegionOverride pgtype.Text
+	Kind           string
+	PolicyFlags    []byte
+	ExpiresAt      pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Event struct {
 	ID      string
 	OrgID   string
@@ -57,6 +68,15 @@ type Policy struct {
 	Enforcement string
 	Config      []byte
 	CreatedAt   pgtype.Timestamptz
+}
+
+type Project struct {
+	ID                  string
+	OrgID               string
+	Name                string
+	CellID              string
+	DeletionScheduledAt pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
 }
 
 type Session struct {
