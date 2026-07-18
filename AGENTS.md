@@ -51,8 +51,11 @@ never hand-written · demo data from `19-canon` only.
 ## Hard rules
 
 - Never invent a component, endpoint, or term — propose the owner-level change first (agent-guide §3 binds here).
-- **Architecture v1 is frozen** (`docs/architecture.md`, ADR-0001): Go/stdlib-http/sqlc/River/REST+SSE etc. are
-  decided — don't introduce alternative frameworks, ORMs, or protocols; deltas go through an ADR.
+- **Architecture v1.2 is frozen** (`docs/architecture.md`, ADR-0001/0003/0004): Go/stdlib-http/sqlc/River/
+  REST+SSE, CNPG+ZFS substrate, and the **product surface `[postgres, valkey, web, worker]`** are decided.
+  Storage & AI are external **Bindings**; queue is a **Postgres capability** (pgmq); GPU is out. Don't
+  introduce alternative frameworks/ORMs/protocols or new managed products — deltas require a new ADR with
+  a measured trigger. The Engineering OS (this file, tasks/, contexts/, spec-sync) is likewise frozen.
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**
