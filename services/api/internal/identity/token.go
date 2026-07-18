@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
@@ -74,7 +76,8 @@ func (s *Service) RevokePersonalToken(ctx context.Context, userID, tokenID strin
 // MintOrgKey creates an org API key (G8: "the org's robots") — same
 // reveal-once/hash contract, same secret prefix as personal tokens (a
 // distinct display prefix is an S-process candidate, noted in T2.7's PR).
-func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope string, expiresInDays int) (MintedToken, error) {
+// actorID is the creating user; the creation lands on the spine (US-2.5).
+func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope, actorID string, expiresInDays int) (MintedToken, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return MintedToken{}, fmt.Errorf("identity: token entropy: %w", err)
@@ -94,6 +97,11 @@ func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope string, exp
 	if err != nil {
 		return MintedToken{}, fmt.Errorf("identity: create org key: %w", err)
 	}
+	s.record(ctx, events.Input{
+		OrgID: orgID, Kind: "lifecycle", Via: "user", Actor: actorID,
+		Action: "api_key.created", Subject: row.ID,
+		Detail: []byte(`{"name":` + strconv.Quote(name) + `,"scope":` + strconv.Quote(scope) + `}`),
+	})
 	return MintedToken{Row: row, Secret: secret}, nil
 }
 
