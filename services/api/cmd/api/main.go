@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+
+	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
 func main() {
@@ -21,7 +23,7 @@ func main() {
 
 	addr := ":" + envOr("PORT", "8080")
 	logger.Info("api listening", "addr", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, problem.Recover(mux)); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
 	}
