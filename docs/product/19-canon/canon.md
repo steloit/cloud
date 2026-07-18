@@ -29,7 +29,7 @@ Facts below are **frame-fixed** (visible in the gallery — changing one is a ca
 
 **Services** (production; db ×2 is the only rail count badge): `api` Web **$61** · `worker` Worker **$22** · `db-main` PostgreSQL Standard **$58** (192/200 connections) · `db-reports` PostgreSQL Dev **$24** (consumed read-only by worker via `bnd_worker_dbreports`) · `cache` Valkey **$22** · `assets` Storage **~$9** · `jobs` Queue **$12** — Σ **$208**.
 
-**Environments:** `production` $199.10 · `staging` $6.70 · `preview/pr-142` $2.20 (Σ $208) — preview carries `preview-minimal v2` (jobs + worker excluded) and the `branch-data-masking` flag, expires by policy. `pr-142` has a masked branch of db-main linked to it; steloit-bot's PR comment: URL + "db: branch of production (masked · policy) · $0.07/day".
+**Environments:** `production` $199.10 · `staging` $6.70 · `preview/pr-142` $2.20 (Σ $208) — preview carries `preview-minimal v2` (jobs + worker excluded) and the `branch-data-masking` flag, expires by policy. `pr-142` has a masked branch of db-main linked to it; steloit-bot's PR comment: URL + "db: production data (masked · policy) · $0.07/day · capped".
 
 **In-flight (never in any total):** admin (binding *issued · activates at ready*), sessions, uploads, emails, mailer, gpu-encoder (beta GPU Worker, C7 region exception), env `production-us` (C8). Depicted at their moment of creation only.
 
