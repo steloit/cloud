@@ -9,4 +9,5 @@ generate:
   std-http-server: true
   strict-server: true
 output-options:
-  include-operation-ids: [signup, login, logout, getSession, createPersonalToken, listPersonalTokens, revokePersonalToken, listAuditEvents, listEvents]
+  # T2.7: org / member / invite governance + org API keys.
+  include-operation-ids: [signup, login, logout, getSession, createPersonalToken, listPersonalTokens, revokePersonalToken, listAuditEvents, listEvents, createOrg, listMyOrgs, getOrg, updateOrg, deleteOrg, listMembers, changeMemberRole, removeMember, createInvite, listInvites, revokeInvite, getInvitePublic, acceptInvite, declineInvite, renewInvite, createApiKey, listApiKeys]

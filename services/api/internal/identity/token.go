@@ -71,6 +71,36 @@ func (s *Service) RevokePersonalToken(ctx context.Context, userID, tokenID strin
 	return n > 0, nil
 }
 
+// MintOrgKey creates an org API key (G8: "the org's robots") — same
+// reveal-once/hash contract, same secret prefix as personal tokens (a
+// distinct display prefix is an S-process candidate, noted in T2.7's PR).
+func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope string, expiresInDays int) (MintedToken, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return MintedToken{}, fmt.Errorf("identity: token entropy: %w", err)
+	}
+	secret := personalTokenPrefix + hex.EncodeToString(b)
+	expires := s.now().AddDate(0, 0, expiresInDays)
+	row, err := s.q.CreateToken(ctx, store.CreateTokenParams{
+		ID:        ids.New("tok"),
+		Kind:      "org",
+		OrgID:     pgtype.Text{String: orgID, Valid: true},
+		Name:      name,
+		Scope:     scope,
+		Prefix:    secret[:prefixLen],
+		TokenHash: session.HashToken(secret),
+		ExpiresAt: tstz(expires),
+	})
+	if err != nil {
+		return MintedToken{}, fmt.Errorf("identity: create org key: %w", err)
+	}
+	return MintedToken{Row: row, Secret: secret}, nil
+}
+
+func (s *Service) ListOrgKeys(ctx context.Context, orgID string) ([]store.Token, error) {
+	return s.q.ListOrgTokens(ctx, pgtype.Text{String: orgID, Valid: true})
+}
+
 // ResolveBearer maps a bearer secret to a principal — credential-kind-agnostic
 // by construction (personal tokens now; org API keys ride the same table and
 // hash contract when the org endpoints land). Touches last_used.

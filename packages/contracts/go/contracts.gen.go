@@ -3206,6 +3206,12 @@ type CreateInviteJSONBody struct {
 	Role  Role                `json:"role"`
 }
 
+// CreateInviteParams defines parameters for CreateInvite.
+type CreateInviteParams struct {
+	// Confirm accept the shown seat overage — the x-error-catalog quota_exceeded contract (soft 402 proceeds only on explicit confirm=true). S-process gap fill with T2.7.
+	Confirm *bool `form:"confirm,omitempty" json:"confirm,omitempty"`
+}
+
 // ChangeMemberRoleJSONBody defines parameters for ChangeMemberRole.
 type ChangeMemberRoleJSONBody struct {
 	Role Role `json:"role"`
@@ -4075,14 +4081,14 @@ type ClientInterface interface {
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-	CreateInviteWithBody(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateInviteWithBody(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateInvite Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending
 	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-	CreateInvite(ctx context.Context, orgPathParam OrgPathParam, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateInvite(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RevokeInvite Admin revoke (G-side): invalidates the link, notifies nobody, audited; status → revoked
 	//
@@ -5906,8 +5912,8 @@ func (c *Client) ListInvites(ctx context.Context, orgPathParam OrgPathParam, req
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-func (c *Client) CreateInviteWithBody(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateInviteRequestWithBody(c.Server, orgPathParam, contentType, body)
+func (c *Client) CreateInviteWithBody(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateInviteRequestWithBody(c.Server, orgPathParam, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5923,8 +5929,8 @@ func (c *Client) CreateInviteWithBody(ctx context.Context, orgPathParam OrgPathP
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-func (c *Client) CreateInvite(ctx context.Context, orgPathParam OrgPathParam, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateInviteRequest(c.Server, orgPathParam, body)
+func (c *Client) CreateInvite(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateInviteRequest(c.Server, orgPathParam, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -9825,18 +9831,18 @@ func NewListInvitesRequest(server string, orgPathParam OrgPathParam) (*http.Requ
 }
 
 // NewCreateInviteRequest calls the generic CreateInvite builder with application/json body
-func NewCreateInviteRequest(server string, orgPathParam OrgPathParam, body CreateInviteJSONRequestBody) (*http.Request, error) {
+func NewCreateInviteRequest(server string, orgPathParam OrgPathParam, params *CreateInviteParams, body CreateInviteJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateInviteRequestWithBody(server, orgPathParam, "application/json", bodyReader)
+	return NewCreateInviteRequestWithBody(server, orgPathParam, params, "application/json", bodyReader)
 }
 
 // NewCreateInviteRequestWithBody constructs an http.Request for the CreateInvite method, with any body, and a specified content type
-func NewCreateInviteRequestWithBody(server string, orgPathParam OrgPathParam, contentType string, body io.Reader) (*http.Request, error) {
+func NewCreateInviteRequestWithBody(server string, orgPathParam OrgPathParam, params *CreateInviteParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -9859,6 +9865,33 @@ func NewCreateInviteRequestWithBody(server string, orgPathParam OrgPathParam, co
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Confirm != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "confirm", *params.Confirm, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
@@ -12577,14 +12610,14 @@ type ClientWithResponsesInterface interface {
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-	CreateInviteWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error)
+	CreateInviteWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error)
 
 	// CreateInviteWithResponse Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-	CreateInviteWithResponse(ctx context.Context, orgPathParam OrgPathParam, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error)
+	CreateInviteWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error)
 
 	// RevokeInviteWithResponse Admin revoke (G-side): invalidates the link, notifies nobody, audited; status → revoked
 	//
@@ -19051,8 +19084,8 @@ func (c *ClientWithResponses) ListInvitesWithResponse(ctx context.Context, orgPa
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-func (c *ClientWithResponses) CreateInviteWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error) {
-	rsp, err := c.CreateInviteWithBody(ctx, orgPathParam, contentType, body, reqEditors...)
+func (c *ClientWithResponses) CreateInviteWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error) {
+	rsp, err := c.CreateInviteWithBody(ctx, orgPathParam, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -19064,8 +19097,8 @@ func (c *ClientWithResponses) CreateInviteWithBodyWithResponse(ctx context.Conte
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /orgs/{org}/invites (the `CreateInvite` operationId).
-func (c *ClientWithResponses) CreateInviteWithResponse(ctx context.Context, orgPathParam OrgPathParam, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error) {
-	rsp, err := c.CreateInvite(ctx, orgPathParam, body, reqEditors...)
+func (c *ClientWithResponses) CreateInviteWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *CreateInviteParams, body CreateInviteJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateInviteResponse, error) {
+	rsp, err := c.CreateInvite(ctx, orgPathParam, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

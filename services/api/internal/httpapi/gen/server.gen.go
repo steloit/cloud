@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/oapi-codegen/runtime"
@@ -33,6 +34,18 @@ type ServerInterface interface {
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams)
+	// DeclineInvite Decline — notifies inviter, invalidates the link
+	// (DELETE /invites/{invite})
+	DeclineInvite(w http.ResponseWriter, r *http.Request, invite string)
+	// GetInvitePublic Public: inviter, org, role (explained by consequences), email hint, status (A6)
+	// (GET /invites/{invite})
+	GetInvitePublic(w http.ResponseWriter, r *http.Request, invite string)
+	// AcceptInvite Accept — session email must match the invited address (A7 card 3); grants access instantly, audited
+	// (POST /invites/{invite})
+	AcceptInvite(w http.ResponseWriter, r *http.Request, invite string)
+	// RenewInvite Request a new link for an expired invite — notifies the inviter (A7)
+	// (POST /invites/{invite}/renew)
+	RenewInvite(w http.ResponseWriter, r *http.Request, invite string)
 	// ListPersonalTokens Returns prefix + metadata only — never the secret
 	// (GET /me/tokens)
 	ListPersonalTokens(w http.ResponseWriter, r *http.Request)
@@ -42,9 +55,48 @@ type ServerInterface interface {
 
 	// (DELETE /me/tokens/{tok})
 	RevokePersonalToken(w http.ResponseWriter, r *http.Request, tok string)
+	// ListMyOrgs List organizations I belong to (SW1)
+	// (GET /orgs)
+	ListMyOrgs(w http.ResponseWriter, r *http.Request)
+	// CreateOrg Create organization (A5)
+	// (POST /orgs)
+	CreateOrg(w http.ResponseWriter, r *http.Request)
+	// DeleteOrg Owner only; typed-confirm client-side; 90-day billing-data rule enforced server-side
+	// (DELETE /orgs/{org})
+	DeleteOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
+	// (GET /orgs/{org})
+	GetOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// UpdateOrg Rename, change default region (G5). Slug never changes.
+	// (PATCH /orgs/{org})
+	UpdateOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
+	// (GET /orgs/{org}/api-keys)
+	ListApiKeys(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CreateApiKey Org automation keys (G8): explicit least-privilege scopes; same reveal-once/hash contract; stale keys flagged for hygiene
+	// (POST /orgs/{org}/api-keys)
+	CreateApiKey(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
+
+	// (GET /orgs/{org}/invites)
+	ListInvites(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CreateInvite Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending
+	// (POST /orgs/{org}/invites)
+	CreateInvite(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreateInviteParams)
+	// RevokeInvite Admin revoke (G-side): invalidates the link, notifies nobody, audited; status → revoked
+	// (DELETE /orgs/{org}/invites/{invite})
+	RevokeInvite(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, invite string)
+	// ListMembers Members with role and MFA posture (G6)
+	// (GET /orgs/{org}/members)
+	ListMembers(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// RemoveMember Sessions + personal tokens revoked immediately; owned resources flagged, never silently reassigned (G6)
+	// (DELETE /orgs/{org}/members/{member})
+	RemoveMember(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, member string)
+	// ChangeMemberRole Role change applies without re-login; audited before → after (G2). Tokens shrink immediately.
+	// (PATCH /orgs/{org}/members/{member})
+	ChangeMemberRole(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, member string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -194,6 +246,110 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// DeclineInvite operation middleware
+func (siw *ServerInterfaceWrapper) DeclineInvite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "invite" -------------
+	var invite string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invite", r.PathValue("invite"), &invite, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invite", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeclineInvite(w, r, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetInvitePublic operation middleware
+func (siw *ServerInterfaceWrapper) GetInvitePublic(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "invite" -------------
+	var invite string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invite", r.PathValue("invite"), &invite, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invite", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetInvitePublic(w, r, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptInvite operation middleware
+func (siw *ServerInterfaceWrapper) AcceptInvite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "invite" -------------
+	var invite string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invite", r.PathValue("invite"), &invite, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invite", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptInvite(w, r, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenewInvite operation middleware
+func (siw *ServerInterfaceWrapper) RenewInvite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "invite" -------------
+	var invite string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invite", r.PathValue("invite"), &invite, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invite", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenewInvite(w, r, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPersonalTokens operation middleware
 func (siw *ServerInterfaceWrapper) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
 
@@ -239,6 +395,164 @@ func (siw *ServerInterfaceWrapper) RevokePersonalToken(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokePersonalToken(w, r, tok)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgs operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrg operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrg(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrg(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrg operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrg(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrg operation middleware
+func (siw *ServerInterfaceWrapper) GetOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrg(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOrg operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOrg(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListApiKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListApiKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApiKeys(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateApiKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateApiKey(w, r, orgPathParam)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -307,6 +621,205 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListAuditEvents(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListInvites operation middleware
+func (siw *ServerInterfaceWrapper) ListInvites(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvites(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInvite operation middleware
+func (siw *ServerInterfaceWrapper) CreateInvite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateInviteParams
+
+	// ------------- Optional query parameter "confirm" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "confirm", r.URL.Query(), &params.Confirm, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "confirm"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "confirm", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInvite(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeInvite operation middleware
+func (siw *ServerInterfaceWrapper) RevokeInvite(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "invite" -------------
+	var invite string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "invite", r.PathValue("invite"), &invite, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "invite", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeInvite(w, r, orgPathParam, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListMembers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMembers(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "member" -------------
+	var member string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "member", r.PathValue("member"), &member, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "member", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveMember(w, r, orgPathParam, member)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeMemberRole operation middleware
+func (siw *ServerInterfaceWrapper) ChangeMemberRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "member" -------------
+	var member string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "member", r.PathValue("member"), &member, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "member", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeMemberRole(w, r, orgPathParam, member)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -436,6 +949,21 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs", wrapper.ListMyOrgs)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs", wrapper.CreateOrg)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}", wrapper.DeleteOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}", wrapper.GetOrg)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/orgs/{org}", wrapper.UpdateOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/members", wrapper.ListMembers)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/members/{member}", wrapper.RemoveMember)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/orgs/{org}/members/{member}", wrapper.ChangeMemberRole)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/invites", wrapper.ListInvites)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/invites", wrapper.CreateInvite)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/invites/{invite}", wrapper.RevokeInvite)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/invites/{invite}", wrapper.DeclineInvite)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/invites/{invite}", wrapper.GetInvitePublic)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invites/{invite}", wrapper.AcceptInvite)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/invites/{invite}/renew", wrapper.RenewInvite)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
@@ -445,9 +973,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tokens", wrapper.ListPersonalTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/tokens", wrapper.CreatePersonalToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/tokens/{tok}", wrapper.RevokePersonalToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.ListApiKeys)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
 
 	return m
 }
+
+type ConflictApplicationProblemPlusJSONResponse Problem
 
 type LoginRequestObject struct {
 	Body *LoginJSONRequestBody
@@ -601,6 +1133,92 @@ func (response ListEvents200JSONResponse) VisitListEventsResponse(w http.Respons
 	return err
 }
 
+type DeclineInviteRequestObject struct {
+	Invite string `json:"invite"`
+}
+
+type DeclineInviteResponseObject interface {
+	VisitDeclineInviteResponse(w http.ResponseWriter) error
+}
+
+type DeclineInvite204Response struct {
+}
+
+func (response DeclineInvite204Response) VisitDeclineInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type GetInvitePublicRequestObject struct {
+	Invite string `json:"invite"`
+}
+
+type GetInvitePublicResponseObject interface {
+	VisitGetInvitePublicResponse(w http.ResponseWriter) error
+}
+
+type GetInvitePublic200JSONResponse InvitePublic
+
+func (response GetInvitePublic200JSONResponse) VisitGetInvitePublicResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInvitePublic410Response struct {
+}
+
+func (response GetInvitePublic410Response) VisitGetInvitePublicResponse(w http.ResponseWriter) error {
+	w.WriteHeader(410)
+	return nil
+}
+
+type AcceptInviteRequestObject struct {
+	Invite string `json:"invite"`
+}
+
+type AcceptInviteResponseObject interface {
+	VisitAcceptInviteResponse(w http.ResponseWriter) error
+}
+
+type AcceptInvite200Response struct {
+}
+
+func (response AcceptInvite200Response) VisitAcceptInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type AcceptInvite403Response struct {
+}
+
+func (response AcceptInvite403Response) VisitAcceptInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(403)
+	return nil
+}
+
+type RenewInviteRequestObject struct {
+	Invite string `json:"invite"`
+}
+
+type RenewInviteResponseObject interface {
+	VisitRenewInviteResponse(w http.ResponseWriter) error
+}
+
+type RenewInvite202Response struct {
+}
+
+func (response RenewInvite202Response) VisitRenewInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
 type ListPersonalTokensRequestObject struct {
 }
 
@@ -660,6 +1278,187 @@ func (response RevokePersonalToken204Response) VisitRevokePersonalTokenResponse(
 	return nil
 }
 
+type ListMyOrgsRequestObject struct {
+}
+
+type ListMyOrgsResponseObject interface {
+	VisitListMyOrgsResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgs200JSONResponse OrgList
+
+func (response ListMyOrgs200JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgRequestObject struct {
+	Body *CreateOrgJSONRequestBody
+}
+
+type CreateOrgResponseObject interface {
+	VisitCreateOrgResponse(w http.ResponseWriter) error
+}
+
+type CreateOrg201JSONResponse Org
+
+func (response CreateOrg201JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrg409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response CreateOrg409ApplicationProblemPlusJSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type DeleteOrgResponseObject interface {
+	VisitDeleteOrgResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrg202Response struct {
+}
+
+func (response DeleteOrg202Response) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type DeleteOrg409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteOrg409ApplicationProblemPlusJSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type GetOrgResponseObject interface {
+	VisitGetOrgResponse(w http.ResponseWriter) error
+}
+
+type GetOrg200JSONResponse Org
+
+func (response GetOrg200JSONResponse) VisitGetOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *UpdateOrgJSONRequestBody
+}
+
+type UpdateOrgResponseObject interface {
+	VisitUpdateOrgResponse(w http.ResponseWriter) error
+}
+
+type UpdateOrg200JSONResponse Org
+
+func (response UpdateOrg200JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListApiKeysRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListApiKeysResponseObject interface {
+	VisitListApiKeysResponse(w http.ResponseWriter) error
+}
+
+type ListApiKeys200JSONResponse TokenList
+
+func (response ListApiKeys200JSONResponse) VisitListApiKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateApiKeyRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *CreateApiKeyJSONRequestBody
+}
+
+type CreateApiKeyResponseObject interface {
+	VisitCreateApiKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateApiKey201JSONResponse TokenCreated
+
+func (response CreateApiKey201JSONResponse) VisitCreateApiKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListAuditEventsRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 	Params       ListAuditEventsParams
@@ -683,6 +1482,186 @@ func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w ht
 	return err
 }
 
+type ListInvitesRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListInvitesResponseObject interface {
+	VisitListInvitesResponse(w http.ResponseWriter) error
+}
+
+type ListInvites200JSONResponse InviteList
+
+func (response ListInvites200JSONResponse) VisitListInvitesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInviteRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       CreateInviteParams
+	Body         *CreateInviteJSONRequestBody
+}
+
+type CreateInviteResponseObject interface {
+	VisitCreateInviteResponse(w http.ResponseWriter) error
+}
+
+type CreateInvite201JSONResponse Invite
+
+func (response CreateInvite201JSONResponse) VisitCreateInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvite402ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateInvite402ApplicationProblemPlusJSONResponse) VisitCreateInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInvite409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreateInvite409ApplicationProblemPlusJSONResponse) VisitCreateInviteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInviteRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Invite       string       `json:"invite"`
+}
+
+type RevokeInviteResponseObject interface {
+	VisitRevokeInviteResponse(w http.ResponseWriter) error
+}
+
+type RevokeInvite204Response struct {
+}
+
+func (response RevokeInvite204Response) VisitRevokeInviteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ListMembersRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListMembersResponseObject interface {
+	VisitListMembersResponse(w http.ResponseWriter) error
+}
+
+type ListMembers200JSONResponse MemberList
+
+func (response ListMembers200JSONResponse) VisitListMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMemberRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Member       string       `json:"member"`
+}
+
+type RemoveMemberResponseObject interface {
+	VisitRemoveMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveMember200JSONResponse struct {
+	FlaggedResources *[]struct {
+		Id   *string `json:"id,omitempty"`
+		Kind *string `json:"kind,omitempty"`
+		Name *string `json:"name,omitempty"`
+	} `json:"flagged_resources,omitempty"`
+}
+
+func (response RemoveMember200JSONResponse) VisitRemoveMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeMemberRoleRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Member       string       `json:"member"`
+	Body         *ChangeMemberRoleJSONRequestBody
+}
+
+type ChangeMemberRoleResponseObject interface {
+	VisitChangeMemberRoleResponse(w http.ResponseWriter) error
+}
+
+type ChangeMemberRole200JSONResponse Member
+
+func (response ChangeMemberRole200JSONResponse) VisitChangeMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangeMemberRole409ApplicationProblemPlusJSONResponse Problem
+
+func (response ChangeMemberRole409ApplicationProblemPlusJSONResponse) VisitChangeMemberRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
@@ -700,6 +1679,18 @@ type StrictServerInterface interface {
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
+	// DeclineInvite Decline — notifies inviter, invalidates the link
+	// (DELETE /invites/{invite})
+	DeclineInvite(ctx context.Context, request DeclineInviteRequestObject) (DeclineInviteResponseObject, error)
+	// GetInvitePublic Public: inviter, org, role (explained by consequences), email hint, status (A6)
+	// (GET /invites/{invite})
+	GetInvitePublic(ctx context.Context, request GetInvitePublicRequestObject) (GetInvitePublicResponseObject, error)
+	// AcceptInvite Accept — session email must match the invited address (A7 card 3); grants access instantly, audited
+	// (POST /invites/{invite})
+	AcceptInvite(ctx context.Context, request AcceptInviteRequestObject) (AcceptInviteResponseObject, error)
+	// RenewInvite Request a new link for an expired invite — notifies the inviter (A7)
+	// (POST /invites/{invite}/renew)
+	RenewInvite(ctx context.Context, request RenewInviteRequestObject) (RenewInviteResponseObject, error)
 	// ListPersonalTokens Returns prefix + metadata only — never the secret
 	// (GET /me/tokens)
 	ListPersonalTokens(ctx context.Context, request ListPersonalTokensRequestObject) (ListPersonalTokensResponseObject, error)
@@ -709,9 +1700,48 @@ type StrictServerInterface interface {
 
 	// (DELETE /me/tokens/{tok})
 	RevokePersonalToken(ctx context.Context, request RevokePersonalTokenRequestObject) (RevokePersonalTokenResponseObject, error)
+	// ListMyOrgs List organizations I belong to (SW1)
+	// (GET /orgs)
+	ListMyOrgs(ctx context.Context, request ListMyOrgsRequestObject) (ListMyOrgsResponseObject, error)
+	// CreateOrg Create organization (A5)
+	// (POST /orgs)
+	CreateOrg(ctx context.Context, request CreateOrgRequestObject) (CreateOrgResponseObject, error)
+	// DeleteOrg Owner only; typed-confirm client-side; 90-day billing-data rule enforced server-side
+	// (DELETE /orgs/{org})
+	DeleteOrg(ctx context.Context, request DeleteOrgRequestObject) (DeleteOrgResponseObject, error)
+
+	// (GET /orgs/{org})
+	GetOrg(ctx context.Context, request GetOrgRequestObject) (GetOrgResponseObject, error)
+	// UpdateOrg Rename, change default region (G5). Slug never changes.
+	// (PATCH /orgs/{org})
+	UpdateOrg(ctx context.Context, request UpdateOrgRequestObject) (UpdateOrgResponseObject, error)
+
+	// (GET /orgs/{org}/api-keys)
+	ListApiKeys(ctx context.Context, request ListApiKeysRequestObject) (ListApiKeysResponseObject, error)
+	// CreateApiKey Org automation keys (G8): explicit least-privilege scopes; same reveal-once/hash contract; stale keys flagged for hygiene
+	// (POST /orgs/{org}/api-keys)
+	CreateApiKey(ctx context.Context, request CreateApiKeyRequestObject) (CreateApiKeyResponseObject, error)
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+
+	// (GET /orgs/{org}/invites)
+	ListInvites(ctx context.Context, request ListInvitesRequestObject) (ListInvitesResponseObject, error)
+	// CreateInvite Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending
+	// (POST /orgs/{org}/invites)
+	CreateInvite(ctx context.Context, request CreateInviteRequestObject) (CreateInviteResponseObject, error)
+	// RevokeInvite Admin revoke (G-side): invalidates the link, notifies nobody, audited; status → revoked
+	// (DELETE /orgs/{org}/invites/{invite})
+	RevokeInvite(ctx context.Context, request RevokeInviteRequestObject) (RevokeInviteResponseObject, error)
+	// ListMembers Members with role and MFA posture (G6)
+	// (GET /orgs/{org}/members)
+	ListMembers(ctx context.Context, request ListMembersRequestObject) (ListMembersResponseObject, error)
+	// RemoveMember Sessions + personal tokens revoked immediately; owned resources flagged, never silently reassigned (G6)
+	// (DELETE /orgs/{org}/members/{member})
+	RemoveMember(ctx context.Context, request RemoveMemberRequestObject) (RemoveMemberResponseObject, error)
+	// ChangeMemberRole Role change applies without re-login; audited before → after (G2). Tokens shrink immediately.
+	// (PATCH /orgs/{org}/members/{member})
+	ChangeMemberRole(ctx context.Context, request ChangeMemberRoleRequestObject) (ChangeMemberRoleResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -892,6 +1922,110 @@ func (sh *strictHandler) ListEvents(w http.ResponseWriter, r *http.Request, envP
 	}
 }
 
+// DeclineInvite operation middleware
+func (sh *strictHandler) DeclineInvite(w http.ResponseWriter, r *http.Request, invite string) {
+	var request DeclineInviteRequestObject
+
+	request.Invite = invite
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeclineInvite(ctx, request.(DeclineInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeclineInvite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeclineInviteResponseObject); ok {
+		if err := validResponse.VisitDeclineInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetInvitePublic operation middleware
+func (sh *strictHandler) GetInvitePublic(w http.ResponseWriter, r *http.Request, invite string) {
+	var request GetInvitePublicRequestObject
+
+	request.Invite = invite
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInvitePublic(ctx, request.(GetInvitePublicRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInvitePublic")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetInvitePublicResponseObject); ok {
+		if err := validResponse.VisitGetInvitePublicResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AcceptInvite operation middleware
+func (sh *strictHandler) AcceptInvite(w http.ResponseWriter, r *http.Request, invite string) {
+	var request AcceptInviteRequestObject
+
+	request.Invite = invite
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptInvite(ctx, request.(AcceptInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptInvite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptInviteResponseObject); ok {
+		if err := validResponse.VisitAcceptInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenewInvite operation middleware
+func (sh *strictHandler) RenewInvite(w http.ResponseWriter, r *http.Request, invite string) {
+	var request RenewInviteRequestObject
+
+	request.Invite = invite
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenewInvite(ctx, request.(RenewInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenewInvite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenewInviteResponseObject); ok {
+		if err := validResponse.VisitRenewInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListPersonalTokens operation middleware
 func (sh *strictHandler) ListPersonalTokens(w http.ResponseWriter, r *http.Request) {
 	var request ListPersonalTokensRequestObject
@@ -973,6 +2107,208 @@ func (sh *strictHandler) RevokePersonalToken(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// ListMyOrgs operation middleware
+func (sh *strictHandler) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+	var request ListMyOrgsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgs(ctx, request.(ListMyOrgsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgsResponseObject); ok {
+		if err := validResponse.VisitListMyOrgsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrg operation middleware
+func (sh *strictHandler) CreateOrg(w http.ResponseWriter, r *http.Request) {
+	var request CreateOrgRequestObject
+
+	var body CreateOrgJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrg(ctx, request.(CreateOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrgResponseObject); ok {
+		if err := validResponse.VisitCreateOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrg operation middleware
+func (sh *strictHandler) DeleteOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request DeleteOrgRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrg(ctx, request.(DeleteOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrgResponseObject); ok {
+		if err := validResponse.VisitDeleteOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrg operation middleware
+func (sh *strictHandler) GetOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request GetOrgRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrg(ctx, request.(GetOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrgResponseObject); ok {
+		if err := validResponse.VisitGetOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOrg operation middleware
+func (sh *strictHandler) UpdateOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request UpdateOrgRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body UpdateOrgJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOrg(ctx, request.(UpdateOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOrgResponseObject); ok {
+		if err := validResponse.VisitUpdateOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListApiKeys operation middleware
+func (sh *strictHandler) ListApiKeys(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListApiKeysRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListApiKeys(ctx, request.(ListApiKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListApiKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListApiKeysResponseObject); ok {
+		if err := validResponse.VisitListApiKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateApiKey operation middleware
+func (sh *strictHandler) CreateApiKey(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request CreateApiKeyRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body CreateApiKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateApiKey(ctx, request.(CreateApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateApiKeyResponseObject); ok {
+		if err := validResponse.VisitCreateApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListAuditEvents operation middleware
 func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams) {
 	var request ListAuditEventsRequestObject
@@ -993,6 +2329,180 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInvites operation middleware
+func (sh *strictHandler) ListInvites(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListInvitesRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInvites(ctx, request.(ListInvitesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInvites")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInvitesResponseObject); ok {
+		if err := validResponse.VisitListInvitesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateInvite operation middleware
+func (sh *strictHandler) CreateInvite(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreateInviteParams) {
+	var request CreateInviteRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	var body CreateInviteJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInvite(ctx, request.(CreateInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInvite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInviteResponseObject); ok {
+		if err := validResponse.VisitCreateInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeInvite operation middleware
+func (sh *strictHandler) RevokeInvite(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, invite string) {
+	var request RevokeInviteRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Invite = invite
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInvite(ctx, request.(RevokeInviteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInvite")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeInviteResponseObject); ok {
+		if err := validResponse.VisitRevokeInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMembers operation middleware
+func (sh *strictHandler) ListMembers(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListMembersRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMembers(ctx, request.(ListMembersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMembers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMembersResponseObject); ok {
+		if err := validResponse.VisitListMembersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMember operation middleware
+func (sh *strictHandler) RemoveMember(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, member string) {
+	var request RemoveMemberRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Member = member
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMember(ctx, request.(RemoveMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangeMemberRole operation middleware
+func (sh *strictHandler) ChangeMemberRole(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, member string) {
+	var request ChangeMemberRoleRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Member = member
+
+	var body ChangeMemberRoleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangeMemberRole(ctx, request.(ChangeMemberRoleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangeMemberRole")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangeMemberRoleResponseObject); ok {
+		if err := validResponse.VisitChangeMemberRoleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

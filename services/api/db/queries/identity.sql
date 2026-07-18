@@ -50,9 +50,6 @@ WHERE id = $1 AND user_id = $2 AND kind = 'personal' AND revoked_at IS NULL;
 -- name: TouchTokenUsed :exec
 UPDATE tokens SET last_used_at = now() WHERE id = $1;
 
--- name: CreateOrg :one
-INSERT INTO orgs (id, name) VALUES ($1, $2) RETURNING *;
-
 -- name: AddMember :one
 INSERT INTO members (id, org_id, user_id, role) VALUES ($1, $2, $3, $4) RETURNING *;
 

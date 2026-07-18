@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
@@ -47,6 +48,7 @@ const MinPasswordLen = 10
 const dummyPassword = "definitely-not-a-real-password"
 
 type Service struct {
+	db      *pgxpool.Pool
 	q       *store.Queries
 	hasher  *password.Hasher
 	mgr     *session.Manager
@@ -56,13 +58,16 @@ type Service struct {
 	dummy   string
 }
 
-func NewService(q *store.Queries, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder) (*Service, error) {
+func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder) (*Service, error) {
 	dummy, err := h.Hash(dummyPassword)
 	if err != nil {
 		return nil, fmt.Errorf("identity: dummy hash: %w", err)
 	}
-	return &Service{q: q, hasher: h, mgr: mgr, limiter: limiter, rec: rec, now: time.Now, dummy: dummy}, nil
+	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, now: time.Now, dummy: dummy}, nil
 }
+
+// txt wraps a string for a nullable text column.
+func txt(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 
 // Established is the outcome of signup/login: the user, the session row, and
 // the raw cookie token (returned once, never stored).

@@ -20,6 +20,17 @@ type Event struct {
 	Detail  []byte
 }
 
+type Invite struct {
+	ID        string
+	OrgID     string
+	Email     string
+	Role      string
+	Status    string
+	InviterID string
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
 type Member struct {
 	ID        string
 	OrgID     string
@@ -29,9 +40,13 @@ type Member struct {
 }
 
 type Org struct {
-	ID        string
-	Name      string
-	CreatedAt pgtype.Timestamptz
+	ID                  string
+	Name                string
+	CreatedAt           pgtype.Timestamptz
+	Slug                string
+	HomeRegion          string
+	Plan                string
+	DeletionScheduledAt pgtype.Timestamptz
 }
 
 type Policy struct {
@@ -53,6 +68,15 @@ type Session struct {
 	LastSeenAt pgtype.Timestamptz
 	ExpiresAt  pgtype.Timestamptz
 	RevokedAt  pgtype.Timestamptz
+}
+
+type Subscription struct {
+	OrgID       string
+	Plan        string
+	AnchorDay   int32
+	Status      string
+	TrialEndsAt pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
 }
 
 type Token struct {

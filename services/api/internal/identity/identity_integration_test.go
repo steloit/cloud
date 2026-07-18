@@ -71,7 +71,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	q := store.New(pool)
 	hub := events.NewHub()
 	recorder := events.NewRecorder(q, hub)
-	svc, err := identity.NewService(q, hasher, mgr, ratelimit.New(100, time.Minute), recorder)
+	svc, err := identity.NewService(pool, hasher, mgr, ratelimit.New(100, time.Minute), recorder)
 	if err != nil {
 		t.Fatal(err)
 	}

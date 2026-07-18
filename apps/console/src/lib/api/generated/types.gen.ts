@@ -1444,7 +1444,12 @@ export type CreateInviteData = {
          */
         org: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * accept the shown seat overage — the x-error-catalog quota_exceeded contract (soft 402 proceeds only on explicit confirm=true). S-process gap fill with T2.7.
+         */
+        confirm?: boolean;
+    };
     url: '/orgs/{org}/invites';
 };
 
