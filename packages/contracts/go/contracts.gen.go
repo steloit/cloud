@@ -20192,6 +20192,9 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 		}
 		response.JSON200 = &dest
 
+	case rsp.StatusCode == 401:
+		break // No content-type
+
 	case rsp.StatusCode == 429:
 		break // No content-type
 
@@ -20342,6 +20345,9 @@ func ParseGetSessionResponse(rsp *http.Response) (*GetSessionResponse, error) {
 		}
 		response.JSON200 = &dest
 
+	case rsp.StatusCode == 401:
+		break // No content-type
+
 	}
 
 	return response, nil
@@ -20367,6 +20373,9 @@ func ParseSignupResponse(rsp *http.Response) (*SignupResponse, error) {
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case rsp.StatusCode == 409:
+		break // No content-type
 
 	case rsp.StatusCode == 429:
 		break // No content-type

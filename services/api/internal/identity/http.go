@@ -66,10 +66,8 @@ func (h *Handlers) requestError(w http.ResponseWriter, r *http.Request, err erro
 	problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{{Field: "body", Detail: err.Error()}}))
 }
 
-// responseError maps typed domain errors onto the closed problem catalog.
-// FINDING (T2.1, filed for the next founder contract bundle): the catalog has
-// no 401/unauthorized class; invalid credentials and missing sessions map to
-// 403 permission_denied until an auth_failed entry lands via S-process.
+// responseError maps typed domain errors onto the closed problem catalog
+// (auth_failed 401 ratified via S-process 2026-07-19, closing the T2.1 finding).
 func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err error) {
 	var weak WeakPasswordError
 	var limited RateLimitedError
@@ -82,10 +80,10 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 		problem.Write(w, r, problem.Conflict([]string{"email already registered"},
 			"Sign in with this email instead, or use password reset when it ships (T7.2)."))
 	case errors.Is(err, ErrInvalidCredentials):
-		problem.Write(w, r, problem.PermissionDenied("invalid credentials",
+		problem.Write(w, r, problem.AuthFailed("invalid credentials",
 			"Check the email and password and try again."))
 	case errors.Is(err, ErrNoSession):
-		problem.Write(w, r, problem.PermissionDenied("no active session", "Sign in first."))
+		problem.Write(w, r, problem.AuthFailed("no active session", "Sign in first."))
 	case errors.As(err, new(validationError)):
 		var ve validationError
 		errors.As(err, &ve)

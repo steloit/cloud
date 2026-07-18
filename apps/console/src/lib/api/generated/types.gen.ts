@@ -2937,6 +2937,10 @@ export type SignupData = {
 
 export type SignupErrors = {
     /**
+     * Email already registered — reasons[] + remediation (S-process 2026-07-19)
+     */
+    409: unknown;
+    /**
      * Rate limited
      */
     429: unknown;
@@ -2960,6 +2964,10 @@ export type LoginData = {
 
 export type LoginErrors = {
     /**
+     * auth_failed — invalid credentials; identical body for unknown email (no disclosure)
+     */
+    401: unknown;
+    /**
      * Rate limited
      */
     429: unknown;
@@ -2981,6 +2989,13 @@ export type LogoutData = {
     url: '/auth/logout';
 };
 
+export type LogoutErrors = {
+    /**
+     * auth_failed — no active session
+     */
+    401: unknown;
+};
+
 export type LogoutResponses = {
     /**
      * Logged out
@@ -2995,6 +3010,13 @@ export type GetSessionData = {
     path?: never;
     query?: never;
     url: '/auth/session';
+};
+
+export type GetSessionErrors = {
+    /**
+     * auth_failed — no active session
+     */
+    401: unknown;
 };
 
 export type GetSessionResponses = {

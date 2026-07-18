@@ -23,6 +23,7 @@ x-conventions:
   idempotency: "every mutating POST accepts Idempotency-Key (client-generated, ≤255 chars); server dedupes on (principal, endpoint, key) for 24h; replay returns the original response with Idempotent-Replay: true; same key + different body = 409 problem+json with remediation (S7 ruling, 2026-07-18)"
 x-error-catalog:
   validation_failed: {status: 422, note: "field errors under errors[]; client renders inline under the field"}
+  auth_failed: {status: 401, note: "invalid credentials or missing/expired session; never discloses account existence; body carries remediation (S-process 2026-07-19, T2.1 finding)"}
   permission_denied: {status: 403, note: "detail names missing role OR denying policy (E3 grammar); denial audited"}
   plan_gated: {status: 402, note: "carries required_plan; client renders B6 lock grammar"}
   quota_exceeded: {status: 402, note: "soft quota: carries overage_price_cents and proceeds only on explicit confirm=true; hard quota: fails with remediation"}
@@ -806,6 +807,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SignupRequest"}}}}
       responses:
         "201": {description: "Session cookie set", content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}
+        "409": {description: "Email already registered — reasons[] + remediation (S-process 2026-07-19)"}
         "429": {description: Rate limited}
   /auth/login:
     post:
@@ -816,11 +818,12 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LoginRequest"}}}}
       responses:
         "200": {description: "Session or mfa_required", content: {application/json: {schema: {$ref: "#/components/schemas/LoginResult"}}}}
+        "401": {description: "auth_failed — invalid credentials; identical body for unknown email (no disclosure)"}
         "429": {description: Rate limited}
   /auth/logout:
-    post: {tags: [auth], operationId: logout, summary: "Revoke the current session", responses: {"204": {description: Logged out}}}
+    post: {tags: [auth], operationId: logout, summary: "Revoke the current session", responses: {"204": {description: Logged out}, "401": {description: "auth_failed — no active session"}}}
   /auth/session:
-    get: {tags: [auth], operationId: getSession, summary: "Current user + session — the console boot call", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}}}
+    get: {tags: [auth], operationId: getSession, summary: "Current user + session — the console boot call", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}, "401": {description: "auth_failed — no active session"}}}
   /auth/password:reset-request:
     post: {tags: [auth], security: [], operationId: requestPasswordReset, summary: "Always 202 (no account disclosure); email carries a single-use token", requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}}, responses: {"202": {description: Accepted}}}
   /auth/password:reset:

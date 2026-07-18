@@ -13,6 +13,7 @@ func catalog() map[string]Problem {
 	return map[string]Problem{
 		"validation_failed": ValidationFailed([]FieldError{{Field: "name", Detail: "required"}}),
 		"permission_denied": PermissionDenied("missing role: Admin", ""),
+		"auth_failed":       AuthFailed("invalid credentials", ""),
 		"plan_gated":        PlanGated("business"),
 		"quota_soft":        QuotaSoft(162),
 		"quota_hard":        QuotaHard("preview quota reached", ""),
