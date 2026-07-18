@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { acceptInvite, addDomain, addPaymentMethod, addWidget, applyProposal, backtestAlertRule, cancelSubscription, captureTemplate, changeMemberRole, changePlan, connectCell, createAlertRule, createApiKey, createBinding, createDashboard, createDeployment, createEnvironment, createEstimate, createInvite, createLifecycleRule, createOrg, createPersonalToken, createPolicy, createProject, createSchedule, createService, createThread, declineInvite, deleteBinding, deleteDashboard, deleteOrg, deleteProject, deleteService, deleteTemplate, dryRunLifecycleRule, getBillingOverview, getDashboard, getInvitePublic, getOrg, getPolicy, getProject, getProposal, getQuotas, getService, getSubscription, getTemplate, getTrace, getUsage, listAlertRules, listApiKeys, listAuditEvents, listBindings, listCatalog, listCells, listDashboards, listDeployments, listDomains, listEnvironments, listEvents, listInsights, listInvites, listInvoices, listLifecycleRules, listMembers, listMyOrgs, listPaymentMethods, listPersonalTokens, listPolicies, listProjects, listSchedules, listServices, listTemplates, listThreads, type Options, postMessage, previewSchedule, queryLogs, queryMetrics, refreshTemplate, removeMember, renewInvite, revokePersonalToken, rollbackDeployment, updateDashboard, updateInsight, updateOrg, updatePolicy, updateProject, updateService, updateTemplate } from '../sdk.gen';
-import type { AcceptInviteData, AddDomainData, AddDomainResponse, AddPaymentMethodData, AddPaymentMethodResponse, AddWidgetData, AddWidgetResponse, ApplyProposalData, ApplyProposalError, ApplyProposalResponse, BacktestAlertRuleData, BacktestAlertRuleResponse, CancelSubscriptionData, CancelSubscriptionResponse, CaptureTemplateData, CaptureTemplateResponse, ChangeMemberRoleData, ChangeMemberRoleError, ChangeMemberRoleResponse, ChangePlanData, ChangePlanError, ChangePlanResponse, ConnectCellData, ConnectCellError, ConnectCellResponse, CreateAlertRuleData, CreateAlertRuleResponse, CreateApiKeyData, CreateApiKeyResponse, CreateBindingData, CreateBindingError, CreateBindingResponse, CreateDashboardData, CreateDashboardResponse, CreateDeploymentData, CreateDeploymentResponse, CreateEnvironmentData, CreateEnvironmentResponse, CreateEstimateData, CreateEstimateResponse, CreateInviteData, CreateInviteError, CreateInviteResponse, CreateLifecycleRuleData, CreateLifecycleRuleResponse, CreateOrgData, CreateOrgError, CreateOrgResponse, CreatePersonalTokenData, CreatePersonalTokenResponse, CreatePolicyData, CreatePolicyError, CreatePolicyResponse, CreateProjectData, CreateProjectError, CreateProjectResponse, CreateScheduleData, CreateScheduleResponse, CreateServiceData, CreateServiceError, CreateServiceResponse, CreateThreadData, CreateThreadResponse, DeclineInviteData, DeclineInviteResponse, DeleteBindingData, DeleteBindingResponse, DeleteDashboardData, DeleteDashboardResponse, DeleteOrgData, DeleteOrgError, DeleteProjectData, DeleteProjectError, DeleteServiceData, DeleteServiceError, DeleteTemplateData, DeleteTemplateResponse, DryRunLifecycleRuleData, DryRunLifecycleRuleResponse, GetBillingOverviewData, GetBillingOverviewResponse, GetDashboardData, GetDashboardResponse, GetInvitePublicData, GetInvitePublicResponse, GetOrgData, GetOrgResponse, GetPolicyData, GetPolicyResponse, GetProjectData, GetProjectResponse, GetProposalData, GetProposalResponse, GetQuotasData, GetQuotasResponse, GetServiceData, GetServiceResponse, GetSubscriptionData, GetSubscriptionResponse, GetTemplateData, GetTemplateResponse, GetTraceData, GetTraceResponse, GetUsageData, GetUsageResponse, ListAlertRulesData, ListAlertRulesResponse, ListApiKeysData, ListApiKeysResponse, ListAuditEventsData, ListAuditEventsResponse, ListBindingsData, ListBindingsResponse, ListCatalogData, ListCatalogResponse, ListCellsData, ListCellsResponse, ListDashboardsData, ListDashboardsResponse, ListDeploymentsData, ListDeploymentsResponse, ListDomainsData, ListDomainsResponse, ListEnvironmentsData, ListEnvironmentsResponse, ListEventsData, ListEventsResponse, ListInsightsData, ListInsightsResponse, ListInvitesData, ListInvitesResponse, ListInvoicesData, ListInvoicesResponse, ListLifecycleRulesData, ListLifecycleRulesResponse, ListMembersData, ListMembersResponse, ListMyOrgsData, ListMyOrgsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPersonalTokensData, ListPersonalTokensResponse, ListPoliciesData, ListPoliciesResponse, ListProjectsData, ListProjectsResponse, ListSchedulesData, ListSchedulesResponse, ListServicesData, ListServicesResponse, ListTemplatesData, ListTemplatesResponse, ListThreadsData, ListThreadsResponse, PostMessageData, PostMessageResponse, PreviewScheduleData, PreviewScheduleError, PreviewScheduleResponse, QueryLogsData, QueryLogsResponse, QueryMetricsData, QueryMetricsResponse, RefreshTemplateData, RefreshTemplateResponse, RemoveMemberData, RemoveMemberResponse, RenewInviteData, RevokePersonalTokenData, RevokePersonalTokenResponse, RollbackDeploymentData, RollbackDeploymentResponse, UpdateDashboardData, UpdateDashboardResponse, UpdateInsightData, UpdateInsightResponse, UpdateOrgData, UpdateOrgResponse, UpdatePolicyData, UpdatePolicyResponse, UpdateProjectData, UpdateProjectResponse, UpdateServiceData, UpdateServiceResponse, UpdateTemplateData, UpdateTemplateResponse } from '../types.gen';
+import { acceptInvite, addDomain, addPaymentMethod, addWidget, applyProposal, backtestAlertRule, cancelSubscription, captureTemplate, changeMemberRole, changePlan, connectCell, createAlertRule, createApiKey, createBinding, createDashboard, createDeployment, createEnvironment, createEstimate, createInvite, createLifecycleRule, createOrg, createPersonalToken, createPolicy, createProject, createSchedule, createService, createThread, createWebhook, declineInvite, deleteBinding, deleteDashboard, deleteOrg, deleteProject, deleteService, deleteTemplate, dryRunLifecycleRule, getBillingOverview, getDashboard, getInvitePublic, getNotificationPrefs, getOrg, getPolicy, getProject, getProposal, getQuotas, getService, getSession, getSubscription, getTemplate, getTrace, getUsage, listAlertRules, listApiKeys, listAuditEvents, listBackups, listBindings, listBranches, listCatalog, listCells, listDashboards, listDeployments, listDomains, listEnvironments, listEvents, listInsights, listInvites, listInvoices, listKeys, listLifecycleRules, listMembers, listMyOrgs, listNotifications, listPaymentMethods, listPersonalTokens, listPolicies, listProjects, listSchedules, listServices, listSessions, listTables, listTemplates, listThreads, listWebhooks, login, logout, markNotificationsRead, type Options, postMessage, previewSchedule, queryLogs, queryMetrics, refreshTemplate, regenerateRecoveryCodes, removeMember, renewInvite, requestPasswordReset, resetPassword, revokePersonalToken, revokeSession, rollbackDeployment, signup, sqlQuery, testWebhook, totpEnroll, totpVerify, updateDashboard, updateInsight, updateNotificationPrefs, updateOrg, updatePolicy, updateProject, updateService, updateTemplate, webauthnLoginBegin, webauthnLoginFinish, webauthnRegisterBegin, webauthnRegisterFinish } from '../sdk.gen';
+import type { AcceptInviteData, AddDomainData, AddDomainResponse, AddPaymentMethodData, AddPaymentMethodResponse, AddWidgetData, AddWidgetResponse, ApplyProposalData, ApplyProposalError, ApplyProposalResponse, BacktestAlertRuleData, BacktestAlertRuleResponse, CancelSubscriptionData, CancelSubscriptionResponse, CaptureTemplateData, CaptureTemplateResponse, ChangeMemberRoleData, ChangeMemberRoleError, ChangeMemberRoleResponse, ChangePlanData, ChangePlanError, ChangePlanResponse, ConnectCellData, ConnectCellError, ConnectCellResponse, CreateAlertRuleData, CreateAlertRuleResponse, CreateApiKeyData, CreateApiKeyResponse, CreateBindingData, CreateBindingError, CreateBindingResponse, CreateDashboardData, CreateDashboardResponse, CreateDeploymentData, CreateDeploymentResponse, CreateEnvironmentData, CreateEnvironmentResponse, CreateEstimateData, CreateEstimateResponse, CreateInviteData, CreateInviteError, CreateInviteResponse, CreateLifecycleRuleData, CreateLifecycleRuleResponse, CreateOrgData, CreateOrgError, CreateOrgResponse, CreatePersonalTokenData, CreatePersonalTokenResponse, CreatePolicyData, CreatePolicyError, CreatePolicyResponse, CreateProjectData, CreateProjectError, CreateProjectResponse, CreateScheduleData, CreateScheduleResponse, CreateServiceData, CreateServiceError, CreateServiceResponse, CreateThreadData, CreateThreadResponse, CreateWebhookData, CreateWebhookResponse, DeclineInviteData, DeclineInviteResponse, DeleteBindingData, DeleteBindingResponse, DeleteDashboardData, DeleteDashboardResponse, DeleteOrgData, DeleteOrgError, DeleteProjectData, DeleteProjectError, DeleteServiceData, DeleteServiceError, DeleteTemplateData, DeleteTemplateResponse, DryRunLifecycleRuleData, DryRunLifecycleRuleResponse, GetBillingOverviewData, GetBillingOverviewResponse, GetDashboardData, GetDashboardResponse, GetInvitePublicData, GetInvitePublicResponse, GetNotificationPrefsData, GetNotificationPrefsResponse, GetOrgData, GetOrgResponse, GetPolicyData, GetPolicyResponse, GetProjectData, GetProjectResponse, GetProposalData, GetProposalResponse, GetQuotasData, GetQuotasResponse, GetServiceData, GetServiceResponse, GetSessionData, GetSessionResponse, GetSubscriptionData, GetSubscriptionResponse, GetTemplateData, GetTemplateResponse, GetTraceData, GetTraceResponse, GetUsageData, GetUsageResponse, ListAlertRulesData, ListAlertRulesResponse, ListApiKeysData, ListApiKeysResponse, ListAuditEventsData, ListAuditEventsResponse, ListBackupsData, ListBackupsResponse, ListBindingsData, ListBindingsResponse, ListBranchesData, ListBranchesResponse, ListCatalogData, ListCatalogResponse, ListCellsData, ListCellsResponse, ListDashboardsData, ListDashboardsResponse, ListDeploymentsData, ListDeploymentsResponse, ListDomainsData, ListDomainsResponse, ListEnvironmentsData, ListEnvironmentsResponse, ListEventsData, ListEventsResponse, ListInsightsData, ListInsightsResponse, ListInvitesData, ListInvitesResponse, ListInvoicesData, ListInvoicesResponse, ListKeysData, ListKeysResponse, ListLifecycleRulesData, ListLifecycleRulesResponse, ListMembersData, ListMembersResponse, ListMyOrgsData, ListMyOrgsResponse, ListNotificationsData, ListNotificationsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPersonalTokensData, ListPersonalTokensResponse, ListPoliciesData, ListPoliciesResponse, ListProjectsData, ListProjectsResponse, ListSchedulesData, ListSchedulesResponse, ListServicesData, ListServicesResponse, ListSessionsData, ListSessionsResponse, ListTablesData, ListTablesResponse, ListTemplatesData, ListTemplatesResponse, ListThreadsData, ListThreadsResponse, ListWebhooksData, ListWebhooksResponse, LoginData, LoginResponse, LogoutData, LogoutResponse, MarkNotificationsReadData, MarkNotificationsReadResponse, PostMessageData, PostMessageResponse, PreviewScheduleData, PreviewScheduleError, PreviewScheduleResponse, QueryLogsData, QueryLogsResponse, QueryMetricsData, QueryMetricsResponse, RefreshTemplateData, RefreshTemplateResponse, RegenerateRecoveryCodesData, RegenerateRecoveryCodesResponse, RemoveMemberData, RemoveMemberResponse, RenewInviteData, RequestPasswordResetData, ResetPasswordData, ResetPasswordResponse, RevokePersonalTokenData, RevokePersonalTokenResponse, RevokeSessionData, RevokeSessionResponse, RollbackDeploymentData, RollbackDeploymentResponse, SignupData, SignupResponse, SqlQueryData, SqlQueryResponse, TestWebhookData, TestWebhookResponse, TotpEnrollData, TotpEnrollResponse, TotpVerifyData, TotpVerifyResponse, UpdateDashboardData, UpdateDashboardResponse, UpdateInsightData, UpdateInsightResponse, UpdateNotificationPrefsData, UpdateNotificationPrefsResponse, UpdateOrgData, UpdateOrgResponse, UpdatePolicyData, UpdatePolicyResponse, UpdateProjectData, UpdateProjectResponse, UpdateServiceData, UpdateServiceResponse, UpdateTemplateData, UpdateTemplateResponse, WebauthnLoginBeginData, WebauthnLoginBeginResponse, WebauthnLoginFinishData, WebauthnLoginFinishResponse, WebauthnRegisterBeginData, WebauthnRegisterBeginResponse, WebauthnRegisterFinishData } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -691,6 +691,151 @@ export const previewScheduleOptions = (options: Options<PreviewScheduleData>) =>
     queryKey: previewScheduleQueryKey(options)
 });
 
+/**
+ * Data-plane read (S2 ruling; E14-W1): Postgres only, executed under an enforced read-only role derived from the caller's binding role; queries audited. Destructive verbs are Future + policy-gated + typed-confirm (T14.7).
+ */
+export const sqlQueryMutation = (options?: Partial<Options<SqlQueryData>>): UseMutationOptions<SqlQueryResponse, DefaultError, Options<SqlQueryData>> => {
+    const mutationOptions: UseMutationOptions<SqlQueryResponse, DefaultError, Options<SqlQueryData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await sqlQuery({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listTablesQueryKey = (options: Options<ListTablesData>) => createQueryKey('listTables', options);
+
+/**
+ * D2 table browser (read plane)
+ */
+export const listTablesOptions = (options: Options<ListTablesData>) => queryOptions<ListTablesResponse, DefaultError, ListTablesResponse, ReturnType<typeof listTablesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listTables({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listTablesQueryKey(options)
+});
+
+export const listKeysQueryKey = (options: Options<ListKeysData>) => createQueryKey('listKeys', options);
+
+/**
+ * Valkey key browse (D3, read plane): pattern + cursor; values summarized, never dumped
+ */
+export const listKeysOptions = (options: Options<ListKeysData>) => queryOptions<ListKeysResponse, DefaultError, ListKeysResponse, ReturnType<typeof listKeysQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listKeys({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listKeysQueryKey(options)
+});
+
+const createInfiniteParams = <K extends Pick<QueryKey<Options>[0], 'body' | 'headers' | 'path' | 'query'>>(queryKey: QueryKey<Options>, page: K) => {
+    const params = { ...queryKey[0] };
+    if (page.body) {
+        params.body = {
+            ...queryKey[0].body as any,
+            ...page.body as any
+        };
+    }
+    if (page.headers) {
+        params.headers = {
+            ...queryKey[0].headers,
+            ...page.headers
+        };
+    }
+    if (page.path) {
+        params.path = {
+            ...queryKey[0].path as any,
+            ...page.path as any
+        };
+    }
+    if (page.query) {
+        params.query = {
+            ...queryKey[0].query as any,
+            ...page.query as any
+        };
+    }
+    return params as unknown as typeof page;
+};
+
+export const listKeysInfiniteQueryKey = (options: Options<ListKeysData>): QueryKey<Options<ListKeysData>> => createQueryKey('listKeys', options, true);
+
+/**
+ * Valkey key browse (D3, read plane): pattern + cursor; values summarized, never dumped
+ */
+export const listKeysInfiniteOptions = (options: Options<ListKeysData>) => infiniteQueryOptions<ListKeysResponse, DefaultError, InfiniteData<ListKeysResponse>, QueryKey<Options<ListKeysData>>, string | Pick<QueryKey<Options<ListKeysData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+// @ts-ignore
+{
+    queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<QueryKey<Options<ListKeysData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+            query: {
+                cursor: pageParam
+            }
+        };
+        const params = createInfiniteParams(queryKey, page);
+        const { data } = await listKeys({
+            ...options,
+            ...params,
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listKeysInfiniteQueryKey(options)
+});
+
+export const listBackupsQueryKey = (options: Options<ListBackupsData>) => createQueryKey('listBackups', options);
+
+/**
+ * W6 backups: schedule, retention, PITR window; restore is always to a NEW branch, never in place (ADR-0003)
+ */
+export const listBackupsOptions = (options: Options<ListBackupsData>) => queryOptions<ListBackupsResponse, DefaultError, ListBackupsResponse, ReturnType<typeof listBackupsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listBackups({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listBackupsQueryKey(options)
+});
+
+export const listBranchesQueryKey = (options: Options<ListBranchesData>) => createQueryKey('listBranches', options);
+
+/**
+ * W5 branch lineage: parent, freshness, per-branch cost, credential scope, masked flag
+ */
+export const listBranchesOptions = (options: Options<ListBranchesData>) => queryOptions<ListBranchesResponse, DefaultError, ListBranchesResponse, ReturnType<typeof listBranchesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listBranches({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listBranchesQueryKey(options)
+});
+
 export const listDeploymentsQueryKey = (options: Options<ListDeploymentsData>) => createQueryKey('listDeployments', options);
 
 /**
@@ -778,35 +923,6 @@ export const queryLogsOptions = (options: Options<QueryLogsData>) => queryOption
     },
     queryKey: queryLogsQueryKey(options)
 });
-
-const createInfiniteParams = <K extends Pick<QueryKey<Options>[0], 'body' | 'headers' | 'path' | 'query'>>(queryKey: QueryKey<Options>, page: K) => {
-    const params = { ...queryKey[0] };
-    if (page.body) {
-        params.body = {
-            ...queryKey[0].body as any,
-            ...page.body as any
-        };
-    }
-    if (page.headers) {
-        params.headers = {
-            ...queryKey[0].headers,
-            ...page.headers
-        };
-    }
-    if (page.path) {
-        params.path = {
-            ...queryKey[0].path as any,
-            ...page.path as any
-        };
-    }
-    if (page.query) {
-        params.query = {
-            ...queryKey[0].query as any,
-            ...page.query as any
-        };
-    }
-    return params as unknown as typeof page;
-};
 
 export const queryLogsInfiniteQueryKey = (options: Options<QueryLogsData>): QueryKey<Options<QueryLogsData>> => createQueryKey('queryLogs', options, true);
 
@@ -1284,6 +1400,248 @@ export const listAuditEventsInfiniteOptions = (options: Options<ListAuditEventsD
     queryKey: listAuditEventsInfiniteQueryKey(options)
 });
 
+/**
+ * Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
+ */
+export const signupMutation = (options?: Partial<Options<SignupData>>): UseMutationOptions<SignupResponse, DefaultError, Options<SignupData>> => {
+    const mutationOptions: UseMutationOptions<SignupResponse, DefaultError, Options<SignupData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await signup({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
+ */
+export const loginMutation = (options?: Partial<Options<LoginData>>): UseMutationOptions<LoginResponse, DefaultError, Options<LoginData>> => {
+    const mutationOptions: UseMutationOptions<LoginResponse, DefaultError, Options<LoginData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await login({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Revoke the current session
+ */
+export const logoutMutation = (options?: Partial<Options<LogoutData>>): UseMutationOptions<LogoutResponse, DefaultError, Options<LogoutData>> => {
+    const mutationOptions: UseMutationOptions<LogoutResponse, DefaultError, Options<LogoutData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await logout({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getSessionQueryKey = (options?: Options<GetSessionData>) => createQueryKey('getSession', options);
+
+/**
+ * Current user + session — the console boot call
+ */
+export const getSessionOptions = (options?: Options<GetSessionData>) => queryOptions<GetSessionResponse, DefaultError, GetSessionResponse, ReturnType<typeof getSessionQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getSession({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getSessionQueryKey(options)
+});
+
+/**
+ * Always 202 (no account disclosure); email carries a single-use token
+ */
+export const requestPasswordResetMutation = (options?: Partial<Options<RequestPasswordResetData>>): UseMutationOptions<unknown, DefaultError, Options<RequestPasswordResetData>> => {
+    const mutationOptions: UseMutationOptions<unknown, DefaultError, Options<RequestPasswordResetData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await requestPasswordReset({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Single-use token + new password; every other session revoked
+ */
+export const resetPasswordMutation = (options?: Partial<Options<ResetPasswordData>>): UseMutationOptions<ResetPasswordResponse, DefaultError, Options<ResetPasswordData>> => {
+    const mutationOptions: UseMutationOptions<ResetPasswordResponse, DefaultError, Options<ResetPasswordData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await resetPassword({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Passkeys-first (ADR-0006): returns PublicKeyCredentialCreationOptions
+ */
+export const webauthnRegisterBeginMutation = (options?: Partial<Options<WebauthnRegisterBeginData>>): UseMutationOptions<WebauthnRegisterBeginResponse, DefaultError, Options<WebauthnRegisterBeginData>> => {
+    const mutationOptions: UseMutationOptions<WebauthnRegisterBeginResponse, DefaultError, Options<WebauthnRegisterBeginData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await webauthnRegisterBegin({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const webauthnRegisterFinishMutation = (options?: Partial<Options<WebauthnRegisterFinishData>>): UseMutationOptions<unknown, DefaultError, Options<WebauthnRegisterFinishData>> => {
+    const mutationOptions: UseMutationOptions<unknown, DefaultError, Options<WebauthnRegisterFinishData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await webauthnRegisterFinish({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const webauthnLoginBeginMutation = (options?: Partial<Options<WebauthnLoginBeginData>>): UseMutationOptions<WebauthnLoginBeginResponse, DefaultError, Options<WebauthnLoginBeginData>> => {
+    const mutationOptions: UseMutationOptions<WebauthnLoginBeginResponse, DefaultError, Options<WebauthnLoginBeginData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await webauthnLoginBegin({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const webauthnLoginFinishMutation = (options?: Partial<Options<WebauthnLoginFinishData>>): UseMutationOptions<WebauthnLoginFinishResponse, DefaultError, Options<WebauthnLoginFinishData>> => {
+    const mutationOptions: UseMutationOptions<WebauthnLoginFinishResponse, DefaultError, Options<WebauthnLoginFinishData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await webauthnLoginFinish({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * TOTP fallback: reveal-once secret + otpauth URI
+ */
+export const totpEnrollMutation = (options?: Partial<Options<TotpEnrollData>>): UseMutationOptions<TotpEnrollResponse, DefaultError, Options<TotpEnrollData>> => {
+    const mutationOptions: UseMutationOptions<TotpEnrollResponse, DefaultError, Options<TotpEnrollData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await totpEnroll({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const totpVerifyMutation = (options?: Partial<Options<TotpVerifyData>>): UseMutationOptions<TotpVerifyResponse, DefaultError, Options<TotpVerifyData>> => {
+    const mutationOptions: UseMutationOptions<TotpVerifyResponse, DefaultError, Options<TotpVerifyData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await totpVerify({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Reveal-once recovery codes; the previous set is invalidated
+ */
+export const regenerateRecoveryCodesMutation = (options?: Partial<Options<RegenerateRecoveryCodesData>>): UseMutationOptions<RegenerateRecoveryCodesResponse, DefaultError, Options<RegenerateRecoveryCodesData>> => {
+    const mutationOptions: UseMutationOptions<RegenerateRecoveryCodesResponse, DefaultError, Options<RegenerateRecoveryCodesData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await regenerateRecoveryCodes({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listSessionsQueryKey = (options?: Options<ListSessionsData>) => createQueryKey('listSessions', options);
+
+/**
+ * P-series security page: device, last-seen, current flag
+ */
+export const listSessionsOptions = (options?: Options<ListSessionsData>) => queryOptions<ListSessionsResponse, DefaultError, ListSessionsResponse, ReturnType<typeof listSessionsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listSessions({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listSessionsQueryKey(options)
+});
+
+export const revokeSessionMutation = (options?: Partial<Options<RevokeSessionData>>): UseMutationOptions<RevokeSessionResponse, DefaultError, Options<RevokeSessionData>> => {
+    const mutationOptions: UseMutationOptions<RevokeSessionResponse, DefaultError, Options<RevokeSessionData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await revokeSession({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const listPersonalTokensQueryKey = (options?: Options<ListPersonalTokensData>) => createQueryKey('listPersonalTokens', options);
 
 /**
@@ -1323,6 +1681,149 @@ export const revokePersonalTokenMutation = (options?: Partial<Options<RevokePers
     const mutationOptions: UseMutationOptions<RevokePersonalTokenResponse, DefaultError, Options<RevokePersonalTokenData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await revokePersonalToken({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listNotificationsQueryKey = (options?: Options<ListNotificationsData>) => createQueryKey('listNotifications', options);
+
+/**
+ * The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery
+ */
+export const listNotificationsOptions = (options?: Options<ListNotificationsData>) => queryOptions<ListNotificationsResponse, DefaultError, ListNotificationsResponse, ReturnType<typeof listNotificationsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listNotifications({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listNotificationsQueryKey(options)
+});
+
+export const listNotificationsInfiniteQueryKey = (options?: Options<ListNotificationsData>): QueryKey<Options<ListNotificationsData>> => createQueryKey('listNotifications', options, true);
+
+/**
+ * The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery
+ */
+export const listNotificationsInfiniteOptions = (options?: Options<ListNotificationsData>) => infiniteQueryOptions<ListNotificationsResponse, DefaultError, InfiniteData<ListNotificationsResponse>, QueryKey<Options<ListNotificationsData>>, string | Pick<QueryKey<Options<ListNotificationsData>>[0], 'body' | 'headers' | 'path' | 'query'>>(
+// @ts-ignore
+{
+    queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<QueryKey<Options<ListNotificationsData>>[0], 'body' | 'headers' | 'path' | 'query'> = typeof pageParam === 'object' ? pageParam : {
+            query: {
+                cursor: pageParam
+            }
+        };
+        const params = createInfiniteParams(queryKey, page);
+        const { data } = await listNotifications({
+            ...options,
+            ...params,
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listNotificationsInfiniteQueryKey(options)
+});
+
+/**
+ * Bulk mark-read
+ */
+export const markNotificationsReadMutation = (options?: Partial<Options<MarkNotificationsReadData>>): UseMutationOptions<MarkNotificationsReadResponse, DefaultError, Options<MarkNotificationsReadData>> => {
+    const mutationOptions: UseMutationOptions<MarkNotificationsReadResponse, DefaultError, Options<MarkNotificationsReadData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await markNotificationsRead({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getNotificationPrefsQueryKey = (options?: Options<GetNotificationPrefsData>) => createQueryKey('getNotificationPrefs', options);
+
+export const getNotificationPrefsOptions = (options?: Options<GetNotificationPrefsData>) => queryOptions<GetNotificationPrefsResponse, DefaultError, GetNotificationPrefsResponse, ReturnType<typeof getNotificationPrefsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getNotificationPrefs({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getNotificationPrefsQueryKey(options)
+});
+
+/**
+ * Channels + quiet hours. Quiet hours affect ROUTING, never recording, and never gate escalation paging (glossary law).
+ */
+export const updateNotificationPrefsMutation = (options?: Partial<Options<UpdateNotificationPrefsData>>): UseMutationOptions<UpdateNotificationPrefsResponse, DefaultError, Options<UpdateNotificationPrefsData>> => {
+    const mutationOptions: UseMutationOptions<UpdateNotificationPrefsResponse, DefaultError, Options<UpdateNotificationPrefsData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await updateNotificationPrefs({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listWebhooksQueryKey = (options: Options<ListWebhooksData>) => createQueryKey('listWebhooks', options);
+
+export const listWebhooksOptions = (options: Options<ListWebhooksData>) => queryOptions<ListWebhooksResponse, DefaultError, ListWebhooksResponse, ReturnType<typeof listWebhooksQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listWebhooks({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listWebhooksQueryKey(options)
+});
+
+/**
+ * Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
+ */
+export const createWebhookMutation = (options?: Partial<Options<CreateWebhookData>>): UseMutationOptions<CreateWebhookResponse, DefaultError, Options<CreateWebhookData>> => {
+    const mutationOptions: UseMutationOptions<CreateWebhookResponse, DefaultError, Options<CreateWebhookData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await createWebhook({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Test delivery with a synthetic event; result inline — never a dead end
+ */
+export const testWebhookMutation = (options?: Partial<Options<TestWebhookData>>): UseMutationOptions<TestWebhookResponse, DefaultError, Options<TestWebhookData>> => {
+    const mutationOptions: UseMutationOptions<TestWebhookResponse, DefaultError, Options<TestWebhookData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await testWebhook({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

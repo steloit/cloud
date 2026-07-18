@@ -1012,6 +1012,185 @@ export type Proposal = {
     applied_event_id?: string | null;
 };
 
+export type SignupRequest = {
+    email: string;
+    /**
+     * argon2id server-side; strength policy in problem+json on 422
+     */
+    password: string;
+    name: string;
+};
+
+export type LoginRequest = {
+    email: string;
+    password: string;
+};
+
+export type LoginResult = {
+    status: 'session' | 'mfa_required';
+    session?: SessionInfo;
+    /**
+     * passkeys-first ordering (ADR-0006)
+     */
+    mfa_methods?: Array<'webauthn' | 'totp' | 'recovery'>;
+};
+
+export type SessionInfo = {
+    user: {
+        id: string;
+        email: string;
+        name?: string;
+    };
+    session: {
+        /**
+         * ses_…
+         */
+        id: string;
+        created_at: string;
+        current?: boolean;
+        device?: string;
+        last_seen_at?: string;
+    };
+};
+
+export type SessionList = {
+    data?: Array<{
+        id?: string;
+        device?: string;
+        created_at?: string;
+        last_seen_at?: string;
+        current?: boolean;
+    }>;
+};
+
+export type SqlQueryRequest = {
+    sql: string;
+    /**
+     * positional bind params
+     */
+    params?: Array<unknown>;
+    /**
+     * server-capped; truncation flagged in the result
+     */
+    limit?: number;
+};
+
+export type SqlQueryResult = {
+    columns: Array<string>;
+    rows: Array<Array<unknown>>;
+    row_count: number;
+    truncated?: boolean;
+    duration_ms?: number;
+};
+
+export type TableList = {
+    data?: Array<{
+        name?: string;
+        schema?: string;
+        rows_estimate?: number;
+        size_bytes?: number;
+    }>;
+};
+
+export type KeyList = {
+    data?: Array<{
+        key?: string;
+        type?: string;
+        ttl_seconds?: number | null;
+        size_bytes?: number;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type BackupList = {
+    data?: Array<{
+        id?: string;
+        taken_at?: string;
+        kind?: 'scheduled' | 'manual' | 'pre_delete';
+        size_bytes?: number;
+    }>;
+    pitr_window_start?: string;
+};
+
+export type BranchList = {
+    data?: Array<{
+        id?: string;
+        name?: string;
+        parent?: string | null;
+        created_at?: string;
+        freshness_at?: string;
+        monthly_cents?: number;
+        masked?: boolean;
+    }>;
+};
+
+export type NotificationList = {
+    data?: Array<{
+        /**
+         * ntf_…
+         */
+        id: string;
+        kind: string;
+        title: string;
+        body?: string;
+        link?: string;
+        created_at: string;
+        read: boolean;
+    }>;
+    next_cursor?: string | null;
+};
+
+export type NotificationPrefs = {
+    channels?: {
+        email?: boolean;
+        inapp?: boolean;
+    };
+    /**
+     * routing only — never recording, never escalation paging (glossary law)
+     */
+    quiet_hours?: {
+        /**
+         * HH:MM
+         */
+        start?: string;
+        /**
+         * HH:MM
+         */
+        end?: string;
+        timezone?: string;
+    } | null;
+};
+
+export type WebhookInput = {
+    url: string;
+    /**
+     * event-spine kinds filter
+     */
+    events: Array<string>;
+};
+
+export type Webhook = {
+    /**
+     * wbh_…
+     */
+    id: string;
+    url: string;
+    events: Array<string>;
+    status: 'active' | 'disabled';
+    created_at?: string;
+};
+
+export type WebhookList = {
+    data?: Array<Webhook>;
+};
+
+export type WebhookCreated = Webhook & {
+    /**
+     * signing secret — reveal-once, hash stored, never returned again
+     */
+    secret?: string;
+};
+
 /**
  * org_… or slug
  */
@@ -1022,6 +1201,11 @@ export type Project2 = string;
 export type Env = string;
 
 export type Service2 = string;
+
+/**
+ * S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409
+ */
+export type IdempotencyKey = string;
 
 export type ListMyOrgsData = {
     body?: never;
@@ -1571,6 +1755,12 @@ export type CreateEstimateData = {
         services?: Array<ServiceShapeInput>;
         template_id?: string;
     };
+    headers?: {
+        /**
+         * S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409
+         */
+        'Idempotency-Key'?: string;
+    };
     path?: never;
     query?: never;
     url: '/estimates';
@@ -1605,6 +1795,12 @@ export type ListServicesResponse = ListServicesResponses[keyof ListServicesRespo
 
 export type CreateServiceData = {
     body: ServiceCreate;
+    headers?: {
+        /**
+         * S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409
+         */
+        'Idempotency-Key'?: string;
+    };
     path: {
         env: string;
     };
@@ -1942,6 +2138,99 @@ export type PreviewScheduleResponses = {
 };
 
 export type PreviewScheduleResponse = PreviewScheduleResponses[keyof PreviewScheduleResponses];
+
+export type SqlQueryData = {
+    body: SqlQueryRequest;
+    path: {
+        service: string;
+    };
+    query?: never;
+    url: '/services/{service}/sql:query';
+};
+
+export type SqlQueryResponses = {
+    /**
+     * OK
+     */
+    200: SqlQueryResult;
+};
+
+export type SqlQueryResponse = SqlQueryResponses[keyof SqlQueryResponses];
+
+export type ListTablesData = {
+    body?: never;
+    path: {
+        service: string;
+    };
+    query?: never;
+    url: '/services/{service}/tables';
+};
+
+export type ListTablesResponses = {
+    /**
+     * OK
+     */
+    200: TableList;
+};
+
+export type ListTablesResponse = ListTablesResponses[keyof ListTablesResponses];
+
+export type ListKeysData = {
+    body?: never;
+    path: {
+        service: string;
+    };
+    query?: {
+        pattern?: string;
+        cursor?: string;
+    };
+    url: '/services/{service}/keys';
+};
+
+export type ListKeysResponses = {
+    /**
+     * OK
+     */
+    200: KeyList;
+};
+
+export type ListKeysResponse = ListKeysResponses[keyof ListKeysResponses];
+
+export type ListBackupsData = {
+    body?: never;
+    path: {
+        service: string;
+    };
+    query?: never;
+    url: '/services/{service}/backups';
+};
+
+export type ListBackupsResponses = {
+    /**
+     * OK
+     */
+    200: BackupList;
+};
+
+export type ListBackupsResponse = ListBackupsResponses[keyof ListBackupsResponses];
+
+export type ListBranchesData = {
+    body?: never;
+    path: {
+        service: string;
+    };
+    query?: never;
+    url: '/services/{service}/branches';
+};
+
+export type ListBranchesResponses = {
+    /**
+     * OK
+     */
+    200: BranchList;
+};
+
+export type ListBranchesResponse = ListBranchesResponses[keyof ListBranchesResponses];
 
 export type ListDeploymentsData = {
     body?: never;
@@ -2609,6 +2898,290 @@ export type ListAuditEventsResponses = {
 
 export type ListAuditEventsResponse = ListAuditEventsResponses[keyof ListAuditEventsResponses];
 
+export type SignupData = {
+    body: SignupRequest;
+    headers?: {
+        /**
+         * S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409
+         */
+        'Idempotency-Key'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/signup';
+};
+
+export type SignupErrors = {
+    /**
+     * Rate limited
+     */
+    429: unknown;
+};
+
+export type SignupResponses = {
+    /**
+     * Session cookie set
+     */
+    201: SessionInfo;
+};
+
+export type SignupResponse = SignupResponses[keyof SignupResponses];
+
+export type LoginData = {
+    body: LoginRequest;
+    path?: never;
+    query?: never;
+    url: '/auth/login';
+};
+
+export type LoginErrors = {
+    /**
+     * Rate limited
+     */
+    429: unknown;
+};
+
+export type LoginResponses = {
+    /**
+     * Session or mfa_required
+     */
+    200: LoginResult;
+};
+
+export type LoginResponse = LoginResponses[keyof LoginResponses];
+
+export type LogoutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/logout';
+};
+
+export type LogoutResponses = {
+    /**
+     * Logged out
+     */
+    204: void;
+};
+
+export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
+
+export type GetSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/session';
+};
+
+export type GetSessionResponses = {
+    /**
+     * OK
+     */
+    200: SessionInfo;
+};
+
+export type GetSessionResponse = GetSessionResponses[keyof GetSessionResponses];
+
+export type RequestPasswordResetData = {
+    body: {
+        email: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/password:reset-request';
+};
+
+export type RequestPasswordResetResponses = {
+    /**
+     * Accepted
+     */
+    202: unknown;
+};
+
+export type ResetPasswordData = {
+    body: {
+        token: string;
+        password: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/password:reset';
+};
+
+export type ResetPasswordResponses = {
+    /**
+     * Reset
+     */
+    204: void;
+};
+
+export type ResetPasswordResponse = ResetPasswordResponses[keyof ResetPasswordResponses];
+
+export type WebauthnRegisterBeginData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/webauthn/register:begin';
+};
+
+export type WebauthnRegisterBeginResponses = {
+    /**
+     * Creation options (WebAuthn spec shape)
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type WebauthnRegisterBeginResponse = WebauthnRegisterBeginResponses[keyof WebauthnRegisterBeginResponses];
+
+export type WebauthnRegisterFinishData = {
+    /**
+     * attestation response
+     */
+    body: {
+        [key: string]: unknown;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/webauthn/register:finish';
+};
+
+export type WebauthnRegisterFinishResponses = {
+    /**
+     * Passkey registered
+     */
+    201: unknown;
+};
+
+export type WebauthnLoginBeginData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/webauthn/login:begin';
+};
+
+export type WebauthnLoginBeginResponses = {
+    /**
+     * PublicKeyCredentialRequestOptions
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type WebauthnLoginBeginResponse = WebauthnLoginBeginResponses[keyof WebauthnLoginBeginResponses];
+
+export type WebauthnLoginFinishData = {
+    /**
+     * assertion response
+     */
+    body: {
+        [key: string]: unknown;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/webauthn/login:finish';
+};
+
+export type WebauthnLoginFinishResponses = {
+    /**
+     * Session
+     */
+    200: SessionInfo;
+};
+
+export type WebauthnLoginFinishResponse = WebauthnLoginFinishResponses[keyof WebauthnLoginFinishResponses];
+
+export type TotpEnrollData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/mfa/totp:enroll';
+};
+
+export type TotpEnrollResponses = {
+    /**
+     * Reveal-once
+     */
+    200: {
+        secret?: string;
+        otpauth_uri?: string;
+    };
+};
+
+export type TotpEnrollResponse = TotpEnrollResponses[keyof TotpEnrollResponses];
+
+export type TotpVerifyData = {
+    body: {
+        code: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/auth/mfa/totp:verify';
+};
+
+export type TotpVerifyResponses = {
+    /**
+     * Enabled
+     */
+    204: void;
+};
+
+export type TotpVerifyResponse = TotpVerifyResponses[keyof TotpVerifyResponses];
+
+export type RegenerateRecoveryCodesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/mfa/recovery:regenerate';
+};
+
+export type RegenerateRecoveryCodesResponses = {
+    /**
+     * Reveal-once
+     */
+    200: {
+        codes?: Array<string>;
+    };
+};
+
+export type RegenerateRecoveryCodesResponse = RegenerateRecoveryCodesResponses[keyof RegenerateRecoveryCodesResponses];
+
+export type ListSessionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/me/sessions';
+};
+
+export type ListSessionsResponses = {
+    /**
+     * OK
+     */
+    200: SessionList;
+};
+
+export type ListSessionsResponse = ListSessionsResponses[keyof ListSessionsResponses];
+
+export type RevokeSessionData = {
+    body?: never;
+    path: {
+        ses: string;
+    };
+    query?: never;
+    url: '/me/sessions/{ses}';
+};
+
+export type RevokeSessionResponses = {
+    /**
+     * Revoked
+     */
+    204: void;
+};
+
+export type RevokeSessionResponse = RevokeSessionResponses[keyof RevokeSessionResponses];
+
 export type ListPersonalTokensData = {
     body?: never;
     path?: never;
@@ -2658,6 +3231,145 @@ export type RevokePersonalTokenResponses = {
 };
 
 export type RevokePersonalTokenResponse = RevokePersonalTokenResponses[keyof RevokePersonalTokenResponses];
+
+export type ListNotificationsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        unread?: boolean;
+        cursor?: string;
+    };
+    url: '/me/notifications';
+};
+
+export type ListNotificationsResponses = {
+    /**
+     * OK
+     */
+    200: NotificationList;
+};
+
+export type ListNotificationsResponse = ListNotificationsResponses[keyof ListNotificationsResponses];
+
+export type MarkNotificationsReadData = {
+    body: {
+        ids: Array<string>;
+    };
+    path?: never;
+    query?: never;
+    url: '/me/notifications:read';
+};
+
+export type MarkNotificationsReadResponses = {
+    /**
+     * Marked
+     */
+    204: void;
+};
+
+export type MarkNotificationsReadResponse = MarkNotificationsReadResponses[keyof MarkNotificationsReadResponses];
+
+export type GetNotificationPrefsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/me/notification-prefs';
+};
+
+export type GetNotificationPrefsResponses = {
+    /**
+     * OK
+     */
+    200: NotificationPrefs;
+};
+
+export type GetNotificationPrefsResponse = GetNotificationPrefsResponses[keyof GetNotificationPrefsResponses];
+
+export type UpdateNotificationPrefsData = {
+    body: NotificationPrefs;
+    path?: never;
+    query?: never;
+    url: '/me/notification-prefs';
+};
+
+export type UpdateNotificationPrefsResponses = {
+    /**
+     * OK
+     */
+    200: NotificationPrefs;
+};
+
+export type UpdateNotificationPrefsResponse = UpdateNotificationPrefsResponses[keyof UpdateNotificationPrefsResponses];
+
+export type ListWebhooksData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/webhooks';
+};
+
+export type ListWebhooksResponses = {
+    /**
+     * OK
+     */
+    200: WebhookList;
+};
+
+export type ListWebhooksResponse = ListWebhooksResponses[keyof ListWebhooksResponses];
+
+export type CreateWebhookData = {
+    body: WebhookInput;
+    headers?: {
+        /**
+         * S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409
+         */
+        'Idempotency-Key'?: string;
+    };
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/webhooks';
+};
+
+export type CreateWebhookResponses = {
+    /**
+     * Reveal-once secret
+     */
+    201: WebhookCreated;
+};
+
+export type CreateWebhookResponse = CreateWebhookResponses[keyof CreateWebhookResponses];
+
+export type TestWebhookData = {
+    body?: never;
+    path: {
+        wbh: string;
+    };
+    query?: never;
+    url: '/webhooks/{wbh}:test';
+};
+
+export type TestWebhookResponses = {
+    /**
+     * Delivery result
+     */
+    200: {
+        delivered?: boolean;
+        status_code?: number;
+        duration_ms?: number;
+    };
+};
+
+export type TestWebhookResponse = TestWebhookResponses[keyof TestWebhookResponses];
 
 export type ListApiKeysData = {
     body?: never;

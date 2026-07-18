@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptInviteData, AcceptInviteErrors, AcceptInviteResponses, AddDomainData, AddDomainResponses, AddPaymentMethodData, AddPaymentMethodResponses, AddWidgetData, AddWidgetResponses, ApplyProposalData, ApplyProposalErrors, ApplyProposalResponses, BacktestAlertRuleData, BacktestAlertRuleResponses, CancelSubscriptionData, CancelSubscriptionResponses, CaptureTemplateData, CaptureTemplateResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePlanData, ChangePlanErrors, ChangePlanResponses, ConnectCellData, ConnectCellErrors, ConnectCellResponses, CreateAlertRuleData, CreateAlertRuleResponses, CreateApiKeyData, CreateApiKeyResponses, CreateBindingData, CreateBindingErrors, CreateBindingResponses, CreateDashboardData, CreateDashboardResponses, CreateDeploymentData, CreateDeploymentResponses, CreateEnvironmentData, CreateEnvironmentResponses, CreateEstimateData, CreateEstimateResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateLifecycleRuleData, CreateLifecycleRuleResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreatePolicyData, CreatePolicyErrors, CreatePolicyResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateScheduleData, CreateScheduleResponses, CreateServiceData, CreateServiceErrors, CreateServiceResponses, CreateThreadData, CreateThreadErrors, CreateThreadResponses, DeclineInviteData, DeclineInviteResponses, DeleteBindingData, DeleteBindingResponses, DeleteDashboardData, DeleteDashboardResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteServiceData, DeleteServiceErrors, DeleteServiceResponses, DeleteTemplateData, DeleteTemplateResponses, DryRunLifecycleRuleData, DryRunLifecycleRuleResponses, GetBillingOverviewData, GetBillingOverviewResponses, GetDashboardData, GetDashboardResponses, GetInvitePublicData, GetInvitePublicErrors, GetInvitePublicResponses, GetOrgData, GetOrgResponses, GetPolicyData, GetPolicyResponses, GetProjectData, GetProjectResponses, GetProposalData, GetProposalResponses, GetQuotasData, GetQuotasResponses, GetServiceData, GetServiceResponses, GetSubscriptionData, GetSubscriptionResponses, GetTemplateData, GetTemplateResponses, GetTraceData, GetTraceResponses, GetUsageData, GetUsageResponses, ListAlertRulesData, ListAlertRulesResponses, ListApiKeysData, ListApiKeysResponses, ListAuditEventsData, ListAuditEventsResponses, ListBindingsData, ListBindingsResponses, ListCatalogData, ListCatalogResponses, ListCellsData, ListCellsResponses, ListDashboardsData, ListDashboardsResponses, ListDeploymentsData, ListDeploymentsResponses, ListDomainsData, ListDomainsResponses, ListEnvironmentsData, ListEnvironmentsResponses, ListEventsData, ListEventsResponses, ListInsightsData, ListInsightsResponses, ListInvitesData, ListInvitesResponses, ListInvoicesData, ListInvoicesResponses, ListLifecycleRulesData, ListLifecycleRulesResponses, ListMembersData, ListMembersResponses, ListMyOrgsData, ListMyOrgsResponses, ListPaymentMethodsData, ListPaymentMethodsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListPoliciesData, ListPoliciesResponses, ListProjectsData, ListProjectsResponses, ListSchedulesData, ListSchedulesResponses, ListServicesData, ListServicesResponses, ListTemplatesData, ListTemplatesResponses, ListThreadsData, ListThreadsResponses, PostMessageData, PostMessageResponses, PreviewScheduleData, PreviewScheduleErrors, PreviewScheduleResponses, QueryLogsData, QueryLogsResponses, QueryMetricsData, QueryMetricsResponses, RefreshTemplateData, RefreshTemplateResponses, RemoveMemberData, RemoveMemberResponses, RenewInviteData, RenewInviteResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RollbackDeploymentData, RollbackDeploymentResponses, UpdateDashboardData, UpdateDashboardResponses, UpdateInsightData, UpdateInsightResponses, UpdateOrgData, UpdateOrgResponses, UpdatePolicyData, UpdatePolicyResponses, UpdateProjectData, UpdateProjectResponses, UpdateServiceData, UpdateServiceResponses, UpdateTemplateData, UpdateTemplateResponses } from './types.gen';
+import type { AcceptInviteData, AcceptInviteErrors, AcceptInviteResponses, AddDomainData, AddDomainResponses, AddPaymentMethodData, AddPaymentMethodResponses, AddWidgetData, AddWidgetResponses, ApplyProposalData, ApplyProposalErrors, ApplyProposalResponses, BacktestAlertRuleData, BacktestAlertRuleResponses, CancelSubscriptionData, CancelSubscriptionResponses, CaptureTemplateData, CaptureTemplateResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePlanData, ChangePlanErrors, ChangePlanResponses, ConnectCellData, ConnectCellErrors, ConnectCellResponses, CreateAlertRuleData, CreateAlertRuleResponses, CreateApiKeyData, CreateApiKeyResponses, CreateBindingData, CreateBindingErrors, CreateBindingResponses, CreateDashboardData, CreateDashboardResponses, CreateDeploymentData, CreateDeploymentResponses, CreateEnvironmentData, CreateEnvironmentResponses, CreateEstimateData, CreateEstimateResponses, CreateInviteData, CreateInviteErrors, CreateInviteResponses, CreateLifecycleRuleData, CreateLifecycleRuleResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, CreatePersonalTokenData, CreatePersonalTokenResponses, CreatePolicyData, CreatePolicyErrors, CreatePolicyResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreateScheduleData, CreateScheduleResponses, CreateServiceData, CreateServiceErrors, CreateServiceResponses, CreateThreadData, CreateThreadErrors, CreateThreadResponses, CreateWebhookData, CreateWebhookResponses, DeclineInviteData, DeclineInviteResponses, DeleteBindingData, DeleteBindingResponses, DeleteDashboardData, DeleteDashboardResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteServiceData, DeleteServiceErrors, DeleteServiceResponses, DeleteTemplateData, DeleteTemplateResponses, DryRunLifecycleRuleData, DryRunLifecycleRuleResponses, GetBillingOverviewData, GetBillingOverviewResponses, GetDashboardData, GetDashboardResponses, GetInvitePublicData, GetInvitePublicErrors, GetInvitePublicResponses, GetNotificationPrefsData, GetNotificationPrefsResponses, GetOrgData, GetOrgResponses, GetPolicyData, GetPolicyResponses, GetProjectData, GetProjectResponses, GetProposalData, GetProposalResponses, GetQuotasData, GetQuotasResponses, GetServiceData, GetServiceResponses, GetSessionData, GetSessionResponses, GetSubscriptionData, GetSubscriptionResponses, GetTemplateData, GetTemplateResponses, GetTraceData, GetTraceResponses, GetUsageData, GetUsageResponses, ListAlertRulesData, ListAlertRulesResponses, ListApiKeysData, ListApiKeysResponses, ListAuditEventsData, ListAuditEventsResponses, ListBackupsData, ListBackupsResponses, ListBindingsData, ListBindingsResponses, ListBranchesData, ListBranchesResponses, ListCatalogData, ListCatalogResponses, ListCellsData, ListCellsResponses, ListDashboardsData, ListDashboardsResponses, ListDeploymentsData, ListDeploymentsResponses, ListDomainsData, ListDomainsResponses, ListEnvironmentsData, ListEnvironmentsResponses, ListEventsData, ListEventsResponses, ListInsightsData, ListInsightsResponses, ListInvitesData, ListInvitesResponses, ListInvoicesData, ListInvoicesResponses, ListKeysData, ListKeysResponses, ListLifecycleRulesData, ListLifecycleRulesResponses, ListMembersData, ListMembersResponses, ListMyOrgsData, ListMyOrgsResponses, ListNotificationsData, ListNotificationsResponses, ListPaymentMethodsData, ListPaymentMethodsResponses, ListPersonalTokensData, ListPersonalTokensResponses, ListPoliciesData, ListPoliciesResponses, ListProjectsData, ListProjectsResponses, ListSchedulesData, ListSchedulesResponses, ListServicesData, ListServicesResponses, ListSessionsData, ListSessionsResponses, ListTablesData, ListTablesResponses, ListTemplatesData, ListTemplatesResponses, ListThreadsData, ListThreadsResponses, ListWebhooksData, ListWebhooksResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutResponses, MarkNotificationsReadData, MarkNotificationsReadResponses, PostMessageData, PostMessageResponses, PreviewScheduleData, PreviewScheduleErrors, PreviewScheduleResponses, QueryLogsData, QueryLogsResponses, QueryMetricsData, QueryMetricsResponses, RefreshTemplateData, RefreshTemplateResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesResponses, RemoveMemberData, RemoveMemberResponses, RenewInviteData, RenewInviteResponses, RequestPasswordResetData, RequestPasswordResetResponses, ResetPasswordData, ResetPasswordResponses, RevokePersonalTokenData, RevokePersonalTokenResponses, RevokeSessionData, RevokeSessionResponses, RollbackDeploymentData, RollbackDeploymentResponses, SignupData, SignupErrors, SignupResponses, SqlQueryData, SqlQueryResponses, TestWebhookData, TestWebhookResponses, TotpEnrollData, TotpEnrollResponses, TotpVerifyData, TotpVerifyResponses, UpdateDashboardData, UpdateDashboardResponses, UpdateInsightData, UpdateInsightResponses, UpdateNotificationPrefsData, UpdateNotificationPrefsResponses, UpdateOrgData, UpdateOrgResponses, UpdatePolicyData, UpdatePolicyResponses, UpdateProjectData, UpdateProjectResponses, UpdateServiceData, UpdateServiceResponses, UpdateTemplateData, UpdateTemplateResponses, WebauthnLoginBeginData, WebauthnLoginBeginResponses, WebauthnLoginFinishData, WebauthnLoginFinishResponses, WebauthnRegisterBeginData, WebauthnRegisterBeginResponses, WebauthnRegisterFinishData, WebauthnRegisterFinishResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -395,6 +395,55 @@ export const previewSchedule = <ThrowOnError extends boolean = false>(options: O
 });
 
 /**
+ * Data-plane read (S2 ruling; E14-W1): Postgres only, executed under an enforced read-only role derived from the caller's binding role; queries audited. Destructive verbs are Future + policy-gated + typed-confirm (T14.7).
+ */
+export const sqlQuery = <ThrowOnError extends boolean = false>(options: Options<SqlQueryData, ThrowOnError>): RequestResult<SqlQueryResponses, unknown, ThrowOnError> => (options.client ?? client).post<SqlQueryResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/services/{service}/sql:query',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * D2 table browser (read plane)
+ */
+export const listTables = <ThrowOnError extends boolean = false>(options: Options<ListTablesData, ThrowOnError>): RequestResult<ListTablesResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListTablesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/services/{service}/tables',
+    ...options
+});
+
+/**
+ * Valkey key browse (D3, read plane): pattern + cursor; values summarized, never dumped
+ */
+export const listKeys = <ThrowOnError extends boolean = false>(options: Options<ListKeysData, ThrowOnError>): RequestResult<ListKeysResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListKeysResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/services/{service}/keys',
+    ...options
+});
+
+/**
+ * W6 backups: schedule, retention, PITR window; restore is always to a NEW branch, never in place (ADR-0003)
+ */
+export const listBackups = <ThrowOnError extends boolean = false>(options: Options<ListBackupsData, ThrowOnError>): RequestResult<ListBackupsResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListBackupsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/services/{service}/backups',
+    ...options
+});
+
+/**
+ * W5 branch lineage: parent, freshness, per-branch cost, credential scope, masked flag
+ */
+export const listBranches = <ThrowOnError extends boolean = false>(options: Options<ListBranchesData, ThrowOnError>): RequestResult<ListBranchesResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListBranchesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/services/{service}/branches',
+    ...options
+});
+
+/**
  * Immutable history — id, git sha, actor, state, annotations (DP1)
  */
 export const listDeployments = <ThrowOnError extends boolean = false>(options: Options<ListDeploymentsData, ThrowOnError>): RequestResult<ListDeploymentsResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListDeploymentsResponses, unknown, ThrowOnError>({
@@ -676,6 +725,145 @@ export const listAuditEvents = <ThrowOnError extends boolean = false>(options: O
 });
 
 /**
+ * Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited.
+ */
+export const signup = <ThrowOnError extends boolean = false>(options: Options<SignupData, ThrowOnError>): RequestResult<SignupResponses, SignupErrors, ThrowOnError> => (options.client ?? client).post<SignupResponses, SignupErrors, ThrowOnError>({
+    url: '/auth/signup',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
+ */
+export const login = <ThrowOnError extends boolean = false>(options: Options<LoginData, ThrowOnError>): RequestResult<LoginResponses, LoginErrors, ThrowOnError> => (options.client ?? client).post<LoginResponses, LoginErrors, ThrowOnError>({
+    url: '/auth/login',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke the current session
+ */
+export const logout = <ThrowOnError extends boolean = false>(options?: Options<LogoutData, ThrowOnError>): RequestResult<LogoutResponses, unknown, ThrowOnError> => (options?.client ?? client).post<LogoutResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/logout',
+    ...options
+});
+
+/**
+ * Current user + session — the console boot call
+ */
+export const getSession = <ThrowOnError extends boolean = false>(options?: Options<GetSessionData, ThrowOnError>): RequestResult<GetSessionResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetSessionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/session',
+    ...options
+});
+
+/**
+ * Always 202 (no account disclosure); email carries a single-use token
+ */
+export const requestPasswordReset = <ThrowOnError extends boolean = false>(options: Options<RequestPasswordResetData, ThrowOnError>): RequestResult<RequestPasswordResetResponses, unknown, ThrowOnError> => (options.client ?? client).post<RequestPasswordResetResponses, unknown, ThrowOnError>({
+    url: '/auth/password:reset-request',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Single-use token + new password; every other session revoked
+ */
+export const resetPassword = <ThrowOnError extends boolean = false>(options: Options<ResetPasswordData, ThrowOnError>): RequestResult<ResetPasswordResponses, unknown, ThrowOnError> => (options.client ?? client).post<ResetPasswordResponses, unknown, ThrowOnError>({
+    url: '/auth/password:reset',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Passkeys-first (ADR-0006): returns PublicKeyCredentialCreationOptions
+ */
+export const webauthnRegisterBegin = <ThrowOnError extends boolean = false>(options?: Options<WebauthnRegisterBeginData, ThrowOnError>): RequestResult<WebauthnRegisterBeginResponses, unknown, ThrowOnError> => (options?.client ?? client).post<WebauthnRegisterBeginResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/webauthn/register:begin',
+    ...options
+});
+
+export const webauthnRegisterFinish = <ThrowOnError extends boolean = false>(options: Options<WebauthnRegisterFinishData, ThrowOnError>): RequestResult<WebauthnRegisterFinishResponses, unknown, ThrowOnError> => (options.client ?? client).post<WebauthnRegisterFinishResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/webauthn/register:finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const webauthnLoginBegin = <ThrowOnError extends boolean = false>(options?: Options<WebauthnLoginBeginData, ThrowOnError>): RequestResult<WebauthnLoginBeginResponses, unknown, ThrowOnError> => (options?.client ?? client).post<WebauthnLoginBeginResponses, unknown, ThrowOnError>({ url: '/auth/webauthn/login:begin', ...options });
+
+export const webauthnLoginFinish = <ThrowOnError extends boolean = false>(options: Options<WebauthnLoginFinishData, ThrowOnError>): RequestResult<WebauthnLoginFinishResponses, unknown, ThrowOnError> => (options.client ?? client).post<WebauthnLoginFinishResponses, unknown, ThrowOnError>({
+    url: '/auth/webauthn/login:finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * TOTP fallback: reveal-once secret + otpauth URI
+ */
+export const totpEnroll = <ThrowOnError extends boolean = false>(options?: Options<TotpEnrollData, ThrowOnError>): RequestResult<TotpEnrollResponses, unknown, ThrowOnError> => (options?.client ?? client).post<TotpEnrollResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/mfa/totp:enroll',
+    ...options
+});
+
+export const totpVerify = <ThrowOnError extends boolean = false>(options: Options<TotpVerifyData, ThrowOnError>): RequestResult<TotpVerifyResponses, unknown, ThrowOnError> => (options.client ?? client).post<TotpVerifyResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/mfa/totp:verify',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reveal-once recovery codes; the previous set is invalidated
+ */
+export const regenerateRecoveryCodes = <ThrowOnError extends boolean = false>(options?: Options<RegenerateRecoveryCodesData, ThrowOnError>): RequestResult<RegenerateRecoveryCodesResponses, unknown, ThrowOnError> => (options?.client ?? client).post<RegenerateRecoveryCodesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/auth/mfa/recovery:regenerate',
+    ...options
+});
+
+/**
+ * P-series security page: device, last-seen, current flag
+ */
+export const listSessions = <ThrowOnError extends boolean = false>(options?: Options<ListSessionsData, ThrowOnError>): RequestResult<ListSessionsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListSessionsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/sessions',
+    ...options
+});
+
+export const revokeSession = <ThrowOnError extends boolean = false>(options: Options<RevokeSessionData, ThrowOnError>): RequestResult<RevokeSessionResponses, unknown, ThrowOnError> => (options.client ?? client).delete<RevokeSessionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/sessions/{ses}',
+    ...options
+});
+
+/**
  * Returns prefix + metadata only — never the secret
  */
 export const listPersonalTokens = <ThrowOnError extends boolean = false>(options?: Options<ListPersonalTokensData, ThrowOnError>): RequestResult<ListPersonalTokensResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListPersonalTokensResponses, unknown, ThrowOnError>({
@@ -700,6 +888,75 @@ export const createPersonalToken = <ThrowOnError extends boolean = false>(option
 export const revokePersonalToken = <ThrowOnError extends boolean = false>(options: Options<RevokePersonalTokenData, ThrowOnError>): RequestResult<RevokePersonalTokenResponses, unknown, ThrowOnError> => (options.client ?? client).delete<RevokePersonalTokenResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/me/tokens/{tok}',
+    ...options
+});
+
+/**
+ * The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery
+ */
+export const listNotifications = <ThrowOnError extends boolean = false>(options?: Options<ListNotificationsData, ThrowOnError>): RequestResult<ListNotificationsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ListNotificationsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/notifications',
+    ...options
+});
+
+/**
+ * Bulk mark-read
+ */
+export const markNotificationsRead = <ThrowOnError extends boolean = false>(options: Options<MarkNotificationsReadData, ThrowOnError>): RequestResult<MarkNotificationsReadResponses, unknown, ThrowOnError> => (options.client ?? client).post<MarkNotificationsReadResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/notifications:read',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getNotificationPrefs = <ThrowOnError extends boolean = false>(options?: Options<GetNotificationPrefsData, ThrowOnError>): RequestResult<GetNotificationPrefsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetNotificationPrefsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/notification-prefs',
+    ...options
+});
+
+/**
+ * Channels + quiet hours. Quiet hours affect ROUTING, never recording, and never gate escalation paging (glossary law).
+ */
+export const updateNotificationPrefs = <ThrowOnError extends boolean = false>(options: Options<UpdateNotificationPrefsData, ThrowOnError>): RequestResult<UpdateNotificationPrefsResponses, unknown, ThrowOnError> => (options.client ?? client).patch<UpdateNotificationPrefsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/me/notification-prefs',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listWebhooks = <ThrowOnError extends boolean = false>(options: Options<ListWebhooksData, ThrowOnError>): RequestResult<ListWebhooksResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListWebhooksResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/orgs/{org}/webhooks',
+    ...options
+});
+
+/**
+ * Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
+ */
+export const createWebhook = <ThrowOnError extends boolean = false>(options: Options<CreateWebhookData, ThrowOnError>): RequestResult<CreateWebhookResponses, unknown, ThrowOnError> => (options.client ?? client).post<CreateWebhookResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/orgs/{org}/webhooks',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Test delivery with a synthetic event; result inline — never a dead end
+ */
+export const testWebhook = <ThrowOnError extends boolean = false>(options: Options<TestWebhookData, ThrowOnError>): RequestResult<TestWebhookResponses, unknown, ThrowOnError> => (options.client ?? client).post<TestWebhookResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/webhooks/{wbh}:test',
     ...options
 });
 

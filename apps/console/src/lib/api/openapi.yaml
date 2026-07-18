@@ -11,7 +11,7 @@ info:
 servers:
   - url: https://api.steloit.app/v1
 x-conventions:
-  ids: "prefixed opaque ids: org_, prj_, env_, svc_, dep_, bnd_, sec_, pol_, evt_, inv_, mbr_, tok_, key_, cell_, tpl_, dsh_, wdg_, sch_, rule_, dom_, prp_, ins_, thr_, usr_, pm_"
+  ids: "prefixed opaque ids: org_, prj_, env_, svc_, dep_, bnd_, sec_, pol_, evt_, inv_, mbr_, tok_, key_, cell_, tpl_, dsh_, wdg_, sch_, rule_, dom_, prp_, ins_, thr_, usr_, pm_, ses_, ntf_, wbh_"
   json: "snake_case keys everywhere"
   money: "integer cents, fields suffixed _cents; clients render via fmtMoney in mono"
   timestamps: "RFC 3339 UTC, fields suffixed _at"
@@ -20,6 +20,7 @@ x-conventions:
   env_as_filter: "every project-scoped list accepts ?env="
   errors: "problem+json (RFC 9457). 402 quota/plan gates include price or plan; 403 names the missing role or denying policy; 409 includes blocking reasons[]; 429 includes Retry-After. Every error carries remediation — a next step, never a dead end."
   realtime: "GET endpoints marked x-streamable accept Accept: text/event-stream for live tail (state.md: SSE drives toasts, bell, status flips, markers)"
+  idempotency: "every mutating POST accepts Idempotency-Key (client-generated, ≤255 chars); server dedupes on (principal, endpoint, key) for 24h; replay returns the original response with Idempotent-Replay: true; same key + different body = 409 problem+json with remediation (S7 ruling, 2026-07-18)"
 x-error-catalog:
   validation_failed: {status: 422, note: "field errors under errors[]; client renders inline under the field"}
   permission_denied: {status: 403, note: "detail names missing role OR denying policy (E3 grammar); denial audited"}
@@ -41,6 +42,7 @@ tags:
   - {name: governance}
   - {name: assistant}
   - {name: account}
+  - {name: auth}
 
 paths:
   /orgs:
@@ -260,6 +262,7 @@ paths:
     post:
       tags: [billing]
       operationId: createEstimate
+      parameters: [{$ref: "#/components/parameters/idempotencyKey"}]
       summary: "Price a shape or template BEFORE anything provisions — the estimate-before-provision law. Estimate line grammar == invoice line grammar."
       requestBody:
         required: true
@@ -279,6 +282,7 @@ paths:
     post:
       tags: [services]
       operationId: createService
+      parameters: [{$ref: "#/components/parameters/idempotencyKey"}]
       summary: "Provision (C-series). Metering starts at `ready`; failed provisioning never bills and lands in the audit log with a reason (C4)."
       requestBody:
         required: true
@@ -436,6 +440,32 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {type: object, properties: {next_runs: {type: array, items: {type: string, format: date-time}}}}}}}
         "422": {$ref: "#/components/responses/Validation"}
+
+  /services/{service}/sql:query:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    post:
+      tags: [services]
+      operationId: sqlQuery
+      summary: "Data-plane read (S2 ruling; E14-W1): Postgres only, executed under an enforced read-only role derived from the caller's binding role; queries audited. Destructive verbs are Future + policy-gated + typed-confirm (T14.7)."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SqlQueryRequest"}}}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SqlQueryResult"}}}}}
+  /services/{service}/tables:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    get: {tags: [services], operationId: listTables, summary: "D2 table browser (read plane)", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TableList"}}}}}}
+  /services/{service}/keys:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    get:
+      tags: [services]
+      operationId: listKeys
+      summary: "Valkey key browse (D3, read plane): pattern + cursor; values summarized, never dumped"
+      parameters: [{name: pattern, in: query, schema: {type: string}}, {name: cursor, in: query, schema: {type: string}}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/KeyList"}}}}}
+  /services/{service}/backups:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    get: {tags: [services], operationId: listBackups, summary: "W6 backups: schedule, retention, PITR window; restore is always to a NEW branch, never in place (ADR-0003)", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BackupList"}}}}}}
+  /services/{service}/branches:
+    parameters: [{$ref: "#/components/parameters/service"}]
+    get: {tags: [services], operationId: listBranches, summary: "W5 branch lineage: parent, freshness, per-branch cost, credential scope, masked flag", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BranchList"}}}}}}
 
   /envs/{env}/deployments:
     parameters: [{$ref: "#/components/parameters/env"}]
@@ -756,6 +786,55 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EventList"}}}}
 
+  /auth/signup:
+    post:
+      tags: [auth]
+      security: []
+      operationId: signup
+      parameters: [{$ref: "#/components/parameters/idempotencyKey"}]
+      summary: "Create the user + first session (S1 ruling; architecture §10: sessions server-side, argon2id; contract-first for T2.8). Rate-limited."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SignupRequest"}}}}
+      responses:
+        "201": {description: "Session cookie set", content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}
+        "429": {description: Rate limited}
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      operationId: login
+      summary: "Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LoginRequest"}}}}
+      responses:
+        "200": {description: "Session or mfa_required", content: {application/json: {schema: {$ref: "#/components/schemas/LoginResult"}}}}
+        "429": {description: Rate limited}
+  /auth/logout:
+    post: {tags: [auth], operationId: logout, summary: "Revoke the current session", responses: {"204": {description: Logged out}}}
+  /auth/session:
+    get: {tags: [auth], operationId: getSession, summary: "Current user + session — the console boot call", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}}}
+  /auth/password:reset-request:
+    post: {tags: [auth], security: [], operationId: requestPasswordReset, summary: "Always 202 (no account disclosure); email carries a single-use token", requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}}, responses: {"202": {description: Accepted}}}
+  /auth/password:reset:
+    post: {tags: [auth], security: [], operationId: resetPassword, summary: "Single-use token + new password; every other session revoked", requestBody: {required: true, content: {application/json: {schema: {type: object, required: [token, password], properties: {token: {type: string}, password: {type: string}}}}}}, responses: {"204": {description: Reset}}}
+  /auth/webauthn/register:begin:
+    post: {tags: [auth], operationId: webauthnRegisterBegin, summary: "Passkeys-first (ADR-0006): returns PublicKeyCredentialCreationOptions", responses: {"200": {description: "Creation options (WebAuthn spec shape)", content: {application/json: {schema: {type: object}}}}}}
+  /auth/webauthn/register:finish:
+    post: {tags: [auth], operationId: webauthnRegisterFinish, requestBody: {required: true, content: {application/json: {schema: {type: object, description: "attestation response"}}}}, responses: {"201": {description: Passkey registered}}}
+  /auth/webauthn/login:begin:
+    post: {tags: [auth], security: [], operationId: webauthnLoginBegin, responses: {"200": {description: "PublicKeyCredentialRequestOptions", content: {application/json: {schema: {type: object}}}}}}
+  /auth/webauthn/login:finish:
+    post: {tags: [auth], security: [], operationId: webauthnLoginFinish, requestBody: {required: true, content: {application/json: {schema: {type: object, description: "assertion response"}}}}, responses: {"200": {description: Session, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}}}
+  /auth/mfa/totp:enroll:
+    post: {tags: [auth], operationId: totpEnroll, summary: "TOTP fallback: reveal-once secret + otpauth URI", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {secret: {type: string}, otpauth_uri: {type: string}}}}}}}}
+  /auth/mfa/totp:verify:
+    post: {tags: [auth], operationId: totpVerify, requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string}}}}}}, responses: {"204": {description: Enabled}}}
+  /auth/mfa/recovery:regenerate:
+    post: {tags: [auth], operationId: regenerateRecoveryCodes, summary: "Reveal-once recovery codes; the previous set is invalidated", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {codes: {type: array, items: {type: string}}}}}}}}}
+  /me/sessions:
+    get: {tags: [account], operationId: listSessions, summary: "P-series security page: device, last-seen, current flag", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionList"}}}}}}
+  /me/sessions/{ses}:
+    parameters: [{name: ses, in: path, required: true, schema: {type: string}}]
+    delete: {tags: [account], operationId: revokeSession, responses: {"204": {description: Revoked}}}
+
   /me/tokens:
     post:
       tags: [account]
@@ -782,6 +861,38 @@ paths:
       operationId: revokePersonalToken
       responses:
         "204": {description: Revoked immediately}
+
+  /me/notifications:
+    get:
+      tags: [account]
+      operationId: listNotifications
+      summary: "The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery"
+      x-streamable: true
+      parameters: [{name: unread, in: query, schema: {type: boolean}}, {name: cursor, in: query, schema: {type: string}}]
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationList"}}}}}
+  /me/notifications:read:
+    post: {tags: [account], operationId: markNotificationsRead, summary: "Bulk mark-read", requestBody: {required: true, content: {application/json: {schema: {type: object, required: [ids], properties: {ids: {type: array, items: {type: string}}}}}}}, responses: {"204": {description: Marked}}}
+  /me/notification-prefs:
+    get: {tags: [account], operationId: getNotificationPrefs, responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationPrefs"}}}}}}
+    patch:
+      tags: [account]
+      operationId: updateNotificationPrefs
+      summary: "Channels + quiet hours. Quiet hours affect ROUTING, never recording, and never gate escalation paging (glossary law)."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationPrefs"}}}}
+      responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationPrefs"}}}}}
+  /orgs/{org}/webhooks:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get: {tags: [governance], operationId: listWebhooks, responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/WebhookList"}}}}}}
+    post:
+      tags: [governance]
+      operationId: createWebhook
+      parameters: [{$ref: "#/components/parameters/idempotencyKey"}]
+      summary: "Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)"
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/WebhookInput"}}}}
+      responses: {"201": {description: "Reveal-once secret", content: {application/json: {schema: {$ref: "#/components/schemas/WebhookCreated"}}}}}
+  /webhooks/{wbh}:test:
+    parameters: [{name: wbh, in: path, required: true, schema: {type: string}}]
+    post: {tags: [governance], operationId: testWebhook, summary: "Test delivery with a synthetic event; result inline — never a dead end", responses: {"200": {description: "Delivery result", content: {application/json: {schema: {type: object, properties: {delivered: {type: boolean}, status_code: {type: integer}, duration_ms: {type: integer}}}}}}}}
 
   /orgs/{org}/api-keys:
     parameters: [{$ref: "#/components/parameters/org"}]
@@ -963,6 +1074,7 @@ components:
     project: {name: project, in: path, required: true, schema: {type: string}}
     env: {name: env, in: path, required: true, schema: {type: string}}
     service: {name: service, in: path, required: true, schema: {type: string}}
+    idempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 255}, description: "S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409"}
   responses:
     Conflict:
       description: Conflict with blocking reasons
@@ -1654,3 +1766,102 @@ components:
         status: {type: string, enum: [open, applied, dismissed, snoozed]}
         applied_by: {type: [string, "null"], description: "audited as `applied as <user>, via assistant`"}
         applied_event_id: {type: [string, "null"]}
+    SignupRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string, description: "argon2id server-side; strength policy in problem+json on 422"}
+        name: {type: string}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        password: {type: string}
+    LoginResult:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [session, mfa_required]}
+        session: {$ref: "#/components/schemas/SessionInfo"}
+        mfa_methods: {type: array, items: {type: string, enum: [webauthn, totp, recovery]}, description: "passkeys-first ordering (ADR-0006)"}
+    SessionInfo:
+      type: object
+      required: [user, session]
+      properties:
+        user: {type: object, required: [id, email], properties: {id: {type: string}, email: {type: string}, name: {type: string}}}
+        session: {type: object, required: [id, created_at], properties: {id: {type: string, description: "ses_…"}, created_at: {type: string, format: date-time}, current: {type: boolean}, device: {type: string}, last_seen_at: {type: string, format: date-time}}}
+    SessionList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, properties: {id: {type: string}, device: {type: string}, created_at: {type: string, format: date-time}, last_seen_at: {type: string, format: date-time}, current: {type: boolean}}}}
+    SqlQueryRequest:
+      type: object
+      required: [sql]
+      properties:
+        sql: {type: string}
+        params: {type: array, items: {}, description: "positional bind params"}
+        limit: {type: integer, default: 500, description: "server-capped; truncation flagged in the result"}
+    SqlQueryResult:
+      type: object
+      required: [columns, rows, row_count]
+      properties:
+        columns: {type: array, items: {type: string}}
+        rows: {type: array, items: {type: array, items: {}}}
+        row_count: {type: integer}
+        truncated: {type: boolean}
+        duration_ms: {type: integer}
+    TableList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, properties: {name: {type: string}, schema: {type: string}, rows_estimate: {type: integer}, size_bytes: {type: integer}}}}
+    KeyList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, properties: {key: {type: string}, type: {type: string}, ttl_seconds: {type: [integer, "null"]}, size_bytes: {type: integer}}}}
+        next_cursor: {type: [string, "null"]}
+    BackupList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, properties: {id: {type: string}, taken_at: {type: string, format: date-time}, kind: {type: string, enum: [scheduled, manual, pre_delete]}, size_bytes: {type: integer}}}}
+        pitr_window_start: {type: string, format: date-time}
+    BranchList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, properties: {id: {type: string}, name: {type: string}, parent: {type: [string, "null"]}, created_at: {type: string, format: date-time}, freshness_at: {type: string, format: date-time}, monthly_cents: {type: integer}, masked: {type: boolean}}}}
+    NotificationList:
+      type: object
+      properties:
+        data: {type: array, items: {type: object, required: [id, kind, title, created_at, read], properties: {id: {type: string, description: "ntf_…"}, kind: {type: string}, title: {type: string}, body: {type: string}, link: {type: string}, created_at: {type: string, format: date-time}, read: {type: boolean}}}}
+        next_cursor: {type: [string, "null"]}
+    NotificationPrefs:
+      type: object
+      properties:
+        channels: {type: object, properties: {email: {type: boolean}, inapp: {type: boolean}}}
+        quiet_hours: {type: [object, "null"], properties: {start: {type: string, description: "HH:MM"}, end: {type: string, description: "HH:MM"}, timezone: {type: string}}, description: "routing only — never recording, never escalation paging (glossary law)"}
+    WebhookInput:
+      type: object
+      required: [url, events]
+      properties:
+        url: {type: string, format: uri}
+        events: {type: array, items: {type: string}, description: "event-spine kinds filter"}
+    Webhook:
+      type: object
+      required: [id, url, events, status]
+      properties:
+        id: {type: string, description: "wbh_…"}
+        url: {type: string}
+        events: {type: array, items: {type: string}}
+        status: {type: string, enum: [active, disabled]}
+        created_at: {type: string, format: date-time}
+    WebhookList:
+      type: object
+      properties:
+        data: {type: array, items: {$ref: "#/components/schemas/Webhook"}}
+    WebhookCreated:
+      allOf:
+        - {$ref: "#/components/schemas/Webhook"}
+        - type: object
+          properties:
+            secret: {type: string, description: "signing secret — reveal-once, hash stored, never returned again"}
