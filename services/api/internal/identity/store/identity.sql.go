@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addMember = `-- name: AddMember :one
+INSERT INTO members (id, org_id, user_id, role) VALUES ($1, $2, $3, $4) RETURNING id, org_id, user_id, role, created_at
+`
+
+type AddMemberParams struct {
+	ID     string
+	OrgID  string
+	UserID string
+	Role   string
+}
+
+func (q *Queries) AddMember(ctx context.Context, arg AddMemberParams) (Member, error) {
+	row := q.db.QueryRow(ctx, addMember,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.Role,
+	)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const countActiveSessionsForUser = `-- name: CountActiveSessionsForUser :one
 SELECT count(*) FROM sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
@@ -21,6 +50,22 @@ func (q *Queries) CountActiveSessionsForUser(ctx context.Context, userID string)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const createOrg = `-- name: CreateOrg :one
+INSERT INTO orgs (id, name) VALUES ($1, $2) RETURNING id, name, created_at
+`
+
+type CreateOrgParams struct {
+	ID   string
+	Name string
+}
+
+func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error) {
+	row := q.db.QueryRow(ctx, createOrg, arg.ID, arg.Name)
+	var i Org
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
 }
 
 const createSession = `-- name: CreateSession :one
@@ -184,6 +229,22 @@ func (q *Queries) GetActiveTokenByHash(ctx context.Context, tokenHash []byte) (T
 		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const getMemberRole = `-- name: GetMemberRole :one
+SELECT role FROM members WHERE org_id = $1 AND user_id = $2
+`
+
+type GetMemberRoleParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) GetMemberRole(ctx context.Context, arg GetMemberRoleParams) (string, error) {
+	row := q.db.QueryRow(ctx, getMemberRole, arg.OrgID, arg.UserID)
+	var role string
+	err := row.Scan(&role)
+	return role, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
