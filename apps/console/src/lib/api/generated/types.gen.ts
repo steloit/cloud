@@ -1470,6 +1470,28 @@ export type CreateInviteResponses = {
 
 export type CreateInviteResponse = CreateInviteResponses[keyof CreateInviteResponses];
 
+export type RevokeInviteData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+        invite: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/invites/{invite}';
+};
+
+export type RevokeInviteResponses = {
+    /**
+     * Revoked
+     */
+    204: void;
+};
+
+export type RevokeInviteResponse = RevokeInviteResponses[keyof RevokeInviteResponses];
+
 export type DeclineInviteData = {
     body?: never;
     path: {
@@ -1538,7 +1560,9 @@ export type AcceptInviteResponses = {
 
 export type RenewInviteData = {
     body?: never;
-    path?: never;
+    path: {
+        invite: string;
+    };
     query?: never;
     url: '/invites/{invite}/renew';
 };

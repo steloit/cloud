@@ -315,6 +315,19 @@
       "provider": "aws-s3"
     },
     {
+      "id": "bnd_api_llm",
+      "source_id": "svc_api",
+      "target_type": "ai",
+      "target_id": null,
+      "provider": "anthropic",
+      "scope": "read_write",
+      "status": "active",
+      "env_vars": {
+        "LLM_API_KEY": "https://…masked"
+      },
+      "rotated_at": "2026-06-15T03:00:00+05:30"
+    },
+    {
       "id": "bnd_api_jobs",
       "source_id": "svc_api",
       "target_id": "svc_jobs",

@@ -144,6 +144,15 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/InviteList"}}}}
 
+  /orgs/{org}/invites/{invite}:
+    parameters: [{$ref: "#/components/parameters/org"}, {name: invite, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [orgs]
+      operationId: revokeInvite
+      summary: "Admin revoke (G-side): invalidates the link, notifies nobody, audited; status → revoked"
+      responses:
+        "204": {description: Revoked}
+
   /invites/{invite}:
     parameters: [{name: invite, in: path, required: true, schema: {type: string}}]
     get:
@@ -166,6 +175,7 @@ paths:
         "204": {description: Declined}
 
   /invites/{invite}/renew:
+    parameters: [{name: invite, in: path, required: true, schema: {type: string}}]
     post:
       operationId: renewInvite
       summary: "Request a new link for an expired invite — notifies the inviter (A7)"
