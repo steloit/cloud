@@ -174,11 +174,11 @@ func TestAuthLifecycle(t *testing.T) {
 
 	// --- failed login: 403 problem, no disclosure ---------------------------
 	resp, body = w.post(t, "/v1/auth/login", `{"email":"asha@example.com","password":"wrong-password!"}`, "")
-	if resp.StatusCode != 403 || !strings.Contains(body, "remediation") {
+	if resp.StatusCode != 401 || !strings.Contains(body, "remediation") {
 		t.Fatalf("bad password: %d %s", resp.StatusCode, body)
 	}
 	resp, body2 := w.post(t, "/v1/auth/login", `{"email":"nobody@example.com","password":"wrong-password!"}`, "")
-	if resp.StatusCode != 403 {
+	if resp.StatusCode != 401 {
 		t.Fatalf("unknown email: %d", resp.StatusCode)
 	}
 	if body != body2 {
@@ -193,7 +193,7 @@ func TestAuthLifecycle(t *testing.T) {
 
 	// --- unauthorized: no cookie → 403 --------------------------------------
 	resp, _ = w.get(t, "/v1/auth/session", "")
-	if resp.StatusCode != 403 {
+	if resp.StatusCode != 401 {
 		t.Fatalf("no-cookie session: %d", resp.StatusCode)
 	}
 
@@ -217,7 +217,7 @@ func TestAuthLifecycle(t *testing.T) {
 		t.Fatalf("session not revoked in DB: %v", err)
 	}
 	resp, _ = w.get(t, "/v1/auth/session", loginCk)
-	if resp.StatusCode != 403 {
+	if resp.StatusCode != 401 {
 		t.Fatalf("revoked session still valid: %d", resp.StatusCode)
 	}
 }
@@ -231,7 +231,7 @@ func TestSessionExpiry(t *testing.T) {
 	ck := sessionCookie(resp)
 	time.Sleep(1500 * time.Millisecond)
 	resp, _ = w.get(t, "/v1/auth/session", ck)
-	if resp.StatusCode != 403 {
+	if resp.StatusCode != 401 {
 		t.Fatalf("expired session accepted: %d", resp.StatusCode)
 	}
 }

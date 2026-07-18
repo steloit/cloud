@@ -48,6 +48,15 @@ func ValidationFailed(errs []FieldError) Problem {
 	}
 }
 
+// AuthFailed — 401 (catalog auth_failed, S-process 2026-07-19): invalid
+// credentials or missing/expired session. Never discloses account existence.
+func AuthFailed(detail, remediation string) Problem {
+	return Problem{
+		Type: typeBase + "auth_failed", Title: "Authentication failed", Status: http.StatusUnauthorized,
+		Detail: detail, Remediation: nonEmpty(remediation, "Sign in and try again."),
+	}
+}
+
 // PermissionDenied — 403; detail must name the missing role OR the denying policy (E3 grammar).
 func PermissionDenied(detail, remediation string) Problem {
 	return Problem{

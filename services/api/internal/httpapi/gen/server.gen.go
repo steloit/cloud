@@ -273,6 +273,14 @@ func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) e
 	return err
 }
 
+type Login401Response struct {
+}
+
+func (response Login401Response) VisitLoginResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
 type Login429Response struct {
 }
 
@@ -293,6 +301,14 @@ type Logout204Response struct {
 
 func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
+	return nil
+}
+
+type Logout401Response struct {
+}
+
+func (response Logout401Response) VisitLogoutResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
 	return nil
 }
 
@@ -317,6 +333,14 @@ func (response GetSession200JSONResponse) VisitGetSessionResponse(w http.Respons
 	return err
 }
 
+type GetSession401Response struct {
+}
+
+func (response GetSession401Response) VisitGetSessionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
 type SignupRequestObject struct {
 	Params SignupParams
 	Body   *SignupJSONRequestBody
@@ -338,6 +362,14 @@ func (response Signup201JSONResponse) VisitSignupResponse(w http.ResponseWriter)
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type Signup409Response struct {
+}
+
+func (response Signup409Response) VisitSignupResponse(w http.ResponseWriter) error {
+	w.WriteHeader(409)
+	return nil
 }
 
 type Signup429Response struct {
