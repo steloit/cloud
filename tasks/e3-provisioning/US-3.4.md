@@ -2,7 +2,7 @@
 id: US-3.4
 title: Bind an external app to the database (credentials minted, rotated on unbind)
 epic: E3
-status: stub
+status: blocked
 phase: MVP
 priority: high
 sprint: 4
@@ -29,4 +29,6 @@ GOV-002 v0 first-class mode: Steloit-as-data-layer.
 
 - [ ] `<TARGET>_URL` injected/displayed; bindings cost $0; read-only scope enforced by the datastore itself.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Blocked
+
+Blocked on P1: bind/mint/rotate mechanics and $0 + <TARGET>_URL landed in T3.6; "read-only scope enforced by the datastore itself" requires the CNPG driver to materialize roles/grants (T3.4).

@@ -2,7 +2,7 @@
 id: US-3.3
 title: Accepted service provisions via the reconciler; metering starts at ready
 epic: E3
-status: stub
+status: blocked
 phase: MVP
 priority: critical
 sprint: 4
@@ -29,4 +29,6 @@ Status walks provisioning → ready (ADR-024); metering starts at `ready`, never
 
 - [ ] end-to-end: desired row → cell agent → CNPG cluster in the env namespace (ADR-0003) → ready; usage events flowing.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Blocked
+
+Blocked on P1: needs T3.4 (CNPG driver, deps T1.2) and a running cell — the reconciler converges accepted desired state; metering-at-ready is already proven control-plane-side (T3.7).
