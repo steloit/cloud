@@ -95,7 +95,7 @@ Modules follow the backend structure in `14-development/architecture.md` and GOV
 This is the path the five clients committed to; it ships first, alone, so they get real value in ~90 days instead of a broader platform in twice that.
 
 - **In:** Cell-0, identity core, orgs/projects/envs, estimate engine, Postgres provisioning (CNPG cluster + snapshot branches, ADR-0003), secrets + bindings (incl. bind-to-external-host — a first-class v0 mode per GOV-002 §1.4), one compute service type (web) via push-to-deploy, PR-triggered branched previews, metering events from first deploy (D10 — cannot defer; backfill is impossible), baseline DB metrics/logs, **CLI as the primary client** (D11: "CLI or minimal UI is acceptable"), audit/events ledger.
-- **Deferred to V1:** Valkey, Queue, Object-storage API, AI layer, billing/charging (metering only), the full console (a thin login + read-only project/estimate view rides along as E8-lite because it's nearly free), dashboards, alerts UI, templates, BYOC.
+- **Deferred to V1:** Valkey, AI layer, billing/charging (metering only), the full console (a thin login + read-only project/estimate view rides along as E8-lite because it's nearly free), dashboards, alerts UI, templates. *(Queue → a Postgres capability, V2, ADR-0004. BYOC is not deferred-to-V1 — it is a v3 Enterprise capability, exit-criteria-gated, ADR-0005.)*
 - **Users:** the five design partners, invite-only (no anonymous compute — abuse control per A1.8).
 
 ### V1 — Design partners → first revenue — Sprints 7–16
@@ -113,7 +113,7 @@ Maps to GOV-002 v0.5→v1: data layer completes, console goes live against the r
 
 ### Future — V2+ (not planned in sprints here; recorded so nobody re-litigates)
 - v2: Workers, Cron, autoscaling depth, `steloit dev` GA, canary/blue-green (compute expansion — ADR-006: data before compute)
-- v3: BYOC cells GA (X2/X3 — connect flow exists in console), SSO/SCIM, private networking, SOC 2, multi-region
+- v3 (Enterprise): SSO/SCIM, private networking (PrivateLink/PSC), SOC 2, multi-region, dedicated cells. **BYOC (true cross-account, X2/X3)** is v3 *and* exit-criteria-gated (ADR-0005): built only against a signed contract requiring in-account deployment where sovereignty is provably un-substitutable by regional cell / dedicated cell / private networking / BYOK. Most "BYOC" asks resolve at a cheaper rung of the ADR-0005 residency ladder; the cell architecture keeps BYOC nearly free to *enable* (only the cell relocates), but **no BYOC-specific machinery is built pre-contract**. Enterprise-sales narrative: "managed → your own account, zero app changes, never locked in" — v3, **not** a wedge message.
 - v4: Functions, event bus, analytics DB, customer auth, marketplace
 - Data-plane depth (E14) straddles V1/Future: read-only surfaces (tables, insights, key browse, messages view) land in V1; destructive verbs (purge, FLUSHALL, shell) land post-V1 behind policy gates, per the S2 ruling
 

@@ -51,11 +51,15 @@ never hand-written · demo data from `19-canon` only.
 ## Hard rules
 
 - Never invent a component, endpoint, or term — propose the owner-level change first (agent-guide §3 binds here).
-- **Architecture v1.2 is frozen** (`docs/architecture.md`, ADR-0001/0003/0004): Go/stdlib-http/sqlc/River/
-  REST+SSE, CNPG+ZFS substrate, and the **product surface `[postgres, valkey, web, worker]`** are decided.
-  Storage & AI are external **Bindings**; queue is a **Postgres capability** (pgmq); GPU is out. Don't
-  introduce alternative frameworks/ORMs/protocols or new managed products — deltas require a new ADR with
-  a measured trigger. The Engineering OS (this file, tasks/, contexts/, spec-sync) is likewise frozen.
+- **Platform architecture is FROZEN** (`docs/architecture.md` v1.2, ADR-0001/0003/0004/0005): Go/stdlib-http/
+  sqlc/River/REST+SSE, CNPG+ZFS substrate, the **product surface `[postgres, valkey, web, worker]`**, and
+  BYOC (Enterprise/v3, exit-criteria-gated — ADR-0005) are decided. Storage & AI are external **Bindings**;
+  queue is a **Postgres capability** (pgmq); GPU is out. The Engineering OS (this file, tasks/, contexts/,
+  spec-sync) is frozen too.
+- **New-managed-product gate:** a proposed managed product must first prove it cannot be **(1) a Binding,
+  (2) a capability of an existing product, or (3) an integration.** Only if all three fail may it be a
+  product — and only via a new ADR. Architecture deltas require evidence from implementation or real
+  customer feedback, never speculation. No proactive redesign.
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**

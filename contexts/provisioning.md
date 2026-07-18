@@ -27,6 +27,12 @@ if a task requires violating an invariant, STOP and surface it (§8).
   response, error, metric, or doc.
 - **Metering (D10):** every lifecycle edge emits usage events (compute-seconds, CU-hours, GB-months,
   egress) tagged org/project/env from the FIRST deploy. Backfill is impossible — never defer.
+- **BYOC is demand-gated to v3 (ADR-0005):** the cell/reconciler/`cell_id` design is justified by
+  isolation/regions/resilience/scale — **BYOC is a free rider on it, not its justification.** Carry the
+  portable shape; build **zero** BYOC-specific machinery (no multi-cloud abstraction, no cross-account
+  IAM, no AWS/Azure drivers) until all five exit criteria hold. Run the residency ladder on any "BYOC"
+  ask (residency → regional cell; network → PrivateLink; keys → BYOK; only contractually-required
+  sovereignty → BYOC). Not every enterprise request is a BYOC request.
 - **Estimate gate:** `createService` requires an accepted `estimate_id`; nothing provisions or
   bills before acceptance; the estimate's line grammar is the invoice's line grammar, verbatim.
 
