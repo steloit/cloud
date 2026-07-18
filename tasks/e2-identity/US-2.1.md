@@ -2,7 +2,7 @@
 id: US-2.1
 title: Sign up, create an org (name → permanent slug, home region)
 epic: E2
-status: stub
+status: done
 phase: MVP
 priority: high
 sprint: 2
@@ -13,7 +13,8 @@ labels: [Backend, API]
 module: M2 Identity
 contexts: [api-conventions, rbac, events-spine]
 files: []
-verify: []
+verify:
+  - cd services/api && go test ./...
 owner: agent
 ---
 
@@ -25,4 +26,19 @@ Sign up, create an org (name → permanent slug, home region)
 
 **AC:** slug `[a-z0-9-]{3,32}` immutable; A5 microcopy verbatim; empty world has a way forward.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E2.
+## Acceptance criteria
+
+- [x] Slug `[a-z0-9-]{3,32}` derived at create, unique, immutable — `TestOrgGovernance`
+      (T2.7): "Gov Co" → `gov-co`, rename keeps the slug, collision → 409; no code path
+      writes slug after create.
+- [x] Signup → session → org → owner membership, all on real Postgres
+      (`TestAuthLifecycle` + `TestOrgGovernance`); `home_region` accepted with the
+      contract default (`aws/ap-south-1`) and PATCHable (a prefill, never a lock).
+- [x] A5 microcopy + empty-world CTA live in the built console (canon-mocked); wiring the
+      console to this API is E8's scope, tracked there — not silently absorbed here.
+
+## Outcome
+
+- API side fully carried by T2.1 (signup/session) and T2.7 (org create with slug
+  derivation, subscription row, owner membership, events). No new code — this story
+  verifies and records the evidence trail. Console wiring lands with E8.

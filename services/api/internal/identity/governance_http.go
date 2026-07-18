@@ -319,7 +319,8 @@ func (h *Handlers) RenewInvite(ctx context.Context, req gen.RenewInviteRequestOb
 // ---- org API keys (G8) -----------------------------------------------------
 
 func (h *Handlers) CreateApiKey(ctx context.Context, req gen.CreateApiKeyRequestObject) (gen.CreateApiKeyResponseObject, error) {
-	if _, err := h.requireOrg(ctx, req.OrgPathParam, "api_keys.manage", true); err != nil {
+	actor, err := h.requireOrg(ctx, req.OrgPathParam, "api_keys.manage", true)
+	if err != nil {
 		return nil, err
 	}
 	if req.Body == nil || strings.TrimSpace(req.Body.Name) == "" {
@@ -333,7 +334,7 @@ func (h *Handlers) CreateApiKey(ctx context.Context, req gen.CreateApiKeyRequest
 	if req.Body.ExpiresInDays != nil {
 		days = int(*req.Body.ExpiresInDays)
 	}
-	minted, err := h.svc.MintOrgKey(ctx, req.OrgPathParam, req.Body.Name, scope, days)
+	minted, err := h.svc.MintOrgKey(ctx, req.OrgPathParam, req.Body.Name, scope, actor, days)
 	if err != nil {
 		return nil, err
 	}
