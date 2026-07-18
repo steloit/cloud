@@ -40,3 +40,11 @@ Validator OK (179 tasks/17 epics/8 packs) · dep graph acyclic, no orphans, no r
 **P5 (docs polish batch):** I5 derived-doc cleanups + Nice items.
 **P6 (offer-based):** vault INDEX/log/decisions update.
 S9 (human pass) remains the vehicle for all 00-sources reconciliation.
+
+## Resolution log (same day)
+
+- **P1 done** (`4d46c9a`): state maps +6/−2 (C4 closed), data rows at parity, label config + live label de-Neon'd, #118 milestone → Sprint 8, two stale blocked-by comments deleted, board fields set for #193–198.
+- **P2 done** (`2588984`): founder rulings applied — E9-4 + T14.4 → Future; Composer core (T13.1/13.2/13.6 → S7, T13.7 → S8 + high) with E13 epic re-based and the Law-4 note clarified. T4.9 → S11. S11 (#199, intent field) and S12 (#200, ADR-022 amendment) ruling stubs created; E8-S3 → intent canvas; T5.3 `add <intent>`; T13.7 MCP clause; S9 scope + CK-M4 partner questions. Plan tables fixed; loads flagged un-rebalanced (S11 overload → enrichment). Validate OK (181), sync 198/198.
+- **P3 done**: console contract migration — authority spec recopied (external-Binding surface restored), client regenerated (Product = 4 values), AI Gateway/X1 chrome fully removed (3 feature files + 5 routes + rail injection + palette entry + all branches), GPU + storage/queue removed from the **create plane** (grid, type blocks, AI1 suggestions, CREATABLE); storage/queue **render plane** kept behind the explicit `CanonProduct` seam (`src/lib/api/legacy.ts` — deleting it is the P4 exit criterion) so the canon world keeps rendering pending the S9 item-6 ruling; Binding `target_id` nullability honored. Typecheck/lint/tests green (21/21).
+- **NEW FINDING (fixed in P3):** `pnpm --filter console lint` was broken on the pristine tree — biome 2.5.0 `vcs.useIgnoreFile: true` requires an ignore file in `apps/console/`, which never existed (the audit's earlier "lint PASS" was incorrect). Fixed: `apps/console/.gitignore` added; biome then auto-fixed 18 files (import organization/formatting); 14 pre-existing non-blocking warnings remain.
+- **NEW FINDING (P2, open):** implementation-plan sprint loads are un-rebalanced after the moves; Sprint 11 now carries T4.9's 3.5 EW on top of its prior load — rebalance at enrichment.

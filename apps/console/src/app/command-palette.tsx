@@ -133,22 +133,6 @@ function Palette() {
         keywords: "create new instance add service postgres valkey",
       },
       {
-        key: "gateway",
-        section: "Jump to" as const,
-        title: (
-          <>
-            Service · <b>AI Gateway</b> <span className="text-ink3">(X1 exemplar)</span>
-          </>
-        ),
-        run: () =>
-          navigate({
-            to: "/$org/$project/svc/$service",
-            params: { org, project, service: "gateway" },
-            search: { env: "production" },
-          }),
-        keywords: "ai gateway capability models routes x1",
-      },
-      {
         key: "audit",
         section: "Jump to" as const,
         title: (

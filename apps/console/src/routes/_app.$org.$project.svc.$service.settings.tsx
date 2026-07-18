@@ -1,14 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Card } from "@/design-system/card";
 import { PermissionDenied } from "@/features/errors/failure-states";
-import { resolveService } from "@/features/services/gateway";
-import { GatewaySettingsTab } from "@/features/services/gateway-tabs";
 import { useServices } from "@/features/services/hooks";
+import { resolveService } from "@/features/services/resolve";
 import { PostgresSettingsTab } from "@/features/services/tabs/postgres";
 import { QueueSettingsTab } from "@/features/services/tabs/queue";
 import { StorageSettingsTab } from "@/features/services/tabs/storage";
 import { ValkeySettingsTab } from "@/features/services/tabs/valkey";
 import { WebSettingsTab } from "@/features/services/tabs/web";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { resolveEnvKey } from "@/lib/canon-env";
 import { useSession } from "@/lib/session";
 
@@ -52,14 +52,12 @@ function SettingsTab() {
       <PostgresSettingsTab {...props} />
     ) : svc.product === "valkey" ? (
       <ValkeySettingsTab {...props} />
-    ) : svc.product === "storage" ? (
+    ) : (svc.product as CanonProduct) === "storage" ? (
       <StorageSettingsTab {...props} />
-    ) : svc.product === "queue" ? (
+    ) : (svc.product as CanonProduct) === "queue" ? (
       <QueueSettingsTab {...props} />
     ) : svc.product === "web" || svc.product === "worker" ? (
       <WebSettingsTab {...props} />
-    ) : svc.product === "ai-gateway" ? (
-      <GatewaySettingsTab {...props} />
     ) : (
       <Card className="p-4 text-12 text-ink2">
         Settings for {svc.product} land in a later phase.

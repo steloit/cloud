@@ -111,19 +111,17 @@ function OrgShell() {
   // Service context wins first: a service tab's /settings or /deployments
   // suffix must not light the gear/Deploy domain icons — exactly one .rit.on.
   const active: RailActive =
-    childParams.service === "gateway" || childParams.service === "ai-gateway"
-      ? { kind: "product", product: "ai-gateway" }
-      : childParams.service && activeService
-        ? { kind: "product", product: activeService.product as Product }
-        : path.includes("/settings")
-          ? { kind: "settings" }
-          : path.includes("/observe")
-            ? { kind: "observe" }
-            : path.includes("/deploy")
-              ? { kind: "deploy" }
-              : path.endsWith("/create")
-                ? { kind: "create" }
-                : { kind: "home" };
+    childParams.service && activeService
+      ? { kind: "product", product: activeService.product }
+      : path.includes("/settings")
+        ? { kind: "settings" }
+        : path.includes("/observe")
+          ? { kind: "observe" }
+          : path.includes("/deploy")
+            ? { kind: "deploy" }
+            : path.endsWith("/create")
+              ? { kind: "create" }
+              : { kind: "home" };
 
   return (
     <div className="flex h-screen flex-col bg-canvas">

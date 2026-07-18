@@ -23,6 +23,7 @@ import type {
   Token,
   Trace,
 } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import fixtures from "@/lib/canon/fixtures.json";
 import { CANON_NOW } from "@/lib/canon/now";
 
@@ -500,7 +501,8 @@ export const internalToolsServices: Service[] = [
     id: "svc_it_files",
     env_id: "env_it_prod",
     name: "files",
-    product: "storage",
+    // PRE-A5 canon record (P4 / S9 item 6): storage -> Binding re-cast pending the founder ruling.
+    product: "storage" as CanonProduct as Service["product"],
     status: "ready",
     shape: { public: false, versioning: true, $representative: "name not frame-fixed" },
     region: "aws/ap-south-1",

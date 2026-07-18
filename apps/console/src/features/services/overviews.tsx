@@ -379,7 +379,8 @@ export function WebOverview({
 
   const usePills = uses.map((b) => {
     const envVar = Object.keys(b.env_vars ?? {})[0] ?? "URL";
-    return `${envVar} ← ${nameOf(b.target_id)} · ${b.scope === "read_only" ? "ro" : "rw"}`;
+    const target = b.target_id ? nameOf(b.target_id) : (b.provider ?? "external");
+    return `${envVar} ← ${target} · ${b.scope === "read_only" ? "ro" : "rw"}`;
   });
 
   return (
@@ -494,7 +495,7 @@ export function WorkerOverview({
   nameOf,
 }: OverviewCtx) {
   const usePills = uses.map((b) => {
-    const target = nameOf(b.target_id);
+    const target = b.target_id ? nameOf(b.target_id) : (b.provider ?? "external");
     if (target === "jobs") return "jobs · consume · concurrency 8";
     return `${target} · ${scopeLabel(b.scope)}`;
   });

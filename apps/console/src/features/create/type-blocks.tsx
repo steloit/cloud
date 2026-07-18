@@ -15,14 +15,7 @@ import { cn } from "@/lib/utils";
  * → included defaults; the estimate rail reads the props-up BlockState.
  */
 
-export type CreatableProduct =
-  | "postgres"
-  | "valkey"
-  | "storage"
-  | "queue"
-  | "web"
-  | "worker"
-  | "gpu-worker";
+export type CreatableProduct = "postgres" | "valkey" | "web" | "worker";
 
 export interface EstimateLineItem {
   label: string;
@@ -63,20 +56,6 @@ export const TYPE_BLOCKS: Record<CreatableProduct, TypeBlockDef> = {
     hsubSuffix: " · same form, different type block — learn one, know them all",
     footer: "Billing starts when ready.",
   },
-  storage: {
-    label: "Storage",
-    h1: "New Object Storage",
-    hsubSuffix: " · usage-based — no idle cost",
-    footer:
-      "Usage-based: the figure is a projection at your entered volumes — the meter, not a floor. $0 if unused.",
-  },
-  queue: {
-    label: "Queue",
-    h1: "New Queue",
-    hsubSuffix: "",
-    footer:
-      "The DLQ is part of the product, not a second queue to configure and pay for separately.",
-  },
   web: {
     label: "Web",
     h1: "New Web service",
@@ -90,13 +69,6 @@ export const TYPE_BLOCKS: Record<CreatableProduct, TypeBlockDef> = {
     hsubSuffix: " · background jobs & schedules",
     footer:
       "A worker that mostly sleeps mostly costs nothing — previews inherit this and round to $0.",
-  },
-  "gpu-worker": {
-    label: "GPU Worker",
-    h1: "New GPU Worker",
-    hsubSuffix: "",
-    footer:
-      "The exception is part of the estimate — the physics never shows up as a billing surprise.",
   },
 };
 
@@ -653,174 +625,6 @@ function WebBlock({ onChange }: { onChange: (s: BlockState) => void }) {
   );
 }
 
-/* ---------- storage · C10 ---------- */
-
-const ST_VISIBILITY: ChoiceOpt[] = [
-  {
-    id: "private",
-    title: "Private",
-    sub: "Access only via bindings and signed URLs — the safe default.",
-  },
-  {
-    id: "public",
-    title: "Public via CDN",
-    sub: "Requires org policy public-buckets — request routes to an Admin.",
-    dimmed: true,
-    disabledReason: "Requires org policy public-buckets — request routes to an Admin.",
-  },
-];
-const ST_BINDINGS: BindingRowDef[] = [
-  { target: "api", scope: "write · scoped to uploads/", on: true },
-  { target: "worker", scope: "read", on: true },
-];
-
-function StorageBlock({ onChange }: { onChange: (s: BlockState) => void }) {
-  const [name, setName] = useState("uploads");
-  const [visibility, setVisibility] = useState("private");
-  const [versioning, setVersioning] = useState(true);
-  const [tmpRule, setTmpRule] = useState(true);
-  const [bind, setBind] = useState(() => initBind(ST_BINDINGS));
-
-  useBlockSync(onChange, {
-    name,
-    lines: [
-      { label: "Storage · $0.021/GB", amount: "~$2.10 @ 100 GB" },
-      { label: "Egress · $0.01/GB", amount: "~$1.90 est." },
-      { label: "Requests", amount: "included" },
-    ],
-    totalLabel: "~$4",
-    buttonLabel: `Create ${name} — usage-based`,
-    cli: `steloit storage create ${name}${visibility === "private" ? " --private" : ""}${versioning ? " --versioning" : ""}`,
-    shape: {
-      visibility,
-      versioning,
-      lifecycle: tmpRule ? ["tmp/ → delete 7d"] : [],
-    },
-    bindings: toBindings(ST_BINDINGS, bind),
-  });
-
-  return (
-    <>
-      <NameCard
-        value={name}
-        onChange={setName}
-        sublabel="raw user uploads, processed into assets"
-      />
-      <Card className="flex flex-col gap-4 p-4">
-        <Group label="Visibility">
-          <ChoiceCards options={ST_VISIBILITY} value={visibility} onPick={setVisibility} cols={2} />
-        </Group>
-        <Toggle
-          on={versioning}
-          onToggle={() => setVersioning((v) => !v)}
-          label="Versioning · deletes are soft for 30 d"
-        />
-        <Group label="Lifecycle">
-          <div className="chiprow">
-            <button
-              type="button"
-              aria-pressed={tmpRule}
-              className={cn("chip", tmpRule && "on")}
-              onClick={() => setTmpRule((v) => !v)}
-            >
-              tmp/ → delete 7d
-            </button>
-            {/* Reads as a button, so it's honestly disabled — extra
-                lifecycle rules aren't built yet; the create body carries the
-                tmp/ rule only (finding). */}
-            <button
-              type="button"
-              className="chip cursor-not-allowed border-dashed text-ink3 opacity-55"
-              disabled
-              title="Extra lifecycle rules aren't built yet — the create body carries the tmp/ rule only (finding)"
-              aria-disabled="true"
-            >
-              + add rule
-            </button>
-          </div>
-        </Group>
-      </Card>
-      <BindingsCard
-        rows={ST_BINDINGS}
-        checked={bind}
-        onToggle={(t) => setBind((prev) => ({ ...prev, [t]: !prev[t] }))}
-      />
-    </>
-  );
-}
-
-/* ---------- queue · C11 ---------- */
-
-const Q_DELIVERY: ChoiceOpt[] = [
-  {
-    id: "at-least-once",
-    title: "At-least-once",
-    sub: "Consumers must be idempotent — highest throughput.",
-  },
-  { id: "fifo", title: "FIFO", sub: "Strict order per group — lower throughput, stated." },
-];
-const Q_BINDINGS: BindingRowDef[] = [
-  { target: "api", scope: "publish", on: true },
-  { target: "worker", scope: "consume", note: "· or wire the new mailer worker (C12)", on: true },
-];
-
-function QueueBlock({ onChange }: { onChange: (s: BlockState) => void }) {
-  const [name, setName] = useState("emails");
-  const [delivery, setDelivery] = useState("at-least-once");
-  const [retries, setRetries] = useState("5 × exponential backoff");
-  const [dlq, setDlq] = useState(true);
-  const [bind, setBind] = useState(() => initBind(Q_BINDINGS));
-
-  useBlockSync(onChange, {
-    name,
-    lines: [
-      { label: "Queue base", amount: "$6" },
-      { label: "Messages · $0.40/M", amount: "metered" },
-    ],
-    totalLabel: "$6",
-    buttonLabel: `Create ${name} — $6/mo est.`,
-    cli: `steloit queue create ${name} --delivery ${delivery}${dlq ? " --dlq" : ""}`,
-    shape: { delivery, retries, dlq },
-    bindings: toBindings(Q_BINDINGS, bind),
-  });
-
-  return (
-    <>
-      <NameCard value={name} onChange={setName} sublabel="transactional email fan-out" />
-      <Card className="flex flex-col gap-4 p-4">
-        <Group label="Delivery contract">
-          <Helper>chosen, not discovered in an incident</Helper>
-          <ChoiceCards options={Q_DELIVERY} value={delivery} onPick={setDelivery} cols={2} />
-        </Group>
-        <Group label="Retries">
-          <Inp
-            value={retries}
-            onChange={(e) => setRetries(e.target.value)}
-            className="mono max-w-[260px] text-12"
-            aria-label="Retries"
-          />
-        </Group>
-        <Toggle
-          on={dlq}
-          onToggle={() => setDlq((v) => !v)}
-          label="Dead-letter queue · failures kept 7 d, redrivable"
-        />
-      </Card>
-      <BindingsCard
-        rows={Q_BINDINGS}
-        checked={bind}
-        onToggle={(t) => setBind((prev) => ({ ...prev, [t]: !prev[t] }))}
-      />
-      <IncludedDefaults
-        pills={[
-          { label: "depth & age alerts pre-set ✓" },
-          { label: "DLQ > 0 alerts through Observe ✓" },
-        ]}
-      />
-    </>
-  );
-}
-
 /* ---------- worker · C12 ---------- */
 
 const WK_TRIGGERS: ChoiceOpt[] = [
@@ -892,145 +696,6 @@ function WorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
   );
 }
 
-/* ---------- gpu-worker · C7 (region exception) ---------- */
-
-/** C7 · only regions where the product exists — sorted by distance from the env. */
-const GPU_REGIONS = [
-  { id: "aws/ap-southeast-1", title: "aws · ap-southeast-1", sub: "Singapore · +34 ms to env" },
-  { id: "gcp/asia-northeast1", title: "gcp · asia-northeast1", sub: "Tokyo · +71 ms to env" },
-  { id: "aws/us-east-1", title: "aws · us-east-1", sub: "N. Virginia · +192 ms to env" },
-];
-
-const GPU_SIZE_A10 = {
-  id: "A10",
-  label: "A10 · scale-to-zero · $88",
-  line: "A10 · scale-to-zero",
-  price: 88,
-};
-const GPU_SIZES = [GPU_SIZE_A10, { id: "A100", label: "A100 · $310", line: "A100", price: 310 }];
-
-function GpuWorkerBlock({ onChange }: { onChange: (s: BlockState) => void }) {
-  const [name, setName] = useState("gpu-encoder");
-  const [region, setRegion] = useState("aws/ap-southeast-1");
-  const [size, setSize] = useState("A10");
-  const [bindJobs, setBindJobs] = useState(true);
-
-  const sz = GPU_SIZES.find((s) => s.id === size) ?? GPU_SIZE_A10;
-  const total = sz.price + (bindJobs ? 3 : 0);
-
-  useBlockSync(onChange, {
-    name,
-    lines: [
-      { label: sz.line, amount: usd(sz.price) },
-      ...(bindJobs ? [{ label: "Cross-region egress est.", amount: "~$3" }] : []),
-    ],
-    totalLabel: usd(total),
-    buttonLabel: `Create ${name} — ${usd(total)}/mo est.`,
-    cli: `steloit gpu create ${name} --region ${region}`,
-    shape: { size, region, scale_to_zero: size === "A10" },
-    bindings: bindJobs ? [{ target: "jobs", scope: "read_write" as const }] : [],
-  });
-
-  return (
-    <>
-      <Banner tone="warn">
-        GPU Worker isn't available in <b>aws · ap-south-1</b> yet — choose one of the regions where
-        it runs. This instance will be a <b>cross-region exception</b>, marked in the topology.
-      </Banner>
-      <NameCard value={name} onChange={setName} />
-      <Card className="flex flex-col gap-2.5 p-4">
-        <Flabel>
-          Region{" "}
-          <span className="font-normal text-ink3">
-            only where this product exists — sorted by distance from your environment
-          </span>
-        </Flabel>
-        <ChoiceCards
-          options={GPU_REGIONS.map((r) => ({
-            id: r.id,
-            title: r.title,
-            sub: r.sub,
-            subMono: true,
-          }))}
-          value={region}
-          onPick={setRegion}
-        />
-        <div className="flex items-center gap-2 text-11">
-          <Pill tone="ok">
-            permitted by org policy <span className="mono">allowed-regions-apac</span>
-          </Pill>
-          <span className="text-ink3">us-east-1 would require an Admin policy exception</span>
-        </div>
-        <div className="flex items-center gap-2.5 rounded-[9px] border border-hair border-dashed px-3 py-2.5">
-          <Icon id="s-globe" className="h-[13px] w-[13px] text-ink3" />
-          <span className="text-11 text-ink2">
-            <b>aws · ap-south-1</b> — your home region — doesn't have GPU Worker yet.
-          </span>
-          <span className="sp" />
-          <Btn
-            variant="s"
-            className="h-6 px-2 text-10p5"
-            onClick={() => toast.success("Request recorded — you'll be notified")}
-          >
-            Request it here
-          </Btn>
-          <span className="text-10 text-ink3">
-            you'll be notified · this instance gets a one-click move home
-          </span>
-        </div>
-      </Card>
-      <Card className="flex flex-col gap-2 p-4">
-        <Flabel>What cross-region means here — stated, not discovered later</Flabel>
-        <div className="flex flex-col gap-2 text-11p5 leading-relaxed text-ink2">
-          <div className="flex gap-2.5">
-            <Dot tone="warn" />
-            <span>
-              Binding <span className="mono">gpu-encoder → jobs</span> crosses regions:{" "}
-              <b className="text-ink1">+34 ms per call</b> and{" "}
-              <b className="text-ink1">egress $0.02/GB</b> (≈ $3/mo at current queue volume).
-            </span>
-          </div>
-          <div className="flex gap-2.5">
-            <Dot tone="warn" />
-            <span>
-              The environment's private network extends via encrypted peering — still private, but
-              this edge renders <b className="text-ink1">dashed with a globe mark</b> in the
-              topology (W3).
-            </span>
-          </div>
-          <div className="flex gap-2.5">
-            <Dot tone="ok" />
-            <span>
-              When GPU Worker reaches ap-south-1, the console will propose a{" "}
-              <b className="text-ink1">move home</b> — one click, downtime-free, logged.
-            </span>
-          </div>
-        </div>
-      </Card>
-      <Card className="flex flex-col gap-2.5 p-4">
-        <Flabel>Size &amp; bindings</Flabel>
-        <div className="flex items-center gap-4">
-          <Chips
-            options={GPU_SIZES.map((s) => ({ label: s.label }))}
-            isOn={(l) => l === sz.label}
-            onPick={(l) => setSize(GPU_SIZES.find((s) => s.label === l)?.id ?? "A10")}
-          />
-          <label className="flex cursor-pointer items-center gap-2 text-12">
-            <input
-              type="checkbox"
-              checked={bindJobs}
-              onChange={() => setBindJobs((v) => !v)}
-              className="accent-steel"
-            />
-            <Icon id="s-queue" className="h-[13px] w-[13px] text-ink3" />
-            jobs <Pill tone="st">consume</Pill> <Pill tone="warn">cross-region</Pill>
-          </label>
-        </div>
-      </Card>
-    </>
-  );
-}
-
 /* ---------- dispatcher ---------- */
 
 export function TypeBlock({
@@ -1047,13 +712,7 @@ export function TypeBlock({
       return <ValkeyBlock onChange={onChange} />;
     case "web":
       return <WebBlock onChange={onChange} />;
-    case "storage":
-      return <StorageBlock onChange={onChange} />;
-    case "queue":
-      return <QueueBlock onChange={onChange} />;
     case "worker":
       return <WorkerBlock onChange={onChange} />;
-    case "gpu-worker":
-      return <GpuWorkerBlock onChange={onChange} />;
   }
 }

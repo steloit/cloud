@@ -85,22 +85,17 @@ import { Route as AppOrgProjectInstancesProductRouteImport } from './routes/_app
 import { Route as AppOrgProjectDeployPreviewsRouteImport } from './routes/_app.$org.$project.deploy.previews'
 import { Route as AppOrgProjectDeployDepRouteImport } from './routes/_app.$org.$project.deploy.$dep'
 import { Route as AppOrgProjectSvcServiceIndexRouteImport } from './routes/_app.$org.$project.svc.$service.index'
-import { Route as AppOrgProjectSvcServiceUsageRouteImport } from './routes/_app.$org.$project.svc.$service.usage'
 import { Route as AppOrgProjectSvcServiceTablesRouteImport } from './routes/_app.$org.$project.svc.$service.tables'
 import { Route as AppOrgProjectSvcServiceSqlEditorRouteImport } from './routes/_app.$org.$project.svc.$service.sql-editor'
 import { Route as AppOrgProjectSvcServiceShellRouteImport } from './routes/_app.$org.$project.svc.$service.shell'
 import { Route as AppOrgProjectSvcServiceSettingsRouteImport } from './routes/_app.$org.$project.svc.$service.settings'
 import { Route as AppOrgProjectSvcServiceSchedulesRouteImport } from './routes/_app.$org.$project.svc.$service.schedules'
 import { Route as AppOrgProjectSvcServiceScalingRouteImport } from './routes/_app.$org.$project.svc.$service.scaling'
-import { Route as AppOrgProjectSvcServiceRoutesRouteImport } from './routes/_app.$org.$project.svc.$service.routes'
-import { Route as AppOrgProjectSvcServicePoliciesRouteImport } from './routes/_app.$org.$project.svc.$service.policies'
 import { Route as AppOrgProjectSvcServiceObjectsRouteImport } from './routes/_app.$org.$project.svc.$service.objects'
-import { Route as AppOrgProjectSvcServiceModelsRouteImport } from './routes/_app.$org.$project.svc.$service.models'
 import { Route as AppOrgProjectSvcServiceMetricsRouteImport } from './routes/_app.$org.$project.svc.$service.metrics'
 import { Route as AppOrgProjectSvcServiceMessagesRouteImport } from './routes/_app.$org.$project.svc.$service.messages'
 import { Route as AppOrgProjectSvcServiceLogsRouteImport } from './routes/_app.$org.$project.svc.$service.logs'
 import { Route as AppOrgProjectSvcServiceLifecycleRouteImport } from './routes/_app.$org.$project.svc.$service.lifecycle'
-import { Route as AppOrgProjectSvcServiceKeysRouteImport } from './routes/_app.$org.$project.svc.$service.keys'
 import { Route as AppOrgProjectSvcServiceInsightsRouteImport } from './routes/_app.$org.$project.svc.$service.insights'
 import { Route as AppOrgProjectSvcServiceDomainsRouteImport } from './routes/_app.$org.$project.svc.$service.domains'
 import { Route as AppOrgProjectSvcServiceDeploymentsRouteImport } from './routes/_app.$org.$project.svc.$service.deployments'
@@ -514,12 +509,6 @@ const AppOrgProjectSvcServiceIndexRoute =
     path: '/',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
-const AppOrgProjectSvcServiceUsageRoute =
-  AppOrgProjectSvcServiceUsageRouteImport.update({
-    id: '/usage',
-    path: '/usage',
-    getParentRoute: () => AppOrgProjectSvcServiceRoute,
-  } as any)
 const AppOrgProjectSvcServiceTablesRoute =
   AppOrgProjectSvcServiceTablesRouteImport.update({
     id: '/tables',
@@ -556,28 +545,10 @@ const AppOrgProjectSvcServiceScalingRoute =
     path: '/scaling',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
-const AppOrgProjectSvcServiceRoutesRoute =
-  AppOrgProjectSvcServiceRoutesRouteImport.update({
-    id: '/routes',
-    path: '/routes',
-    getParentRoute: () => AppOrgProjectSvcServiceRoute,
-  } as any)
-const AppOrgProjectSvcServicePoliciesRoute =
-  AppOrgProjectSvcServicePoliciesRouteImport.update({
-    id: '/policies',
-    path: '/policies',
-    getParentRoute: () => AppOrgProjectSvcServiceRoute,
-  } as any)
 const AppOrgProjectSvcServiceObjectsRoute =
   AppOrgProjectSvcServiceObjectsRouteImport.update({
     id: '/objects',
     path: '/objects',
-    getParentRoute: () => AppOrgProjectSvcServiceRoute,
-  } as any)
-const AppOrgProjectSvcServiceModelsRoute =
-  AppOrgProjectSvcServiceModelsRouteImport.update({
-    id: '/models',
-    path: '/models',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
 const AppOrgProjectSvcServiceMetricsRoute =
@@ -602,12 +573,6 @@ const AppOrgProjectSvcServiceLifecycleRoute =
   AppOrgProjectSvcServiceLifecycleRouteImport.update({
     id: '/lifecycle',
     path: '/lifecycle',
-    getParentRoute: () => AppOrgProjectSvcServiceRoute,
-  } as any)
-const AppOrgProjectSvcServiceKeysRoute =
-  AppOrgProjectSvcServiceKeysRouteImport.update({
-    id: '/keys',
-    path: '/keys',
     getParentRoute: () => AppOrgProjectSvcServiceRoute,
   } as any)
 const AppOrgProjectSvcServiceInsightsRoute =
@@ -749,22 +714,17 @@ export interface FileRoutesByFullPath {
   '/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
   '/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
-  '/$org/$project/svc/$service/keys': typeof AppOrgProjectSvcServiceKeysRoute
   '/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
   '/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
   '/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
   '/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
-  '/$org/$project/svc/$service/models': typeof AppOrgProjectSvcServiceModelsRoute
   '/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
-  '/$org/$project/svc/$service/policies': typeof AppOrgProjectSvcServicePoliciesRoute
-  '/$org/$project/svc/$service/routes': typeof AppOrgProjectSvcServiceRoutesRoute
   '/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
   '/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
   '/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
   '/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
   '/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
   '/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
-  '/$org/$project/svc/$service/usage': typeof AppOrgProjectSvcServiceUsageRoute
   '/$org/$project/svc/$service/': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRoutesByTo {
@@ -847,22 +807,17 @@ export interface FileRoutesByTo {
   '/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
   '/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
-  '/$org/$project/svc/$service/keys': typeof AppOrgProjectSvcServiceKeysRoute
   '/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
   '/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
   '/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
   '/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
-  '/$org/$project/svc/$service/models': typeof AppOrgProjectSvcServiceModelsRoute
   '/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
-  '/$org/$project/svc/$service/policies': typeof AppOrgProjectSvcServicePoliciesRoute
-  '/$org/$project/svc/$service/routes': typeof AppOrgProjectSvcServiceRoutesRoute
   '/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
   '/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
   '/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
   '/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
   '/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
   '/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
-  '/$org/$project/svc/$service/usage': typeof AppOrgProjectSvcServiceUsageRoute
   '/$org/$project/svc/$service': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRoutesById {
@@ -951,22 +906,17 @@ export interface FileRoutesById {
   '/_app/$org/$project/svc/$service/deployments': typeof AppOrgProjectSvcServiceDeploymentsRoute
   '/_app/$org/$project/svc/$service/domains': typeof AppOrgProjectSvcServiceDomainsRoute
   '/_app/$org/$project/svc/$service/insights': typeof AppOrgProjectSvcServiceInsightsRoute
-  '/_app/$org/$project/svc/$service/keys': typeof AppOrgProjectSvcServiceKeysRoute
   '/_app/$org/$project/svc/$service/lifecycle': typeof AppOrgProjectSvcServiceLifecycleRoute
   '/_app/$org/$project/svc/$service/logs': typeof AppOrgProjectSvcServiceLogsRoute
   '/_app/$org/$project/svc/$service/messages': typeof AppOrgProjectSvcServiceMessagesRoute
   '/_app/$org/$project/svc/$service/metrics': typeof AppOrgProjectSvcServiceMetricsRoute
-  '/_app/$org/$project/svc/$service/models': typeof AppOrgProjectSvcServiceModelsRoute
   '/_app/$org/$project/svc/$service/objects': typeof AppOrgProjectSvcServiceObjectsRoute
-  '/_app/$org/$project/svc/$service/policies': typeof AppOrgProjectSvcServicePoliciesRoute
-  '/_app/$org/$project/svc/$service/routes': typeof AppOrgProjectSvcServiceRoutesRoute
   '/_app/$org/$project/svc/$service/scaling': typeof AppOrgProjectSvcServiceScalingRoute
   '/_app/$org/$project/svc/$service/schedules': typeof AppOrgProjectSvcServiceSchedulesRoute
   '/_app/$org/$project/svc/$service/settings': typeof AppOrgProjectSvcServiceSettingsRoute
   '/_app/$org/$project/svc/$service/shell': typeof AppOrgProjectSvcServiceShellRoute
   '/_app/$org/$project/svc/$service/sql-editor': typeof AppOrgProjectSvcServiceSqlEditorRoute
   '/_app/$org/$project/svc/$service/tables': typeof AppOrgProjectSvcServiceTablesRoute
-  '/_app/$org/$project/svc/$service/usage': typeof AppOrgProjectSvcServiceUsageRoute
   '/_app/$org/$project/svc/$service/': typeof AppOrgProjectSvcServiceIndexRoute
 }
 export interface FileRouteTypes {
@@ -1055,22 +1005,17 @@ export interface FileRouteTypes {
     | '/$org/$project/svc/$service/deployments'
     | '/$org/$project/svc/$service/domains'
     | '/$org/$project/svc/$service/insights'
-    | '/$org/$project/svc/$service/keys'
     | '/$org/$project/svc/$service/lifecycle'
     | '/$org/$project/svc/$service/logs'
     | '/$org/$project/svc/$service/messages'
     | '/$org/$project/svc/$service/metrics'
-    | '/$org/$project/svc/$service/models'
     | '/$org/$project/svc/$service/objects'
-    | '/$org/$project/svc/$service/policies'
-    | '/$org/$project/svc/$service/routes'
     | '/$org/$project/svc/$service/scaling'
     | '/$org/$project/svc/$service/schedules'
     | '/$org/$project/svc/$service/settings'
     | '/$org/$project/svc/$service/shell'
     | '/$org/$project/svc/$service/sql-editor'
     | '/$org/$project/svc/$service/tables'
-    | '/$org/$project/svc/$service/usage'
     | '/$org/$project/svc/$service/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -1153,22 +1098,17 @@ export interface FileRouteTypes {
     | '/$org/$project/svc/$service/deployments'
     | '/$org/$project/svc/$service/domains'
     | '/$org/$project/svc/$service/insights'
-    | '/$org/$project/svc/$service/keys'
     | '/$org/$project/svc/$service/lifecycle'
     | '/$org/$project/svc/$service/logs'
     | '/$org/$project/svc/$service/messages'
     | '/$org/$project/svc/$service/metrics'
-    | '/$org/$project/svc/$service/models'
     | '/$org/$project/svc/$service/objects'
-    | '/$org/$project/svc/$service/policies'
-    | '/$org/$project/svc/$service/routes'
     | '/$org/$project/svc/$service/scaling'
     | '/$org/$project/svc/$service/schedules'
     | '/$org/$project/svc/$service/settings'
     | '/$org/$project/svc/$service/shell'
     | '/$org/$project/svc/$service/sql-editor'
     | '/$org/$project/svc/$service/tables'
-    | '/$org/$project/svc/$service/usage'
     | '/$org/$project/svc/$service'
   id:
     | '__root__'
@@ -1256,22 +1196,17 @@ export interface FileRouteTypes {
     | '/_app/$org/$project/svc/$service/deployments'
     | '/_app/$org/$project/svc/$service/domains'
     | '/_app/$org/$project/svc/$service/insights'
-    | '/_app/$org/$project/svc/$service/keys'
     | '/_app/$org/$project/svc/$service/lifecycle'
     | '/_app/$org/$project/svc/$service/logs'
     | '/_app/$org/$project/svc/$service/messages'
     | '/_app/$org/$project/svc/$service/metrics'
-    | '/_app/$org/$project/svc/$service/models'
     | '/_app/$org/$project/svc/$service/objects'
-    | '/_app/$org/$project/svc/$service/policies'
-    | '/_app/$org/$project/svc/$service/routes'
     | '/_app/$org/$project/svc/$service/scaling'
     | '/_app/$org/$project/svc/$service/schedules'
     | '/_app/$org/$project/svc/$service/settings'
     | '/_app/$org/$project/svc/$service/shell'
     | '/_app/$org/$project/svc/$service/sql-editor'
     | '/_app/$org/$project/svc/$service/tables'
-    | '/_app/$org/$project/svc/$service/usage'
     | '/_app/$org/$project/svc/$service/'
   fileRoutesById: FileRoutesById
 }
@@ -1823,13 +1758,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgProjectSvcServiceIndexRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
-    '/_app/$org/$project/svc/$service/usage': {
-      id: '/_app/$org/$project/svc/$service/usage'
-      path: '/usage'
-      fullPath: '/$org/$project/svc/$service/usage'
-      preLoaderRoute: typeof AppOrgProjectSvcServiceUsageRouteImport
-      parentRoute: typeof AppOrgProjectSvcServiceRoute
-    }
     '/_app/$org/$project/svc/$service/tables': {
       id: '/_app/$org/$project/svc/$service/tables'
       path: '/tables'
@@ -1872,32 +1800,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrgProjectSvcServiceScalingRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
-    '/_app/$org/$project/svc/$service/routes': {
-      id: '/_app/$org/$project/svc/$service/routes'
-      path: '/routes'
-      fullPath: '/$org/$project/svc/$service/routes'
-      preLoaderRoute: typeof AppOrgProjectSvcServiceRoutesRouteImport
-      parentRoute: typeof AppOrgProjectSvcServiceRoute
-    }
-    '/_app/$org/$project/svc/$service/policies': {
-      id: '/_app/$org/$project/svc/$service/policies'
-      path: '/policies'
-      fullPath: '/$org/$project/svc/$service/policies'
-      preLoaderRoute: typeof AppOrgProjectSvcServicePoliciesRouteImport
-      parentRoute: typeof AppOrgProjectSvcServiceRoute
-    }
     '/_app/$org/$project/svc/$service/objects': {
       id: '/_app/$org/$project/svc/$service/objects'
       path: '/objects'
       fullPath: '/$org/$project/svc/$service/objects'
       preLoaderRoute: typeof AppOrgProjectSvcServiceObjectsRouteImport
-      parentRoute: typeof AppOrgProjectSvcServiceRoute
-    }
-    '/_app/$org/$project/svc/$service/models': {
-      id: '/_app/$org/$project/svc/$service/models'
-      path: '/models'
-      fullPath: '/$org/$project/svc/$service/models'
-      preLoaderRoute: typeof AppOrgProjectSvcServiceModelsRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
     '/_app/$org/$project/svc/$service/metrics': {
@@ -1926,13 +1833,6 @@ declare module '@tanstack/react-router' {
       path: '/lifecycle'
       fullPath: '/$org/$project/svc/$service/lifecycle'
       preLoaderRoute: typeof AppOrgProjectSvcServiceLifecycleRouteImport
-      parentRoute: typeof AppOrgProjectSvcServiceRoute
-    }
-    '/_app/$org/$project/svc/$service/keys': {
-      id: '/_app/$org/$project/svc/$service/keys'
-      path: '/keys'
-      fullPath: '/$org/$project/svc/$service/keys'
-      preLoaderRoute: typeof AppOrgProjectSvcServiceKeysRouteImport
       parentRoute: typeof AppOrgProjectSvcServiceRoute
     }
     '/_app/$org/$project/svc/$service/insights': {
@@ -2088,22 +1988,17 @@ interface AppOrgProjectSvcServiceRouteChildren {
   AppOrgProjectSvcServiceDeploymentsRoute: typeof AppOrgProjectSvcServiceDeploymentsRoute
   AppOrgProjectSvcServiceDomainsRoute: typeof AppOrgProjectSvcServiceDomainsRoute
   AppOrgProjectSvcServiceInsightsRoute: typeof AppOrgProjectSvcServiceInsightsRoute
-  AppOrgProjectSvcServiceKeysRoute: typeof AppOrgProjectSvcServiceKeysRoute
   AppOrgProjectSvcServiceLifecycleRoute: typeof AppOrgProjectSvcServiceLifecycleRoute
   AppOrgProjectSvcServiceLogsRoute: typeof AppOrgProjectSvcServiceLogsRoute
   AppOrgProjectSvcServiceMessagesRoute: typeof AppOrgProjectSvcServiceMessagesRoute
   AppOrgProjectSvcServiceMetricsRoute: typeof AppOrgProjectSvcServiceMetricsRoute
-  AppOrgProjectSvcServiceModelsRoute: typeof AppOrgProjectSvcServiceModelsRoute
   AppOrgProjectSvcServiceObjectsRoute: typeof AppOrgProjectSvcServiceObjectsRoute
-  AppOrgProjectSvcServicePoliciesRoute: typeof AppOrgProjectSvcServicePoliciesRoute
-  AppOrgProjectSvcServiceRoutesRoute: typeof AppOrgProjectSvcServiceRoutesRoute
   AppOrgProjectSvcServiceScalingRoute: typeof AppOrgProjectSvcServiceScalingRoute
   AppOrgProjectSvcServiceSchedulesRoute: typeof AppOrgProjectSvcServiceSchedulesRoute
   AppOrgProjectSvcServiceSettingsRoute: typeof AppOrgProjectSvcServiceSettingsRoute
   AppOrgProjectSvcServiceShellRoute: typeof AppOrgProjectSvcServiceShellRoute
   AppOrgProjectSvcServiceSqlEditorRoute: typeof AppOrgProjectSvcServiceSqlEditorRoute
   AppOrgProjectSvcServiceTablesRoute: typeof AppOrgProjectSvcServiceTablesRoute
-  AppOrgProjectSvcServiceUsageRoute: typeof AppOrgProjectSvcServiceUsageRoute
   AppOrgProjectSvcServiceIndexRoute: typeof AppOrgProjectSvcServiceIndexRoute
 }
 
@@ -2120,16 +2015,12 @@ const AppOrgProjectSvcServiceRouteChildren: AppOrgProjectSvcServiceRouteChildren
       AppOrgProjectSvcServiceDeploymentsRoute,
     AppOrgProjectSvcServiceDomainsRoute: AppOrgProjectSvcServiceDomainsRoute,
     AppOrgProjectSvcServiceInsightsRoute: AppOrgProjectSvcServiceInsightsRoute,
-    AppOrgProjectSvcServiceKeysRoute: AppOrgProjectSvcServiceKeysRoute,
     AppOrgProjectSvcServiceLifecycleRoute:
       AppOrgProjectSvcServiceLifecycleRoute,
     AppOrgProjectSvcServiceLogsRoute: AppOrgProjectSvcServiceLogsRoute,
     AppOrgProjectSvcServiceMessagesRoute: AppOrgProjectSvcServiceMessagesRoute,
     AppOrgProjectSvcServiceMetricsRoute: AppOrgProjectSvcServiceMetricsRoute,
-    AppOrgProjectSvcServiceModelsRoute: AppOrgProjectSvcServiceModelsRoute,
     AppOrgProjectSvcServiceObjectsRoute: AppOrgProjectSvcServiceObjectsRoute,
-    AppOrgProjectSvcServicePoliciesRoute: AppOrgProjectSvcServicePoliciesRoute,
-    AppOrgProjectSvcServiceRoutesRoute: AppOrgProjectSvcServiceRoutesRoute,
     AppOrgProjectSvcServiceScalingRoute: AppOrgProjectSvcServiceScalingRoute,
     AppOrgProjectSvcServiceSchedulesRoute:
       AppOrgProjectSvcServiceSchedulesRoute,
@@ -2138,7 +2029,6 @@ const AppOrgProjectSvcServiceRouteChildren: AppOrgProjectSvcServiceRouteChildren
     AppOrgProjectSvcServiceSqlEditorRoute:
       AppOrgProjectSvcServiceSqlEditorRoute,
     AppOrgProjectSvcServiceTablesRoute: AppOrgProjectSvcServiceTablesRoute,
-    AppOrgProjectSvcServiceUsageRoute: AppOrgProjectSvcServiceUsageRoute,
     AppOrgProjectSvcServiceIndexRoute: AppOrgProjectSvcServiceIndexRoute,
   }
 

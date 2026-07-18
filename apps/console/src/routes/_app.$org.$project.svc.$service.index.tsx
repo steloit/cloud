@@ -9,8 +9,6 @@ import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Stlab, statusDotTone } from "@/design-system/pill";
 import { useProject } from "@/features/projects/hooks";
-import { resolveService } from "@/features/services/gateway";
-import { GatewayOverview } from "@/features/services/gateway-page";
 import { useBindings, useServices } from "@/features/services/hooks";
 import { ConnectPanel, VitalsStrip } from "@/features/services/overview-zones";
 import {
@@ -24,7 +22,9 @@ import {
   WorkerOverview,
 } from "@/features/services/overviews";
 import { ProvisioningView } from "@/features/services/provisioning";
+import { resolveService } from "@/features/services/resolve";
 import type { Service } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { ageOf } from "@/lib/canon/now";
 import { resolveEnvKey } from "@/lib/canon-env";
 import { fmtMoney } from "@/lib/fmt";
@@ -50,20 +50,12 @@ function identityChips(svc: Service): string[] {
   } else if (svc.product === "worker") {
     chips.push(`Worker · ${cap(String(shape.size ?? ""))}`);
     chips.push(`${String(shape.instances ?? 1)} instances`);
-  } else if (svc.product === "queue") {
+  } else if ((svc.product as CanonProduct) === "queue") {
     chips.push(String(shape.delivery ?? "").replace(/_/g, "-"));
     if (shape.dlq) chips.push("DLQ on");
-  } else if (svc.product === "storage") {
+  } else if ((svc.product as CanonProduct) === "storage") {
     chips.push(shape.public ? "public" : "private · signed URLs");
     if (shape.versioning) chips.push("versioning on");
-  }
-  if (svc.product === "ai-gateway") {
-    // X1's identity line is a sentence, not chips — kept verbatim.
-    return [
-      "One endpoint in ecommerce / production",
-      "4 models behind 3 routes",
-      "a service with no fleet — config, not instances",
-    ];
   }
   if (svc.region) chips.push(svc.region.replace("/", " · "));
   if (svc.product === "postgres") chips.push(`HA ${shape.ha ? "on" : "off"}`);
@@ -77,7 +69,6 @@ function cap(s: string): string {
 
 /** Status label per the S-frames: healthy for ready, the incident's suffixes for amber. */
 function statusLabel(svc: Service): string {
-  if (svc.product === "ai-gateway") return "healthy";
   if (svc.status === "ready")
     return svc.name === "db-reports" ? "ready · just provisioned" : "healthy";
   if (svc.status === "degraded") {
@@ -98,7 +89,7 @@ function headerActions(svc: Service, nav: { org: string; project: string; env: s
       <Btn variant="s">{label}</Btn>
     </Link>
   );
-  switch (svc.product) {
+  switch (svc.product as CanonProduct) {
     case "postgres":
       return tabLink("sql-editor", "Open SQL editor");
     case "valkey":
@@ -130,16 +121,6 @@ function headerActions(svc: Service, nav: { org: string; project: string; env: s
           disabledReason="Manual runs land with a schedule-run endpoint the API lacks (finding)"
         >
           Run a job now
-        </Btn>
-      );
-    case "ai-gateway":
-      return (
-        <Btn
-          variant="s"
-          disabled
-          disabledReason="Model management needs a canon gateway service (X1 finding)"
-        >
-          Add model
         </Btn>
       );
     default:
@@ -279,7 +260,7 @@ function DbMainOverview(ctx: OverviewCtx) {
 function overviewFor(ctx: OverviewCtx) {
   const { svc } = ctx;
   if (svc.status === "provisioning") return <ProvisioningView svc={svc} env={ctx.env} />;
-  switch (svc.product) {
+  switch (svc.product as CanonProduct) {
     case "postgres":
       if (ctx.project === "internal-tools" && svc.name === "tools-db") {
         // M1 — the adaptive-rail exemplar lives on this instance's overview.
@@ -290,8 +271,6 @@ function overviewFor(ctx: OverviewCtx) {
       ) : (
         <FreshPostgresOverview {...ctx} />
       );
-    case "ai-gateway":
-      return <GatewayOverview {...ctx} />;
     case "valkey":
       return <ValkeyOverview {...ctx} />;
     case "storage":
@@ -356,12 +335,10 @@ function ServiceOverview() {
                 {identityChips(svc).map((chip) => (
                   <span key={chip}>{chip}</span>
                 ))}
-                {svc.product !== "ai-gateway" ? (
-                  <span className="inline-flex items-center gap-1">
-                    {svc.id}
-                    <Icon id="s-copy" className="h-2.5 w-2.5" />
-                  </span>
-                ) : null}
+                <span className="inline-flex items-center gap-1">
+                  {svc.id}
+                  <Icon id="s-copy" className="h-2.5 w-2.5" />
+                </span>
               </span>
             )
           }

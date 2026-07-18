@@ -9,6 +9,7 @@ import { Glyph } from "@/design-system/glyph";
 import { Icon } from "@/design-system/icon";
 import { Inp } from "@/design-system/inp";
 import { useServices } from "@/features/services/hooks";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +42,7 @@ function ObjectsPage() {
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
-  if (svc.product !== "storage") {
+  if ((svc.product as CanonProduct) !== "storage") {
     return (
       <main className="main">
         <div className="pgpad">

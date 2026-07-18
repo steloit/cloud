@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { resolveService } from "@/features/services/gateway";
 import { useServices } from "@/features/services/hooks";
+import { resolveService } from "@/features/services/resolve";
 import { BindingsTab } from "@/features/services/tabs/bindings-tab";
 import { resolveEnvKey } from "@/lib/canon-env";
 

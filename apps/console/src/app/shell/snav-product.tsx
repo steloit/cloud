@@ -5,6 +5,7 @@ import { Icon, type IconId } from "@/design-system/icon";
 import { Dot, statusDotTone } from "@/design-system/pill";
 import type { CreatableProduct } from "@/features/create/type-blocks";
 import type { Service } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { fmtMoney, fmtMoneyPerMonth } from "@/lib/fmt";
 import { cn } from "@/lib/utils";
 import { PRODUCT_ICON, PRODUCT_LABEL } from "./rail";
@@ -44,7 +45,7 @@ const AI_INSIGHTS: MatrixItem = {
   icon: "s-ai",
 };
 
-const MATRIX: Record<Service["product"], ProductMatrix> = {
+const MATRIX: Record<CanonProduct, ProductMatrix> = {
   postgres: {
     top: [METRICS, LOGS_PG],
     browse: [
@@ -117,24 +118,6 @@ const MATRIX: Record<Service["product"], ProductMatrix> = {
       { label: "Settings", frame: "D23", route: "settings", icon: "s-gear" },
     ],
   },
-  "gpu-worker": {
-    top: [],
-    browse: [{ label: "Shell", frame: "D20", route: "shell", icon: "s-term" }],
-    manage: [{ label: "Settings", frame: "D23", route: "settings", icon: "s-gear" }],
-  },
-  // X1: a flat capability workspace — routes/models, not instances; no
-  // Metrics/Logs pair and no Browse/Manage split in the frame.
-  "ai-gateway": {
-    top: [
-      { label: "Models", frame: "X1", route: "models", count: "4", icon: "s-ai" },
-      { label: "Routes", frame: "X1", route: "routes", count: "3", icon: "s-branch" },
-      { label: "Usage & cost", frame: "X1", route: "usage", icon: "s-card" },
-      { label: "Policies", frame: "X1", route: "policies", icon: "s-shield" },
-      { label: "Keys & bindings", frame: "X1", route: "keys", icon: "s-key" },
-    ],
-    browse: [],
-    manage: [{ label: "Settings", frame: "X1", route: "settings", icon: "s-gear" }],
-  },
 };
 
 function MatrixNit({
@@ -194,7 +177,7 @@ export function SnavProduct({
   const matrix = MATRIX[service.product];
   const linkParams = { org, project, service: service.name };
   const search = { env };
-  const usageBased = service.product === "storage";
+  const usageBased = (service.product as CanonProduct) === "storage";
   const costLabel = usageBased
     ? `${fmtMoney(914)} mtd`
     : fmtMoneyPerMonth(service.monthly_estimate_cents ?? 0);
@@ -206,11 +189,7 @@ export function SnavProduct({
       </span>
       <div>
         <div className="t">{PRODUCT_LABEL[service.product]}</div>
-        <div className="u">
-          {service.product === "ai-gateway"
-            ? "capability · one endpoint"
-            : `${service.name}${siblings.length > 1 ? " ▾" : ""} · ${env}`}
-        </div>
+        <div className="u">{`${service.name}${siblings.length > 1 ? " ▾" : ""} · ${env}`}</div>
       </div>
     </div>
   );
@@ -279,14 +258,7 @@ export function SnavProduct({
                   navigate({
                     to: "/$org/create",
                     params: { org },
-                    // ai-gateway isn't creatable from the canvas; SW3 only renders at n>1.
-                    search: {
-                      env,
-                      type:
-                        service.product === "ai-gateway"
-                          ? undefined
-                          : (service.product as CreatableProduct),
-                    },
+                    search: { env, type: service.product },
                   })
                 }
               >
@@ -351,18 +323,12 @@ export function SnavProduct({
           <span>This service</span>
           <span className="mono">{costLabel}</span>
         </div>
-        {service.product === "ai-gateway" ? (
-          // X1: usage-priced capability — no project rollup line (adding it
-          // to the $208 would misstate the canon arithmetic).
-          <div className="px-1.5 pt-1">usage-priced · no instances to scale</div>
-        ) : (
-          <div className="flex justify-between px-1.5 pt-1">
-            <span>{project} total</span>
-            <span className="mono">
-              {projectTotalCents !== undefined ? fmtMoneyPerMonth(projectTotalCents) : "…"}
-            </span>
-          </div>
-        )}
+        <div className="flex justify-between px-1.5 pt-1">
+          <span>{project} total</span>
+          <span className="mono">
+            {projectTotalCents !== undefined ? fmtMoneyPerMonth(projectTotalCents) : "…"}
+          </span>
+        </div>
       </Nfoot>
     </Snav>
   );

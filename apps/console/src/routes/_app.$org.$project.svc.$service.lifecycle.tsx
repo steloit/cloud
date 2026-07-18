@@ -12,6 +12,7 @@ import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useServices } from "@/features/services/hooks";
 import { LifecycleDrawer } from "@/features/services/lifecycle-drawer";
 import { type LifecycleRule, listLifecycleRulesOptions } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
@@ -48,7 +49,7 @@ function LifecyclePage() {
   });
 
   if (!svc) return <main className="main" />;
-  if (svc.product !== "storage") {
+  if ((svc.product as CanonProduct) !== "storage") {
     return (
       <main className="main">
         <div className="pgpad">

@@ -8,10 +8,12 @@ import { EmptyRow } from "@/design-system/empty-state";
 import { Icon } from "@/design-system/icon";
 import { Dot } from "@/design-system/pill";
 import { SkeletonRows } from "@/design-system/skeleton";
+import type { CreatableProduct } from "@/features/create/type-blocks";
 import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useEnvironments } from "@/features/projects/hooks";
 import { useServices } from "@/features/services/hooks";
 import type { Product } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { fmtMoney } from "@/lib/fmt";
 
 /**
@@ -23,12 +25,12 @@ import { fmtMoney } from "@/lib/fmt";
  * carry 19910 / 670 / 220 cents — fixtures win (ADR-026), rendered from data.
  */
 
-const PRODUCT_ORDER: Product[] = ["postgres", "valkey", "storage", "queue", "web", "worker"];
+const PRODUCT_ORDER: CanonProduct[] = ["postgres", "valkey", "storage", "queue", "web", "worker"];
 
 type CellKind = "ok" | "warn-x2" | "scaled" | "branch" | "sus" | "sus-selected";
 
 /** Presence cells per the M3 frame, by env name then product. */
-const MATRIX: Record<string, Partial<Record<Product, CellKind>>> = {
+const MATRIX: Record<string, Partial<Record<CanonProduct, CellKind>>> = {
   production: {
     postgres: "warn-x2",
     valkey: "ok",
@@ -101,7 +103,7 @@ function EnvironmentsPage() {
   const environments = useEnvironments(project);
   const services = useServices(env);
 
-  const present = new Set((services.data ?? []).map((s) => s.product));
+  const present = new Set<CanonProduct>((services.data ?? []).map((s) => s.product));
   const products = PRODUCT_ORDER.filter((p) => present.size === 0 || present.has(p));
 
   return (
@@ -199,7 +201,8 @@ function EnvironmentsPage() {
             <Link
               to="/$org/create"
               params={{ org }}
-              search={{ type: "queue", env: "preview/pr-142" }}
+              // PRE-A5 frame content (P4/S9): queue create retired; link degrades to the unselected canvas.
+              search={{ type: "queue" as CanonProduct as CreatableProduct, env: "preview/pr-142" }}
             >
               <Btn variant="s">Add to this environment · +$0.40/mo</Btn>
             </Link>

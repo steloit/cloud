@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Icon, type IconId } from "@/design-system/icon";
 import type { Product, Service } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { initialsOf, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 
@@ -11,33 +12,30 @@ import { cn } from "@/lib/utils";
  * Environment switches never reshuffle the rail (ADR-013).
  */
 
-export const PRODUCT_ICON: Record<Product, IconId> = {
+// CanonProduct: storage/queue stay renderable for the canon world (PRE-A5 seam, P4).
+export const PRODUCT_ICON: Record<CanonProduct, IconId> = {
   postgres: "s-db",
   valkey: "s-chip",
   storage: "s-bucket",
   queue: "s-queue",
   web: "s-globe",
   worker: "s-worker",
-  "gpu-worker": "s-worker",
-  "ai-gateway": "s-ai",
 };
 
-export const PRODUCT_LABEL: Record<Product, string> = {
+export const PRODUCT_LABEL: Record<CanonProduct, string> = {
   postgres: "PostgreSQL",
   valkey: "Valkey",
   storage: "Object Storage",
   queue: "Queue",
   web: "Web service",
   worker: "Worker",
-  "gpu-worker": "GPU Worker",
-  "ai-gateway": "AI Gateway",
 };
 
 export type RailActive =
   | { kind: "home" }
   | { kind: "observe" }
   | { kind: "deploy" }
-  | { kind: "product"; product: Product }
+  | { kind: "product"; product: CanonProduct }
   | { kind: "create" }
   | { kind: "settings" }
   | { kind: "none" };
@@ -173,23 +171,6 @@ export function Rail({ org, project, env, services, active }: RailProps) {
             </Link>
           ))
         : null}
-
-      {/* X1 — the AI Gateway capability entry: chrome, not data. It links to
-          the exemplar page without adding a service to the canon world (which
-          would break the 7-services-=-$208 invariant); no ×n badge by design. */}
-      {project === "ecommerce" ? (
-        <Link
-          to="/$org/$project/svc/$service"
-          params={{ org, project, service: "gateway" }}
-          search={search}
-        >
-          <Rit
-            icon="s-ai"
-            label="AI Gateway"
-            on={active.kind === "product" && active.product === "ai-gateway"}
-          />
-        </Link>
-      ) : null}
 
       <Link to="/$org/create" params={{ org }} search={{ env: env ?? "production" }}>
         <Rit icon="s-plus" label="Create service" add on={active.kind === "create"} />

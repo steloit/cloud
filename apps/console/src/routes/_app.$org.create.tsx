@@ -36,15 +36,7 @@ import { cn } from "@/lib/utils";
  * service page, which renders the C4 provisioning state.
  */
 
-const CREATABLE = [
-  "postgres",
-  "valkey",
-  "storage",
-  "queue",
-  "web",
-  "worker",
-  "gpu-worker",
-] as const;
+const CREATABLE = ["postgres", "valkey", "web", "worker"] as const;
 
 const isCreatable = (v: unknown): v is CreatableProduct =>
   typeof v === "string" && (CREATABLE as readonly string[]).includes(v);
@@ -70,20 +62,6 @@ const PRODUCT_GRID: {
     name: "Valkey",
     desc: "Cache or persistent modes, eviction stated up front.",
     price: "from $11/mo · 512 MB",
-  },
-  {
-    type: "storage",
-    icon: "s-bucket",
-    name: "Storage",
-    desc: "Objects with lifecycle rules; public needs approval.",
-    price: "$0.023 / GB-mo",
-  },
-  {
-    type: "queue",
-    icon: "s-queue",
-    name: "Queue",
-    desc: "At-least-once with a DLQ included, contract first.",
-    price: "from $4/mo",
   },
   {
     type: "web",
@@ -131,24 +109,6 @@ const AI1_SUGGESTIONS: {
     tag: "Standard · db",
     why: "durable store for accounts, sessions and app data — the SaaS backbone",
     price: 58,
-    defaultOn: true,
-  },
-  {
-    key: "storage",
-    icon: "s-bucket",
-    name: "Object Storage",
-    tag: "with lifecycle",
-    why: "file uploads, with a lifecycle rule so temp files expire — you named uploads",
-    price: 9,
-    defaultOn: true,
-  },
-  {
-    key: "queue",
-    icon: "s-queue",
-    name: "Queue",
-    tag: "DLQ included",
-    why: "background jobs run off the request path; DLQ catches failures",
-    price: 12,
     defaultOn: true,
   },
   {
@@ -356,27 +316,17 @@ function CreatePage() {
           <>
             <div className="mb-3 flex items-center gap-2">
               <div className="chiprow">
-                {(Object.keys(TYPE_BLOCKS) as CreatableProduct[])
-                  .filter((p) => p !== "gpu-worker")
-                  .map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      aria-pressed={p === type}
-                      className={cn("chip", p === type && "on")}
-                      onClick={() => pick(p)}
-                    >
-                      {TYPE_BLOCKS[p].label}
-                    </button>
-                  ))}
-                <button
-                  type="button"
-                  aria-pressed={type === "gpu-worker"}
-                  className={cn("chip", type === "gpu-worker" && "on")}
-                  onClick={() => pick("gpu-worker")}
-                >
-                  GPU Worker <Pill tone="st">beta</Pill>
-                </button>
+                {(Object.keys(TYPE_BLOCKS) as CreatableProduct[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={p === type}
+                    className={cn("chip", p === type && "on")}
+                    onClick={() => pick(p)}
+                  >
+                    {TYPE_BLOCKS[p].label}
+                  </button>
+                ))}
               </div>
               <span className="sp" />
               <span className="mono text-10p5 text-ink3">
@@ -449,18 +399,7 @@ function CreatePage() {
                 {type === "valkey" ? (
                   <Card className="p-4 text-11p5 leading-relaxed text-ink2">
                     The same skeleton serves every product: name → type block → bindings → included
-                    defaults → estimate → confirm. Storage adds bucket policy; Queue adds delivery &
-                    DLQ; Compute adds repo & health checks.
-                  </Card>
-                ) : null}
-                {type === "gpu-worker" ? (
-                  <Card className="p-4 text-10p5 leading-relaxed text-ink3">
-                    Region model:{" "}
-                    <b className="text-ink2">
-                      env sets the home · instances inherit · exceptions are explicit
-                    </b>{" "}
-                    — offered only for availability gaps and typed cross-region features (read
-                    replicas, multi-region buckets).
+                    defaults → estimate → confirm. Compute adds repo & health checks.
                   </Card>
                 ) : null}
               </div>
@@ -497,36 +436,6 @@ function CreatePage() {
                       <span className="mono text-10p5 text-ink2">{p.price}</span>
                     </button>
                   ))}
-                </div>
-                <div className="grid grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => pick("gpu-worker")}
-                    className="card flex flex-col gap-1.5 p-3 text-left hover:border-ink3"
-                  >
-                    <span className="flex items-center gap-1.5 text-12p5 font-semibold">
-                      GPU Worker <Pill tone="st">beta</Pill>
-                    </span>
-                    <span className="self-start">
-                      <Pill tone="warn">not in ap-south-1 yet — request it (C7)</Pill>
-                    </span>
-                    <span className="text-10p5 leading-snug text-ink3">Batch GPU jobs.</span>
-                    <span className="mono text-10p5 text-ink2">
-                      from $88/mo · nearest cell aws · ap-southeast-1 (+34 ms)
-                    </span>
-                  </button>
-                  <Card dashed className="col-span-2 flex flex-col gap-1.5 p-3">
-                    <span className="text-12p5 font-semibold">Start from a template</span>
-                    <span className="text-10p5 leading-snug text-ink3">
-                      saas-starter $96 · docs-site $14 · store $184 — whole stacks, each opening a
-                      full estimate first.
-                    </span>
-                    <Link to="/$org/new-project/templates" params={{ org }} className="self-start">
-                      <Btn variant="gh" className="!h-auto !p-0 text-steel">
-                        Browse templates →
-                      </Btn>
-                    </Link>
-                  </Card>
                 </div>
               </div>
               <div className="flex w-[320px] shrink-0 flex-col gap-3">

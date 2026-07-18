@@ -10,6 +10,7 @@ import { Glyph } from "@/design-system/glyph";
 import { Pill, Stlab, statusDotTone } from "@/design-system/pill";
 import { useServices } from "@/features/services/hooks";
 import type { Product, Service } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { fmtMoney } from "@/lib/fmt";
 
 /**
@@ -67,7 +68,7 @@ interface IllustrativeProduct {
 }
 
 /** M4–M8 — per-product frame-fixed two-row tables and rationales. */
-const ILLUSTRATIVE: Partial<Record<Product, IllustrativeProduct>> = {
+const ILLUSTRATIVE: Partial<Record<CanonProduct, IllustrativeProduct>> = {
   valkey: {
     columns: ["Mode", "Memory", "Hit rate", "Ops/s", "Cost / mo"],
     rows: [

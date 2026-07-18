@@ -8,6 +8,7 @@ import { EmptyState } from "@/design-system/empty-state";
 import { Eyebrow } from "@/design-system/eyebrow";
 import { Glyph } from "@/design-system/glyph";
 import { useServices } from "@/features/services/hooks";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { resolveEnvKey } from "@/lib/canon-env";
 import { cn } from "@/lib/utils";
 
@@ -61,7 +62,7 @@ function MessagesPage() {
 
   const svc = services.data?.find((s) => s.name === service || s.id === service);
   if (!svc) return <main className="main" />;
-  if (svc.product !== "queue") {
+  if ((svc.product as CanonProduct) !== "queue") {
     return (
       <main className="main">
         <div className="pgpad">

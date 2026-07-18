@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@/design-system/card";
-import { resolveService } from "@/features/services/gateway";
 import { useServices } from "@/features/services/hooks";
+import { resolveService } from "@/features/services/resolve";
 import { PostgresLogsTab } from "@/features/services/tabs/postgres";
 import { resolveEnvKey } from "@/lib/canon-env";
 

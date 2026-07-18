@@ -61,7 +61,10 @@ export type Enforcement = 'enabled' | 'opt_in' | 'disabled' | 'warn' | 'enforce'
  */
 export type ServiceStatus = 'provisioning' | 'ready' | 'degraded' | 'failed' | 'suspended' | 'deleting';
 
-export type Product = 'postgres' | 'valkey' | 'storage' | 'queue' | 'web' | 'worker' | 'gpu-worker' | 'ai-gateway';
+/**
+ * managed services Steloit builds (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed.
+ */
+export type Product = 'postgres' | 'valkey' | 'web' | 'worker';
 
 export type Org = {
     id: string;
@@ -246,14 +249,35 @@ export type Scaling = {
 export type Binding = {
     id: string;
     source_id: string;
-    target_id: string;
+    /**
+     * internal service, or an external-provider Binding (ADR-0004/A5.5)
+     */
+    target_type: 'service' | 'storage' | 'ai';
+    /**
+     * internal service id when target_type=service
+     */
+    target_id?: string;
+    /**
+     * external provider when target_type∈{storage,ai}, e.g. s3|gcs|r2 or openai|anthropic; the only substrate name that may reach a customer surface (D8)
+     */
+    provider?: string;
+    /**
+     * region, model allow-list, bucket, etc. Credentials live in Secrets (secret_ref), never here.
+     */
+    provider_config?: {
+        [key: string]: unknown;
+    };
+    /**
+     * reference to the Secret holding provider credentials; reveal-once, rotated, never returned
+     */
+    secret_ref?: string;
     scope: 'read_only' | 'read_write';
     /**
      * pending until next deploy
      */
     status: 'pending' | 'active' | 'revoked';
     /**
-     * deterministic <TARGET>_URL; values always masked in reads
+     * deterministic injected config (<TARGET>_URL, PROVIDER_API_KEY, ...); values always masked in reads
      */
     env_vars?: {
         [key: string]: string;

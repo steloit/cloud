@@ -1,8 +1,8 @@
 import { createFileRoute, Outlet, useChildMatches } from "@tanstack/react-router";
 import { SnavProduct } from "@/app/shell/snav-product";
 import { useProject } from "@/features/projects/hooks";
-import { resolveService } from "@/features/services/gateway";
 import { useServices } from "@/features/services/hooks";
+import { resolveService } from "@/features/services/resolve";
 import { resolveEnvKey } from "@/lib/canon-env";
 
 /** Service layout: product snav (variant B) + the selected tab. */

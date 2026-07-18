@@ -990,7 +990,7 @@ components:
       type: string
       enum: [provisioning, ready, degraded, failed, suspended, deleting]
       description: "The one status vocabulary (spec §1.2): ✓ ◌ ! ✕ ○ · — metering starts at ready"
-    Product: {type: string, enum: [postgres, valkey, web, worker], description: "managed services (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed."}
+    Product: {type: string, enum: [postgres, valkey, web, worker], description: "managed services Steloit builds (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed."}
     Org:
       type: object
       required: [id, slug, name, home_region, plan, created_at]
@@ -1128,14 +1128,18 @@ components:
         signals: {type: array, items: {type: string, enum: [cpu, rps, p95]}}
     Binding:
       type: object
-      required: [id, source_id, target_id, scope, status]
+      required: [id, source_id, scope, status, target_type]
       properties:
         id: {type: string}
         source_id: {type: string}
-        target_id: {type: string}
+        target_type: {type: string, enum: [service, storage, ai], description: "internal service, or an external-provider Binding (ADR-0004/A5.5)"}
+        target_id: {type: string, nullable: true, description: "internal service id when target_type=service"}
+        provider: {type: string, nullable: true, description: "external provider when target_type∈{storage,ai}, e.g. s3|gcs|r2 or openai|anthropic; the only substrate name that may reach a customer surface (D8)"}
+        provider_config: {type: object, nullable: true, additionalProperties: true, description: "region, model allow-list, bucket, etc. Credentials live in Secrets (secret_ref), never here."}
+        secret_ref: {type: string, nullable: true, description: "reference to the Secret holding provider credentials; reveal-once, rotated, never returned"}
         scope: {type: string, enum: [read_only, read_write]}
         status: {type: string, enum: [pending, active, revoked], description: "pending until next deploy"}
-        env_vars: {type: object, additionalProperties: {type: string}, description: "deterministic <TARGET>_URL; values always masked in reads"}
+        env_vars: {type: object, additionalProperties: {type: string}, description: "deterministic injected config (<TARGET>_URL, PROVIDER_API_KEY, ...); values always masked in reads"}
         rotated_at: {type: string, format: date-time}
     BindingList:
       type: object

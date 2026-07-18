@@ -13,6 +13,7 @@ import { ApiFailureCard } from "@/features/errors/failure-states";
 import { useServices } from "@/features/services/hooks";
 import { ScheduleDrawer } from "@/features/services/schedule-drawer";
 import { listSchedulesOptions } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { resolveEnvKey } from "@/lib/canon-env";
 
 /**
@@ -56,7 +57,7 @@ function SchedulesPage() {
 
   if (!svc) return <main className="main" />;
   // S5: worker services carry schedules too — same grammar, same canon rows.
-  if (svc.product !== "queue" && svc.product !== "worker") {
+  if ((svc.product as CanonProduct) !== "queue" && svc.product !== "worker") {
     return (
       <main className="main">
         <div className="pgpad">

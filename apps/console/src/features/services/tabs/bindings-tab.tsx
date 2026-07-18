@@ -19,6 +19,7 @@ import {
   errorMessage,
   listBindingsQueryKey,
 } from "@/lib/api";
+import type { CanonProduct } from "@/lib/api/legacy";
 import { cn } from "@/lib/utils";
 
 /**
@@ -253,7 +254,7 @@ function cap(s: string): string {
 
 function productLabel(s: Service): string {
   const shape = (s.shape ?? {}) as Record<string, unknown>;
-  switch (s.product) {
+  switch (s.product as CanonProduct) {
     case "postgres":
       return shape.size ? `PostgreSQL · ${cap(String(shape.size))}` : "PostgreSQL";
     case "storage":

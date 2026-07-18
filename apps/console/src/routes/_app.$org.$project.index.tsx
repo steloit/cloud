@@ -89,7 +89,7 @@ function Topology({
         <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
           {bindings.map((b) => {
             const src = byId.get(b.source_id);
-            const dst = byId.get(b.target_id);
+            const dst = b.target_id ? byId.get(b.target_id) : undefined;
             if (!src || !dst) return null;
             const a = nodePos(src.name, indexOf.get(src.name) ?? 0);
             const c = nodePos(dst.name, indexOf.get(dst.name) ?? 0);
