@@ -131,6 +131,21 @@ func (s *testAPI) ListEnvironments(ctx context.Context, r gen.ListEnvironmentsRe
 func (s *testAPI) CreateEstimate(ctx context.Context, r gen.CreateEstimateRequestObject) (gen.CreateEstimateResponseObject, error) {
 	return s.Handlers2.CreateEstimate(ctx, r)
 }
+func (s *testAPI) CreateService(ctx context.Context, r gen.CreateServiceRequestObject) (gen.CreateServiceResponseObject, error) {
+	return s.Handlers2.CreateService(ctx, r)
+}
+func (s *testAPI) ListServices(ctx context.Context, r gen.ListServicesRequestObject) (gen.ListServicesResponseObject, error) {
+	return s.Handlers2.ListServices(ctx, r)
+}
+func (s *testAPI) GetService(ctx context.Context, r gen.GetServiceRequestObject) (gen.GetServiceResponseObject, error) {
+	return s.Handlers2.GetService(ctx, r)
+}
+func (s *testAPI) UpdateService(ctx context.Context, r gen.UpdateServiceRequestObject) (gen.UpdateServiceResponseObject, error) {
+	return s.Handlers2.UpdateService(ctx, r)
+}
+func (s *testAPI) DeleteService(ctx context.Context, r gen.DeleteServiceRequestObject) (gen.DeleteServiceResponseObject, error) {
+	return s.Handlers2.DeleteService(ctx, r)
+}
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
 	t.Helper()

@@ -98,6 +98,25 @@ func (s *Service) Accept(ctx context.Context, estimateID, envID string) (store.E
 	return row, shapes, nil
 }
 
+// Shapes returns what an estimate priced, without touching acceptance —
+// callers pre-check coverage before burning the one-shot Accept.
+func (s *Service) Shapes(ctx context.Context, estimateID string) ([]ShapeInput, error) {
+	row, err := s.q.GetEstimate(ctx, estimateID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, problemError{p: problem.Conflict(
+				[]string{"estimate not found"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
+		return nil, err
+	}
+	var shapes []ShapeInput
+	if err := json.Unmarshal(row.Services, &shapes); err != nil {
+		return nil, fmt.Errorf("estimates: stored shapes: %w", err)
+	}
+	return shapes, nil
+}
+
 func textOrNull(s string) pgtype.Text {
 	if s == "" {
 		return pgtype.Text{}
