@@ -29,6 +29,10 @@ quota evaluator, invoice generator. If they can diverge, the design is wrong.
 - **The cap is real (F9 flagship, 2026-07-18):** an org's hard spend bound is *enforced* — at the cap,
   provisioning pauses and overage stops accruing (nothing deleted, state kept, instant resume);
   an estimate whose acceptance would cross the cap is refused with the math. Never alerts-only.
+- **External Bindings extend certainty honestly (ADR-0004/A5):** Storage/AI Bindings show the *provider's*
+  price at bind (estimate-at-bind), not a Steloit markup — we don't own that economics. AI Binding surfaces
+  provider token usage in the billing view and offers **soft** spend control (suspend the binding at a
+  threshold) — hard real-time in-line caps require sitting in the request path (the gateway commodity, not built).
 - Metering flows from day one (D10, see `provisioning`); invoices only *price* what was metered.
 
 ## Testing

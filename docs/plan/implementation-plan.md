@@ -2,7 +2,7 @@
 
 **Status:** Execution roadmap · 2026-07-18
 **Scope:** From "handoff package complete + console UI built" to a running product with paying customers. Five clients have committed to using the platform; the plan optimizes for getting them onboarded and converting them to revenue.
-**Amended 2026-07-18:** database substrate re-decided per ADR-0003 / INF-001 A4 — CNPG + CoW volume snapshots replace Neon OSS; substrate references below are updated (branching remains a product capability; no customer contract changes).
+**Amended 2026-07-18 (ADR-0004/A5):** product surface narrowed to postgres/valkey/web/worker — storage & AI are external Bindings, queue is a Postgres capability (pgmq, V2), GPU removed; risk R3 retired. Also (ADR-0003/A4): database substrate re-decided — CNPG + CoW volume snapshots replace Neon OSS; substrate references below are updated (branching remains a product capability; no customer contract changes).
 **Provenance:** Derived from `00-sources/` (GOV-002, INF-001 incl. A1–A3, 152-frame gallery, design spec), the derived docs 01–23, the console build's findings ledger (`claudedocs/spec-change-proposals.md`), and the current state of `steloit/console`. Decision IDs (D1–D11, ADR-###) are cited per INF-001 §8.
 
 ---
@@ -103,7 +103,7 @@ Maps to GOV-002 v0.5→v1: data layer completes, console goes live against the r
 
 - Auth hardening (MFA, sessions, org API keys), invites full lifecycle
 - Console integration in slices (auth → create/estimate → deploy → observe → settings/billing)
-- Valkey + Object storage (proxied GCS, Steloit-domain URLs per A1.4, content eTLD+1) + Queue (after the A1.2/A3.1 WAL-signal design review — scale-to-zero must survive)
+- Valkey (optional, idle-suspend) + **external-provider Bindings (Storage Binding, AI Binding)** replacing managed object-storage and any AI gateway (ADR-0004/A5). Queue is a Postgres capability (pgmq), shipped in V2 with workers — not a V1 product.
 - Observability product (metrics/logs/traces/events queries, alert rules + backtest, notifications family, emails)
 - Billing end-to-end (usage → quotas → plans → dunning → invoices) + payment provider + **the hard spend cap as flagship (F9, US-11.7)**
 - **Masking-by-policy V1 depth (F14, T4.9)** — policy-driven rules + DDL-aware feeds; the defensible half of the preview demo
@@ -254,13 +254,13 @@ Swap MSW → real API, surface by surface, behind a per-family flag (`VITE_API_M
 
 ### E9 · Data layer completion (M4) — **8 EW** · V1 · Sprints 8–10
 
-Per GOV-002 v0.5, in this order:
+Rescoped by ADR-0004/A5 — build only differentiated products; commodity becomes a Binding or a Postgres capability:
 
-1. **Valkey** (2 EW): per-project-env pods (never shared — D5), driver + estimate shapes + bindings. Frames S2/D3/D6/D14.
-2. **Object storage** (3 EW): proxied GCS (D4), one bucket per project, STS-scoped presigned URLs rewritten to Steloit content-domain (A1.4/A2.4), lifecycle rules (expire/tier_cold). Frames S3/D7/D15/D16.
-3. **Queue** (3 EW + design review): **the A3.1 design review comes first** — WAL-derived signals via logical-decoding CDC on vanilla Postgres (A3.1 as amended by INF-001 A4; direct-CDC vs trigger-outbox variants), dispatcher-driven consumer wake; queues must not defeat scale-to-zero (A1.2), and the NATS fallback is last resort (loses branch-coherence). The review is a Sprint 8 deliverable with its own ADR; implementation follows its outcome. Frames S4/D8/D17/D18.
+1. **Valkey** (2 EW): optional service (provision-on-add, idle-suspend, hard quotas — A5.1), driver + estimate shapes + bindings. Frames S2/D3/D6/D14.
+2. **External-provider Bindings** (~2 EW, shared mechanism — A5.5): the Binding primitive extended to external targets. **Storage Binding** (connect S3/GCS/R2 — creds in Secrets, config injection, allow-policy, estimate-at-bind, audit; Steloit never proxies bytes/egress — A5.3) and **AI Binding** (govern an LLM provider — allow-policy, creds, estimate-at-bind, cost visibility, soft spend control; no proxy/routing/hard-caps — A5.4). Replaces the managed object-storage build and any AI gateway.
+3. **Queue → deferred to V2 as a Postgres capability** (A5.2): pgmq inside the customer's Postgres, consumed by a worker. No design review, no NATS, no separate service. Risk R3 retired.
 
-Each product instantiates the same anatomy (21-playbooks: one pioneer at a time — Postgres is the pioneer; these instantiate).
+Valkey instantiates the pioneer anatomy (21-playbooks: one pioneer — Postgres); the Bindings ride the existing Binding machinery (F3/T3.6).
 
 ---
 
@@ -323,7 +323,7 @@ Last by design (Law 4: the platform is already whole). The four laws are archite
 
 Shaped by the S2 ruling. If accepted as proposed (v1 grows a data-plane section):
 
-- **Wave 1 (read-only, V1-tail, ~5 EW):** SQL exec (read-committed, statement-timeout) + tables + pg_stat_statements insights (D1/D2/D4); Valkey key browse + TTL (D3); messages list + payload (D8/D18); object list (D7); backups list (D5); branches list/create (W5 — also unblocks CLI `db branch`).
+- **Wave 1 (read-only, V1-tail, ~5 EW):** SQL exec (read-committed, statement-timeout) + tables + pg_stat_statements insights (D1/D2/D4); Valkey key browse + TTL (D3); messages list + payload (D8/D18); backups list (D5); branches list/create (W5 — also unblocks CLI `db branch`).
 - **Wave 2 (destructive, policy-gated + audited, Future, ~5 EW):** redrive/discard/purge, FLUSHALL, restore-to-branch (never in place), shell exec (audited, TTL'd unlock), branch promote/delete.
 
 Also carries the remaining spec-change §2b/§2c/§2d endpoints not already landed by E7–E12 (bindings rotate, domain recheck/delete, schedule/lifecycle per-row ops, deployment pause/abort, org/project transfer, git integration, cell drain/detach) — sequenced by blocked-surface count (§9 of the proposals doc).
@@ -423,8 +423,8 @@ Suggested split: Engineer A owns W-PLAT+W-BE-infra-adjacent; Engineer B owns W-B
 | Sprint | Focus | Deliverables | Load |
 |---|---|---|---|
 | **7** | E7, E8-2 | MFA/WebAuthn/sessions/recovery · org API keys · invite emails · console A/G planes live | 5.5 |
-| **8** | E9-1/2, E8-3 | Valkey · object storage (proxied, content-domain URLs) · **queue design review ADR (A3.1)** · TS SDK v0 · console create/services live | 6 |
-| **9** | E9-3, E10, E8-4 | Queue impl (per review outcome) · alert evaluator + backtest · custom domains & TLS (F5) · console deploy/previews live | 6 |
+| **8** | E9-1, E9-7, E8-3 | Valkey (optional) · external-provider Bindings (Storage + AI) · TS SDK v0 · console create/services live | 6 |
+| **9** | E10, E8-4 | Storage/AI Binding polish · alert evaluator + backtest · custom domains & TLS (F5) · console deploy/previews live | 6 |
 | **10** | E10, E11 starts, E8-5 | Notifications family + bell · email service (12 templates) · pricing tables + subscription machine · console observe live | 6 |
 | **11** | E11, E12, E8-6a | Quota evaluator + 80% warnings · invoices · policies CRUD+dry-run · console settings/policies live | 6 |
 | **12** | E11, E12 | Payment provider · dunning timeline (clock-warped tests) · templates (capture/consume) · plan change/cancel | 6 |
@@ -495,7 +495,7 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 |---|---|---|---|---|
 | R1 | Substrate spike surprises (ZFS snapshot semantics, CNPG recovery/hibernation edge cases) | Low | Medium — all documented paths; the prior Critical Neon↔GCS risk was retired by ADR-0003 | Week-1 spike measures; CNPG pinned ≤1.30 until barman-cloud plugin stabilizes |
 | R2 | **Partner expectations exceed alpha scope** — five clients ready to *use* the platform; the alpha ships one path | High | High — churn before revenue | P5 expectations doc up front; visible V1 roadmap; weekly partner check-ins; E8-lite gives early visual progress |
-| R3 | Queue scale-to-zero constraint unsolvable at the WAL layer | Medium | High — queues slip or lose branch-coherence via NATS | A3.1 design review is a Sprint 8 deliverable with its own ADR; queues are not on the alpha path |
+| ~~R3~~ | **Retired (ADR-0004/A5.2)** — queue collapsed to pgmq-in-Postgres; the scale-to-zero-queue problem no longer exists | — | — | — |
 | R4 | Two-founder ops load (CNPG/ZFS fleet, support commitment to five partners) | High | High | Duty-cycle discipline pre-partner; alerting hygiene; M7 unfreezes hiring (D3 budgets 2–3 seniors when hiring starts) |
 | R5 | GCP quota walls on fresh account | High | Medium — days of stall | Staged quota filings in Sprint 0 and at each scale-out; track headroom per sprint review |
 | R6 | Free-compute abuse post-open-signup | High (if opened) | High | Invite-only through V1; abuse controls are a GA entry criterion |
@@ -528,7 +528,7 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 | **MVP total** | | **42 EW ≈ 6 sprints @ ~5.5–6 EW loaded** (fits the ~90-day target with zero slack — R9 applies) | |
 | E7 | Auth hardening | 4 | V1 |
 | E8 | Console integration | 10 | V1 |
-| E9 | Data layer (Valkey/Storage/Queue) | 8 | V1 |
+| E9 | Data layer: Valkey (optional) + external Bindings (storage+AI) | 4 | V1 |
 | E10 | Observability + notifications + emails | 8 | V1 |
 | E11 | Billing & subscription | 9 | V1 |
 | E12 | Policies, templates, dashboards | 7 | V1 |
@@ -538,8 +538,8 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 | T4.9 | Masking-by-policy V1 depth (F14) | 3.5 | V1 |
 | US-11.7 | Hard spend cap (F9 flagship) | 0.5 | V1 |
 | E5.6–7 | TS SDK v0 + docs | 1.5 | V1 |
-| **V1 total** | | **65.5 EW ≈ 10–11 sprints** | |
-| **Grand total to v1 GA** | | **~108 EW ≈ 16 sprints ≈ 8 months** with the stated team | |
+| **V1 total** | | **~61.5 EW ≈ 10 sprints** (ADR-0004: E9 8→4 EW, queue product removed) | |
+| **Grand total to v1 GA** | | **~104 EW ≈ 16 sprints ≈ 8 months** with the stated team | |
 
 **Revision note (2026-07-18 review):** gaps closed — custom domains/TLS (F5) was specced in module M5 and DB tier 4 but owned by no epic (now E4 T4.8); TS SDK and documentation had workstream mentions but no tasks (now E5 T5.6/T5.7); Sprint 16 gained an explicit external security review. Duplication check: the E6-metering vs E11-billing split and the E8-lite vs E8 slice overlap are intentional and stand.
 

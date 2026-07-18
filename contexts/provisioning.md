@@ -32,11 +32,18 @@ if a task requires violating an invariant, STOP and surface it (§8).
 
 ## Drivers
 
-Per-product drivers behind one provisioner interface (Postgres/CNPG is the pioneer — cluster create,
-snapshot-branch, hibernate/wake, PITR-to-new-branch; Valkey, storage-proxy, queue instantiate the
-same anatomy — one pioneer at a time, ADR-010). Reference implementation for branching mechanics:
-Xata OSS (Apache-2.0); substrate decision record: `docs/adr/0003-database-substrate.md` + INF-001 §A4.
-Customer-visible object URLs are served from the separate content eTLD+1 (A2.4), never provider URLs (A1.4).
+**The managed `Product` surface is exactly `[postgres, valkey, web, worker]` (ADR-0004/A5).** Per-product
+drivers behind one provisioner interface (Postgres/CNPG is the pioneer — cluster create, snapshot-branch,
+hibernate/wake, PITR-to-new-branch; **Valkey** instantiates the anatomy — one pioneer at a time, ADR-010).
+Reference for branching mechanics: Xata OSS (Apache-2.0); substrate record: `docs/adr/0003-database-substrate.md` + INF-001 §A4.
+
+**Not products — do not build these as managed services (A5):**
+- **Cache (Valkey)** is *optional* — provision-on-add, idle-suspend, hard quotas; never a pod per project by default (A5.1).
+- **Queue** is a *Postgres capability* — pgmq inside the customer's DB, consumed by a worker. No queue service, no broker, no NATS; A3.1/R3 retired (A5.2).
+- **Storage & AI** are *external-provider Bindings* (A5.3/A5.4/A5.5): the Binding primitive extended to external targets (provider + config + secret-ref). Steloit never proxies bytes/traffic and never bears egress; credentials live in Secrets; estimate-at-bind shows the provider's price. AI Binding is control-plane governance only — **no proxy, no routing, no hard in-line caps** (that's the gateway commodity). Distinct from the four-laws assistant.
+- **GPU** is removed; a future GPU need is a Binding to Modal/Replicate, v4+.
+
+Preview/content served on the content eTLD+1 (A2.4) applies to *preview environments* (E4), not to a storage product.
 
 ## Mistake bank
 
@@ -44,5 +51,7 @@ Customer-visible object URLs are served from the separate content eTLD+1 (A2.4),
 - A resource table without `cell_id`, or provisioning that skips the cell-selection function (inv. 1).
 - Letting a substrate name (cnpg/zfs/gke/gcs — or the retired neon) into an id, error, URL, or metric label (violates D8).
 - Metering only "when billing ships" — metering is day-one (D10).
-- Scale-to-zero designs that require an always-awake poller (A1.2 — queues especially).
+- Scale-to-zero designs that require an always-awake poller (A1.2 — internal jobs; the customer queue is now pgmq-in-DB drained by a scale-to-zero worker, A5.2).
+- Building storage/AI/queue as a *managed service* — they are Bindings or a Postgres capability (A5); a new managed product needs an ADR.
+- An external Binding that proxies bytes/traffic, routes across providers, or enforces a hard in-line cap — that is the commodity we don't build (A5.3/A5.4).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.

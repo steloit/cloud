@@ -32,6 +32,15 @@ permanent). They are enforced by *shape*, not by prompt:
   destructive, even as one-click suggestions (describe-only).
 - Inference is a bought API behind a swappable interface (D5); AI requests are metered ($2/1k).
 
+## AI Binding ≠ AI assistant (ADR-0004/A5.4)
+
+This pack is the **assistant** (Steloit's own AI, the four laws). Separately, the customer's app governs
+its *own* LLM dependency via an **AI Binding** (a Binding to an external provider — see `provisioning`):
+allow-policy, credentials-in-Secrets, config injection, **estimate-at-bind** (model $/1k tokens), cost
+visibility (provider usage API), lifecycle audit, **soft** spend control. It is control-plane governance —
+**no proxy, no routing, no hard in-line caps** (that is the AI-gateway commodity, never built). There is
+no AI Gateway product. Don't conflate the two: the assistant proposes; the AI Binding governs a dependency.
+
 ## Mistake bank
 
 - Any endpoint whose effect is "AI applies a change" (Law 1 is architectural — it must not exist).
