@@ -15,6 +15,7 @@ locals {
     "dns.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudscheduler.googleapis.com",
+    "billingbudgets.googleapis.com",
     "monitoring.googleapis.com",
     "logging.googleapis.com",
   ]
