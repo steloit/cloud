@@ -19,6 +19,9 @@ permissions:
 
 jobs:
   build-sign:
+    # P1 gate: repo vars (GCP_PROJECT, WIF_PROVIDER, CI_IMAGE_SA) are set when
+    # the GCP project exists; until then this job skips cleanly.
+    if: ${{ vars.GCP_PROJECT != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
