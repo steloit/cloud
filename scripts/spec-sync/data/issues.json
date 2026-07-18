@@ -1860,11 +1860,11 @@
       "Platform",
       "Database"
     ],
-    "milestone": "Sprint 8",
-    "sprint": "Sprint 8",
+    "milestone": null,
+    "sprint": null,
     "priority": "Critical",
     "estimate": 0.5,
-    "phase": "V1",
+    "phase": "Future",
     "module": "M4 Provisioning",
     "deps": [],
     "body": "Queues MUST NOT defeat scale-to-zero (A1.2). Evaluate WAL-derived signals at the safekeeper/CDC layer (direct-CDC vs trigger-outbox); dispatcher-driven consumer wake; NATS fallback last resort (loses branch-coherence).\n**AC:** ADR recorded; E9-5 shaped by it."
@@ -2526,8 +2526,8 @@
       "AI",
       "Backend"
     ],
-    "milestone": "Sprint 13",
-    "sprint": "Sprint 13",
+    "milestone": "Sprint 7",
+    "sprint": "Sprint 7",
     "priority": "High",
     "estimate": 1.25,
     "phase": "V1",
@@ -2546,8 +2546,8 @@
       "AI",
       "Backend"
     ],
-    "milestone": "Sprint 14",
-    "sprint": "Sprint 14",
+    "milestone": "Sprint 7",
+    "sprint": "Sprint 7",
     "priority": "High",
     "estimate": 0.75,
     "phase": "V1",
@@ -2620,8 +2620,8 @@
       "AI",
       "DevOps"
     ],
-    "milestone": "Sprint 13",
-    "sprint": "Sprint 13",
+    "milestone": "Sprint 7",
+    "sprint": "Sprint 7",
     "priority": "Medium",
     "estimate": 0.25,
     "phase": "V1",
@@ -2637,9 +2637,9 @@
       "AI",
       "Backend"
     ],
-    "milestone": "Sprint 15",
-    "sprint": "Sprint 15",
-    "priority": "Medium",
+    "milestone": "Sprint 8",
+    "sprint": "Sprint 8",
+    "priority": "High",
     "estimate": 0.5,
     "phase": "V1",
     "module": "M9 AI",
@@ -2716,11 +2716,11 @@
       "Backend",
       "API"
     ],
-    "milestone": "Sprint 15",
-    "sprint": "Sprint 15",
+    "milestone": null,
+    "sprint": null,
     "priority": "Medium",
     "estimate": 0.5,
-    "phase": "V1",
+    "phase": "Future",
     "module": "M12 Data-plane depth",
     "deps": [
       "E9-5",
@@ -3204,8 +3204,8 @@
       "Security",
       "Backend"
     ],
-    "milestone": "Sprint 10",
-    "sprint": "Sprint 10",
+    "milestone": "Sprint 11",
+    "sprint": "Sprint 11",
     "priority": "High",
     "estimate": 3.5,
     "phase": "V1",
@@ -3305,5 +3305,39 @@
     "module": "Cross-cutting",
     "deps": [],
     "body": "(seeded post-hoc; source of truth: tasks/e0-setup/S10.md)"
+  },
+  {
+    "key": "S11",
+    "epic": "E0",
+    "title": "S11 · Ruling: openapi `intent` field + catalog read surface (S-process, ADR-039/040)",
+    "labels": [
+      "spec-ruling",
+      "API"
+    ],
+    "milestone": "Sprint 0",
+    "sprint": "Sprint 0",
+    "priority": "High",
+    "estimate": 0.2,
+    "phase": "MVP",
+    "module": "Cross-cutting",
+    "deps": [],
+    "body": "(seeded post-hoc; source of truth: tasks/e0-setup/S11.md)"
+  },
+  {
+    "key": "S12",
+    "epic": "E0",
+    "title": "S12 · Ruling: ADR-022 pricing amendment — product-first presentation, included capabilities, Pro price (human-only)",
+    "labels": [
+      "spec-ruling",
+      "Billing"
+    ],
+    "milestone": "Sprint 0",
+    "sprint": "Sprint 0",
+    "priority": "High",
+    "estimate": 0.1,
+    "phase": "MVP",
+    "module": "Cross-cutting",
+    "deps": [],
+    "body": "(seeded post-hoc; source of truth: tasks/e0-setup/S12.md)"
   }
 ]

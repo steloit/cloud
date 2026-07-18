@@ -423,16 +423,18 @@ Suggested split: Engineer A owns W-PLAT+W-BE-infra-adjacent; Engineer B owns W-B
 
 | Sprint | Focus | Deliverables | Load |
 |---|---|---|---|
-| **7** | E7, E8-2 | MFA/WebAuthn/sessions/recovery · org API keys · invite emails · console A/G planes live | 5.5 |
-| **8** | E9-1, E9-7, E8-3 | Valkey (optional) · external-provider Bindings (Storage + AI) · TS SDK v0 · console create/services live | 6 |
+| **7** | E7, E8-2, E13 core | MFA/WebAuthn/sessions/recovery · org API keys · invite emails · console A/G planes live · Composer core: AI tools + resolver + inference interface (T13.1/13.2/13.6) | 5.5* |
+| **8** | E9-1/2/3, E8-3, T13.7 | Valkey (optional) · external-provider Bindings (Storage + AI) · TS SDK v0 · intent-catalog create canvas live · **Composer describe-to-provision (T13.7)** | 6* |
 | **9** | E10, E8-4 | Storage/AI Binding polish · alert evaluator + backtest · custom domains & TLS (F5) · console deploy/previews live | 6 |
 | **10** | E10, E11 starts, E8-5 | Notifications family + bell · email service (12 templates) · pricing tables + subscription machine · console observe live | 6 |
 | **11** | E11, E12, E8-6a | Quota evaluator + 80% warnings · invoices · policies CRUD+dry-run · console settings/policies live | 6 |
 | **12** | E11, E12 | Payment provider · dunning timeline (clock-warped tests) · templates (capture/consume) · plan change/cancel | 6 |
-| **13** | E11 finish, E12, E13 starts | **First charge to design partners → M7** · dashboards · AI tools + resolver | 6 |
-| **14** | E13, E8-7 | Threads/insights/proposals · describe-to-provision · console AI plane live · **capacity knob-turns post-M7** | 6 |
-| **15** | E13 finish, E14-W1 | AI polish + Law-4 disable QA · data-plane read surfaces (SQL/tables/keys/messages/backups/branches list) | 6 |
+| **13** | E11 finish, E12, E13 assistant | **First charge to design partners → M7** · dashboards · AI plane assistant work resumes | 6* |
+| **14** | E13, E8-7 | Threads/insights/proposals · console AI plane live · **capacity knob-turns post-M7** | 6* |
+| **15** | E13 finish, E14-W1 | AI polish + Law-4 disable QA · data-plane read surfaces (SQL/tables/keys/backups/branches list) | 6* |
 | **16** | E14, hardening | Remaining spec-closure endpoints · load/failure drills · **external security review / pen-test** · SOC2-lite hygiene checklist · **v1 GA review → M8** | 5 |
+
+\* Loads not yet rebalanced for the 2026-07-18 audit moves (Composer core → S7–8 · T4.9 → S11 · E9-4 + T14.4 → Future) — rebalance at enrichment; S11 in particular now carries T4.9's 3.5 EW on top of its prior load.
 
 **Milestones:** **M5** (end S9): console fully usable for the alpha path against the real API. **M6** (end S10): data layer complete. **M7** (S13): first payment clears — hiring unfreeze, knob-turns, Mumbai. **M8** (end S16): v1 GA-ready (public signup timing is a separate founder call, contingent on abuse controls per A1.8).
 
