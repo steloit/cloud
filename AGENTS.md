@@ -12,6 +12,7 @@ views* — never edit them; edit the files here and run sync.
 | `services/` | Backend deployables (`api` = modular monolith, `cell-agent`) — born with their first tasks |
 | `packages/` | `contracts` (generated from openapi.yaml) · `canon` (fixtures + invariants as test utils) |
 | `docs/product/` | **The design authority** (the spec package; internal numbering 00–24 is load-bearing) |
+| `docs/architecture.md` | **Architecture v1 (FROZEN, ADR-0001)** — stack, boundaries, toolchain; deltas need an ADR |
 | `docs/adr/` | Engineering ADRs · `docs/plan/` — roadmap, workflow, migration record |
 | `contexts/` | Context Packs — cross-cutting domain knowledge; load the ones your task lists |
 | `tasks/` | Execution layer: one file per work item (YAML frontmatter + implementation closure) |
@@ -50,6 +51,8 @@ never hand-written · demo data from `19-canon` only.
 ## Hard rules
 
 - Never invent a component, endpoint, or term — propose the owner-level change first (agent-guide §3 binds here).
+- **Architecture v1 is frozen** (`docs/architecture.md`, ADR-0001): Go/stdlib-http/sqlc/River/REST+SSE etc. are
+  decided — don't introduce alternative frameworks, ORMs, or protocols; deltas go through an ADR.
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**
