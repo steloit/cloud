@@ -27,3 +27,25 @@ UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL;
 -- name: CountActiveSessionsForUser :one
 SELECT count(*) FROM sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now();
+
+-- name: CreateToken :one
+INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ListPersonalTokens :many
+SELECT * FROM tokens
+WHERE kind = 'personal' AND user_id = $1 AND revoked_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: GetActiveTokenByHash :one
+SELECT * FROM tokens
+WHERE token_hash = $1 AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at > now());
+
+-- name: RevokePersonalToken :execrows
+UPDATE tokens SET revoked_at = now()
+WHERE id = $1 AND user_id = $2 AND kind = 'personal' AND revoked_at IS NULL;
+
+-- name: TouchTokenUsed :exec
+UPDATE tokens SET last_used_at = now() WHERE id = $1;

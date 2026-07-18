@@ -81,10 +81,15 @@ func CarrierFrom(ctx context.Context) *Carrier {
 	return c
 }
 
-// Principal is the authenticated session resolved by the middleware.
+// Principal is the authenticated caller resolved by the middleware — a
+// browser session (Kind "session") or a bearer token (Kind "token"; Scope
+// narrows what mutating operations it may perform).
 type Principal struct {
+	Kind       string // "session" | "token"
 	UserID     string
-	SessionID  string
+	SessionID  string // Kind "session" only
+	TokenID    string // Kind "token" only
+	Scope      string // Kind "token": "full" | "read_only"
 	Device     string
 	CreatedAt  time.Time
 	LastSeenAt time.Time

@@ -59,6 +59,54 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
+const createToken = `-- name: CreateToken :one
+INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at
+`
+
+type CreateTokenParams struct {
+	ID        string
+	Kind      string
+	UserID    pgtype.Text
+	OrgID     pgtype.Text
+	Name      string
+	Scope     string
+	Prefix    string
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token, error) {
+	row := q.db.QueryRow(ctx, createToken,
+		arg.ID,
+		arg.Kind,
+		arg.UserID,
+		arg.OrgID,
+		arg.Name,
+		arg.Scope,
+		arg.Prefix,
+		arg.TokenHash,
+		arg.ExpiresAt,
+	)
+	var i Token
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.UserID,
+		&i.OrgID,
+		&i.Name,
+		&i.Scope,
+		&i.Prefix,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, password_hash, name)
 VALUES ($1, $2, $3, $4)
@@ -112,6 +160,32 @@ func (q *Queries) GetActiveSessionByTokenHash(ctx context.Context, tokenHash []b
 	return i, err
 }
 
+const getActiveTokenByHash = `-- name: GetActiveTokenByHash :one
+SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
+WHERE token_hash = $1 AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
+`
+
+func (q *Queries) GetActiveTokenByHash(ctx context.Context, tokenHash []byte) (Token, error) {
+	row := q.db.QueryRow(ctx, getActiveTokenByHash, tokenHash)
+	var i Token
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.UserID,
+		&i.OrgID,
+		&i.Name,
+		&i.Scope,
+		&i.Prefix,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.CreatedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, name, created_at, updated_at FROM users WHERE lower(email) = lower($1)
 `
@@ -148,6 +222,63 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	return i, err
 }
 
+const listPersonalTokens = `-- name: ListPersonalTokens :many
+SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
+WHERE kind = 'personal' AND user_id = $1 AND revoked_at IS NULL
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListPersonalTokens(ctx context.Context, userID pgtype.Text) ([]Token, error) {
+	rows, err := q.db.Query(ctx, listPersonalTokens, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Token
+	for rows.Next() {
+		var i Token
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.UserID,
+			&i.OrgID,
+			&i.Name,
+			&i.Scope,
+			&i.Prefix,
+			&i.TokenHash,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokePersonalToken = `-- name: RevokePersonalToken :execrows
+UPDATE tokens SET revoked_at = now()
+WHERE id = $1 AND user_id = $2 AND kind = 'personal' AND revoked_at IS NULL
+`
+
+type RevokePersonalTokenParams struct {
+	ID     string
+	UserID pgtype.Text
+}
+
+func (q *Queries) RevokePersonalToken(ctx context.Context, arg RevokePersonalTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokePersonalToken, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL
 `
@@ -163,5 +294,14 @@ UPDATE sessions SET last_seen_at = now() WHERE id = $1
 
 func (q *Queries) TouchSession(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, touchSession, id)
+	return err
+}
+
+const touchTokenUsed = `-- name: TouchTokenUsed :exec
+UPDATE tokens SET last_used_at = now() WHERE id = $1
+`
+
+func (q *Queries) TouchTokenUsed(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, touchTokenUsed, id)
 	return err
 }

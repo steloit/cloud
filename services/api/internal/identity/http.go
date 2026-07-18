@@ -50,9 +50,13 @@ func (h *Handlers) contextMiddleware(f gen.StrictHandlerFunc, _ string) gen.Stri
 		if ck, err := r.Cookie(session.CookieName); err == nil && ck.Value != "" {
 			if sess, u, err := h.svc.Resolve(ctx, ck.Value); err == nil {
 				ctx = session.WithPrincipal(ctx, session.Principal{
-					UserID: u.ID, SessionID: sess.ID, Device: sess.Device,
+					Kind: "session", UserID: u.ID, SessionID: sess.ID, Device: sess.Device,
 					CreatedAt: sess.CreatedAt.Time, LastSeenAt: sess.LastSeenAt.Time,
 				})
+			}
+		} else if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
+			if p, err := h.svc.ResolveBearer(ctx, strings.TrimPrefix(ah, "Bearer ")); err == nil {
+				ctx = session.WithPrincipal(ctx, p)
 			}
 		}
 		resp, err := f(ctx, w, r, request)
@@ -84,6 +88,13 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 			"Check the email and password and try again."))
 	case errors.Is(err, ErrNoSession):
 		problem.Write(w, r, problem.AuthFailed("no active session", "Sign in first."))
+	case errors.Is(err, ErrScopeDenied):
+		problem.Write(w, r, problem.PermissionDenied("read_only token",
+			"Use a full-scope token or a browser session for this operation."))
+	case errors.As(err, new(notFoundError)):
+		var nf notFoundError
+		errors.As(err, &nf)
+		problem.Write(w, r, problem.NotFound(nf.what))
 	case errors.As(err, new(validationError)):
 		var ve validationError
 		errors.As(err, &ve)
