@@ -12,6 +12,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
+	"github.com/steloit/cloud/services/api/internal/identity/policy"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -64,7 +65,8 @@ func main() {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
 	}
-	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, nil))
+	policies := policy.NewEngine(identity.NewPolicySource(queries))
+	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies))
 	_ = authz // consumed by the org/project handlers as their tasks land (T2.7+)
 
 	mux := http.NewServeMux()

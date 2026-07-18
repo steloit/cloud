@@ -322,6 +322,38 @@ func (q *Queries) ListPersonalTokens(ctx context.Context, userID pgtype.Text) ([
 	return items, nil
 }
 
+const listPoliciesForOrg = `-- name: ListPoliciesForOrg :many
+SELECT id, org_id, project_id, key, enforcement, config, created_at FROM policies WHERE org_id = $1
+`
+
+func (q *Queries) ListPoliciesForOrg(ctx context.Context, orgID string) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listPoliciesForOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.Key,
+			&i.Enforcement,
+			&i.Config,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokePersonalToken = `-- name: RevokePersonalToken :execrows
 UPDATE tokens SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND kind = 'personal' AND revoked_at IS NULL
