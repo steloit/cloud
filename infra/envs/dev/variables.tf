@@ -23,3 +23,14 @@ variable "content_domain" {
   description = "Empty until P2 registers the customer-content eTLD+1 (A2.4)"
   default     = ""
 }
+
+variable "billing_account" {
+  type        = string
+  description = "P1 gate — cost guardrails are inert while empty"
+  default     = ""
+}
+
+variable "alert_emails" {
+  type    = list(string)
+  default = []
+}
