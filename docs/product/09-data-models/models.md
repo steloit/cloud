@@ -34,6 +34,10 @@ erDiagram
 ## Core tables (constraints & indexes)
 - **orgs**(id, slug UNIQUE, name, home_region, plan enum, created_at) — slug immutable.
 - **members**(org_id, user_id, role enum, PK(org_id,user_id)); ≥1 owner enforced by trigger.
+- **users**(id text pk `usr_…`, email text NOT NULL, password_hash text NOT NULL — argon2id PHC string, name text, created_at, updated_at) — UNIQUE index on lower(email); no soft-delete in v1 (account deletion = T7.6's flow); no verification fields (no verify-email op in the contract — added via S-process if/when one exists). *(spec gap filled by T2.1, 2026-07-18.)*
+- **sessions**(id text pk `ses_…`, user_id FK→users ON DELETE CASCADE, token_hash bytea UNIQUE — sha256 of the cookie token, the raw value is never stored, device text, created_at, last_seen_at, expires_at, revoked_at nullable) — idx (user_id), (expires_at); server-side sessions per architecture §10; P-series reads device/last_seen/current. *(T2.1.)*
+- **users**(id text pk `usr_…`, email text NOT NULL, password_hash text NOT NULL — argon2id PHC string, name text, created_at, updated_at) — UNIQUE index on lower(email); no soft-delete in v1 (account deletion = T7.6's flow); no verification fields (no verify-email op in the contract — added via S-process if/when one exists). *(spec gap filled by T2.1, 2026-07-18.)*
+- **sessions**(id text pk `ses_…`, user_id FK→users ON DELETE CASCADE, token_hash bytea UNIQUE — sha256 of the cookie token, the raw value is never stored, device text, created_at, last_seen_at, expires_at, revoked_at nullable) — idx (user_id), (expires_at); server-side sessions per architecture §10; P-series reads device/last_seen/current. *(T2.1.)*
 - **invites**(id, org_id, email, role, status enum, expires_at, inviter_id) — UNIQUE(org_id,email) WHERE status='pending'; idx expires_at.
 - **projects**(id, org_id, name UNIQUE(org_id,name)); **environments**(id, project_id, name, region_override).
 - **services**(id, env_id, name UNIQUE(env_id,name), product enum, intent enum nullable, status enum, shape jsonb, monthly_estimate numeric) — idx (env_id,status).
