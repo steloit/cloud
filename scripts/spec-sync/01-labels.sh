@@ -14,7 +14,7 @@ labels=(
   "Backend|0052CC|Control-plane services & API"
   "Frontend|006B75|Console integration"
   "Infrastructure|C5DEF5|GCP / Terraform / cluster"
-  "Platform|BFD4F2|Data plane, Neon, drivers, reconciler"
+  "Platform|BFD4F2|Data plane, CNPG substrate, drivers, reconciler"
   "CLI|E4E669|steloit CLI & SDK"
   "API|FEF2C0|openapi.yaml contract work"
   "Database|D4C5F9|Schema, migrations, data model"

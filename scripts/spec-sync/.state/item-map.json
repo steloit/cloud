@@ -118,7 +118,6 @@
   "E9-2": "PVTI_lADOEN1Mzc4BdtcFzgzO9js",
   "E9-3": "PVTI_lADOEN1Mzc4BdtcFzgzO9jw",
   "E9-4": "PVTI_lADOEN1Mzc4BdtcFzgzO9j4",
-  "E9-5": "PVTI_lADOEN1Mzc4BdtcFzgzO9j8",
   "E9-6": "PVTI_lADOEN1Mzc4BdtcFzgzO9kA",
   "US-10.1": "PVTI_lADOEN1Mzc4BdtcFzgzO9lg",
   "US-10.2": "PVTI_lADOEN1Mzc4BdtcFzgzO9lk",
@@ -165,7 +164,6 @@
   "T14.2": "PVTI_lADOEN1Mzc4BdtcFzgzO9yk",
   "T14.3": "PVTI_lADOEN1Mzc4BdtcFzgzO9yo",
   "T14.4": "PVTI_lADOEN1Mzc4BdtcFzgzO9ys",
-  "T14.5": "PVTI_lADOEN1Mzc4BdtcFzgzO9yw",
   "T14.6": "PVTI_lADOEN1Mzc4BdtcFzgzO9y0",
   "T14.7": "PVTI_lADOEN1Mzc4BdtcFzgzO9y4",
   "T14.8": "PVTI_lADOEN1Mzc4BdtcFzgzO9y8",
@@ -190,5 +188,11 @@
   "CK-M5": "PVTI_lADOEN1Mzc4BdtcFzgzO9hc",
   "CK-M6": "PVTI_lADOEN1Mzc4BdtcFzgzO9kI",
   "CK-M7": "PVTI_lADOEN1Mzc4BdtcFzgzO9p8",
-  "CK-M8": "PVTI_lADOEN1Mzc4BdtcFzgzO9zA"
+  "CK-M8": "PVTI_lADOEN1Mzc4BdtcFzgzO9zA",
+  "T4.9": "PVTI_lADOEN1Mzc4BdtcFzgzQSd4",
+  "US-11.7": "PVTI_lADOEN1Mzc4BdtcFzgzQSeI",
+  "S8": "PVTI_lADOEN1Mzc4BdtcFzgzQTKk",
+  "S9": "PVTI_lADOEN1Mzc4BdtcFzgzQe_Y",
+  "E7-1": "PVTI_lADOEN1Mzc4BdtcFzgzQvVg",
+  "S10": "PVTI_lADOEN1Mzc4BdtcFzgzQ2Gw"
 }
