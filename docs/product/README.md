@@ -7,6 +7,8 @@ Everything required to build the Steloit developer-cloud console, for human engi
 - `00-sources/Steloit-Console-Screens.html` — **152 validated frames** (1440×900) of every page, state, and overlay. Frame labels are authoritative one-line purposes; frame ids (W3, B10, U6, DB7, AI3…) are the cross-reference currency used throughout this package.
 - `00-sources/Steloit-Console-Design-Spec.md` — the design spec: every decision, rule, and reversal, with reasoning.
 
+**Current product model (2026-07-18):** the managed-service enum is `[postgres, valkey, web, worker]`; Storage & AI are external **Bindings**; queue is a **Postgres capability** (pgmq); the public catalog sells **outcome intents resolved by the Composer**. Authority: `18-philosophy/decisions.md` ADR-034/037/038/039/040 — read those entries before trusting any product-surface example in the derived docs (frames reconcile via ruling S9).
+
 ## How to use this package (agents: read this)
 1. Load `01-design-system` first — components are class contracts extracted from the gallery; never invent a component.
 2. Resolve any screen question by opening its frame in `00-sources` (search the frame id).

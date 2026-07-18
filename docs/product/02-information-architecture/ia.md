@@ -8,13 +8,13 @@ Admission rule: **weight × frequency**; items are doorways, not containers.
 1. **Home** (`s-hex`) — org-wide landing: projects, costs, activity; hosts the **Dashboards** section (single-door decision: dashboards are reached from Home only).
 2. **Observe** (`s-pulse`) — telemetry suite: Health · Metrics · Logs · Traces · Alerts (+ events).
 3. **Deploy** (`s-deploy`) — promotion, rollouts, previews (DP-series).
-4. **Services zone** — per-product entries in current project context. Two shapes: *fleet* (badge ×n, e.g. db ×2) vs *capability* (no badge, e.g. AI Gateway).
+4. **Services zone** — per-product entries in current project context. Two shapes: *fleet* (badge ×n, e.g. db ×2) vs *capability* (no badge — *no current product has this shape post-A5*; the shape remains for future services, ruling S9).
 5. **+** (dashed) — creation canvas (C1).
 6. **⚙** — settings plane.
 Never on the rail: Alerts, AI Insights, Dashboards, Templates, Cells (all reached through their owners).
 
 ## Sidebars (`.snav`) by area
-- **Home**: All projects · **Dashboards** (Overview / Pre-built: PostgreSQL Health · Valkey Performance · AI Gateway · Infrastructure · Cost & Usage · Deployments / My · Shared · Templates) · Projects group · New project.
+- **Home**: All projects · **Dashboards** (Overview / Pre-built: PostgreSQL Health · Valkey Performance · AI Gateway *(pre-A5 exemplar — S9 ruling pending: re-cast as AI-Binding usage or drop)* · Infrastructure · Cost & Usage · Deployments / My · Shared · Templates) · Projects group · New project.
 - **Settings**: Project group (General · Members & roles · Git integration · Policies) · Organization group (General · Members · Audit log · Policies · API keys · Cells · Templates) · Billing group (Overview · Usage · Invoices · Payment & plan). Account (P-series): Profile · Security · Personal tokens · Notifications · Quiet hours.
 - **Assistant** (⌘J / top-nav button): Ask · Insights · Activity · Capabilities; footer names the four laws + the disable policy (AI3).
 

@@ -10,7 +10,7 @@ This document owns the CLI's grammar and output conventions. Command *behavior* 
 steloit <noun> <verb> [args] [--project <p>] [--env <e>] [--org <o>] [flags]
 ```
 
-- **Nouns are the primitives and products**; verbs are the shared lifecycle set (`create, list, inspect, scale, backup, destroy` — GOV-002 §6.2) plus product verbs. A developer fluent in `steloit db …` is fluent in `steloit queue …`.
+- **Nouns are the primitives and products**; verbs are the shared lifecycle set (`create, list, inspect, scale, backup, destroy` — GOV-002 §6.2) plus product verbs. A developer fluent in `steloit db …` is fluent in `steloit valkey …`. *(ADR-0004/A5: `storage` and `queue` are no longer product nouns — queue capabilities surface under `steloit db` (pgmq) and storage under Binding commands. ADR-039/040 adds the intent door `steloit add <intent>` — task T5.3.)*
 - **Context mirrors the console crumb exactly**: `--org / --project / --env` are the context bar as flags. Resolution order: explicit flags → repo link (`steloit init` wrote `.steloit`) → profile default. The resolved context is **always echoed** on state-changing commands (`ecommerce/production ·`) — context is worn, not guessed.
 - **Env is a filter here too**: `--env staging` re-scopes the same command; omitting it uses the linked default and says so.
 - Regions render provider-faceted everywhere: display `aws · ap-south-1`, flag value `aws/ap-south-1`.
@@ -49,7 +49,7 @@ The exact string works in the console's log bar, ⌘K, and alert rules — anyth
 |---|---|---|
 | `project` | create, list, inspect, delete | `steloit project create ecommerce` (GOV-002 §5) |
 | `env` | create, list, inspect, delete | C8's flow: `steloit env create production-us --region aws/us-east-1 --clone-shape production` |
-| `db`, `valkey`, `storage`, `queue`, `web`, `worker` | create, list, inspect, scale, backup, destroy + product verbs | `steloit db branch db-main --from production` (W5) · `steloit --project ecommerce --env production db list` |
+| `db`, `valkey`, `web`, `worker` | create, list, inspect, scale, backup, destroy + product verbs | `steloit db branch db-main --from production` (W5) · `steloit --project ecommerce --env production db list` |
 | `bind` | (verb-first form) | `steloit bind worker jobs` — consumer config injected, effective next deploy (GOV-002 §6.1) |
 | `deploy` | —, list, rollback, promote | `steloit deploy` · promotion prints the DP1 diff before running |
 | `logs`, `metrics`, `traces`, `events` | (query-first) | §5 grammar; deploy markers included in output |

@@ -140,7 +140,7 @@ Every family here sits in a market with the **same shape**: the primitive is com
 
 - **INF-001 Amendment A5** (founder-ratified — 00-sources is human-only): D5 cache clause (per-project pods → provision-on-add/idle-suspend; shared-with-isolation permitted); D5 queue clause (pgmq-in-customer-DB, not a separate service; NATS struck); note A1.2/A3.1 now bind *internal jobs (River)* only, superseded for the customer product. New §2 nothing; this is a scope-narrowing amendment.
 - **GOV-002 §3.8**: annotate the build list — GPU/AI-gateway were never on it (no change to GOV-002 text needed; the enum is what's wrong).
-- **openapi.yaml + models.md** (S-process): `Product` enum → `[postgres, valkey, storage, queue, web, worker]`. Removes `gpu-worker`, `ai-gateway`.
+- **openapi.yaml + models.md** (S-process): `Product` enum → `[postgres, valkey, storage, queue, web, worker]`. Removes `gpu-worker`, `ai-gateway`. *(superseded: the ratified final is the 4-value enum `[postgres, valkey, web, worker]` — §11d / ADR-034; this line records the review's mid-document proposal only)*
 - **ADR-0004** (docs/adr) + **ADR-034** (product log): record this review's outcomes, superseding the relevant slices of the implementation plan and D5.
 - **Architecture v1.2**: §3/§5 note (customer queue = pgmq-in-DB; cache = provision-on-add); enum note.
 - **Roadmap (implementation-plan.md)**: E9 rescoped to Valkey-only in V1; E9-2/E9-3 (storage) → V2; E9-4 **deleted**; E9-5 → V2 pgmq-capability; E9-6/CK-M6 ("data layer complete") redefined; **risk R3 removed**; Sprint 8–9 lightened; effort totals down ~6 EW.

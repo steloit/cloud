@@ -12,6 +12,7 @@ import {
   listLifecycleRulesQueryKey,
   type Service,
 } from "@/lib/api";
+import { fmtMoney } from "@/lib/fmt";
 import { cn } from "@/lib/utils";
 
 /**
@@ -139,8 +140,8 @@ export function LifecycleDrawer({ svc, onClose }: { svc: Service; onClose: () =>
               </div>
               {typeof savingsCents === "number" ? (
                 <div>
-                  <span className="t">savings&nbsp;&nbsp;</span>~$
-                  {(savingsCents / 100).toFixed(2)}/mo at current prices
+                  <span className="t">savings&nbsp;&nbsp;</span>~{fmtMoney(savingsCents)}/mo at
+                  current prices
                 </div>
               ) : null}
               {note ? (
