@@ -1,0 +1,27 @@
+# PITR always recovers to a NEW cluster (ADR-0003: restore never in place).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: spike-pitr
+  namespace: spike
+spec:
+  instances: 1
+  storage:
+    storageClass: zfs-spike
+    size: 10Gi
+  bootstrap:
+    recovery:
+      source: spike-a
+      recoveryTarget:
+        targetTime: "__TARGET_TIME__"
+  externalClusters:
+    - name: spike-a
+      barmanObjectStore:
+        destinationPath: gs://__WAL_BUCKET__/spike-a
+        googleCredentials:
+          gkeEnvironment: true
+  affinity:
+    tolerations:
+      - {key: storage, operator: Equal, value: zfs, effect: NoSchedule}
+    nodeSelector:
+      pool: zfs-storage
