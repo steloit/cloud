@@ -59,5 +59,8 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Metering only "when billing ships" — metering is day-one (D10).
 - Scale-to-zero designs that require an always-awake poller (A1.2 — internal jobs; the customer queue is now pgmq-in-DB drained by a scale-to-zero worker, A5.2).
 - Building storage/AI/queue as a *managed service* — they are Bindings or a Postgres capability (A5); a new managed product needs an ADR.
+- Classifying by implementation instead of state semantics (ADR-038's State Test: state location/ownership decides Service vs Capability vs Binding — lifecycle, backup, branching, billing all follow state).
+- Surfacing a capability's dependency as a prerequisite or error instead of composing it (the catalog sells intents; the composer proposes the shaped service + estimate — "Jobs without Postgres" is a proposal, never homework).
+- Backend-swapping a capability into different semantics ("Jobs on Kafka") — a semantic divergence is a NEW named service via the gate, never a swap (ADR-038 scope clause).
 - An external Binding that proxies bytes/traffic, routes across providers, or enforces a hard in-line cap — that is the commodity we don't build (A5.3/A5.4).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.

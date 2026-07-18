@@ -56,10 +56,13 @@ never hand-written · demo data from `19-canon` only.
   BYOC (Enterprise/v3, exit-criteria-gated — ADR-0005) are decided. Storage & AI are external **Bindings**;
   queue is a **Postgres capability** (pgmq); GPU is out. The Engineering OS (this file, tasks/, contexts/,
   spec-sync) is frozen too.
-- **New-managed-product gate:** a proposed managed product must first prove it cannot be **(1) a Binding,
-  (2) a capability of an existing product, or (3) an integration.** Only if all three fail may it be a
-  product — and only via a new ADR. Architecture deltas require evidence from implementation or real
-  customer feedback, never speculation. No proactive redesign.
+- **New-managed-product gate — the State Test first (ADR-038):** classification is decided by *state*,
+  because lifecycle, backup, branching, scaling, permissions, billing, and ownership all follow state:
+  **Service** iff independent state lifecycle + isolation boundary · **Capability** iff its state is *of*
+  a parent (branches/joins/transacts with it) · **Binding** iff state lives outside the platform. A
+  proposed managed product must first fail Binding, capability, and integration — only then, via a new
+  ADR. Dependencies are satisfied by the composer (catalog sells intents), never surfaced as homework.
+  Architecture deltas require evidence from implementation or real customer feedback, never speculation.
 - Money is integer cents end-to-end (ADR-025). Service status vocabulary is `ready`/`deleting` (ADR-024).
   Errors are problem+json and always carry `remediation`.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**
