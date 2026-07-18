@@ -23,6 +23,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
 
 var _ = gen.SessionInfo{} // anchor: the contract types this binary serves
@@ -119,7 +120,13 @@ func main() {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
-	prov := provisioning.NewService(pool, recorder)
+	kek, err := secrets.NewEnvKEK(cfg.SecretsKEKID, cfg.SecretsKEK)
+	if err != nil {
+		logger.Error("boot failed", "err", err)
+		os.Exit(1)
+	}
+	vault := secrets.NewVault(queries, kek)
+	prov := provisioning.NewService(pool, recorder, vault)
 	envs := prov // T3.2 closed the env→org seam: environments are real rows
 
 	mux := http.NewServeMux()

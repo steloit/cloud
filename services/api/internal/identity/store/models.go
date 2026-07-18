@@ -91,6 +91,22 @@ type Project struct {
 	CreatedAt           pgtype.Timestamptz
 }
 
+type Secret struct {
+	ID         string
+	OrgID      string
+	ProjectID  pgtype.Text
+	EnvID      pgtype.Text
+	Name       string
+	Version    int32
+	Ciphertext []byte
+	Nonce      []byte
+	WrappedDek []byte
+	DekNonce   []byte
+	KekID      string
+	CreatedBy  string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Service struct {
 	ID                   string
 	EnvID                string
