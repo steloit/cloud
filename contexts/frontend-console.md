@@ -23,6 +23,16 @@ this pack carries the integration knowledge.
   never for anything provisioning, billing, or destructive.
 - Query keys mirror URLs and always include `env` for project-scoped data (env-as-filter).
 
+## The implicit-environment reveal rule (ADR-037 — presentation-layer law)
+
+Environment chrome (crumb pill, env columns, scope chips, pickers, the M3 matrix) is visible iff
+**envs ≥ 2 ∨ previews enabled/history** — one boolean, applied everywhere at once, never per-page.
+At n=1: no env chrome, no `?env=` in URLs, no env rows in Billing, env-free CLI examples in empty
+states. On reveal: chrome appears everywhere simultaneously + one coachmark on the pill + one bell
+event; nothing renames, no URL changes (omitted `?env=` = production, forever). The model/API stay
+explicit — hiding is chrome only (implicit ≠ anonymous). Full spec: docs/plan/implicit-environment-ux.md.
+E8 four-state checks verify both states per slice.
+
 ## The audit grammar (keep green — the suites check these)
 
 Four-state truth on every query-backed surface · gated verbs visible-but-disabled with reason (B6)

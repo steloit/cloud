@@ -57,6 +57,7 @@ All paths follow the spec's own `x-conventions` (plural nouns, `:verb` action su
 | `GET/PATCH/DELETE /lifecycle-rules/{rule}` | D15 per-row actions | `lifecycle.tsx:144` |
 | `POST /deployments/{dep}:pause` · `:abort` | DP2 controls | `deploy.$dep.tsx:28` |
 | `DELETE /envs/{env}` (preview teardown, U6 typed-confirm) | DP3 | `deploy.previews.tsx:117` |
+| `PATCH /envs/{env}` (rename — the ADR-037 escape hatch for teams that want a different word than `production`; rename consequences stated: `?env=` deep links use names) | ADR-037 / implicit-environment-ux.md | founder-ratified 2026-07-18 |
 | `POST /projects:batch` or estimate-linked multi-create | AI1 review-and-create | `create.tsx:569` |
 | `DELETE /orgs/{org}/api-keys/{key}` | G4 revoke (list+create only today) | `api-keys.tsx:200` |
 | `POST /orgs/{org}:transfer` + `POST /projects/{project}:transfer` | G5/G1 transfer | `settings.general.tsx:90` |

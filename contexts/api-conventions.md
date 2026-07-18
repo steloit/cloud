@@ -17,7 +17,9 @@ Never hand-write API types; never add an endpoint the spec lacks (spec change fi
   foreign-org existence — unknown/foreign id → **404, not 403**.
 - **Money = integer cents**, fields `*_cents` (ADR-025). Timestamps RFC 3339 UTC, fields `*_at`.
 - Pagination: cursor only — `?limit=&cursor=` → `{data: [], next_cursor}`. Every project-scoped
-  list accepts `?env=` (env-as-filter, ADR-013).
+  list accepts `?env=` (env-as-filter, ADR-013); **omitted `?env=` always means `production`**
+  (ADR-037: every project is born with it; `POST /projects` returns it; no `/envs/default` alias —
+  the API is always explicit, implicitness is console chrome only).
 - Errors: RFC 9457 problem+json; `remediation` is **required on every error** — each failure names
   a next step. Extensions: 422 `errors[]` · 409 `reasons[]` (ALL blockers, not the first) ·
   402 `required_plan` / `overage_price_cents` (soft overage proceeds only with `confirm=true`) ·

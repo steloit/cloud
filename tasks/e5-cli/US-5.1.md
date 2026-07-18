@@ -23,7 +23,7 @@ steloit init / create with the estimate-first safety grammar
 
 ## Summary
 
-20-clients safety grammar: `--yes` accepts a *shown* estimate (no skip-seeing flag); context org/project/env echoed on every state-changing command.
+20-clients safety grammar: `--yes` accepts a *shown* estimate (no skip-seeing flag); context org/project/env echoed on every state-changing command. **Implicit-env rules (ADR-037):** at n=1, `--env` is never required or asked (echo still truthfully includes `· production`); at n≥2, resolution = flag → repo-link → profile default, then read-only commands default to production (env printed in header) and **state-changing commands never guess** — TTY prompts with the env list, non-TTY exits 2 with remediation `pass --env`.
 
 ## Acceptance criteria
 

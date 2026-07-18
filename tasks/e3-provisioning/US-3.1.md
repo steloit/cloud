@@ -19,9 +19,11 @@ owner: agent
 
 ## Goal
 
-Project + environment creation; environment sets the region
+Project creation **auto-creates the `production` environment** (born, not created — ADR-037); environment sets the region
 
 ## Summary
+
+ADR-037 contract: `POST /projects` atomically creates the project + one environment named `production` carrying the home region; the create response includes it. No project ever exists without an environment; the user never creates their first one. Implicit ≠ anonymous: the name is real in every API response/audit row from birth.
 
 ADR-004: services inherit the env region; overrides are explicit priced exceptions. Alpha regions: us-central1 (founders), asia-south1 once partner-touchable (A1.7).
 
