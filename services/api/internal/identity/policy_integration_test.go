@@ -59,16 +59,38 @@ func TestPolicyLayerAgainstDB(t *testing.T) {
 	}
 
 	// Closest wins from real rows: project-level 'enabled' overrides in that
-	// project only; the org floor holds elsewhere.
-	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, project_id, key, enforcement) values ('pol_prj1', $1, 'prj_a', 'ai_assistant', 'enabled')`,
-		org.ID); err != nil {
+	// project only; the org floor holds elsewhere. Projects are real rows
+	// since T3.2 (policies.project_id is FK'd).
+	orgRow, err := w.svc.GetOrg(ctx, org.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := check("ai.use", rbac.Scope{OrgID: org.ID, ProjectID: "prj_a"}); err != nil {
+	prjA, _, err := w.prov.CreateProject(ctx, orgRow, "pol-a", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prjB, _, err := w.prov.CreateProject(ctx, orgRow, "pol-b", "", uid)
+	if err == nil {
+		// free plan allows 1 project; the gate must have fired
+		t.Fatalf("plan gate did not fire for the second free project: %v", prjB)
+	}
+	if _, err := w.pool.Exec(ctx, "update orgs set plan='pro' where id=$1", org.ID); err != nil {
+		t.Fatal(err)
+	}
+	orgRow.Plan = "pro"
+	prjB, _, err = w.prov.CreateProject(ctx, orgRow, "pol-b", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`insert into policies (id, org_id, project_id, key, enforcement) values ('pol_prj1', $1, $2, 'ai_assistant', 'enabled')`,
+		org.ID, prjA.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := check("ai.use", rbac.Scope{OrgID: org.ID, ProjectID: prjA.ID}); err != nil {
 		t.Fatalf("project-level enabled did not win in prj_a: %v", err)
 	}
-	if err := check("ai.use", rbac.Scope{OrgID: org.ID, ProjectID: "prj_b"}); !errors.As(err, &denied) {
+	if err := check("ai.use", rbac.Scope{OrgID: org.ID, ProjectID: prjB.ID}); !errors.As(err, &denied) {
 		t.Fatalf("org floor ignored in prj_b: %v", err)
 	}
 

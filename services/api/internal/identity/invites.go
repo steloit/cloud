@@ -26,10 +26,10 @@ import (
 const inviteTTLDays = 7
 
 var (
-	ErrAlreadyMember   = errors.New("identity: already a member")
-	ErrAlreadyInvited  = errors.New("identity: already invited")
-	ErrWrongAccount    = errors.New("identity: invite bound to another address")
-	ErrInviteGone      = errors.New("identity: invite expired, used or revoked")
+	ErrAlreadyMember    = errors.New("identity: already a member")
+	ErrAlreadyInvited   = errors.New("identity: already invited")
+	ErrWrongAccount     = errors.New("identity: invite bound to another address")
+	ErrInviteGone       = errors.New("identity: invite expired, used or revoked")
 	ErrInviteNotExpired = errors.New("identity: invite is not expired")
 )
 

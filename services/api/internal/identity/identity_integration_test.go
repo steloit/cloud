@@ -19,6 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/steloit/cloud/services/api/internal/events"
+	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
 	"github.com/steloit/cloud/services/api/internal/identity/policy"
@@ -28,6 +29,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 type world struct {
@@ -36,7 +38,7 @@ type world struct {
 	svc   *identity.Service
 	authz *identity.Authorizer
 	hub   *events.Hub
-	envs  *fakeEnvs
+	prov  *provisioning.Service
 }
 
 func newWorld(t *testing.T, ttl time.Duration) *world {
@@ -81,28 +83,49 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(q))
 	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies), recorder)
-	envs := &fakeEnvs{orgs: map[string]string{}}
+	prov := provisioning.NewService(pool, recorder)
 	mux := http.NewServeMux()
-	identity.NewHandlers(svc, mgr, authz, events.NewReader(q), envs).Mount(mux)
+	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov)
+	idHandlers.Mount(mux, &testAPI{
+		Handlers:  idHandlers,
+		Handlers2: provisioning.NewHandlers(prov, authz, q, svc),
+	})
 	streamer := &events.Streamer{
-		Q: q, Hub: hub, Envs: envs,
+		Q: q, Hub: hub, Envs: prov,
 		Principal: svc.PrincipalFromRequest,
 		Authorize: authz.Require,
 	}
 	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, envs: envs}
+	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, prov: prov}
 }
 
-// fakeEnvs stands in for the T3.2 environments module: tests attach env ids
-// to orgs directly.
-type fakeEnvs struct{ orgs map[string]string }
+// testAPI composes the module handler sets exactly like the composition root.
+type testAPI struct {
+	*identity.Handlers
+	Handlers2 *provisioning.Handlers
+}
 
-func (f *fakeEnvs) OrgForEnv(_ context.Context, envID string) (string, error) {
-	if org, ok := f.orgs[envID]; ok {
-		return org, nil
-	}
-	return "", events.ErrEnvNotFound
+func (s *testAPI) CreateProject(ctx context.Context, r gen.CreateProjectRequestObject) (gen.CreateProjectResponseObject, error) {
+	return s.Handlers2.CreateProject(ctx, r)
+}
+func (s *testAPI) ListProjects(ctx context.Context, r gen.ListProjectsRequestObject) (gen.ListProjectsResponseObject, error) {
+	return s.Handlers2.ListProjects(ctx, r)
+}
+func (s *testAPI) GetProject(ctx context.Context, r gen.GetProjectRequestObject) (gen.GetProjectResponseObject, error) {
+	return s.Handlers2.GetProject(ctx, r)
+}
+func (s *testAPI) UpdateProject(ctx context.Context, r gen.UpdateProjectRequestObject) (gen.UpdateProjectResponseObject, error) {
+	return s.Handlers2.UpdateProject(ctx, r)
+}
+func (s *testAPI) DeleteProject(ctx context.Context, r gen.DeleteProjectRequestObject) (gen.DeleteProjectResponseObject, error) {
+	return s.Handlers2.DeleteProject(ctx, r)
+}
+func (s *testAPI) CreateEnvironment(ctx context.Context, r gen.CreateEnvironmentRequestObject) (gen.CreateEnvironmentResponseObject, error) {
+	return s.Handlers2.CreateEnvironment(ctx, r)
+}
+func (s *testAPI) ListEnvironments(ctx context.Context, r gen.ListEnvironmentsRequestObject) (gen.ListEnvironmentsResponseObject, error) {
+	return s.Handlers2.ListEnvironments(ctx, r)
 }
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {

@@ -102,9 +102,16 @@ func TestEventsLedger(t *testing.T) {
 		t.Fatalf("bad cursor: %d", resp.StatusCode)
 	}
 
-	// --- /envs/{env}/events JSON via the resolver seam ----------------------
-	w.envs.orgs["env_spine"] = org.ID
-	resp, body = w.get(t, "/v1/envs/env_spine/events", ownerCk)
+	// --- /envs/{env}/events JSON via the REAL resolver (T3.2) ---------------
+	orgRow, err := w.svc.GetOrg(ctx, org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "spine", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.get(t, "/v1/envs/"+env.ID+"/events", ownerCk)
 	if resp.StatusCode != 200 || !strings.Contains(body, "org.created") {
 		t.Fatalf("env events: %d %s", resp.StatusCode, body)
 	}
@@ -131,9 +138,16 @@ func TestEventsSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.envs.orgs["env_sse"] = org.ID
+	orgRow, err := w.svc.GetOrg(ctx, org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "ssedemo", "", uid) // +1 event
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/env_sse/events", nil)
+	req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+env.ID+"/events", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cookie", ck)
 	streamCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -190,6 +204,10 @@ func TestEventsSSE(t *testing.T) {
 	if f2.event != "membership" || !strings.Contains(f2.data, "member.added") {
 		t.Fatalf("replay frame 2: %+v", f2)
 	}
+	f3 := read("replay project.created")
+	if f3.event != "lifecycle" || !strings.Contains(f3.data, "project.created") {
+		t.Fatalf("replay frame 3: %+v", f3)
+	}
 
 	// live: a new state change arrives on the open stream
 	var live string
@@ -204,13 +222,13 @@ func TestEventsSSE(t *testing.T) {
 	if err := w.svc.AddMember(ctx, org.ID, u2, "developer", uid); err != nil {
 		t.Fatal(err)
 	}
-	f3 := read("live member.added")
-	if f3.event != "membership" || !strings.Contains(f3.data, u2) {
-		t.Fatalf("live frame: %+v", f3)
+	f4 := read("live member.added")
+	if f4.event != "membership" || !strings.Contains(f4.data, u2) {
+		t.Fatalf("live frame: %+v", f4)
 	}
 
-	// reconnect from f2's cursor replays ONLY the live event — no gap, no dup
-	req2, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/env_sse/events?cursor="+f2.id, nil)
+	// reconnect from f3's cursor replays ONLY the live event — no gap, no dup
+	req2, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+env.ID+"/events?cursor="+f3.id, nil)
 	req2.Header.Set("Accept", "text/event-stream")
 	req2.Header.Set("Cookie", ck)
 	ctx2, cancel2 := context.WithTimeout(ctx, 5*time.Second)
@@ -233,7 +251,7 @@ func TestEventsSSE(t *testing.T) {
 	}
 
 	// no credentials → 401 before any stream starts
-	req3, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/env_sse/events", nil)
+	req3, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+env.ID+"/events", nil)
 	req3.Header.Set("Accept", "text/event-stream")
 	res3, err := http.DefaultClient.Do(req3)
 	if err != nil {

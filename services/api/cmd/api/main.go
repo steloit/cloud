@@ -21,9 +21,39 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 var _ = gen.SessionInfo{} // anchor: the contract types this binary serves
+
+// apiServer composes each module's strict-handler set into the one
+// gen.StrictServerInterface (method sets merge by embedding).
+type apiServer struct {
+	*identity.Handlers
+	Handlers2 *provisioning.Handlers
+}
+
+func (s *apiServer) CreateProject(ctx context.Context, r gen.CreateProjectRequestObject) (gen.CreateProjectResponseObject, error) {
+	return s.Handlers2.CreateProject(ctx, r)
+}
+func (s *apiServer) ListProjects(ctx context.Context, r gen.ListProjectsRequestObject) (gen.ListProjectsResponseObject, error) {
+	return s.Handlers2.ListProjects(ctx, r)
+}
+func (s *apiServer) GetProject(ctx context.Context, r gen.GetProjectRequestObject) (gen.GetProjectResponseObject, error) {
+	return s.Handlers2.GetProject(ctx, r)
+}
+func (s *apiServer) UpdateProject(ctx context.Context, r gen.UpdateProjectRequestObject) (gen.UpdateProjectResponseObject, error) {
+	return s.Handlers2.UpdateProject(ctx, r)
+}
+func (s *apiServer) DeleteProject(ctx context.Context, r gen.DeleteProjectRequestObject) (gen.DeleteProjectResponseObject, error) {
+	return s.Handlers2.DeleteProject(ctx, r)
+}
+func (s *apiServer) CreateEnvironment(ctx context.Context, r gen.CreateEnvironmentRequestObject) (gen.CreateEnvironmentResponseObject, error) {
+	return s.Handlers2.CreateEnvironment(ctx, r)
+}
+func (s *apiServer) ListEnvironments(ctx context.Context, r gen.ListEnvironmentsRequestObject) (gen.ListEnvironmentsResponseObject, error) {
+	return s.Handlers2.ListEnvironments(ctx, r)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -70,14 +100,20 @@ func main() {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
-	envs := events.NoEnvs{} // env→org seam; real environments arrive with T3.2
+	prov := provisioning.NewService(pool, recorder)
+	envs := prov // T3.2 closed the env→org seam: environments are real rows
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs).Mount(mux)
+	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs)
+	// One strict server, module handler sets composed by embedding (§15).
+	idHandlers.Mount(mux, &apiServer{
+		Handlers:  idHandlers,
+		Handlers2: provisioning.NewHandlers(prov, authz, queries, svc),
+	})
 
 	// SSE sits BEFORE the strict server: strict handlers buffer; streams need
 	// the raw ResponseWriter (x-streamable listEvents).

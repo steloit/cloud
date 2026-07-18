@@ -91,6 +91,13 @@ func QuotaHard(detail, remediation string) Problem {
 	}
 }
 
+// Carrier lets module-local error types carry their own catalog problem to
+// the one strict-server error seam (identity.responseError checks it first).
+type Carrier interface {
+	error
+	Problem() Problem
+}
+
 // Conflict — 409 with the blocking reasons (downgrade blockers, dependents…).
 func Conflict(reasons []string, remediation string) Problem {
 	return Problem{
