@@ -28,21 +28,37 @@ Pick the enemy that matches their scar (from messaging.md; never mix):
 - **Silent limbo:** "When your deploy fails at 2am, does the error tell
   you what to do next — or who to wake?"
 
-## The wedge — shown, not described
+## The promise, then the wedge — shown, not described
 
-> Open a PR. Steloit gives it a working preview environment with a
-> **branch of your production database — masked by policy** — and the
-> bot comments the price where the reviewer reads:
+One sentence before the demo, so the demo has a frame (Problem →
+Certainty → Demo — the mechanism is never the message):
+
+> With Steloit you know the cost, the policy, and the outcome
+> **before anything exists.**
+
+Then show it:
+
+> Open a PR. Steloit gives it a working preview environment with
+> **your production data — masked by policy** — and the bot comments
+> the price where the reviewer reads:
 >
-> `db: branch of production (masked · policy) · $0.07/day`
+> `db: production data (masked · policy) · $0.07/day · capped`
 >
 > Merge, and it's gone. Zero footprint. Nobody else does this loop
 > whole.
 
-Then the second beat, only after the wedge lands: **the estimate is the
-workflow** — nothing provisions, and nothing bills, before you accept a
-shown number, and the invoice is that number. Demo: the composer, live,
-unauthenticated — price their actual stack in front of them.
+Then the second beat: **the estimate is the workflow, and the cap is
+real** — nothing provisions, and nothing bills, before you accept a
+shown number; the invoice is that number; and a spend bound you set is
+*enforced* — at the cap, provisioning pauses, nothing is deleted, never
+alerts-only. Demo: the composer, live, unauthenticated — price their
+actual stack in front of them, then set a cap and watch an
+over-the-bound estimate get refused with the math.
+
+(Implementation vocabulary — branching, snapshots, PITR — stays out of
+the pitch. If they ask how: "copy-on-write branches under the hood;
+you get the masked data and the price." Certainty is what they should
+remember.)
 
 ## What the alpha actually is (candid, per D11)
 

@@ -13,9 +13,15 @@ Brand owns positioning, messaging, tone, audiences, proof, and taglines — this
 
 **Primary:** the developer who signs off on production — senior/staff engineers and small platform teams who have been burned. They buy proof, not promises; they read pricing pages like contracts. **The enemy is named, always specific, never a competitor's name:** bill shock · silent limbo · the mystery deploy · the invoice that doesn't match yesterday · the AI you can't audit. Every campaign leads with one enemy and kills it on screen.
 
-## The wedge
+## The story hierarchy (settled 2026-07-18, founder-ratified — every telling walks it in order)
 
-**Preview environments with a real database branch per PR — masked by policy, priced per day, stated on the PR comment** ("db: branch of production (masked · policy) · $0.07/day"). Concrete, demoable, priced-in-the-open; nobody does the whole loop. The platform reveals itself after the wedge lands — never lead with "everything platform."
+**Problem → Certainty → Demo → Implementation.**
+- **Problem:** unpredictable infrastructure — surprise bills, unsafe previews, deploys reviewed against toy data.
+- **Certainty (the differentiator):** know cost, policy, and outcome *before* provisioning. The customer remembers certainty.
+- **Demo (the wedge):** a preview environment per PR with **masked production-shaped data and a guaranteed cost**, stated where the reviewer reads it (`db: production data (masked · policy) · $0.07/day · capped` — the canonical demo line). Concrete, priced-in-the-open; nobody does the whole loop.
+- **Implementation (never positioning):** branching, snapshots, PITR, orchestration. These words appear in docs and changelogs, not in headlines. Branching is *how*; it is never *why*.
+
+The platform reveals itself after the wedge lands — never lead with "everything platform," and never lead with a mechanism.
 
 ## Proof points (each must be *shown*, not asserted)
 
@@ -25,6 +31,7 @@ Brand owns positioning, messaging, tone, audiences, proof, and taglines — this
 4. **The four laws** — "no auto-apply path exists in the API" is a sentence competitors cannot say.
 5. **One grammar** — two product pages side by side, sameness visually undeniable; the CLI reading identically across products.
 6. **Safety is never gated** — the plan table's absences are the argument.
+7. **The cap is real** (elevated to flagship 2026-07-18, F9) — a spend bound you set, we enforce: at the bound, provisioning pauses and overage stops; nothing is deleted; never alerts-only. Shown live: set a cap, watch an estimate that would cross it get refused with the math. Competitors' caps are alerts, retrofits, or "coming soon" — ours is falsifiable on contact.
 
 ## Rules of engagement
 
