@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -28,28 +29,54 @@ func (e AccessDeniedError) Error() string { return "identity: access denied: " +
 type Authorizer struct {
 	q         *store.Queries
 	evaluator *rbac.Evaluator
+	rec       *events.Recorder
 }
 
-func NewAuthorizer(q *store.Queries, e *rbac.Evaluator) *Authorizer {
-	return &Authorizer{q: q, evaluator: e}
+func NewAuthorizer(q *store.Queries, e *rbac.Evaluator, rec *events.Recorder) *Authorizer {
+	return &Authorizer{q: q, evaluator: e, rec: rec}
 }
 
 // Require resolves the principal's role in the scope's org and runs the
 // two-layer check. read_only bearer tokens are ceiling-limited to
 // non-mutating checks by the caller (requireUser); role logic lives here.
+// DENIALS ARE AUDITED (US-2.2 / spine contract: "grants, denials — yes,
+// denials"): every deny lands on the spine naming what denied it.
 func (a *Authorizer) Require(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope) error {
 	role, err := a.q.GetMemberRole(ctx, store.GetMemberRoleParams{OrgID: scope.OrgID, UserID: p.UserID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return AccessDeniedError{DeniedBy: "membership:none — you are not a member of this organization"}
+			return a.deny(ctx, p, perm, scope, "membership:none — you are not a member of this organization")
 		}
 		return fmt.Errorf("identity: role lookup: %w", err)
 	}
 	d := a.evaluator.Check(ctx, rbac.Role(role), perm, scope)
 	if !d.Allowed {
-		return AccessDeniedError{DeniedBy: d.DeniedBy}
+		return a.deny(ctx, p, perm, scope, d.DeniedBy)
 	}
 	return nil
+}
+
+// deny records the denial on the spine and returns the explained 403.
+// Policy denials land as policy_trigger, everything else as membership.
+func (a *Authorizer) deny(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope, deniedBy string) error {
+	if a.rec != nil && scope.OrgID != "" {
+		kind := "membership"
+		if strings.HasPrefix(deniedBy, "policy:") {
+			kind = "policy_trigger"
+		}
+		actor := p.UserID
+		if actor == "" {
+			actor = p.TokenID
+		}
+		if _, err := a.rec.Append(ctx, events.Input{
+			OrgID: scope.OrgID, Kind: kind, Via: "user", Actor: actor,
+			Action: "authz.denied", Subject: string(perm),
+			Detail: []byte(`{"denied_by":` + strconv.Quote(deniedBy) + `}`),
+		}); err != nil {
+			slog.Error("events: denial audit failed", "perm", perm, "org", scope.OrgID, "err", err)
+		}
+	}
+	return AccessDeniedError{DeniedBy: deniedBy}
 }
 
 // AddMember is the raw membership insert (role validity is DB-checked).

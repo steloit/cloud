@@ -80,7 +80,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 		t.Fatal(err)
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(q))
-	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies))
+	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies), recorder)
 	envs := &fakeEnvs{orgs: map[string]string{}}
 	mux := http.NewServeMux()
 	identity.NewHandlers(svc, mgr, authz, events.NewReader(q), envs).Mount(mux)

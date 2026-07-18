@@ -69,7 +69,7 @@ func main() {
 		os.Exit(1)
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
-	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies))
+	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
 	envs := events.NoEnvs{} // env→org seam; real environments arrive with T3.2
 
 	mux := http.NewServeMux()
