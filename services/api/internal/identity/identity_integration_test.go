@@ -27,6 +27,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
@@ -94,7 +95,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 		t.Fatal(err)
 	}
 	vault := secrets.NewVault(q, kek)
-	prov := provisioning.NewService(pool, recorder, vault)
+	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q))
 	mux := http.NewServeMux()
 	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov)
 	idHandlers.Mount(mux, &testAPI{

@@ -18,6 +18,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/secrets"
@@ -50,11 +51,12 @@ type Service struct {
 	db    *pgxpool.Pool
 	q     *store.Queries
 	rec   *events.Recorder
-	vault *secrets.Vault // consumed by bindings (T3.6); credentials never at rest in plaintext
+	vault *secrets.Vault    // consumed by bindings (T3.6); credentials never at rest in plaintext
+	meter *metering.Emitter // D10: span edges emitted on billing transitions
 }
 
-func NewService(db *pgxpool.Pool, rec *events.Recorder, vault *secrets.Vault) *Service {
-	return &Service{db: db, q: store.New(db), rec: rec, vault: vault}
+func NewService(db *pgxpool.Pool, rec *events.Recorder, vault *secrets.Vault, meter *metering.Emitter) *Service {
+	return &Service{db: db, q: store.New(db), rec: rec, vault: vault, meter: meter}
 }
 
 func (s *Service) record(ctx context.Context, in events.Input) {

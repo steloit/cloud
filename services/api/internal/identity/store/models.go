@@ -174,6 +174,21 @@ type Token struct {
 	RevokedAt  pgtype.Timestamptz
 }
 
+type UsageEvent struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	EnvID     string
+	ServiceID string
+	Meter     string
+	Edge      string
+	Product   string
+	RateCents int64
+	Quantity  int64
+	At        pgtype.Timestamptz
+	Detail    []byte
+}
+
 type User struct {
 	ID           string
 	Email        string
