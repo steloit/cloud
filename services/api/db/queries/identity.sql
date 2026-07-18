@@ -58,3 +58,6 @@ INSERT INTO members (id, org_id, user_id, role) VALUES ($1, $2, $3, $4) RETURNIN
 
 -- name: GetMemberRole :one
 SELECT role FROM members WHERE org_id = $1 AND user_id = $2;
+
+-- name: ListPoliciesForOrg :many
+SELECT * FROM policies WHERE org_id = $1;

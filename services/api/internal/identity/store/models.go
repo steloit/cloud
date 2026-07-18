@@ -22,6 +22,16 @@ type Org struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Policy struct {
+	ID          string
+	OrgID       string
+	ProjectID   pgtype.Text
+	Key         string
+	Enforcement string
+	Config      []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Session struct {
 	ID         string
 	UserID     string

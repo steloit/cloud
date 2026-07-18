@@ -20,6 +20,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
+	"github.com/steloit/cloud/services/api/internal/identity/policy"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -72,7 +73,8 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authz := identity.NewAuthorizer(store.New(pool), rbac.NewEvaluator(matrix, nil))
+	policies := policy.NewEngine(identity.NewPolicySource(store.New(pool)))
+	authz := identity.NewAuthorizer(store.New(pool), rbac.NewEvaluator(matrix, policies))
 	mux := http.NewServeMux()
 	identity.NewHandlers(svc, mgr).Mount(mux)
 	srv := httptest.NewServer(problem.Recover(mux))
