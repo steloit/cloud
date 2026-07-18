@@ -26,6 +26,9 @@ quota evaluator, invoice generator. If they can diverge, the design is wrong.
 - **Dunning:** day 0 fail → retries → day 7 provisioning paused → day 21 suspend (state kept) →
   day 90 only-then deletion with final notice. Payment clears everything instantly. Never early.
 - **Cancel ≠ delete:** services keep running and metering after plan cancellation.
+- **The cap is real (F9 flagship, 2026-07-18):** an org's hard spend bound is *enforced* — at the cap,
+  provisioning pauses and overage stops accruing (nothing deleted, state kept, instant resume);
+  an estimate whose acceptance would cross the cap is refused with the math. Never alerts-only.
 - Metering flows from day one (D10, see `provisioning`); invoices only *price* what was metered.
 
 ## Testing

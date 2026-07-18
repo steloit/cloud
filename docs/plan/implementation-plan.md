@@ -105,7 +105,8 @@ Maps to GOV-002 v0.5→v1: data layer completes, console goes live against the r
 - Console integration in slices (auth → create/estimate → deploy → observe → settings/billing)
 - Valkey + Object storage (proxied GCS, Steloit-domain URLs per A1.4, content eTLD+1) + Queue (after the A1.2/A3.1 WAL-signal design review — scale-to-zero must survive)
 - Observability product (metrics/logs/traces/events queries, alert rules + backtest, notifications family, emails)
-- Billing end-to-end (usage → quotas → plans → dunning → invoices) + payment provider
+- Billing end-to-end (usage → quotas → plans → dunning → invoices) + payment provider + **the hard spend cap as flagship (F9, US-11.7)**
+- **Masking-by-policy V1 depth (F14, T4.9)** — policy-driven rules + DDL-aware feeds; the defensible half of the preview demo
 - Governance (policies + dry-run, templates, dashboards)
 - AI plane (four laws, proposals, insights) — last, per GOV-002 Law 4: the platform must already be whole without it
 - Capacity knob-turns at first payment: CNPG replicas for paid tiers, core-pool floor, Mumbai cell for partner-touchable envs (A1.7)
@@ -187,16 +188,16 @@ The estimate-before-provision law made real. This epic is the product's soul; th
 
 ### E4 · Deploy & branched previews (M5) — **9 EW** · MVP · Sprints 4–6
 
-The wedge's flagship, and the thing the five partners are waiting for: *PR gets a working preview with a masked branch of production DB.*
+The certainty demo the five partners are waiting for: *a PR gets a working preview with masked production data and the price printed on the comment.* (Branching/snapshots are the mechanism — F14 masking is the defensible half.)
 
 **Stories:**
 - US-4.1 *As a developer I `git push` (or connect a GitHub repo) and get a built, deployed web service with a URL.* AC: buildpack or Dockerfile path; image signed; deploy states walk `queued → building → live`; time-to-first-connection contributes to the <5-min test (GOV-002 five-minute test).
-- US-4.2 *As a developer, opening a PR creates a preview environment with a **branched** database (CoW snapshot, ADR-0003), and closing the PR tears it down.* AC: preview env `kind=preview`, `expires_at` enforced by a background job; the bot comment carries the canon grammar: `db: branch of production (masked · policy) · $0.07/day`.
+- US-4.2 *As a developer, opening a PR creates a preview environment with a **branched** database (CoW snapshot, ADR-0003), and closing the PR tears it down.* AC: preview env `kind=preview`, `expires_at` enforced by a background job; the bot comment carries the canonical demo line: `db: production data (masked · policy) · $0.07/day · capped`.
 - US-4.3 *As a developer I roll back a bad deploy in one click/command in <60s (redeploy previous image).*
 - US-4.4 *As the platform, deploy markers land on the events spine so every chart of the affected env can show them.* (F4; QA scenario 1's #142/#143 replay)
 - US-4.5 *As a developer my preview URL is on the customer-content domain, never the console origin.* (A2.4 — needs P2)
 
-**Tasks:** T4.1 GitHub App (webhook: push, PR open/close) + repo link storage · T4.2 build pipeline on the workload pool (Kaniko/BuildKit, gVisor, signed output) · T4.3 deployment records (immutable history) + rollback · T4.4 preview-env orchestration (create env → branch timeline → deploy → comment; teardown on close) · T4.5 ingress + TLS for `*.previews.<content-domain>` · T4.6 data masking hook for branched previews (policy-driven; alpha = static mask ruleset, flagged as v1 depth) · T4.7 `DELETE /envs/{env}` — **missing from the yaml** (spec-change §2b); needed for teardown; add via S-process · T4.8 **custom domains & TLS (F5/U5, V1 · Sprint 9, +1 EW):** add-domain drawer contract (CNAME+TXT, 60s recheck, async-safe — closing the drawer never cancels verification), cert auto-issue, bell on success; TLS never optional, never plan-gated; DNS >48h → guidance, never expiry.
+**Tasks:** T4.1 GitHub App (webhook: push, PR open/close) + repo link storage · T4.2 build pipeline on the workload pool (Kaniko/BuildKit, gVisor, signed output) · T4.3 deployment records (immutable history) + rollback · T4.4 preview-env orchestration (create env → branch timeline → deploy → comment; teardown on close) · T4.5 ingress + TLS for `*.previews.<content-domain>` · T4.6 masking-by-policy v0 for previews (F14: static ruleset at branch creation, fail-closed; policy-driven depth is T4.9 in V1) · T4.7 `DELETE /envs/{env}` — **missing from the yaml** (spec-change §2b); needed for teardown; add via S-process · T4.8 **custom domains & TLS (F5/U5, V1 · Sprint 9, +1 EW):** add-domain drawer contract (CNAME+TXT, 60s recheck, async-safe — closing the drawer never cancels verification), cert auto-issue, bell on success; TLS never optional, never plan-gated; DNS >48h → guidance, never expiry.
 
 **Exit:** the wedge is real: push → estimate → approve → live service + Postgres → open PR → preview URL with branched DB → merge → teardown. This is milestone M4 and the partner-onboarding trigger.
 
@@ -286,6 +287,7 @@ Nearly all backend rules (F9). Metering already flows (E6); this epic prices, ga
 - US-11.3 *Upgrades are immediate + prorated; downgrades take effect at anchor and are blocked with all reasons when over limits.* AC: QA scenario 4 (Business→Pro with 12 members & 2 cells → 409 listing both).
 - US-11.4 *Dunning: day 0 fail → retries → day 7 provisioning paused → day 21 suspend (state kept) → day 90 deletion with final notice; payment clears everything instantly.* AC: QA scenario 3 with clock-warped tests.
 - US-11.5 *Cancel ≠ delete: services keep running and metering after plan cancellation.*
+- US-11.7 *As an org owner I set a hard monthly spend bound; at the bound provisioning pauses and overage stops accruing — nothing deleted, never alerts-only; an estimate that would cross the cap is refused at accept with the math.* AC: F9's "the cap is real" clause; crossing the cap is impossible by construction. (Flagship proof point #7.)
 - US-11.6 *Invoices carry the same line grammar as estimates; lines sum to their subtotal; money is integer cents end-to-end.* (ADR-025; fixes the B3 canon defect per S5 ruling)
 
 **Tasks:** T11.1 pricing/quota tables as data · T11.2 subscription state machine (incl. trial, `cancelled_at_anchor`, dunning states) · T11.3 invoice generator (accrue → open → paid/failed) · T11.4 payment provider integration (Stripe or Razorpay — decide by partner geography; INR-first suggests Razorpay + Stripe for intl; needs a founder call) · T11.5 quota evaluator middleware (soft → `confirm=true` overage path; hard → 402/429 catalog) · T11.6 budget endpoint + exports (spec-change §2d, per ruling).
@@ -533,9 +535,11 @@ Rollout mechanics: feature flags per console slice; canon mode ships forever as 
 | E13 | AI plane | 8 | V1 |
 | E14 | Data-plane depth (wave 1) | 5 | V1-tail |
 | E4.8 | Custom domains & TLS (F5) | 1 | V1 |
+| T4.9 | Masking-by-policy V1 depth (F14) | 3.5 | V1 |
+| US-11.7 | Hard spend cap (F9 flagship) | 0.5 | V1 |
 | E5.6–7 | TS SDK v0 + docs | 1.5 | V1 |
-| **V1 total** | | **61.5 EW ≈ 10 sprints** | |
-| **Grand total to v1 GA** | | **~104 EW ≈ 16 sprints ≈ 8 months** with the stated team | |
+| **V1 total** | | **65.5 EW ≈ 10–11 sprints** | |
+| **Grand total to v1 GA** | | **~108 EW ≈ 16 sprints ≈ 8 months** with the stated team | |
 
 **Revision note (2026-07-18 review):** gaps closed — custom domains/TLS (F5) was specced in module M5 and DB tier 4 but owned by no epic (now E4 T4.8); TS SDK and documentation had workstream mentions but no tasks (now E5 T5.6/T5.7); Sprint 16 gained an explicit external security review. Duplication check: the E6-metering vs E11-billing split and the E8-lite vs E8 slice overlap are intentional and stand.
 

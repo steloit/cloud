@@ -17,7 +17,7 @@ owner: founders
 
 ## Scope
 
-The wedge's flagship: push → build → deploy; PR → preview env with a branched (masked) database; rollback <60s; deploy markers. Custom domains & TLS (T4.8) follow in V1 Sprint 9.
+The certainty demo's mechanism (wedge review 2026-07-18: branching is implementation, never positioning): push → build → deploy; PR → preview env with masked production data (F14) at a guaranteed, capped price; rollback <60s; deploy markers. Custom domains & TLS (T4.8) and masking-by-policy depth (T4.9) follow in V1.
 
 **Exit:** push → estimate → approve → live service + Postgres → PR → preview URL with branched DB → merge → teardown (= milestone M4). (implementation-plan §5 E4)
 

@@ -23,10 +23,10 @@ PR opens → preview environment with a branched database; close → teardown
 
 ## Summary
 
-The wedge flagship. Preview env `kind=preview`, `expires_at` enforced by a background job.
+The certainty demo (mechanism layer). Preview env `kind=preview`, `expires_at` enforced by a background job.
 
 ## Acceptance criteria
 
-- [ ] bot comment carries the canon grammar: `db: branch of production (masked · policy) · $0.07/day`.
+- [ ] bot comment carries the canonical demo line: `db: production data (masked · policy) · $0.07/day · capped` (microcopy ruling 2026-07-18, wedge review).
 
 > **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E4.
