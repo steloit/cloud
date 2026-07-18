@@ -20,6 +20,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
@@ -191,6 +192,14 @@ func (s *Service) Transition(ctx context.Context, svc store.Service, to, via, ac
 		Action: "service." + to, Subject: svc.ID,
 		Detail: []byte(`{"from":` + strconv.Quote(svc.Status) + `}`),
 	})
+	// D10: billing span edges — metering starts at ready, never before.
+	if edge := metering.BillingEdge(svc.Status, to); edge != "" && s.meter != nil {
+		if env, err := s.q.GetEnvironment(ctx, svc.EnvID); err == nil {
+			s.meter.MustEmitSpan(ctx, metering.Tags{
+				OrgID: orgID, ProjectID: env.ProjectID, EnvID: svc.EnvID, ServiceID: svc.ID,
+			}, edge, svc.Product, svc.MonthlyEstimateCents)
+		}
+	}
 	return row, nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/config"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
@@ -135,7 +136,7 @@ func main() {
 		os.Exit(1)
 	}
 	vault := secrets.NewVault(queries, kek)
-	prov := provisioning.NewService(pool, recorder, vault)
+	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries))
 	envs := prov // T3.2 closed the env→org seam: environments are real rows
 
 	mux := http.NewServeMux()
