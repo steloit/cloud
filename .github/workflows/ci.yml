@@ -15,8 +15,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Task files valid (schema, deps, caps)
         run: node scripts/spec-sync/validate.mjs
-      - name: Console typecheck + tests + build
+      - name: Console lint + typecheck + tests + build
         run: |
+          pnpm --filter console lint
           pnpm --filter console typecheck
           pnpm --filter console test
           pnpm --filter console build
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.15.8" }
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infra
+      - name: Validate envs (credential-free)
+        run: |
+          terraform -chdir=infra/envs/dev init -backend=false -input=false
+          terraform -chdir=infra/envs/dev validate
+          terraform -chdir=infra/envs/cell0 init -backend=false -input=false
+          terraform -chdir=infra/envs/cell0 validate
+      - name: Spike scripts + manifests
+        run: |
+          for f in infra/spike/*.sh; do bash -n "$f"; done
+          python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/spike/manifests/*.yaml')]"
+
