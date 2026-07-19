@@ -769,6 +769,7 @@ paths:
       operationId: getPolicy
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+        "404": {description: "Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
     patch:
       tags: [governance]
       operationId: updatePolicy
@@ -776,6 +777,7 @@ paths:
       requestBody: {content: {application/json: {schema: {type: object, properties: {enforcement: {$ref: "#/components/schemas/Enforcement"}, config: {type: object}, enforce_from: {type: string, format: date-time}}}}}}
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+        "404": {description: "Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
 
   /orgs/{org}/cells:
     parameters: [{$ref: "#/components/parameters/org"}]

@@ -2876,6 +2876,15 @@ export type GetPolicyData = {
     url: '/policies/{policy}';
 };
 
+export type GetPolicyErrors = {
+    /**
+     * Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)
+     */
+    404: Problem;
+};
+
+export type GetPolicyError = GetPolicyErrors[keyof GetPolicyErrors];
+
 export type GetPolicyResponses = {
     /**
      * OK
@@ -2899,6 +2908,15 @@ export type UpdatePolicyData = {
     query?: never;
     url: '/policies/{policy}';
 };
+
+export type UpdatePolicyErrors = {
+    /**
+     * Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)
+     */
+    404: Problem;
+};
+
+export type UpdatePolicyError = UpdatePolicyErrors[keyof UpdatePolicyErrors];
 
 export type UpdatePolicyResponses = {
     /**

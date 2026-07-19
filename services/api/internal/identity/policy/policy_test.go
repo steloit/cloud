@@ -30,7 +30,7 @@ func TestPropertyNoPolicyWidensN(t *testing.T) {
 	}
 	roles := []rbac.Role{rbac.RoleOwner, rbac.RoleAdmin, rbac.RoleDeveloper, rbac.RoleBilling}
 	rng := rand.New(rand.NewSource(42)) // deterministic property sweep
-	keys := []string{"ai_assistant", "unknown_future_key"}
+	keys := []string{"ai-assistant", "unknown_future_key"}
 	enfs := []string{"enabled", "opt_in", "disabled"}
 
 	checked := 0
@@ -70,27 +70,27 @@ func TestPropertyNoPolicyWidensN(t *testing.T) {
 
 // TestAIAssistantDisabledNarrowsAI: disabled denies ai.*, permits others.
 func TestAIAssistantKind(t *testing.T) {
-	off := Row{OrgID: "org_x", Key: "ai_assistant", Enforcement: "disabled"}
+	off := Row{OrgID: "org_x", Key: "ai-assistant", Enforcement: "disabled"}
 	e := eval(off)
 	d := e.Check(context.Background(), rbac.RoleOwner, "ai.use", rbac.Scope{OrgID: "org_x"})
-	if d.Allowed || !strings.Contains(d.DeniedBy, "policy:ai_assistant") {
-		t.Fatalf("disabled ai_assistant did not narrow ai.*: %+v", d)
+	if d.Allowed || !strings.Contains(d.DeniedBy, "policy:ai-assistant") {
+		t.Fatalf("disabled ai-assistant did not narrow ai.*: %+v", d)
 	}
 	d = e.Check(context.Background(), rbac.RoleOwner, "project.create", rbac.Scope{OrgID: "org_x"})
 	if !d.Allowed {
-		t.Fatalf("ai_assistant narrowed a non-ai permission: %+v", d)
+		t.Fatalf("ai-assistant narrowed a non-ai permission: %+v", d)
 	}
-	on := Row{OrgID: "org_x", Key: "ai_assistant", Enforcement: "enabled"}
+	on := Row{OrgID: "org_x", Key: "ai-assistant", Enforcement: "enabled"}
 	d = eval(on).Check(context.Background(), rbac.RoleOwner, "ai.use", rbac.Scope{OrgID: "org_x"})
 	if !d.Allowed {
-		t.Fatalf("enabled ai_assistant denied ai.*: %+v", d)
+		t.Fatalf("enabled ai-assistant denied ai.*: %+v", d)
 	}
 }
 
 // Closest wins: a project-level row overrides the org-level row of the same key.
 func TestClosestWins(t *testing.T) {
-	orgOff := Row{OrgID: "org_x", Key: "ai_assistant", Enforcement: "disabled"}
-	projOn := Row{OrgID: "org_x", ProjectID: "prj_a", Key: "ai_assistant", Enforcement: "enabled"}
+	orgOff := Row{OrgID: "org_x", Key: "ai-assistant", Enforcement: "disabled"}
+	projOn := Row{OrgID: "org_x", ProjectID: "prj_a", Key: "ai-assistant", Enforcement: "enabled"}
 	e := eval(orgOff, projOn)
 	// In prj_a the project-level 'enabled' is closest → permit.
 	d := e.Check(context.Background(), rbac.RoleOwner, "ai.use", rbac.Scope{OrgID: "org_x", ProjectID: "prj_a"})
@@ -104,11 +104,20 @@ func TestClosestWins(t *testing.T) {
 	}
 }
 
-// Unknown policy keys and unreadable sources fail CLOSED.
+// An ENFORCING policy whose kind is unimplemented fails CLOSED — but a
+// non-enforcing (warn/opt_in) row for an unknown future kind is inert, never a
+// lockout (warn-first). Authoring refuses enforce+unknown, so the fail-closed
+// path is defense-in-depth.
 func TestFailClosed(t *testing.T) {
-	unknown := Row{OrgID: "org_x", Key: "mystery_key", Enforcement: "enabled"}
-	d := eval(unknown).Check(context.Background(), rbac.RoleOwner, "project.create", rbac.Scope{OrgID: "org_x"})
+	enforcing := Row{OrgID: "org_x", Key: "mystery_key", Enforcement: "enforce"}
+	d := eval(enforcing).Check(context.Background(), rbac.RoleOwner, "project.create", rbac.Scope{OrgID: "org_x"})
 	if d.Allowed || !strings.Contains(d.DeniedBy, "mystery_key") {
-		t.Fatalf("unknown key did not fail closed: %+v", d)
+		t.Fatalf("enforcing unknown key did not fail closed: %+v", d)
+	}
+	// the same unknown kind in warn posture is inert — the org is not bricked.
+	warn := Row{OrgID: "org_x", Key: "mystery_key", Enforcement: "warn"}
+	d = eval(warn).Check(context.Background(), rbac.RoleOwner, "project.create", rbac.Scope{OrgID: "org_x"})
+	if !d.Allowed {
+		t.Fatalf("warn-mode unknown kind bricked authorization: %+v", d)
 	}
 }
