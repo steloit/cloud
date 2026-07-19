@@ -8,6 +8,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AssistantMessage struct {
+	ID         string
+	ThreadID   string
+	Role       string
+	Content    string
+	Evidence   []byte
+	ProposalID pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+}
+
+type AssistantThread struct {
+	ID              string
+	OrgID           string
+	UserID          string
+	Title           string
+	Context         []byte
+	AttachedInsight pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+}
+
 type Binding struct {
 	ID             string
 	SourceID       string

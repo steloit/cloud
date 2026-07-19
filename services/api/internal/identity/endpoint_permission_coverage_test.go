@@ -26,7 +26,7 @@ var enforcedPermissions = []rbac.Permission{
 	// identity module
 	"org.manage", "org.delete", "members.role_change", "members.invite",
 	"api_keys.manage", "billing.view", "billing.manage_payment", "audit.read", "observe.read", "policy.manage",
-	"template.manage", "template.consume", "subscription.change",
+	"template.manage", "template.consume", "subscription.change", "ai.use",
 	// provisioning module
 	"binding.manage", "deploy.promote", "deploy.rollback",
 	"project.create", "project.delete", "env.manage",
