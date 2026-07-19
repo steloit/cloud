@@ -8,6 +8,7 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,31 @@ func TestBudgetCapAndExports(t *testing.T) {
 		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
 	if r.StatusCode != 201 {
 		t.Fatalf("under-cap create should succeed: %d %s", r.StatusCode, cb2)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(cb2), &svc)
+
+	// --- a scale-UP must respect the cap too (the create-only bypass) --------
+	// tighten the cap to the current run-rate (forecast) — no headroom — then
+	// try to scale the service up; it must be refused, not silently grow spend.
+	_, ov := w.get(t, "/v1/orgs/"+org.Id+"/billing/overview", ownerCk)
+	var overview struct {
+		ForecastCents int `json:"forecast_cents"`
+	}
+	_ = json.Unmarshal([]byte(ov), &overview)
+	if r, b := w.put(t, "/v1/orgs/"+org.Id+"/billing/budget", `{"limit_cents":`+strconv.Itoa(overview.ForecastCents)+`}`, ownerCk); r.StatusCode != 200 {
+		t.Fatalf("tighten cap: %d %s", r.StatusCode, b)
+	}
+	sr, sb := w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"standard","storage_gb":50}}`, ownerCk)
+	if sr.StatusCode != 409 || !strings.Contains(sb, "cap") {
+		t.Fatalf("scale-up past the cap must 409 (create-only enforcement is a bypass): %d %s", sr.StatusCode, sb)
+	}
+
+	// --- budget changes are audited on the spine -----------------------------
+	var audits int
+	_ = w.pool.QueryRow(ctx, "select count(*) from events where org_id=$1 and action='billing.budget_changed'", org.Id).Scan(&audits)
+	if audits < 3 { // $1, raise, tighten
+		t.Fatalf("budget changes not audited: %d billing.budget_changed events", audits)
 	}
 
 	// --- removing the cap (null) leaves it uncapped --------------------------

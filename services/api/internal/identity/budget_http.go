@@ -8,12 +8,14 @@ package identity
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/steloit/cloud/services/api/internal/billing"
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
@@ -43,12 +45,41 @@ func (s *Service) mtdSpend(ctx context.Context, orgID string) (planFee, metered,
 	return planFee, metered, billing.SpendToDate(planFee, metered), nil
 }
 
+// monthlyRunRate is the org's committed monthly forecast: plan fee + Σ active
+// services' monthly estimates — the SAME number the hard cap enforces against
+// (provisioning.enforceBudget), so used_percent reflects how close the org is to
+// the wall, not just what it has accrued so far.
+func (s *Service) monthlyRunRate(ctx context.Context, orgID string) (int64, error) {
+	org, err := s.q.GetOrg(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	var planFee int64
+	if fee, ok := s.plans.PlanFeeCents(org.Plan); ok {
+		planFee = int64(fee)
+	}
+	committed, err := s.q.SumOrgMonthlyEstimate(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return planFee + committed, nil
+}
+
 func (h *Handlers) SetBudget(ctx context.Context, req gen.SetBudgetRequestObject) (gen.SetBudgetResponseObject, error) {
-	if _, err := h.requireOrg(ctx, req.OrgPathParam, "billing.manage_payment", true); err != nil {
+	actor, err := h.requireOrg(ctx, req.OrgPathParam, "billing.manage_payment", true)
+	if err != nil {
 		return nil, err
 	}
 	if req.Body == nil {
 		return nil, validationError{fields: []problem.FieldError{{Field: "body", Detail: "required"}}}
+	}
+	// the prior bound, for the audit trail (a silent cap-lift/removal is a
+	// spend-control bypass — every change lands on the spine).
+	prior := "none"
+	if old, err := h.svc.q.GetBudget(ctx, req.OrgPathParam); err == nil && old.LimitCents.Valid {
+		prior = fmt.Sprintf("%d", old.LimitCents.Int64)
+	} else if err != nil && err != pgx.ErrNoRows {
+		return nil, err
 	}
 	// A null limit removes the cap. A negative bound is nonsense; a bound BELOW
 	// current spend is allowed — it just pauses new provisioning immediately (it
@@ -73,11 +104,20 @@ func (h *Handlers) SetBudget(ctx context.Context, req gen.SetBudgetRequestObject
 	if err != nil {
 		return nil, err
 	}
-	_, _, mtd, err := h.svc.mtdSpend(ctx, req.OrgPathParam)
+	next := "none"
+	if row.LimitCents.Valid {
+		next = fmt.Sprintf("%d", row.LimitCents.Int64)
+	}
+	h.svc.record(ctx, events.Input{
+		OrgID: req.OrgPathParam, Kind: "billing", Via: "user", Actor: actor,
+		Action: "billing.budget_changed", Subject: req.OrgPathParam,
+		Detail: []byte(`{"from_limit_cents":"` + prior + `","to_limit_cents":"` + next + `"}`),
+	})
+	runRate, err := h.svc.monthlyRunRate(ctx, req.OrgPathParam)
 	if err != nil {
 		return nil, err
 	}
-	return gen.SetBudget200JSONResponse(budgetToAPI(row, mtd)), nil
+	return gen.SetBudget200JSONResponse(budgetToAPI(row, runRate)), nil
 }
 
 func (h *Handlers) GetBillingOverview(ctx context.Context, req gen.GetBillingOverviewRequestObject) (gen.GetBillingOverviewResponseObject, error) {
@@ -88,15 +128,22 @@ func (h *Handlers) GetBillingOverview(ctx context.Context, req gen.GetBillingOve
 	if err != nil {
 		return nil, err
 	}
+	runRate, err := h.svc.monthlyRunRate(ctx, req.OrgPathParam)
+	if err != nil {
+		return nil, err
+	}
 	out := gen.BillingOverview{}
-	mtdI, feeI, resI := int(mtd), int(planFee), int(metered)
-	out.MtdCents = &mtdI
+	mtdI, feeI, resI, fcI := int(mtd), int(planFee), int(metered), int(runRate)
+	out.MtdCents = &mtdI // actual accrued so far this month
 	out.PlanFeeCents = &feeI
 	out.ResourcesCents = &resI
+	out.ForecastCents = &fcI // committed monthly run-rate (the enforced number)
 
 	budget, err := h.svc.q.GetBudget(ctx, req.OrgPathParam)
 	if err == nil {
-		b := budgetToAPI(budget, mtd)
+		// used_percent is run-rate ÷ cap — the ratio the cap actually enforces,
+		// so the developer sees how close to the wall they are (not just accrued).
+		b := budgetToAPI(budget, runRate)
 		out.Budget = &struct {
 			AlertThresholds *[]int   `json:"alert_thresholds,omitempty"`
 			LimitCents      *int     `json:"limit_cents,omitempty"`
@@ -108,10 +155,10 @@ func (h *Handlers) GetBillingOverview(ctx context.Context, req gen.GetBillingOve
 	return gen.GetBillingOverview200JSONResponse(out), nil
 }
 
-// budgetToAPI maps the stored budget + the current MTD spend into the wire
-// shape, computing used_percent (0 when uncapped, so the UI never divides by a
-// null cap).
-func budgetToAPI(row store.Budget, mtd int64) gen.Budget {
+// budgetToAPI maps the stored budget + the spend figure used_percent is measured
+// against (the monthly run-rate — the enforced number) into the wire shape.
+// used_percent is 0 when uncapped, so the UI never divides by a null cap.
+func budgetToAPI(row store.Budget, spendCents int64) gen.Budget {
 	out := gen.Budget{}
 	thresholds := make([]int, 0, len(row.AlertThresholds))
 	for _, t := range row.AlertThresholds {
@@ -123,7 +170,7 @@ func budgetToAPI(row store.Budget, mtd int64) gen.Budget {
 		lc := int(row.LimitCents.Int64)
 		out.LimitCents = &lc
 		if row.LimitCents.Int64 > 0 {
-			pct = float32(mtd) / float32(row.LimitCents.Int64) * 100
+			pct = float32(spendCents) / float32(row.LimitCents.Int64) * 100
 		}
 	}
 	out.UsedPercent = &pct

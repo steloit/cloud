@@ -298,6 +298,16 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 		params.Shape = merged
 		params.MonthlyEstimateCents = pgtype.Int8{Int64: line.MonthlyCents, Valid: true}
+		// T11.6 hard cap: a scale-UP raises committed monthly spend and MUST
+		// respect the cap exactly like a create — otherwise the cap is trivially
+		// bypassed by scaling an existing service up. The run-rate already
+		// includes this service's OLD cost, so only the increase is projected (a
+		// scale-down is always allowed).
+		if delta := line.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
+				return store.Service{}, err
+			}
+		}
 	}
 	params.Scaling = scaling
 	params.Override = override

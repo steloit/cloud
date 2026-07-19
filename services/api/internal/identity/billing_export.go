@@ -11,11 +11,29 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
+
+// monthRe validates the ?month= filter (YYYY-MM); anything else falls back to
+// the current period rather than reaching the query or the filename.
+var monthRe = regexp.MustCompile(`^\d{4}-\d{2}$`)
+
+// csvCell neutralizes spreadsheet formula injection: a cell whose first char is
+// = + - @ (or a tab/CR) is executed as a formula by Excel/Sheets. Prefixing a
+// single quote defuses it. Applied to every free-text cell (meter/description)
+// so a future user-authored value (a service name in a meter label) can't smuggle
+// a formula into an exported sheet.
+func csvCell(s string) string {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+		return "'" + s
+	}
+	return s
+}
 
 // MountBillingExports registers the CSV export routes (GET, `:export` literal
 // segment — mux-routable, unlike testWebhook's `{wbh}:test`).
@@ -47,8 +65,8 @@ func (h *Handlers) exportUsage(ctx context.Context, w http.ResponseWriter, r *ht
 		return err
 	}
 	period := r.URL.Query().Get("month")
-	if period == "" {
-		period = currentPeriod()
+	if !monthRe.MatchString(period) {
+		period = currentPeriod() // reject anything but YYYY-MM (query + filename safety)
 	}
 	rows, err := h.svc.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: org, Period: period})
 	if err != nil {
@@ -59,7 +77,7 @@ func (h *Handlers) exportUsage(ctx context.Context, w http.ResponseWriter, r *ht
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"period", "meter", "used", "rate_cents"})
 	for _, u := range rows {
-		_ = cw.Write([]string{u.Period, u.Meter, strconv.FormatInt(u.Used, 10), strconv.FormatInt(u.RateCents, 10)})
+		_ = cw.Write([]string{u.Period, csvCell(u.Meter), strconv.FormatInt(u.Used, 10), strconv.FormatInt(u.RateCents, 10)})
 	}
 	cw.Flush()
 	return cw.Error()
@@ -79,7 +97,7 @@ func (h *Handlers) exportInvoices(ctx context.Context, w http.ResponseWriter, r 
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"id", "period", "status", "total_cents", "lines"})
 	for _, inv := range rows {
-		_ = cw.Write([]string{inv.ID, inv.Period, inv.Status, strconv.FormatInt(inv.TotalCents, 10), string(compactJSON(inv.Lines))})
+		_ = cw.Write([]string{inv.ID, inv.Period, inv.Status, strconv.FormatInt(inv.TotalCents, 10), csvCell(string(compactJSON(inv.Lines)))})
 	}
 	cw.Flush()
 	return cw.Error()
