@@ -49,8 +49,13 @@ func TestNotifyRouting(t *testing.T) {
 	}
 
 	// a recording EmailSender proves the email route is GATED by the pref.
+	// Pin the clock to noon UTC — OUTSIDE the 22:00–07:00 quiet window this test
+	// configures — so the email-route assertion is deterministic regardless of
+	// the wall-clock time the suite runs (this test flaked every run between
+	// 22:00 and 07:00 UTC, when quiet hours legitimately suppress email).
+	noonUTC := func() time.Time { return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC) }
 	fake := &recordingSender{}
-	router := notify.NewRouter(q, w.kek).WithEmail(fake)
+	router := notify.NewRouter(q, w.kek).WithEmail(fake).WithClock(noonUTC)
 
 	if err := router.Notify(ctx, notify.NotifyInput{
 		OrgID: orgID, Kind: "lifecycle", Title: "Deploy finished", Body: "svc_x is ready", Link: "/x",
