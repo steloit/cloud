@@ -6,6 +6,7 @@ package identity_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -93,5 +94,55 @@ func TestPasswordResetFlow(t *testing.T) {
 	resp, _ = w.post(t, "/v1/auth/password:reset", `{"token":"`+token+`","password":"short"}`, "")
 	if resp.StatusCode != 422 {
 		t.Fatalf("weak password: %d", resp.StatusCode)
+	}
+}
+
+// A password reset is the "kick the attacker out" action: it must revoke
+// PERSONAL TOKENS too (they authenticate independently of sessions and bypass
+// MFA) — not just browser sessions.
+func TestPasswordResetRevokesPersonalTokens(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	q := store.New(w.pool)
+
+	resp, _ := w.post(t, "/v1/auth/signup", `{"email":"tok-reset@example.com","password":"orbit-magnet-11","name":"T"}`, "")
+	if resp.StatusCode != 201 {
+		t.Fatalf("signup: %d", resp.StatusCode)
+	}
+	ck := sessionCookie(resp)
+
+	// mint a full-scope personal token (the attacker's persistence)
+	resp, body := w.req(t, "POST", "/v1/me/tokens", `{"name":"cli","scope":"full"}`, map[string]string{"Cookie": ck})
+	if resp.StatusCode != 201 {
+		t.Fatalf("mint token: %d %s", resp.StatusCode, body)
+	}
+	var tok struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal([]byte(body), &tok)
+	bearer := map[string]string{"Authorization": "Bearer " + tok.Token}
+	// it works before the reset
+	if resp, _ = w.req(t, "GET", "/v1/me/tokens", "", bearer); resp.StatusCode != 200 {
+		t.Fatalf("token should work pre-reset: %d", resp.StatusCode)
+	}
+
+	// reset the password
+	resp, _ = w.post(t, "/v1/auth/password:reset-request", `{"email":"tok-reset@example.com"}`, "")
+	if resp.StatusCode != 202 {
+		t.Fatalf("reset-request: %d", resp.StatusCode)
+	}
+	spy := &spyProvider{}
+	disp := mailer.NewDispatcher(spy, q, identity.NewMailDirectory(q, "https://c", w.kek), "noreply@steloit.app")
+	_, _ = disp.ProcessAccountEmails(ctx)
+	b := spy.sent[0].Text
+	token := strings.Fields(b[strings.Index(b, "token=")+len("token="):])[0]
+	if resp, _ = w.post(t, "/v1/auth/password:reset", `{"token":"`+token+`","password":"new-strong-pw-99"}`, ""); resp.StatusCode != 204 {
+		t.Fatalf("reset: %d", resp.StatusCode)
+	}
+
+	// the attacker's token must now be dead
+	resp, _ = w.req(t, "GET", "/v1/me/tokens", "", bearer)
+	if resp.StatusCode == 200 {
+		t.Fatal("personal token SURVIVED a password reset — account-takeover persistence")
 	}
 }

@@ -30,20 +30,17 @@ const resetTokenTTL = time.Hour
 
 func resetAAD(resetID string) []byte { return []byte("pwreset:" + resetID) }
 
-// RequestPasswordReset mints a reset token for the email's account and emits the
-// event that drives the reset email. It ALWAYS succeeds from the caller's view
-// (the handler returns 202 regardless) — an unknown email simply does nothing,
-// so account existence is never disclosed.
-func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
+// RequestPasswordReset mints a reset token for the email's account and lets the
+// dispatcher send the reset email. It ALWAYS succeeds from the caller's view
+// (the handler returns 202 regardless) — an unknown email does equivalent dummy
+// work and returns, so account existence is disclosed by neither status nor
+// timing. Rate-limited by requester to bound email-bombing + enumeration.
+func (s *Service) RequestPasswordReset(ctx context.Context, email, rateKey string) error {
 	if s.kek == nil {
 		return fmt.Errorf("identity: password reset unavailable (no KEK)")
 	}
-	u, err := s.q.GetUserByEmail(ctx, email)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // no disclosure: unknown email is a silent no-op
-		}
-		return err
+	if ok, retry := s.limiter.Allow("pwreset|" + rateKey); !ok {
+		return RateLimitedError{RetryAfterS: retry}
 	}
 
 	raw := make([]byte, 32)
@@ -52,8 +49,19 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) error 
 	}
 	token := hex.EncodeToString(raw)
 	sum := sha256.Sum256([]byte(token))
-
 	id := ids.New("prt")
+
+	u, err := s.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Equalize the expensive path (a Seal) so response time doesn't leak
+			// account existence; then silently no-op.
+			_, _ = secrets.Seal(s.kek, []byte(token), resetAAD(id))
+			return nil
+		}
+		return err
+	}
+
 	sealed, err := secrets.Seal(s.kek, []byte(token), resetAAD(id))
 	if err != nil {
 		return err
@@ -111,7 +119,14 @@ func (s *Service) ResetPassword(ctx context.Context, token, newPassword string) 
 	if err := q.UpdatePasswordHash(ctx, store.UpdatePasswordHashParams{ID: row.UserID, PasswordHash: hash}); err != nil {
 		return err
 	}
+	// A reset is the "kick the attacker out" action: revoke BOTH sessions AND
+	// personal tokens (which authenticate independently of sessions and bypass
+	// MFA), matching the org-removal invariant (orgs.go). Sessions alone would
+	// leave an attacker-minted token alive after the victim resets.
 	if err := q.RevokeAllSessionsForUser(ctx, row.UserID); err != nil {
+		return err
+	}
+	if err := q.RevokeAllPersonalTokensForUser(ctx, txt(row.UserID)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

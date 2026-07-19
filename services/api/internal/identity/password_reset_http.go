@@ -9,14 +9,17 @@ import (
 	"errors"
 
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
+	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
 func (h *Handlers) RequestPasswordReset(ctx context.Context, req gen.RequestPasswordResetRequestObject) (gen.RequestPasswordResetResponseObject, error) {
 	// Always 202 — a valid or unknown email is indistinguishable to the caller
-	// (no account enumeration). A real error (infra) still surfaces as 500.
+	// (no account enumeration). Rate-limited by requester IP to bound bombing +
+	// enumeration; a real error (infra) still surfaces as 500.
 	if req.Body != nil && string(req.Body.Email) != "" {
-		if err := h.svc.RequestPasswordReset(ctx, string(req.Body.Email)); err != nil {
+		rateKey := session.MetaFrom(ctx).IP
+		if err := h.svc.RequestPasswordReset(ctx, string(req.Body.Email), rateKey); err != nil {
 			return nil, err
 		}
 	}

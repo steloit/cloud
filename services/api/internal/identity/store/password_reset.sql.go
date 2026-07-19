@@ -109,7 +109,7 @@ func (q *Queries) InsertResetToken(ctx context.Context, arg InsertResetTokenPara
 const listPendingResetEmails = `-- name: ListPendingResetEmails :many
 SELECT t.id FROM password_reset_tokens t
 LEFT JOIN email_deliveries d ON d.event_id = t.id
-WHERE t.expires_at > now()
+WHERE t.expires_at > now() AND t.used_at IS NULL
   AND (d.id IS NULL OR (d.status NOT IN ('sent', 'skipped') AND d.attempts < 5))
 ORDER BY t.created_at ASC
 LIMIT 100
