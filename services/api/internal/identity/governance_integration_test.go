@@ -31,6 +31,22 @@ func (w *world) patch(t *testing.T, path, body, cookie string) (*http.Response, 
 	return resp, string(b)
 }
 
+func (w *world) put(t *testing.T, path, body, cookie string) (*http.Response, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPut, w.srv.URL+path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return resp, string(b)
+}
+
 func (w *world) del(t *testing.T, path, cookie string) (*http.Response, string) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodDelete, w.srv.URL+path, nil)

@@ -1774,6 +1774,24 @@ type BranchList struct {
 	} `json:"data,omitempty"`
 }
 
+// Budget defines model for Budget.
+type Budget struct {
+	AlertThresholds *[]int `json:"alert_thresholds,omitempty"`
+	LimitCents      *int   `json:"limit_cents,omitempty"`
+
+	// UsedPercent month-to-date spend as a percent of the cap; 0 when uncapped
+	UsedPercent *float32 `json:"used_percent,omitempty"`
+}
+
+// BudgetInput defines model for BudgetInput.
+type BudgetInput struct {
+	// AlertThresholds percent points that warn (e.g. [80]); routing rides B8
+	AlertThresholds *[]int `json:"alert_thresholds,omitempty"`
+
+	// LimitCents the hard monthly bound in cents; null removes the cap
+	LimitCents *int `json:"limit_cents,omitempty"`
+}
+
 // CatalogIntent defines model for CatalogIntent.
 type CatalogIntent struct {
 	// Contract the one-line semantic contract — what the state is, what it branches/joins with, what the meter is. Execution models are replaceable; semantic contracts are not (ADR-040).
@@ -3176,6 +3194,11 @@ type GetUsageParams struct {
 	Project *string `form:"project,omitempty" json:"project,omitempty"`
 }
 
+// ExportUsageParams defines parameters for ExportUsage.
+type ExportUsageParams struct {
+	Month *string `form:"month,omitempty" json:"month,omitempty"`
+}
+
 // ConnectCellJSONBody defines parameters for ConnectCell.
 type ConnectCellJSONBody struct {
 	// AccountRef customer account/project id
@@ -3431,6 +3454,9 @@ type UpdateOrgJSONRequestBody UpdateOrgJSONBody
 
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody = TokenInput
+
+// SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
+type SetBudgetJSONRequestBody = BudgetInput
 
 // ConnectCellJSONRequestBody defines body for ConnectCell for application/json ContentType.
 type ConnectCellJSONRequestBody ConnectCellJSONBody

@@ -987,6 +987,36 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BillingOverview"}}}}
 
+  /orgs/{org}/billing/budget:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    put:
+      tags: [billing]
+      operationId: setBudget
+      summary: "The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/BudgetInput"}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Budget"}}}}
+
+  /orgs/{org}/billing/usage:export:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: exportUsage
+      summary: "The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line."
+      parameters:
+        - {name: month, in: query, schema: {type: string, description: "YYYY-MM"}}
+      responses:
+        "200": {description: CSV, content: {text/csv: {schema: {type: string}}}}
+
+  /orgs/{org}/billing/invoices:export:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: exportInvoices
+      summary: "Invoices as CSV (B3): one line per invoice with period, status, and total."
+      responses:
+        "200": {description: CSV, content: {text/csv: {schema: {type: string}}}}
+
   /orgs/{org}/billing/usage:
     parameters: [{$ref: "#/components/parameters/org"}]
     get:
@@ -1695,6 +1725,17 @@ components:
               basis: {type: string, description: "fixed | usage_projection ($0 if unused, labeled a projection)"}
               egress_note: {type: [string, "null"], description: "cross-region: egress priced here, never a billing surprise (C7)"}
         expires_at: {type: string, format: date-time}
+    BudgetInput:
+      type: object
+      properties:
+        limit_cents: {type: [integer, "null"], description: "the hard monthly bound in cents; null removes the cap"}
+        alert_thresholds: {type: array, items: {type: integer}, description: "percent points that warn (e.g. [80]); routing rides B8"}
+    Budget:
+      type: object
+      properties:
+        limit_cents: {type: [integer, "null"]}
+        used_percent: {type: number, description: "month-to-date spend as a percent of the cap; 0 when uncapped"}
+        alert_thresholds: {type: array, items: {type: integer}}
     BillingOverview:
       type: object
       properties:

@@ -148,9 +148,15 @@ type ServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
+	// SetBudget The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	// (PUT /orgs/{org}/billing/budget)
+	SetBudget(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 	// (GET /orgs/{org}/billing/invoices)
 	ListInvoices(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// GetBillingOverview One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere.
+	// (GET /orgs/{org}/billing/overview)
+	GetBillingOverview(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params GetUsageParams)
@@ -1296,6 +1302,32 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// SetBudget operation middleware
+func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetBudget(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListInvoices operation middleware
 func (siw *ServerInterfaceWrapper) ListInvoices(w http.ResponseWriter, r *http.Request) {
 
@@ -1313,6 +1345,32 @@ func (siw *ServerInterfaceWrapper) ListInvoices(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListInvoices(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBillingOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetBillingOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBillingOverview(w, r, orgPathParam)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2298,6 +2356,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.ListApiKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/api-keys/{key}", wrapper.RevokeApiKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/overview", wrapper.GetBillingOverview)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/orgs/{org}/billing/budget", wrapper.SetBudget)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/usage", wrapper.GetUsage)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/invoices", wrapper.ListInvoices)
 
@@ -3320,6 +3380,29 @@ func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w ht
 	return err
 }
 
+type SetBudgetRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *SetBudgetJSONRequestBody
+}
+
+type SetBudgetResponseObject interface {
+	VisitSetBudgetResponse(w http.ResponseWriter) error
+}
+
+type SetBudget200JSONResponse Budget
+
+func (response SetBudget200JSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListInvoicesRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -3331,6 +3414,28 @@ type ListInvoicesResponseObject interface {
 type ListInvoices200JSONResponse InvoiceList
 
 func (response ListInvoices200JSONResponse) VisitListInvoicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBillingOverviewRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type GetBillingOverviewResponseObject interface {
+	VisitGetBillingOverviewResponse(w http.ResponseWriter) error
+}
+
+type GetBillingOverview200JSONResponse BillingOverview
+
+func (response GetBillingOverview200JSONResponse) VisitGetBillingOverviewResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -4216,9 +4321,15 @@ type StrictServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// SetBudget The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	// (PUT /orgs/{org}/billing/budget)
+	SetBudget(ctx context.Context, request SetBudgetRequestObject) (SetBudgetResponseObject, error)
 	// ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 	// (GET /orgs/{org}/billing/invoices)
 	ListInvoices(ctx context.Context, request ListInvoicesRequestObject) (ListInvoicesResponseObject, error)
+	// GetBillingOverview One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere.
+	// (GET /orgs/{org}/billing/overview)
+	GetBillingOverview(ctx context.Context, request GetBillingOverviewRequestObject) (GetBillingOverviewResponseObject, error)
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(ctx context.Context, request GetUsageRequestObject) (GetUsageResponseObject, error)
@@ -5535,6 +5646,39 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// SetBudget operation middleware
+func (sh *strictHandler) SetBudget(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request SetBudgetRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body SetBudgetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetBudget(ctx, request.(SetBudgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetBudget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetBudgetResponseObject); ok {
+		if err := validResponse.VisitSetBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListInvoices operation middleware
 func (sh *strictHandler) ListInvoices(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
 	var request ListInvoicesRequestObject
@@ -5554,6 +5698,32 @@ func (sh *strictHandler) ListInvoices(w http.ResponseWriter, r *http.Request, or
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListInvoicesResponseObject); ok {
 		if err := validResponse.VisitListInvoicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetBillingOverview operation middleware
+func (sh *strictHandler) GetBillingOverview(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request GetBillingOverviewRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBillingOverview(ctx, request.(GetBillingOverviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBillingOverview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBillingOverviewResponseObject); ok {
+		if err := validResponse.VisitGetBillingOverviewResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

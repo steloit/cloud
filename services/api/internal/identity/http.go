@@ -46,6 +46,8 @@ func (h *Handlers) Mount(mux *http.ServeMux, ssi gen.StrictServerInterface) {
 	// testWebhook is registered pre-strict: its contract path glues a `:verb`
 	// custom-method onto a wildcard, which the stdlib mux can't parse.
 	h.MountWebhookTest(mux)
+	// CSV billing exports stream a raw body — pre-strict, not typed JSON (T11.6).
+	h.MountBillingExports(mux)
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
 		BaseURL:    "/v1",
 		BaseRouter: mux,
