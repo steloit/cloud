@@ -41,14 +41,16 @@ type Deployment struct {
 }
 
 type Environment struct {
-	ID             string
-	ProjectID      string
-	Name           string
-	RegionOverride pgtype.Text
-	Kind           string
-	PolicyFlags    []byte
-	ExpiresAt      pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
+	ID                  string
+	ProjectID           string
+	Name                string
+	RegionOverride      pgtype.Text
+	Kind                string
+	PolicyFlags         []byte
+	ExpiresAt           pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	Implicit            bool
+	DeletionScheduledAt pgtype.Timestamptz
 }
 
 type Estimate struct {

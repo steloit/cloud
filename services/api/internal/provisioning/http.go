@@ -246,3 +246,56 @@ func (h *Handlers) ListEnvironments(ctx context.Context, req gen.ListEnvironment
 	}
 	return gen.ListEnvironments200JSONResponse(gen.EnvironmentList{Data: &data}), nil
 }
+
+// ---- environment lifecycle (T4.7) -------------------------------------------
+
+// envWithProject resolves env → project (+ org fencing via memberOrg).
+func (h *Handlers) envWithProject(ctx context.Context, envID string) (store.Environment, store.Project, string, error) {
+	env, orgID, err := h.envScoped(ctx, envID)
+	if err != nil {
+		return store.Environment{}, store.Project{}, "", err
+	}
+	prj, err := h.svc.ProjectOrg(ctx, env.ProjectID)
+	if err != nil {
+		return store.Environment{}, store.Project{}, "", err
+	}
+	return env, prj, orgID, nil
+}
+
+func (h *Handlers) RenameEnvironment(ctx context.Context, req gen.RenameEnvironmentRequestObject) (gen.RenameEnvironmentResponseObject, error) {
+	env, prj, orgID, err := h.envWithProject(ctx, req.EnvPathParam)
+	if err != nil {
+		return nil, err
+	}
+	actor, err := h.requireOrg(ctx, orgID, "env.manage", true)
+	if err != nil {
+		return nil, err
+	}
+	if req.Body == nil || req.Body.Name == "" {
+		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "name", Detail: "required"}})}
+	}
+	out, err := h.svc.RenameEnvironment(ctx, env, prj, req.Body.Name, actor)
+	if err != nil {
+		return nil, err
+	}
+	org, err := h.idsvc.GetOrg(ctx, prj.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	return gen.RenameEnvironment200JSONResponse(envToAPI(out, org.HomeRegion)), nil
+}
+
+func (h *Handlers) DeleteEnvironment(ctx context.Context, req gen.DeleteEnvironmentRequestObject) (gen.DeleteEnvironmentResponseObject, error) {
+	env, prj, orgID, err := h.envWithProject(ctx, req.EnvPathParam)
+	if err != nil {
+		return nil, err
+	}
+	actor, err := h.requireOrg(ctx, orgID, "env.manage", true)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.svc.DeleteEnvironment(ctx, env, prj, actor); err != nil {
+		return nil, err
+	}
+	return gen.DeleteEnvironment202Response{}, nil
+}

@@ -26,9 +26,16 @@ UPDATE projects SET deletion_scheduled_at = now()
 WHERE id = $1 AND deletion_scheduled_at IS NULL;
 
 -- name: CreateEnvironment :one
-INSERT INTO environments (id, project_id, name, region_override, kind)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO environments (id, project_id, name, region_override, kind, implicit)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
+
+-- name: RenameEnvironment :one
+UPDATE environments SET name = $2 WHERE id = $1 RETURNING *;
+
+-- name: ScheduleEnvDeletion :execrows
+UPDATE environments SET deletion_scheduled_at = now()
+WHERE id = $1 AND deletion_scheduled_at IS NULL;
 
 -- name: ListEnvironments :many
 SELECT * FROM environments WHERE project_id = $1 ORDER BY created_at;

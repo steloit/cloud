@@ -3076,6 +3076,11 @@ type UpdateDashboardJSONBody struct {
 	Visibility *Visibility             `json:"visibility,omitempty"`
 }
 
+// RenameEnvironmentJSONBody defines parameters for RenameEnvironment.
+type RenameEnvironmentJSONBody struct {
+	Name string `json:"name"`
+}
+
 // CreateDeploymentJSONBody defines parameters for CreateDeployment.
 type CreateDeploymentJSONBody struct {
 	GitSha *string `json:"git_sha,omitempty"`
@@ -3396,6 +3401,9 @@ type UpdateDashboardJSONRequestBody UpdateDashboardJSONBody
 
 // AddWidgetJSONRequestBody defines body for AddWidget for application/json ContentType.
 type AddWidgetJSONRequestBody = WidgetInput
+
+// RenameEnvironmentJSONRequestBody defines body for RenameEnvironment for application/json ContentType.
+type RenameEnvironmentJSONRequestBody RenameEnvironmentJSONBody
 
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody CreateDeploymentJSONBody
@@ -3797,6 +3805,25 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /deployments/{dep}/rollback (the `RollbackDeployment` operationId).
 	RollbackDeployment(ctx context.Context, dep string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteEnvironment Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+	//
+	// Corresponds with DELETE /envs/{env} (the `DeleteEnvironment` operationId).
+	DeleteEnvironment(ctx context.Context, envPathParam EnvPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameEnvironmentWithBody Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+	RenameEnvironmentWithBody(ctx context.Context, envPathParam EnvPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameEnvironment Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+	RenameEnvironment(ctx context.Context, envPathParam EnvPathParam, body RenameEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListDeployments Immutable history — id, git sha, actor, state, annotations (DP1)
 	//
@@ -5119,6 +5146,55 @@ func (c *Client) AddWidget(ctx context.Context, dash string, body AddWidgetJSONR
 // Corresponds with POST /deployments/{dep}/rollback (the `RollbackDeployment` operationId).
 func (c *Client) RollbackDeployment(ctx context.Context, dep string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRollbackDeploymentRequest(c.Server, dep)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteEnvironment Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+//
+// Corresponds with DELETE /envs/{env} (the `DeleteEnvironment` operationId).
+func (c *Client) DeleteEnvironment(ctx context.Context, envPathParam EnvPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteEnvironmentRequest(c.Server, envPathParam)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameEnvironmentWithBody Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+func (c *Client) RenameEnvironmentWithBody(ctx context.Context, envPathParam EnvPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameEnvironmentRequestWithBody(c.Server, envPathParam, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameEnvironment Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+func (c *Client) RenameEnvironment(ctx context.Context, envPathParam EnvPathParam, body RenameEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameEnvironmentRequest(c.Server, envPathParam, body)
 	if err != nil {
 		return nil, err
 	}
@@ -8073,6 +8149,87 @@ func NewRollbackDeploymentRequest(server string, dep string) (*http.Request, err
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewDeleteEnvironmentRequest constructs an http.Request for the DeleteEnvironment method
+func NewDeleteEnvironmentRequest(server string, envPathParam EnvPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "env", envPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/envs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRenameEnvironmentRequest calls the generic RenameEnvironment builder with application/json body
+func NewRenameEnvironmentRequest(server string, envPathParam EnvPathParam, body RenameEnvironmentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRenameEnvironmentRequestWithBody(server, envPathParam, "application/json", bodyReader)
+}
+
+// NewRenameEnvironmentRequestWithBody constructs an http.Request for the RenameEnvironment method, with any body, and a specified content type
+func NewRenameEnvironmentRequestWithBody(server string, envPathParam EnvPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "env", envPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/envs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -12271,6 +12428,27 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /deployments/{dep}/rollback (the `RollbackDeployment` operationId).
 	RollbackDeploymentWithResponse(ctx context.Context, dep string, reqEditors ...RequestEditorFn) (*RollbackDeploymentResponse, error)
 
+	// DeleteEnvironmentWithResponse Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /envs/{env} (the `DeleteEnvironment` operationId).
+	DeleteEnvironmentWithResponse(ctx context.Context, envPathParam EnvPathParam, reqEditors ...RequestEditorFn) (*DeleteEnvironmentResponse, error)
+
+	// RenameEnvironmentWithBodyWithResponse Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+	RenameEnvironmentWithBodyWithResponse(ctx context.Context, envPathParam EnvPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameEnvironmentResponse, error)
+
+	// RenameEnvironmentWithResponse Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+	RenameEnvironmentWithResponse(ctx context.Context, envPathParam EnvPathParam, body RenameEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameEnvironmentResponse, error)
+
 	// ListDeploymentsWithResponse Immutable history — id, git sha, actor, state, annotations (DP1)
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -14209,6 +14387,95 @@ func (r RollbackDeploymentResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RollbackDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteEnvironmentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r DeleteEnvironmentResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteEnvironmentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteEnvironmentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteEnvironmentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteEnvironmentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RenameEnvironmentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Environment
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RenameEnvironmentResponse) GetJSON200() *Environment {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r RenameEnvironmentResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r RenameEnvironmentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RenameEnvironmentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RenameEnvironmentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RenameEnvironmentResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -18445,6 +18712,45 @@ func (c *ClientWithResponses) RollbackDeploymentWithResponse(ctx context.Context
 	return ParseRollbackDeploymentResponse(rsp)
 }
 
+// DeleteEnvironmentWithResponse Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /envs/{env} (the `DeleteEnvironment` operationId).
+func (c *ClientWithResponses) DeleteEnvironmentWithResponse(ctx context.Context, envPathParam EnvPathParam, reqEditors ...RequestEditorFn) (*DeleteEnvironmentResponse, error) {
+	rsp, err := c.DeleteEnvironment(ctx, envPathParam, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteEnvironmentResponse(rsp)
+}
+
+// RenameEnvironmentWithBodyWithResponse Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+func (c *ClientWithResponses) RenameEnvironmentWithBodyWithResponse(ctx context.Context, envPathParam EnvPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameEnvironmentResponse, error) {
+	rsp, err := c.RenameEnvironmentWithBody(ctx, envPathParam, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameEnvironmentResponse(rsp)
+}
+
+// RenameEnvironmentWithResponse Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /envs/{env} (the `RenameEnvironment` operationId).
+func (c *ClientWithResponses) RenameEnvironmentWithResponse(ctx context.Context, envPathParam EnvPathParam, body RenameEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameEnvironmentResponse, error) {
+	rsp, err := c.RenameEnvironment(ctx, envPathParam, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameEnvironmentResponse(rsp)
+}
+
 // ListDeploymentsWithResponse Immutable history — id, git sha, actor, state, annotations (DP1)
 //
 // Returns a wrapper object for the known response body format(s).
@@ -20668,6 +20974,68 @@ func ParseRollbackDeploymentResponse(rsp *http.Response) (*RollbackDeploymentRes
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteEnvironmentResponse parses an HTTP response from a DeleteEnvironmentWithResponse call
+func ParseDeleteEnvironmentResponse(rsp *http.Response) (*DeleteEnvironmentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteEnvironmentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRenameEnvironmentResponse parses an HTTP response from a RenameEnvironmentWithResponse call
+func ParseRenameEnvironmentResponse(rsp *http.Response) (*RenameEnvironmentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RenameEnvironmentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Environment
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	}
 
