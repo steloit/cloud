@@ -36,6 +36,9 @@ const (
 var (
 	ErrNoSubscription = errors.New("subscription: not found")
 	ErrBadTransition  = errors.New("subscription: transition not allowed from the current state")
+	// ErrConcurrentModification: the row changed under us (CAS lost). The
+	// caller's decision was stale; re-read. Benign for the idempotent worker.
+	ErrConcurrentModification = errors.New("subscription: concurrently modified")
 )
 
 // Store is the persistence the machine needs (the sqlc queries satisfy it).
@@ -71,14 +74,15 @@ func (s *Service) Get(ctx context.Context, orgID string) (store.Subscription, er
 
 // --- transitions ------------------------------------------------------------
 
-// StartTrial puts a subscription into a trial for a plan (idempotent-ish: only
-// from current/free-inert). trialDays<=0 uses the default.
+// StartTrial puts a subscription into a trial — ONLY from the inert free row
+// (status current + plan free). Guarding on plan too prevents flipping a paying
+// customer back to trial (which would stop billing). trialDays<=0 = default.
 func (s *Service) StartTrial(ctx context.Context, orgID, plan string, trialDays int) (store.Subscription, error) {
 	sub, err := s.Get(ctx, orgID)
 	if err != nil {
 		return sub, err
 	}
-	if sub.Status != "current" {
+	if sub.Status != "current" || sub.Plan != "free" {
 		return sub, ErrBadTransition
 	}
 	if trialDays <= 0 {
@@ -106,8 +110,8 @@ func (s *Service) Activate(ctx context.Context, orgID string) (store.Subscriptio
 }
 
 // FailPayment enters the dunning track: current → grace, day 0, first retry
-// scheduled. (A trial that lapses without payment uses this too, from current
-// after the trial converts — see AdvanceLifecycle.)
+// scheduled. Payment execution/retry is external (T11.4/Stripe); this only
+// records the state.
 func (s *Service) FailPayment(ctx context.Context, orgID string) (store.Subscription, error) {
 	sub, err := s.Get(ctx, orgID)
 	if err != nil {
@@ -130,7 +134,11 @@ func (s *Service) Cancel(ctx context.Context, orgID string) (store.Subscription,
 	if err != nil {
 		return sub, err
 	}
-	if sub.Status != "current" && sub.Status != "trial" {
+	// Cancel is never gated (billing pack: self-service always available) — allow
+	// it from any active/dunning state, just not from an already-cancelled one.
+	switch sub.Status {
+	case "current", "trial", "grace", "provisioning_paused", "suspended":
+	default:
 		return sub, ErrBadTransition
 	}
 	ends := nextAnchor(s.now(), int(sub.AnchorDay))
@@ -160,6 +168,14 @@ func (s *Service) AdvanceLifecycle(ctx context.Context, orgID string) (store.Sub
 	}
 	now := s.now()
 
+	// a trial that reached its end without converting enters the dunning track
+	// (payment is now required). T11.4/Stripe may convert-on-charge before this.
+	if sub.Status == "trial" && sub.TrialEndsAt.Valid && !now.Before(sub.TrialEndsAt.Time) {
+		return s.commit(ctx, sub, "grace", sub.Plan, txParams{
+			dunningStarted: ts(now), nextRetry: ts(now.Add(retryIntervalHours * time.Hour)),
+		}, "subscription.trial_expired")
+	}
+
 	// cancel takes effect at the anchor: drop to free, back to current.
 	if sub.Status == "cancelled_at_anchor" && sub.PlanEndsAt.Valid && !now.Before(sub.PlanEndsAt.Time) {
 		return s.commit(ctx, sub, "current", "free", txParams{}, "subscription.plan_ended")
@@ -188,7 +204,9 @@ func (s *Service) AdvanceAll(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	for _, orgID := range orgs {
-		if _, err := s.AdvanceLifecycle(ctx, orgID); err != nil {
+		// A concurrent transition (another replica's sweep, a webhook) winning
+		// the CAS is expected and benign — the state already moved.
+		if _, err := s.AdvanceLifecycle(ctx, orgID); err != nil && !errors.Is(err, ErrConcurrentModification) {
 			slog.Error("subscription: advance failed", "org", orgID, "err", err)
 		}
 	}
@@ -223,11 +241,17 @@ type txParams struct {
 }
 
 func (s *Service) commit(ctx context.Context, cur store.Subscription, status, plan string, p txParams, action string) (store.Subscription, error) {
+	// Compare-and-swap on status: the write lands only if the row is still in the
+	// status we read (cur.Status). A concurrent transition wins the race and this
+	// returns no row → stale decision, never a lost update.
 	out, err := s.q.SetSubscriptionState(ctx, store.SetSubscriptionStateParams{
-		OrgID: cur.OrgID, Status: status, Plan: plan,
+		OrgID: cur.OrgID, Expected: cur.Status, Status: status, Plan: plan,
 		DunningStartedAt: p.dunningStarted, NextRetryAt: p.nextRetry,
 		PlanEndsAt: p.planEnds, TrialEndsAt: p.trialEnds,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.Subscription{}, ErrConcurrentModification
+	}
 	if err != nil {
 		return store.Subscription{}, fmt.Errorf("subscription: set state: %w", err)
 	}
