@@ -19,6 +19,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/quota"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
@@ -85,8 +86,12 @@ func (s *Service) CreateInvite(ctx context.Context, orgID, email, role, inviterI
 	if err != nil {
 		return store.Invite{}, err
 	}
-	if seats.Used >= seats.Included && !confirm {
-		return store.Invite{}, SeatOverageError{PriceCents: int64(seats.OveragePriceCents)}
+	// Seats are a SOFT quota: adding a member over the plan allowance proceeds
+	// only with confirm=true and the price shown — the T11.5 evaluator decides,
+	// so soft-quota behaviour is identical to every other metered limit.
+	if d := quota.Evaluate(quota.Soft, int64(seats.Included), int64(seats.Used), 1,
+		int64(seats.OveragePriceCents), confirm); d.SoftBlocked {
+		return store.Invite{}, SeatOverageError{PriceCents: d.OveragePriceCents}
 	}
 
 	id, err := newInviteID()
