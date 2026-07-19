@@ -138,12 +138,33 @@ type Org struct {
 }
 
 type Policy struct {
+	ID              string
+	OrgID           string
+	ProjectID       pgtype.Text
+	Key             string
+	Enforcement     string
+	Config          []byte
+	CreatedAt       pgtype.Timestamptz
+	Rule            []byte
+	Description     pgtype.Text
+	Version         int32
+	EnforceFrom     pgtype.Timestamptz
+	LastChangeEvent pgtype.Text
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type PolicyVersion struct {
 	ID          string
-	OrgID       string
-	ProjectID   pgtype.Text
+	PolicyID    string
+	Version     int32
 	Key         string
 	Enforcement string
+	Rule        []byte
 	Config      []byte
+	Description pgtype.Text
+	EnforceFrom pgtype.Timestamptz
+	ChangeEvent pgtype.Text
+	ChangedBy   string
 	CreatedAt   pgtype.Timestamptz
 }
 

@@ -353,7 +353,7 @@ func (q *Queries) ListPersonalTokens(ctx context.Context, userID pgtype.Text) ([
 }
 
 const listPoliciesForOrg = `-- name: ListPoliciesForOrg :many
-SELECT id, org_id, project_id, key, enforcement, config, created_at FROM policies WHERE org_id = $1
+SELECT id, org_id, project_id, key, enforcement, config, created_at, rule, description, version, enforce_from, last_change_event, updated_at FROM policies WHERE org_id = $1
 `
 
 func (q *Queries) ListPoliciesForOrg(ctx context.Context, orgID string) ([]Policy, error) {
@@ -373,6 +373,12 @@ func (q *Queries) ListPoliciesForOrg(ctx context.Context, orgID string) ([]Polic
 			&i.Enforcement,
 			&i.Config,
 			&i.CreatedAt,
+			&i.Rule,
+			&i.Description,
+			&i.Version,
+			&i.EnforceFrom,
+			&i.LastChangeEvent,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

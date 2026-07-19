@@ -154,12 +154,24 @@ type ServerInterface interface {
 	// ChangeMemberRole Role change applies without re-login; audited before → after (G2). Tokens shrink immediately.
 	// (PATCH /orgs/{org}/members/{member})
 	ChangeMemberRole(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, member string)
+
+	// (GET /orgs/{org}/policies)
+	ListPolicies(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CreatePolicy Policy (G9): structured rule, warn-first default posture, promote-to-enforce date; dry-run via ?dry_run=true returns impact preview instead of creating
+	// (POST /orgs/{org}/policies)
+	CreatePolicy(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreatePolicyParams)
 	// ListProjects Projects with health, monthly cost, env count, last deploy (W1)
 	// (GET /orgs/{org}/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
+	// (GET /policies/{policy})
+	GetPolicy(w http.ResponseWriter, r *http.Request, policy string)
+	// UpdatePolicy Versioned; one-click audited revert; incl. the ai-assistant policy (AI3: enabled|opt_in|disabled — disable hides all AI surfaces, deletes nothing)
+	// (PATCH /policies/{policy})
+	UpdatePolicy(w http.ResponseWriter, r *http.Request, policy string)
 	// DeleteProject Typed-name confirm client-side; blocked while services/envs exist unless cascade acknowledged; final backups taken (U6)
 	// (DELETE /projects/{project})
 	DeleteProject(w http.ResponseWriter, r *http.Request, projectPathParam ProjectPathParam)
@@ -1421,6 +1433,74 @@ func (siw *ServerInterfaceWrapper) ChangeMemberRole(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListPolicies operation middleware
+func (siw *ServerInterfaceWrapper) ListPolicies(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPolicies(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePolicy operation middleware
+func (siw *ServerInterfaceWrapper) CreatePolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreatePolicyParams
+
+	// ------------- Optional query parameter "dry_run" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "dry_run", r.URL.Query(), &params.DryRun, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "dry_run"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dry_run", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePolicy(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProjects operation middleware
 func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
 
@@ -1464,6 +1544,58 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateProject(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "policy" -------------
+	var policy string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "policy", r.PathValue("policy"), &policy, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "policy", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPolicy(w, r, policy)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePolicy operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "policy" -------------
+	var policy string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "policy", r.PathValue("policy"), &policy, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "policy", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePolicy(w, r, policy)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1890,6 +2022,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/envs/{env}/deployments", wrapper.CreateDeployment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/deployments/{dep}/rollback", wrapper.RollbackDeployment)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/policies", wrapper.ListPolicies)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/policies", wrapper.CreatePolicy)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/policies/{policy}", wrapper.GetPolicy)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/policies/{policy}", wrapper.UpdatePolicy)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
@@ -3052,6 +3188,80 @@ func (response ChangeMemberRole409ApplicationProblemPlusJSONResponse) VisitChang
 	return err
 }
 
+type ListPoliciesRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListPoliciesResponseObject interface {
+	VisitListPoliciesResponse(w http.ResponseWriter) error
+}
+
+type ListPolicies200JSONResponse PolicyList
+
+func (response ListPolicies200JSONResponse) VisitListPoliciesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePolicyRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       CreatePolicyParams
+	Body         *CreatePolicyJSONRequestBody
+}
+
+type CreatePolicyResponseObject interface {
+	VisitCreatePolicyResponse(w http.ResponseWriter) error
+}
+
+type CreatePolicy200JSONResponse PolicyImpact
+
+func (response CreatePolicy200JSONResponse) VisitCreatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePolicy201JSONResponse Policy
+
+func (response CreatePolicy201JSONResponse) VisitCreatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePolicy409ApplicationProblemPlusJSONResponse Problem
+
+func (response CreatePolicy409ApplicationProblemPlusJSONResponse) VisitCreatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListProjectsRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -3107,6 +3317,51 @@ func (response CreateProject402ApplicationProblemPlusJSONResponse) VisitCreatePr
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPolicyRequestObject struct {
+	Policy string `json:"policy"`
+}
+
+type GetPolicyResponseObject interface {
+	VisitGetPolicyResponse(w http.ResponseWriter) error
+}
+
+type GetPolicy200JSONResponse Policy
+
+func (response GetPolicy200JSONResponse) VisitGetPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePolicyRequestObject struct {
+	Policy string `json:"policy"`
+	Body   *UpdatePolicyJSONRequestBody
+}
+
+type UpdatePolicyResponseObject interface {
+	VisitUpdatePolicyResponse(w http.ResponseWriter) error
+}
+
+type UpdatePolicy200JSONResponse Policy
+
+func (response UpdatePolicy200JSONResponse) VisitUpdatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3504,12 +3759,24 @@ type StrictServerInterface interface {
 	// ChangeMemberRole Role change applies without re-login; audited before → after (G2). Tokens shrink immediately.
 	// (PATCH /orgs/{org}/members/{member})
 	ChangeMemberRole(ctx context.Context, request ChangeMemberRoleRequestObject) (ChangeMemberRoleResponseObject, error)
+
+	// (GET /orgs/{org}/policies)
+	ListPolicies(ctx context.Context, request ListPoliciesRequestObject) (ListPoliciesResponseObject, error)
+	// CreatePolicy Policy (G9): structured rule, warn-first default posture, promote-to-enforce date; dry-run via ?dry_run=true returns impact preview instead of creating
+	// (POST /orgs/{org}/policies)
+	CreatePolicy(ctx context.Context, request CreatePolicyRequestObject) (CreatePolicyResponseObject, error)
 	// ListProjects Projects with health, monthly cost, env count, last deploy (W1)
 	// (GET /orgs/{org}/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+
+	// (GET /policies/{policy})
+	GetPolicy(ctx context.Context, request GetPolicyRequestObject) (GetPolicyResponseObject, error)
+	// UpdatePolicy Versioned; one-click audited revert; incl. the ai-assistant policy (AI3: enabled|opt_in|disabled — disable hides all AI surfaces, deletes nothing)
+	// (PATCH /policies/{policy})
+	UpdatePolicy(ctx context.Context, request UpdatePolicyRequestObject) (UpdatePolicyResponseObject, error)
 	// DeleteProject Typed-name confirm client-side; blocked while services/envs exist unless cascade acknowledged; final backups taken (U6)
 	// (DELETE /projects/{project})
 	DeleteProject(ctx context.Context, request DeleteProjectRequestObject) (DeleteProjectResponseObject, error)
@@ -4831,6 +5098,66 @@ func (sh *strictHandler) ChangeMemberRole(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListPolicies operation middleware
+func (sh *strictHandler) ListPolicies(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListPoliciesRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPolicies(ctx, request.(ListPoliciesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPolicies")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPoliciesResponseObject); ok {
+		if err := validResponse.VisitListPoliciesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePolicy operation middleware
+func (sh *strictHandler) CreatePolicy(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreatePolicyParams) {
+	var request CreatePolicyRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	var body CreatePolicyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePolicy(ctx, request.(CreatePolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePolicyResponseObject); ok {
+		if err := validResponse.VisitCreatePolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListProjects operation middleware
 func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
 	var request ListProjectsRequestObject
@@ -4883,6 +5210,68 @@ func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
 		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPolicy operation middleware
+func (sh *strictHandler) GetPolicy(w http.ResponseWriter, r *http.Request, policy string) {
+	var request GetPolicyRequestObject
+
+	request.Policy = policy
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPolicy(ctx, request.(GetPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPolicyResponseObject); ok {
+		if err := validResponse.VisitGetPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePolicy operation middleware
+func (sh *strictHandler) UpdatePolicy(w http.ResponseWriter, r *http.Request, policy string) {
+	var request UpdatePolicyRequestObject
+
+	request.Policy = policy
+
+	var body UpdatePolicyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePolicy(ctx, request.(UpdatePolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePolicyResponseObject); ok {
+		if err := validResponse.VisitUpdatePolicyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
