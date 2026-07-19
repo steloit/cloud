@@ -77,6 +77,25 @@ type Event struct {
 	Detail  []byte
 }
 
+type GithubDelivery struct {
+	ID         string
+	DeliveryID string
+	Event      string
+	Action     string
+	Repo       string
+	Payload    []byte
+	ReceivedAt pgtype.Timestamptz
+}
+
+type GithubInstallation struct {
+	ID             string
+	OrgID          string
+	InstallationID int64
+	AccountLogin   string
+	CreatedAt      pgtype.Timestamptz
+	DeletedAt      pgtype.Timestamptz
+}
+
 type Invite struct {
 	ID        string
 	OrgID     string
@@ -123,6 +142,15 @@ type Project struct {
 	CellID              string
 	DeletionScheduledAt pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
+}
+
+type RepoLink struct {
+	ID        string
+	OrgID     string
+	ServiceID string
+	Repo      string
+	Branch    string
+	CreatedAt pgtype.Timestamptz
 }
 
 type Secret struct {
