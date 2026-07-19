@@ -41,3 +41,13 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - Inventing demo/seed data outside canon (ADR-026 violation).
 - Testing the happy path of a four-state surface only (fault-inject the other three).
 - Weakening an invariant to make a feature fit (that's a canon decision for founders, e.g. the X1 $208 case).
+- A Docker-gated integration test as the ONLY assertion of a security invariant — it `t.Skip`s
+  where no container runtime exists and the suite still prints `PASS ok`, masking the guard green.
+  Every critical invariant needs a store-free unit assertion that always runs (Q4: the org-key
+  delegation ceiling; the user-minter half can stay integration-gated, but not the whole property).
+- A property test whose assertions live inside an `if allowed {…}` branch — if the positive branch
+  never runs (a regressed matrix, a mistyped grant list), it passes vacuously. Count the positive
+  cases and `t.Fatal` on zero (Q4: tighten-only logs "N allowed", org-key sweep asserts len(granted)).
+- A "drift guard" that checks a hand-maintained list instead of DERIVING from source — it can't catch
+  the drift it's named for (a new call site the list forgot). Scan the actual call sites and assert
+  set-equality both directions (Q4: enforced-permission set regex'd from the handler source).
