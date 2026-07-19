@@ -166,6 +166,12 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 		var nf notFoundError
 		errors.As(err, &nf)
 		problem.Write(w, r, problem.NotFound(nf.what))
+	case errors.Is(err, subscription.ErrBadTransition):
+		problem.Write(w, r, problem.Conflict([]string{"the subscription is not in a state that allows this change"},
+			"Check the current subscription status; a cancelled subscription owns its anchor until it completes."))
+	case errors.Is(err, subscription.ErrConcurrentModification):
+		problem.Write(w, r, problem.Conflict([]string{"the subscription changed while this request was in flight"},
+			"Re-read the subscription and retry."))
 	case errors.As(err, new(validationError)):
 		var ve validationError
 		errors.As(err, &ve)

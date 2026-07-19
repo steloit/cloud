@@ -79,7 +79,7 @@ func TestSubscriptionLifecycle(t *testing.T) {
 	}
 
 	// --- cancel at anchor (B12) — resources keep running -------------------
-	sub, err = svc.Cancel(ctx, org.ID)
+	sub, err = svc.Cancel(ctx, org.ID, "")
 	if err != nil || sub.Status != "cancelled_at_anchor" || !sub.PlanEndsAt.Valid {
 		t.Fatalf("cancel: %v %+v", err, sub)
 	}
@@ -89,7 +89,7 @@ func TestSubscriptionLifecycle(t *testing.T) {
 		t.Fatalf("reactivate: %v %+v", err, sub)
 	}
 	// cancel again, then let the anchor pass → plan drops to free, current
-	sub, _ = svc.Cancel(ctx, org.ID)
+	sub, _ = svc.Cancel(ctx, org.ID, "")
 	clock = sub.PlanEndsAt.Time.Add(time.Hour) // past the anchor
 	sub, err = svc.AdvanceLifecycle(ctx, org.ID)
 	if err != nil || sub.Status != "current" || sub.Plan != "free" {

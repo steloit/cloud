@@ -132,7 +132,8 @@ func (s *Service) FailPayment(ctx context.Context, orgID string) (store.Subscrip
 // Cancel schedules cancellation at the billing anchor: current/trial →
 // cancelled_at_anchor, plan_ends_at = the next anchor. Resources keep running
 // and metering (cancel ≠ delete).
-func (s *Service) Cancel(ctx context.Context, orgID string) (store.Subscription, error) {
+func (s *Service) Cancel(ctx context.Context, orgID, reasonCode string) (store.Subscription, error) {
+	s.RecordCancelReason(ctx, orgID, reasonCode)
 	sub, err := s.Get(ctx, orgID)
 	if err != nil {
 		return sub, err
@@ -145,7 +146,29 @@ func (s *Service) Cancel(ctx context.Context, orgID string) (store.Subscription,
 		return sub, ErrBadTransition
 	}
 	ends := nextAnchor(s.now(), int(sub.AnchorDay))
-	return s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{planEnds: ts(ends)}, "subscription.cancelled")
+	// A cancel SUPERSEDES any scheduled downgrade (review H1) and PRESERVES the
+	// dunning track (review H2: cancelling while suspended must not lift
+	// enforcement or reset the day-90 clock — those timestamps stay).
+	if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
+		return sub, fmt.Errorf("subscription: clear pending on cancel: %w", err)
+	}
+	return s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{
+		planEnds: ts(ends), dunningStarted: sub.DunningStartedAt,
+		nextRetry: sub.NextRetryAt, trialEnds: sub.TrialEndsAt,
+	}, "subscription.cancelled")
+}
+
+// cancelReason records the caller-supplied reason_code beside the cancel event
+// (the contract field must not be silently dropped).
+func (s *Service) RecordCancelReason(ctx context.Context, orgID, reasonCode string) {
+	if reasonCode == "" || s.rec == nil {
+		return
+	}
+	_, _ = s.rec.Append(ctx, events.Input{
+		OrgID: orgID, Kind: "billing", Via: "user", Actor: "user",
+		Action: "subscription.cancel_reason", Subject: orgID,
+		Detail: []byte(fmt.Sprintf(`{"reason_code":%q}`, reasonCode)),
+	})
 }
 
 // Reactivate undoes a pending cancel before the anchor: cancelled_at_anchor →
@@ -163,6 +186,9 @@ func (s *Service) Reactivate(ctx context.Context, orgID string) (store.Subscript
 
 // planRank orders tiers for the upgrade-vs-downgrade decision (B4).
 var planRank = map[string]int{"free": 0, "pro": 1, "business": 2, "enterprise": 3}
+
+// PlanRank is the one rank table (the HTTP layer reuses it — no duplicates).
+func PlanRank(plan string) int { return planRank[plan] }
 
 // ChangePlan (B4 / US-11.3 core): an UPGRADE applies immediately; a CLEAN
 // DOWNGRADE pends to the anchor (pending_plan/pending_plan_at, applied by the
@@ -192,11 +218,19 @@ func (s *Service) ChangePlan(ctx context.Context, orgID, target string) (store.S
 		_ = s.q.ClearPendingPlan(ctx, orgID) // an upgrade supersedes any pending downgrade
 		return out, false, nil
 	}
-	// downgrade: schedule at the anchor.
+	// downgrade: schedule at the anchor. Refused on a cancelled row (review
+	// H1/M1: the cancel wind-down owns the anchor; the guarded UPDATE below
+	// also excludes it, closing the read-then-write race).
+	if sub.Status == "cancelled_at_anchor" {
+		return sub, false, ErrBadTransition
+	}
 	at := nextAnchor(s.now(), int(sub.AnchorDay))
 	out, err := s.q.SetPendingPlan(ctx, store.SetPendingPlanParams{
 		OrgID: orgID, PendingPlan: pgtype.Text{String: target, Valid: true}, PendingPlanAt: ts(at),
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sub, false, ErrConcurrentModification // row left the schedulable states mid-flight
+	}
 	if err != nil {
 		return sub, false, fmt.Errorf("subscription: schedule downgrade: %w", err)
 	}
@@ -228,22 +262,28 @@ func (s *Service) AdvanceLifecycle(ctx context.Context, orgID string) (store.Sub
 		}, "subscription.trial_expired")
 	}
 
-	// a scheduled clean downgrade applies at its anchor instant.
+	// cancel takes effect at the anchor: drop to free, back to current. This
+	// clause runs BEFORE the pending apply (review H1: a cancel always wins over
+	// a scheduled downgrade — and Cancel clears pending anyway).
+	if sub.Status == "cancelled_at_anchor" && sub.PlanEndsAt.Valid && !now.Before(sub.PlanEndsAt.Time) {
+		return s.commit(ctx, sub, "current", "free", txParams{}, "subscription.plan_ended")
+	}
+
+	// a scheduled clean downgrade applies at its anchor instant. EVERY timestamp
+	// is preserved (review H1: omitting planEnds here NULLed a scheduled cancel).
 	if sub.PendingPlan.Valid && sub.PendingPlanAt.Valid && !now.Before(sub.PendingPlanAt.Time) {
 		out, err := s.commit(ctx, sub, sub.Status, sub.PendingPlan.String, txParams{
 			dunningStarted: sub.DunningStartedAt, nextRetry: sub.NextRetryAt,
-			trialEnds: sub.TrialEndsAt,
+			trialEnds: sub.TrialEndsAt, planEnds: sub.PlanEndsAt,
 		}, "subscription.plan_changed")
 		if err != nil {
 			return out, err
 		}
-		_ = s.q.ClearPendingPlan(ctx, orgID)
+		if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
+			// review M5/Med2: a stale pending would re-apply every sweep — loud.
+			slog.Error("subscription: clear pending after apply failed", "org", orgID, "err", err)
+		}
 		return out, nil
-	}
-
-	// cancel takes effect at the anchor: drop to free, back to current.
-	if sub.Status == "cancelled_at_anchor" && sub.PlanEndsAt.Valid && !now.Before(sub.PlanEndsAt.Time) {
-		return s.commit(ctx, sub, "current", "free", txParams{}, "subscription.plan_ended")
 	}
 
 	// dunning day progression.
@@ -322,7 +362,11 @@ func (s *Service) commit(ctx context.Context, cur store.Subscription, status, pl
 	}
 	// Keep orgs.plan (what every plan gate reads) converged with the billing
 	// master (Q9 finding: cancel-at-anchor previously left orgs.plan paid).
-	_ = s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: cur.OrgID, Plan: plan})
+	// Non-transactional with the CAS above — a failure here is LOUD and the
+	// single-tx convergence is a tracked follow-up (ledger).
+	if err := s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: cur.OrgID, Plan: plan}); err != nil {
+		slog.Error("subscription: orgs.plan sync failed — plan gates may diverge until next transition", "org", cur.OrgID, "plan", plan, "err", err)
+	}
 	if s.rec != nil {
 		_, _ = s.rec.Append(ctx, events.Input{
 			OrgID: cur.OrgID, Kind: "billing", Via: "system", Actor: "system",

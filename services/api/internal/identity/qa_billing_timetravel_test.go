@@ -119,6 +119,35 @@ func TestQAScenario3Dunning(t *testing.T) {
 	if orgs != 1 || subs != 1 {
 		t.Fatalf("day-89: billing deletion fired EARLY (orgs=%d subs=%d) — the 90-day rule is never earlier", orgs, subs)
 	}
+	// HONESTY NOTE (review): no billing-deletion machinery exists yet, so this
+	// assertion PINS today's behavior (nothing can fire) rather than proving the
+	// rule against a live deleter — it becomes load-bearing when T11.4/dunning
+	// deletion lands, and fails if that lands wired earlier than day 90.
+
+	// H1 regression: a cancel WINS over a scheduled downgrade. Cancel (which
+	// preserves dunning timestamps — H2), then attempt to schedule a downgrade:
+	// refused; the cancel still completes at its anchor.
+	if _, err := w.subs.Cancel(ctx, org.Id, "too-expensive"); err != nil {
+		t.Fatalf("cancel from suspended: %v", err)
+	}
+	var dunStarted bool
+	_ = w.pool.QueryRow(ctx, "select dunning_started_at is not null from subscriptions where org_id=$1", org.Id).Scan(&dunStarted)
+	if !dunStarted {
+		t.Fatal("H2 regression: cancel from a dunning state wiped dunning_started_at (day-90 clock reset)")
+	}
+	r, cb := w.post(t, "/v1/orgs/"+org.Id+"/subscription", `{"plan":"free"}`, ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("scheduling a downgrade onto a cancelled row must 409: %d %s", r.StatusCode, cb)
+	}
+	clock.Advance(40 * day)
+	if _, err := w.subs.AdvanceLifecycle(ctx, org.Id); err != nil {
+		t.Fatal(err)
+	}
+	var st, pl string
+	_ = w.pool.QueryRow(ctx, "select status, plan from subscriptions where org_id=$1", org.Id).Scan(&st, &pl)
+	if st != "current" || pl != "free" {
+		t.Fatalf("H1 regression: cancel did not complete at the anchor (status=%s plan=%s)", st, pl)
+	}
 }
 
 // TestQAScenario4DowngradeBlock — qa.md #4: "Business→Pro with 12 members →
@@ -207,5 +236,27 @@ func TestQAScenario4DowngradeBlock(t *testing.T) {
 	_ = w.pool.QueryRow(ctx, "select plan from orgs where id=$1", org.Id).Scan(&planNow)
 	if planNow != "pro" {
 		t.Fatalf("orgs.plan diverged from the billing master after anchor apply: %s", planNow)
+	}
+	_ = w.pool.QueryRow(ctx, "select coalesce(pending_plan,'') from subscriptions where org_id=$1", org.Id).Scan(&pending)
+	if pending != "" {
+		t.Fatalf("pending_plan not cleared after the anchor apply: %q", pending)
+	}
+
+	// upgrade path: immediate, and it SUPERSEDES any newly scheduled downgrade.
+	r, db = w.post(t, "/v1/orgs/"+org.Id+"/subscription", `{"plan":"free"}`, ownerCk) // schedule pro->free
+	if r.StatusCode != 200 {
+		t.Fatalf("schedule downgrade: %d %s", r.StatusCode, db)
+	}
+	r, db = w.post(t, "/v1/orgs/"+org.Id+"/subscription", `{"plan":"business"}`, ownerCk) // upgrade NOW
+	if r.StatusCode != 200 || !strings.Contains(db, `"plan":"business"`) {
+		t.Fatalf("upgrade should be immediate: %d %s", r.StatusCode, db)
+	}
+	_ = w.pool.QueryRow(ctx, "select coalesce(pending_plan,'') from subscriptions where org_id=$1", org.Id).Scan(&pending)
+	if pending != "" {
+		t.Fatalf("upgrade must supersede the pending downgrade: %q", pending)
+	}
+	_ = w.pool.QueryRow(ctx, "select plan from orgs where id=$1", org.Id).Scan(&planNow)
+	if planNow != "business" {
+		t.Fatalf("orgs.plan not converged after upgrade: %s", planNow)
 	}
 }

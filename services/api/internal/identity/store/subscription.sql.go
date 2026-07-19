@@ -82,7 +82,7 @@ func (q *Queries) ListSubscriptionsToAdvance(ctx context.Context) ([]string, err
 
 const setPendingPlan = `-- name: SetPendingPlan :one
 UPDATE subscriptions SET pending_plan = $2, pending_plan_at = $3, updated_at = now()
-WHERE org_id = $1
+WHERE org_id = $1 AND status <> 'cancelled_at_anchor'
 RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
 `
 
@@ -92,7 +92,9 @@ type SetPendingPlanParams struct {
 	PendingPlanAt pgtype.Timestamptz
 }
 
-// A clean downgrade schedules at the anchor (B4) — never immediate.
+// A clean downgrade schedules at the anchor (B4) — never immediate. Guarded:
+// never onto a cancelled row (the wind-down owns the anchor — review H1/M1);
+// no row back = the row left the schedulable states mid-flight.
 func (q *Queries) SetPendingPlan(ctx context.Context, arg SetPendingPlanParams) (Subscription, error) {
 	row := q.db.QueryRow(ctx, setPendingPlan, arg.OrgID, arg.PendingPlan, arg.PendingPlanAt)
 	var i Subscription

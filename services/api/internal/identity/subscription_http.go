@@ -13,6 +13,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/subscription"
 )
 
 func (h *Handlers) GetSubscription(ctx context.Context, req gen.GetSubscriptionRequestObject) (gen.GetSubscriptionResponseObject, error) {
@@ -85,7 +86,11 @@ func (h *Handlers) CancelSubscription(ctx context.Context, req gen.CancelSubscri
 	if _, err := h.requireOrg(ctx, req.OrgPathParam, "subscription.change", true); err != nil {
 		return nil, err
 	}
-	out, err := h.subs.Cancel(ctx, req.OrgPathParam)
+	reason := ""
+	if req.Body != nil && req.Body.ReasonCode != nil {
+		reason = *req.Body.ReasonCode
+	}
+	out, err := h.subs.Cancel(ctx, req.OrgPathParam, reason)
 	if err != nil {
 		return nil, err
 	}
@@ -128,9 +133,7 @@ func subscriptionToAPI(sub store.Subscription, now time.Time) gen.Subscription {
 	return out
 }
 
-func rankOf(plan string) int {
-	return map[string]int{"free": 0, "pro": 1, "business": 2, "enterprise": 3}[plan]
-}
+func rankOf(plan string) int { return subscription.PlanRank(plan) }
 
 func planTitle(p string) string {
 	switch p {

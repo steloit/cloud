@@ -34,9 +34,11 @@ ORDER BY updated_at ASC
 LIMIT 500;
 
 -- name: SetPendingPlan :one
--- A clean downgrade schedules at the anchor (B4) — never immediate.
+-- A clean downgrade schedules at the anchor (B4) — never immediate. Guarded:
+-- never onto a cancelled row (the wind-down owns the anchor — review H1/M1);
+-- no row back = the row left the schedulable states mid-flight.
 UPDATE subscriptions SET pending_plan = $2, pending_plan_at = $3, updated_at = now()
-WHERE org_id = $1
+WHERE org_id = $1 AND status <> 'cancelled_at_anchor'
 RETURNING *;
 
 -- name: ClearPendingPlan :exec
