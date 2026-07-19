@@ -107,7 +107,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 // splitArgs separates positionals from --flags (--flag value | --flag=value;
 // bare boolean flags: --json --quiet --yes --help -f).
 func splitArgs(argv []string) ([]string, map[string]string, error) {
-	boolFlags := map[string]bool{"json": true, "quiet": true, "yes": true, "help": true, "f": true, "compare": true}
+	boolFlags := map[string]bool{"json": true, "quiet": true, "yes": true, "help": true, "f": true, "compare": true, "ha": true}
 	var pos []string
 	flags := map[string]string{}
 	for i := 0; i < len(argv); i++ {

@@ -35,10 +35,12 @@ func (inv *Invocation) client() (*contracts.ClientWithResponses, int) {
 // mapped exit code.
 func (inv *Invocation) fail(body []byte, resp *http.Response) int {
 	status := 0
+	retryAfter := ""
 	if resp != nil {
 		status = resp.StatusCode
+		retryAfter = resp.Header.Get("Retry-After")
 	}
-	return output.Problem(inv.Stderr, body, status)
+	return output.Problem(inv.Stderr, body, status, retryAfter)
 }
 
 // needProject / needEnv enforce worn context with a way forward.

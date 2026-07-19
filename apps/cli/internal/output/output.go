@@ -145,39 +145,74 @@ func Quiet(w io.Writer, ids ...string) {
 
 // Problem renders problem+json as the three-line contract (cli.md §4):
 // what happened · why/where · what to do next. Returns the §4 exit code.
-type ProblemBody struct {
-	Title       string   `json:"title"`
-	Detail      string   `json:"detail"`
-	Status      int      `json:"status"`
-	DeniedBy    string   `json:"denied_by"`
-	Reasons     []string `json:"reasons"`
-	Remediation string   `json:"remediation"`
-	RetryAfterS int      `json:"retry_after_s"`
+// Shapes follow the CONTRACT Problem schema: reasons are {code, message,
+// remediation} objects (bare strings tolerated during rollout); the 403
+// why/where lives in detail (E3 grammar); 429 timing arrives in the
+// Retry-After HEADER, passed by the caller — never a body field.
+type Reason struct {
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Remediation string `json:"remediation"`
 }
 
-func Problem(w io.Writer, raw []byte, httpStatus int) int {
+type ProblemBody struct {
+	Title       string          `json:"title"`
+	Detail      string          `json:"detail"`
+	Status      int             `json:"status"`
+	Reasons     json.RawMessage `json:"reasons"`
+	Remediation string          `json:"remediation"`
+}
+
+// parseReasons accepts the contract object shape and tolerates bare strings.
+func parseReasons(raw json.RawMessage) []Reason {
+	if len(raw) == 0 {
+		return nil
+	}
+	var objs []Reason
+	if json.Unmarshal(raw, &objs) == nil && len(objs) > 0 && (objs[0].Message != "" || objs[0].Code != "") {
+		return objs
+	}
+	var strs []string
+	if json.Unmarshal(raw, &strs) == nil {
+		out := make([]Reason, 0, len(strs))
+		for _, m := range strs {
+			out = append(out, Reason{Message: m})
+		}
+		return out
+	}
+	return objs
+}
+
+func Problem(w io.Writer, raw []byte, httpStatus int, retryAfter string) int {
 	var p ProblemBody
 	_ = json.Unmarshal(raw, &p)
 	if p.Status == 0 {
 		p.Status = httpStatus
 	}
+	reasons := parseReasons(p.Reasons)
 	what := p.Title
-	if p.Detail != "" {
-		what += " — " + p.Detail
-	}
 	if what == "" {
 		what = fmt.Sprintf("request failed (%d)", p.Status)
 	}
+	// for 403 the detail IS the why/where line (E3 grammar); elsewhere it
+	// joins the what-happened line
+	if p.Detail != "" && p.Status != 403 && p.Status != 401 {
+		what += " — " + p.Detail
+	}
 	fmt.Fprintf(w, "✕ %s\n", what)
 	switch {
-	case p.DeniedBy != "":
-		fmt.Fprintf(w, "  %s\n", p.DeniedBy)
-	case len(p.Reasons) > 0:
-		for _, r := range p.Reasons {
-			fmt.Fprintf(w, "  · %s\n", r)
+	case (p.Status == 403 || p.Status == 401) && p.Detail != "":
+		fmt.Fprintf(w, "  %s\n", p.Detail)
+	case len(reasons) > 0:
+		for _, r := range reasons {
+			line := r.Message
+			if r.Remediation != "" {
+				line += " → " + r.Remediation
+			}
+			fmt.Fprintf(w, "  · %s\n", line)
 		}
-	case p.RetryAfterS > 0:
-		fmt.Fprintf(w, "  rate limited — retry after %ds\n", p.RetryAfterS)
+	case retryAfter != "":
+		fmt.Fprintf(w, "  rate limited — retry after %ss\n", retryAfter)
 	}
 	if p.Remediation != "" {
 		fmt.Fprintf(w, "  → %s\n", p.Remediation)

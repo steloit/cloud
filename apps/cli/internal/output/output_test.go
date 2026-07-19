@@ -77,7 +77,8 @@ func TestTableAlignment(t *testing.T) {
 
 func TestProblemThreeLines(t *testing.T) {
 	var buf bytes.Buffer
-	code := Problem(&buf, []byte(`{"title":"Access denied","detail":"you lack a role","status":403,"denied_by":"role:developer lacks org.manage","remediation":"Ask an org admin."}`), 403)
+	// 403: the E3 grammar lives in DETAIL and becomes the why/where line
+	code := Problem(&buf, []byte(`{"title":"Access denied","detail":"role:developer lacks org.manage","status":403,"remediation":"Ask an org admin."}`), 403, "")
 	out := buf.String()
 	if code != 3 {
 		t.Fatalf("exit: %d", code)
@@ -89,20 +90,27 @@ func TestProblemThreeLines(t *testing.T) {
 		!strings.Contains(lines[2], "Ask an org admin") {
 		t.Fatalf("three lines: %q", out)
 	}
-	// 409 lists ALL reasons; exit 5
+	// 409: contract OBJECT reasons, all listed with their remediations; exit 5
 	buf.Reset()
-	code = Problem(&buf, []byte(`{"title":"Conflict","status":409,"reasons":["a","b"],"remediation":"fix"}`), 409)
-	if code != 5 || strings.Count(buf.String(), "·") != 2 {
-		t.Fatalf("409: %d %q", code, buf.String())
+	code = Problem(&buf, []byte(`{"title":"Conflict","status":409,"reasons":[{"code":"c1","message":"a","remediation":"do a"},{"message":"b"}],"remediation":"fix"}`), 409, "")
+	if code != 5 || strings.Count(buf.String(), "·") != 2 || !strings.Contains(buf.String(), "do a") {
+		t.Fatalf("409 objects: %d %q", code, buf.String())
 	}
-	// 402 exit 6 · 429 exit 7 · unparsable body degrades, never panics
-	if code = Problem(&bytes.Buffer{}, []byte(`{"status":402}`), 402); code != 6 {
+	// bare-string reasons tolerated during rollout
+	buf.Reset()
+	code = Problem(&buf, []byte(`{"title":"Conflict","status":409,"reasons":["x","y"],"remediation":"fix"}`), 409, "")
+	if code != 5 || strings.Count(buf.String(), "·") != 2 {
+		t.Fatalf("409 strings: %d %q", code, buf.String())
+	}
+	// 402 exit 6 · 429 exit 7 with the HEADER carrying timing · garbage degrades
+	if code = Problem(&bytes.Buffer{}, []byte(`{"status":402}`), 402, ""); code != 6 {
 		t.Fatalf("402: %d", code)
 	}
-	if code = Problem(&bytes.Buffer{}, []byte(`{"status":429,"retry_after_s":30}`), 429); code != 7 {
-		t.Fatalf("429: %d", code)
+	buf.Reset()
+	if code = Problem(&buf, []byte(`{"status":429,"title":"Rate limited"}`), 429, "30"); code != 7 || !strings.Contains(buf.String(), "30s") {
+		t.Fatalf("429: %d %q", code, buf.String())
 	}
-	if code = Problem(&bytes.Buffer{}, []byte(`not json`), 500); code != 1 {
+	if code = Problem(&bytes.Buffer{}, []byte(`not json`), 500, ""); code != 1 {
 		t.Fatalf("garbage: %d", code)
 	}
 }
