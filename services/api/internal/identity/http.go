@@ -137,6 +137,9 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrInvalidCredentials):
 		problem.Write(w, r, problem.AuthFailed("invalid credentials",
 			"Check the email and password and try again."))
+	case errors.Is(err, ErrMFACodeInvalid) || errors.Is(err, ErrMFANotEnrolled):
+		problem.Write(w, r, problem.AuthFailed("MFA code invalid",
+			"Enter the current code from your authenticator, or a recovery code."))
 	case errors.Is(err, ErrNoSession):
 		problem.Write(w, r, problem.AuthFailed("no active session", "Sign in first."))
 	case errors.Is(err, ErrAccountDeleting):
@@ -200,8 +203,21 @@ func (h *Handlers) Login(ctx context.Context, req gen.LoginRequestObject) (gen.L
 	}
 	meta := session.MetaFrom(ctx)
 	rateKey := meta.IP + "|" + strings.ToLower(strings.TrimSpace(string(req.Body.Email)))
-	est, err := h.svc.Login(ctx, string(req.Body.Email), req.Body.Password, meta.Device, rateKey)
+	mfaCode := ""
+	if req.Body.MfaCode != nil {
+		mfaCode = *req.Body.MfaCode
+	}
+	est, err := h.svc.Login(ctx, string(req.Body.Email), req.Body.Password, meta.Device, rateKey, mfaCode)
 	if err != nil {
+		// Password correct but a second factor is needed → mfa_required (a
+		// state, not an error): the client re-submits with mfa_code.
+		if errors.Is(err, ErrMFACodeRequired) {
+			methods := []gen.LoginResultMfaMethods{"totp", "recovery"}
+			return gen.Login200JSONResponse(gen.LoginResult{
+				Status:     gen.LoginResultStatus("mfa_required"),
+				MfaMethods: &methods,
+			}), nil
+		}
 		return nil, err
 	}
 	h.setSessionCookie(ctx, est)

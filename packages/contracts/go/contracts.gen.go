@@ -2197,8 +2197,11 @@ type LogResult struct {
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
-	Email    openapi_types.Email `json:"email"`
-	Password string              `json:"password"`
+	Email openapi_types.Email `json:"email"`
+
+	// MfaCode TOTP or recovery code — required to complete login for an MFA-enabled account (the first call returns status=mfa_required; retry with this). S-process with T7.1.
+	MfaCode  *string `json:"mfa_code,omitempty"`
+	Password string  `json:"password"`
 }
 
 // LoginResult defines model for LoginResult.
@@ -3674,6 +3677,11 @@ type ClientInterface interface {
 	// Corresponds with POST /auth/logout (the `Logout` operationId).
 	Logout(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DisableMfa Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+	//
+	// Corresponds with DELETE /auth/mfa (the `DisableMfa` operationId).
+	DisableMfa(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RegenerateRecoveryCodes Reveal-once recovery codes; the previous set is invalidated
 	//
 	// Corresponds with POST /auth/mfa/recovery:regenerate (the `RegenerateRecoveryCodes` operationId).
@@ -4769,6 +4777,21 @@ func (c *Client) Login(ctx context.Context, body LoginJSONRequestBody, reqEditor
 // Corresponds with POST /auth/logout (the `Logout` operationId).
 func (c *Client) Logout(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewLogoutRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DisableMfa Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+//
+// Corresponds with DELETE /auth/mfa (the `DisableMfa` operationId).
+func (c *Client) DisableMfa(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDisableMfaRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -7565,6 +7588,33 @@ func NewLogoutRequest(server string) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDisableMfaRequest constructs an http.Request for the DisableMfa method
+func NewDisableMfaRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/auth/mfa")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -12432,6 +12482,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /auth/logout (the `Logout` operationId).
 	LogoutWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*LogoutResponse, error)
 
+	// DisableMfaWithResponse Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /auth/mfa (the `DisableMfa` operationId).
+	DisableMfaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DisableMfaResponse, error)
+
 	// RegenerateRecoveryCodesWithResponse Reveal-once recovery codes; the previous set is invalidated
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -13870,6 +13927,40 @@ func (r LogoutResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r LogoutResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DisableMfaResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r DisableMfaResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DisableMfaResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DisableMfaResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DisableMfaResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -18697,6 +18788,19 @@ func (c *ClientWithResponses) LogoutWithResponse(ctx context.Context, reqEditors
 	return ParseLogoutResponse(rsp)
 }
 
+// DisableMfaWithResponse Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /auth/mfa (the `DisableMfa` operationId).
+func (c *ClientWithResponses) DisableMfaWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DisableMfaResponse, error) {
+	rsp, err := c.DisableMfa(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDisableMfaResponse(rsp)
+}
+
 // RegenerateRecoveryCodesWithResponse Reveal-once recovery codes; the previous set is invalidated
 //
 // Returns a wrapper object for the known response body format(s).
@@ -20895,6 +20999,22 @@ func ParseLogoutResponse(rsp *http.Response) (*LogoutResponse, error) {
 	}
 
 	response := &LogoutResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseDisableMfaResponse parses an HTTP response from a DisableMfaWithResponse call
+func ParseDisableMfaResponse(rsp *http.Response) (*DisableMfaResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DisableMfaResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

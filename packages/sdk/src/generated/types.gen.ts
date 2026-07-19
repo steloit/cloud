@@ -1032,6 +1032,10 @@ export type SignupRequest = {
 export type LoginRequest = {
     email: string;
     password: string;
+    /**
+     * TOTP or recovery code — required to complete login for an MFA-enabled account (the first call returns status=mfa_required; retry with this). S-process with T7.1.
+     */
+    mfa_code?: string;
 };
 
 export type LoginResult = {
@@ -3242,6 +3246,22 @@ export type TotpVerifyResponses = {
 };
 
 export type TotpVerifyResponse = TotpVerifyResponses[keyof TotpVerifyResponses];
+
+export type DisableMfaData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/auth/mfa';
+};
+
+export type DisableMfaResponses = {
+    /**
+     * Disabled
+     */
+    204: void;
+};
+
+export type DisableMfaResponse = DisableMfaResponses[keyof DisableMfaResponses];
 
 export type RegenerateRecoveryCodesData = {
     body?: never;

@@ -142,7 +142,7 @@ func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, password_hash, name)
 VALUES ($1, $2, $3, $4)
-RETURNING id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at
+RETURNING id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at, mfa_enabled
 `
 
 type CreateUserParams struct {
@@ -168,6 +168,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
+		&i.MfaEnabled,
 	)
 	return i, err
 }
@@ -237,7 +238,7 @@ func (q *Queries) GetMemberRole(ctx context.Context, arg GetMemberRoleParams) (s
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at FROM users WHERE lower(email) = lower($1)
+SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at, mfa_enabled FROM users WHERE lower(email) = lower($1)
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error) {
@@ -251,12 +252,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
+		&i.MfaEnabled,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at FROM users WHERE id = $1
+SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at, mfa_enabled FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -270,6 +272,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
+		&i.MfaEnabled,
 	)
 	return i, err
 }

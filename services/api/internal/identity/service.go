@@ -20,6 +20,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/password"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 )
@@ -55,16 +56,17 @@ type Service struct {
 	mgr     *session.Manager
 	limiter *ratelimit.Limiter
 	rec     *events.Recorder
+	kek     secrets.KEK // MFA TOTP secret envelope (nil = MFA unavailable)
 	now     func() time.Time
 	dummy   string
 }
 
-func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder) (*Service, error) {
+func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder, kek secrets.KEK) (*Service, error) {
 	dummy, err := h.Hash(dummyPassword)
 	if err != nil {
 		return nil, fmt.Errorf("identity: dummy hash: %w", err)
 	}
-	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, now: time.Now, dummy: dummy}, nil
+	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, kek: kek, now: time.Now, dummy: dummy}, nil
 }
 
 // txt wraps a string for a nullable text column.
@@ -102,7 +104,7 @@ func (s *Service) Signup(ctx context.Context, email, plaintext, name, device str
 // Login verifies credentials and establishes a FRESH session (rotation: a new
 // session per login; prior sessions stay valid until logout/expiry — the
 // P-series lists them).
-func (s *Service) Login(ctx context.Context, email, plaintext, device, rateKey string) (Established, error) {
+func (s *Service) Login(ctx context.Context, email, plaintext, device, rateKey, mfaCode string) (Established, error) {
 	if ok, retry := s.limiter.Allow(rateKey); !ok {
 		return Established{}, RateLimitedError{RetryAfterS: retry}
 	}
@@ -124,6 +126,15 @@ func (s *Service) Login(ctx context.Context, email, plaintext, device, rateKey s
 	// flow; that would be an explicit future capability).
 	if u.DeletionScheduledAt.Valid {
 		return Established{}, ErrAccountDeleting
+	}
+	// MFA challenge: an enrolled account needs a valid second factor. Password
+	// was correct (so the caller is the user), but no session is issued until
+	// the code checks out. A missing code → ErrMFACodeRequired (the handler
+	// maps this to status=mfa_required, NOT an error to the user).
+	if u.MfaEnabled {
+		if err := s.checkMFACode(ctx, u.ID, mfaCode); err != nil {
+			return Established{}, err
+		}
 	}
 	return s.establish(ctx, u, device)
 }

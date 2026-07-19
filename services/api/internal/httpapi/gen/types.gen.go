@@ -2188,8 +2188,11 @@ type LogResult struct {
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
-	Email    openapi_types.Email `json:"email"`
-	Password string              `json:"password"`
+	Email openapi_types.Email `json:"email"`
+
+	// MfaCode TOTP or recovery code — required to complete login for an MFA-enabled account (the first call returns status=mfa_required; retry with this). S-process with T7.1.
+	MfaCode  *string `json:"mfa_code,omitempty"`
+	Password string  `json:"password"`
 }
 
 // LoginResult defines model for LoginResult.
