@@ -153,6 +153,20 @@ type Org struct {
 	DeletionScheduledAt pgtype.Timestamptz
 }
 
+type PasswordResetToken struct {
+	ID         string
+	UserID     string
+	TokenHash  []byte
+	Ciphertext []byte
+	Nonce      []byte
+	WrappedDek []byte
+	DekNonce   []byte
+	KekID      string
+	ExpiresAt  pgtype.Timestamptz
+	UsedAt     pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Policy struct {
 	ID              string
 	OrgID           string

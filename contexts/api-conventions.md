@@ -97,3 +97,16 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
 - A scan-based outbox where an unresolvable item leaves NO row — it is re-scanned every poll
   (hot loop) and enough at the head starve newer work. Record a terminal `skipped` row so poison
   items drop out; treat a genuinely-gone dependency as skip, not a propagated error (T10.4).
+- "Revoke all sessions" that only touches the `sessions` table — personal API tokens live in
+  `tokens` and authenticate INDEPENDENTLY of sessions (and bypass MFA). Any "kick the attacker
+  out" action (password reset, account recovery) must revoke BOTH: `RevokeAllSessionsForUser`
+  AND `RevokeAllPersonalTokensForUser` in one tx, like `orgs.go` org-removal (T7.2).
+- An always-202/always-200 "no enumeration" endpoint that still leaks account existence by
+  TIMING — the found path does crypto + a DB write, the not-found path returns immediately. Do
+  equivalent work on the miss path (a dummy Seal / hasher.Verify, as Login does) and rate-limit
+  the endpoint; a constant status with variable latency is still an oracle (T7.2).
+- An account-level fact (password reset, personal security notice) forced onto the ORG-scoped
+  events spine (`events.org_id NOT NULL`) — it silently fails the FK and the email never sends.
+  Account emails dispatch from their own durable fact via `mailer.AccountSource`, reusing the
+  same idempotent Dispatch + email_deliveries ledger; don't fan a personal action into the
+  user's org audits (T7.2).

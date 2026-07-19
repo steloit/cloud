@@ -60,9 +60,44 @@ func (d *Dispatcher) ProcessPending(ctx context.Context) (int, error) {
 	return len(evts), nil
 }
 
+// AccountTrigger is a durable account-level (org-less) email trigger — a fact
+// that isn't an org-spine event (password reset, and future security notices).
+type AccountTrigger struct {
+	ID      string // idempotency key (the fact's id)
+	Action  string // maps to a registry rule
+	Subject string // passed to the rule's resolver
+}
+
+// AccountSource lists pending account-level email triggers. Optional: a
+// Directory that also implements it feeds the account outbox alongside the
+// org-event scan, so account emails reuse the same idempotent Dispatch.
+type AccountSource interface {
+	PendingAccountEmails(ctx context.Context) ([]AccountTrigger, error)
+}
+
+// ProcessAccountEmails drains account-level triggers (if the directory supplies
+// them) through the same Dispatch path — a synthetic Event carries the fact.
+func (d *Dispatcher) ProcessAccountEmails(ctx context.Context) (int, error) {
+	src, ok := d.dir.(AccountSource)
+	if !ok {
+		return 0, nil
+	}
+	triggers, err := src.PendingAccountEmails(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, tr := range triggers {
+		if err := d.Dispatch(ctx, store.Event{ID: tr.ID, Action: tr.Action, Subject: tr.Subject}); err != nil {
+			slog.Error("mailer: account dispatch failed", "trigger", tr.ID, "action", tr.Action, "err", err)
+		}
+	}
+	return len(triggers), nil
+}
+
 // RunOutbox polls the durable outbox until ctx is cancelled — the near-real-time
 // dispatch loop (a River-backed worker with backoff is the follow-up; the spine
-// + delivery ledger make this loop safe and lossless meanwhile).
+// + delivery ledger make this loop safe and lossless meanwhile). It drains both
+// the org-event scan and account-level triggers.
 func (d *Dispatcher) RunOutbox(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -73,6 +108,9 @@ func (d *Dispatcher) RunOutbox(ctx context.Context, interval time.Duration) {
 		case <-t.C:
 			if _, err := d.ProcessPending(ctx); err != nil {
 				slog.Error("mailer: outbox scan failed", "err", err)
+			}
+			if _, err := d.ProcessAccountEmails(ctx); err != nil {
+				slog.Error("mailer: account scan failed", "err", err)
 			}
 		}
 	}

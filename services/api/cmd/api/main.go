@@ -164,7 +164,7 @@ func main() {
 		mailProvider = mailer.NewResend(cfg.ResendAPIKey)
 	}
 	logger.Info("email provider", "provider", mailProvider.Name())
-	dispatcher := mailer.NewDispatcher(mailProvider, queries, identity.NewMailDirectory(queries, cfg.ConsoleBaseURL), cfg.EmailFrom)
+	dispatcher := mailer.NewDispatcher(mailProvider, queries, identity.NewMailDirectory(queries, cfg.ConsoleBaseURL, kek), cfg.EmailFrom)
 	go dispatcher.RunOutbox(ctx, 10*time.Second)
 
 	mux := http.NewServeMux()
