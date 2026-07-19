@@ -1,6 +1,8 @@
 package billing
 
 import (
+	"slices"
+	"sort"
 	"testing"
 
 	"github.com/steloit/cloud/services/api/internal/canon"
@@ -111,16 +113,36 @@ func TestLoadRejectsBadData(t *testing.T) {
 	}
 }
 
-// Plans gate capabilities, never safety (billing pack / F9). The never-gated
-// list is law — assert the safety features are all on it.
+// Plans gate capabilities, never safety (billing pack / F9; B6: "Safety is never
+// gated on any tier"). The never-gated list is LAW — this table-driven invariant
+// pins it in BOTH directions so it cannot silently drift: the plans.json list
+// must equal the canonical safety set exactly (nothing dropped, nothing extra),
+// and capability features must NOT be on it. (US-11.1)
 func TestSafetyNeverGated(t *testing.T) {
-	tbl, _ := Load()
-	for _, cap := range []string{"tls", "backups", "mfa", "policies", "alerts", "dunning_protections", "self_deletion"} {
+	tbl, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The canonical safety set — the seven things a paying-or-not customer always
+	// gets: TLS, backups, MFA, policies, alerts, dunning protections, and the
+	// ability to leave (self-deletion). Sourced from the billing pack / F9 / B6.
+	canonical := []string{"alerts", "backups", "dunning_protections", "mfa", "policies", "self_deletion", "tls"}
+
+	got := append([]string(nil), tbl.NeverGated.Capabilities...)
+	sort.Strings(got)
+	if !slices.Equal(got, canonical) {
+		t.Fatalf("never-gated list DRIFTED from the canonical safety set: canonical=%v plans.json=%v (a dropped entry silently plan-gates safety; an extra entry silently frees a capability)", canonical, got)
+	}
+	// every safety capability reports never-gated…
+	for _, cap := range canonical {
 		if !tbl.IsNeverGated(cap) {
-			t.Errorf("safety capability %q must be on the never-gated list", cap)
+			t.Errorf("safety capability %q must be never-gated", cap)
 		}
 	}
-	if tbl.IsNeverGated("ai") {
-		t.Error("ai is plan-gated (ai.use is in the matrix) — not on the never-gated safety list")
+	// …and capability features (sold per tier) are gated, not on the list.
+	for _, cap := range []string{"ai", "sso", "audit_export", "byoc", "priority_support"} {
+		if tbl.IsNeverGated(cap) {
+			t.Errorf("%q is a plan-gated capability — it must NOT be on the never-gated safety list", cap)
+		}
 	}
 }
