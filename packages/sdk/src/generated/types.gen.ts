@@ -3285,7 +3285,7 @@ export type LeaveOrgData = {
         org: string;
     };
     query?: never;
-    url: '/orgs/{org}:leave';
+    url: '/orgs/{org}/leave';
 };
 
 export type LeaveOrgErrors = {

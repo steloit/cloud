@@ -28,7 +28,7 @@ func TestLeaveOrgAndAccountDeletion(t *testing.T) {
 	}
 
 	// --- leave-org: a member leaves; account + session untouched -----------
-	resp, _ = w.post(t, "/v1/orgs/"+org.Id+":leave", "", memberCk)
+	resp, _ = w.post(t, "/v1/orgs/"+org.Id+"/leave", "", memberCk)
 	if resp.StatusCode != 204 {
 		t.Fatalf("leave: %d", resp.StatusCode)
 	}
@@ -46,7 +46,7 @@ func TestLeaveOrgAndAccountDeletion(t *testing.T) {
 	}
 
 	// --- the last owner cannot leave (F1) ----------------------------------
-	resp, body = w.post(t, "/v1/orgs/"+org.Id+":leave", "", ownerCk)
+	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/leave", "", ownerCk)
 	if resp.StatusCode != 409 || !strings.Contains(body, "owner") {
 		t.Fatalf("last-owner leave: %d %s", resp.StatusCode, body)
 	}

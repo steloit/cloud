@@ -871,7 +871,7 @@ paths:
         "202": {description: "Deletion scheduled; grace window before purge"}
         "409": {$ref: "#/components/responses/Conflict"}
 
-  /orgs/{org}:leave:
+  /orgs/{org}/leave:
     parameters: [{$ref: "#/components/parameters/org"}]
     post:
       tags: [orgs]

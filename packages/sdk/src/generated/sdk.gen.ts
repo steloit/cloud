@@ -893,7 +893,7 @@ export const deleteAccount = <ThrowOnError extends boolean = false>(options?: Op
  */
 export const leaveOrg = <ThrowOnError extends boolean = false>(options: Options<LeaveOrgData, ThrowOnError>): RequestResult<LeaveOrgResponses, LeaveOrgErrors, ThrowOnError> => (options.client ?? client).post<LeaveOrgResponses, LeaveOrgErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/orgs/{org}:leave',
+    url: '/orgs/{org}/leave',
     ...options
 });
 
