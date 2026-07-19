@@ -235,6 +235,9 @@ type ServerInterface interface {
 	// ChangePlan Upgrades immediate + prorated; downgrades at anchor, 409 with ALL blocking reasons verbatim (B4: '12 members > Free's 3 — the button says why')
 	// (POST /orgs/{org}/subscription)
 	ChangePlan(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// ReactivateSubscription The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+	// (POST /orgs/{org}/subscription/reactivate)
+	ReactivateSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 
 	// (GET /orgs/{org}/templates)
 	ListTemplates(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
@@ -2205,6 +2208,32 @@ func (siw *ServerInterfaceWrapper) ChangePlan(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ReactivateSubscription operation middleware
+func (siw *ServerInterfaceWrapper) ReactivateSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReactivateSubscription(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTemplates operation middleware
 func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.Request) {
 
@@ -2959,6 +2988,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.CancelSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.GetSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.ChangePlan)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/subscription/reactivate", wrapper.ReactivateSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/assistant/threads", wrapper.ListThreads)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/assistant/threads", wrapper.CreateThread)
 
@@ -4743,6 +4773,42 @@ func (response ChangePlan409ApplicationProblemPlusJSONResponse) VisitChangePlanR
 	return err
 }
 
+type ReactivateSubscriptionRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ReactivateSubscriptionResponseObject interface {
+	VisitReactivateSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type ReactivateSubscription200JSONResponse Subscription
+
+func (response ReactivateSubscription200JSONResponse) VisitReactivateSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReactivateSubscription409ApplicationProblemPlusJSONResponse Problem
+
+func (response ReactivateSubscription409ApplicationProblemPlusJSONResponse) VisitReactivateSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTemplatesRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -5464,6 +5530,9 @@ type StrictServerInterface interface {
 	// ChangePlan Upgrades immediate + prorated; downgrades at anchor, 409 with ALL blocking reasons verbatim (B4: '12 members > Free's 3 — the button says why')
 	// (POST /orgs/{org}/subscription)
 	ChangePlan(ctx context.Context, request ChangePlanRequestObject) (ChangePlanResponseObject, error)
+	// ReactivateSubscription The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+	// (POST /orgs/{org}/subscription/reactivate)
+	ReactivateSubscription(ctx context.Context, request ReactivateSubscriptionRequestObject) (ReactivateSubscriptionResponseObject, error)
 
 	// (GET /orgs/{org}/templates)
 	ListTemplates(ctx context.Context, request ListTemplatesRequestObject) (ListTemplatesResponseObject, error)
@@ -7599,6 +7668,32 @@ func (sh *strictHandler) ChangePlan(w http.ResponseWriter, r *http.Request, orgP
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ChangePlanResponseObject); ok {
 		if err := validResponse.VisitChangePlanResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReactivateSubscription operation middleware
+func (sh *strictHandler) ReactivateSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ReactivateSubscriptionRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReactivateSubscription(ctx, request.(ReactivateSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReactivateSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReactivateSubscriptionResponseObject); ok {
+		if err := validResponse.VisitReactivateSubscriptionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

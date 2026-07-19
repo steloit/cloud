@@ -1102,6 +1102,16 @@ paths:
       responses:
         "200": {description: "Cancelled at anchor; wind-down contract echoed", content: {application/json: {schema: {$ref: "#/components/schemas/Subscription"}}}}
 
+  /orgs/{org}/subscription/reactivate:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [billing]
+      operationId: reactivateSubscription
+      summary: "The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out."
+      responses:
+        "200": {description: "Reactivated; wind-down cleared", content: {application/json: {schema: {$ref: "#/components/schemas/Subscription"}}}}
+        "409": {description: "Not in a cancellable-reactivatable state (e.g. already current, or the anchor passed — use changePlan to restart)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+
   /orgs/{org}/payment-methods:
     parameters: [{$ref: "#/components/parameters/org"}]
     post:
