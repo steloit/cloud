@@ -19,6 +19,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/mailer"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/config"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
@@ -155,6 +156,16 @@ func main() {
 	vault := secrets.NewVault(queries, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries))
 	envs := prov // T3.2 closed the env→org seam: environments are real rows
+
+	// T10.4: email is Event-driven (nothing else sends mail). Resend if a key is
+	// configured, else the Noop provider so the app runs without credentials.
+	var mailProvider mailer.Provider = mailer.Noop{}
+	if cfg.ResendAPIKey != "" {
+		mailProvider = mailer.NewResend(cfg.ResendAPIKey)
+	}
+	logger.Info("email provider", "provider", mailProvider.Name())
+	dispatcher := mailer.NewDispatcher(mailProvider, queries, identity.NewMailDirectory(queries, cfg.ConsoleBaseURL), cfg.EmailFrom)
+	go dispatcher.RunOutbox(ctx, 10*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

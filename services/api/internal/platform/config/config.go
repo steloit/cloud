@@ -31,6 +31,13 @@ type Config struct {
 	ArgonMemoryKiB uint32 `env:"ARGON_MEMORY_KIB" envDefault:"19456"`
 	ArgonTime      uint32 `env:"ARGON_TIME" envDefault:"2"`
 	ArgonThreads   uint8  `env:"ARGON_THREADS" envDefault:"1"`
+
+	// Email (T10.4, ADR-0009). Empty RESEND_API_KEY ⇒ the Noop provider (the
+	// app runs without a live send path; the key finalizes it — GCP Secret
+	// Manager replaces the env source behind the same seam later).
+	ResendAPIKey   string `env:"RESEND_API_KEY"`
+	EmailFrom      string `env:"EMAIL_FROM" envDefault:"Steloit <noreply@steloit.app>"`
+	ConsoleBaseURL string `env:"CONSOLE_BASE_URL" envDefault:"https://console.steloit.app"`
 }
 
 func Load() (Config, error) {
