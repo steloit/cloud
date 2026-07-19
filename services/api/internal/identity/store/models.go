@@ -115,6 +115,18 @@ type Member struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type MfaTotp struct {
+	UserID      string
+	Ciphertext  []byte
+	Nonce       []byte
+	WrappedDek  []byte
+	DekNonce    []byte
+	KekID       string
+	ConfirmedAt pgtype.Timestamptz
+	LastStep    pgtype.Int8
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Org struct {
 	ID                  string
 	Name                string
@@ -151,6 +163,14 @@ type QuotaUsage struct {
 	Used       int64
 	RateCents  int64
 	ComputedAt pgtype.Timestamptz
+}
+
+type RecoveryCode struct {
+	ID        string
+	UserID    string
+	CodeHash  []byte
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
 
 type RepoLink struct {
@@ -254,4 +274,5 @@ type User struct {
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
 	DeletionScheduledAt pgtype.Timestamptz
+	MfaEnabled          bool
 }

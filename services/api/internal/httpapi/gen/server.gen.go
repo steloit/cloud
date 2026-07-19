@@ -25,6 +25,18 @@ type ServerInterface interface {
 	// Logout Revoke the current session
 	// (POST /auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// DisableMfa Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+	// (DELETE /auth/mfa)
+	DisableMfa(w http.ResponseWriter, r *http.Request)
+	// RegenerateRecoveryCodes Reveal-once recovery codes; the previous set is invalidated
+	// (POST /auth/mfa/recovery:regenerate)
+	RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request)
+	// TotpEnroll TOTP fallback: reveal-once secret + otpauth URI
+	// (POST /auth/mfa/totp:enroll)
+	TotpEnroll(w http.ResponseWriter, r *http.Request)
+
+	// (POST /auth/mfa/totp:verify)
+	TotpVerify(w http.ResponseWriter, r *http.Request)
 	// GetSession Current user + session — the console boot call
 	// (GET /auth/session)
 	GetSession(w http.ResponseWriter, r *http.Request)
@@ -208,6 +220,62 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisableMfa operation middleware
+func (siw *ServerInterfaceWrapper) DisableMfa(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisableMfa(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegenerateRecoveryCodes operation middleware
+func (siw *ServerInterfaceWrapper) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegenerateRecoveryCodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TotpEnroll operation middleware
+func (siw *ServerInterfaceWrapper) TotpEnroll(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TotpEnroll(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TotpVerify operation middleware
+func (siw *ServerInterfaceWrapper) TotpVerify(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TotpVerify(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1827,6 +1895,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetSession)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/mfa/totp:enroll", wrapper.TotpEnroll)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/mfa/totp:verify", wrapper.TotpVerify)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/mfa", wrapper.DisableMfa)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/mfa/recovery:regenerate", wrapper.RegenerateRecoveryCodes)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me", wrapper.DeleteAccount)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/leave", wrapper.LeaveOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/sessions", wrapper.ListSessions)
@@ -1902,6 +1974,84 @@ type Logout401Response struct {
 
 func (response Logout401Response) VisitLogoutResponse(w http.ResponseWriter) error {
 	w.WriteHeader(401)
+	return nil
+}
+
+type DisableMfaRequestObject struct {
+}
+
+type DisableMfaResponseObject interface {
+	VisitDisableMfaResponse(w http.ResponseWriter) error
+}
+
+type DisableMfa204Response struct {
+}
+
+func (response DisableMfa204Response) VisitDisableMfaResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RegenerateRecoveryCodesRequestObject struct {
+}
+
+type RegenerateRecoveryCodesResponseObject interface {
+	VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error
+}
+
+type RegenerateRecoveryCodes200JSONResponse struct {
+	Codes *[]string `json:"codes,omitempty"`
+}
+
+func (response RegenerateRecoveryCodes200JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TotpEnrollRequestObject struct {
+}
+
+type TotpEnrollResponseObject interface {
+	VisitTotpEnrollResponse(w http.ResponseWriter) error
+}
+
+type TotpEnroll200JSONResponse struct {
+	OtpauthUri *string `json:"otpauth_uri,omitempty"`
+	Secret     *string `json:"secret,omitempty"`
+}
+
+func (response TotpEnroll200JSONResponse) VisitTotpEnrollResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TotpVerifyRequestObject struct {
+	Body *TotpVerifyJSONRequestBody
+}
+
+type TotpVerifyResponseObject interface {
+	VisitTotpVerifyResponse(w http.ResponseWriter) error
+}
+
+type TotpVerify204Response struct {
+}
+
+func (response TotpVerify204Response) VisitTotpVerifyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
 	return nil
 }
 
@@ -3225,6 +3375,18 @@ type StrictServerInterface interface {
 	// Logout Revoke the current session
 	// (POST /auth/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// DisableMfa Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+	// (DELETE /auth/mfa)
+	DisableMfa(ctx context.Context, request DisableMfaRequestObject) (DisableMfaResponseObject, error)
+	// RegenerateRecoveryCodes Reveal-once recovery codes; the previous set is invalidated
+	// (POST /auth/mfa/recovery:regenerate)
+	RegenerateRecoveryCodes(ctx context.Context, request RegenerateRecoveryCodesRequestObject) (RegenerateRecoveryCodesResponseObject, error)
+	// TotpEnroll TOTP fallback: reveal-once secret + otpauth URI
+	// (POST /auth/mfa/totp:enroll)
+	TotpEnroll(ctx context.Context, request TotpEnrollRequestObject) (TotpEnrollResponseObject, error)
+
+	// (POST /auth/mfa/totp:verify)
+	TotpVerify(ctx context.Context, request TotpVerifyRequestObject) (TotpVerifyResponseObject, error)
 	// GetSession Current user + session — the console boot call
 	// (GET /auth/session)
 	GetSession(ctx context.Context, request GetSessionRequestObject) (GetSessionResponseObject, error)
@@ -3467,6 +3629,109 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisableMfa operation middleware
+func (sh *strictHandler) DisableMfa(w http.ResponseWriter, r *http.Request) {
+	var request DisableMfaRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisableMfa(ctx, request.(DisableMfaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisableMfa")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisableMfaResponseObject); ok {
+		if err := validResponse.VisitDisableMfaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RegenerateRecoveryCodes operation middleware
+func (sh *strictHandler) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	var request RegenerateRecoveryCodesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RegenerateRecoveryCodes(ctx, request.(RegenerateRecoveryCodesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RegenerateRecoveryCodes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RegenerateRecoveryCodesResponseObject); ok {
+		if err := validResponse.VisitRegenerateRecoveryCodesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TotpEnroll operation middleware
+func (sh *strictHandler) TotpEnroll(w http.ResponseWriter, r *http.Request) {
+	var request TotpEnrollRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TotpEnroll(ctx, request.(TotpEnrollRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TotpEnroll")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TotpEnrollResponseObject); ok {
+		if err := validResponse.VisitTotpEnrollResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TotpVerify operation middleware
+func (sh *strictHandler) TotpVerify(w http.ResponseWriter, r *http.Request) {
+	var request TotpVerifyRequestObject
+
+	var body TotpVerifyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TotpVerify(ctx, request.(TotpVerifyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TotpVerify")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TotpVerifyResponseObject); ok {
+		if err := validResponse.VisitTotpVerifyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

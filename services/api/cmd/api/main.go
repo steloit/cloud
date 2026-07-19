@@ -134,7 +134,12 @@ func main() {
 
 	hub := events.NewHub()
 	recorder := events.NewRecorder(queries, hub)
-	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder)
+	kek, err := secrets.NewEnvKEK(cfg.SecretsKEKID, cfg.SecretsKEK)
+	if err != nil {
+		logger.Error("boot failed", "err", err)
+		os.Exit(1)
+	}
+	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder, kek)
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
@@ -146,11 +151,6 @@ func main() {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
-	kek, err := secrets.NewEnvKEK(cfg.SecretsKEKID, cfg.SecretsKEK)
-	if err != nil {
-		logger.Error("boot failed", "err", err)
-		os.Exit(1)
-	}
 	vault := secrets.NewVault(queries, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries))
 	envs := prov // T3.2 closed the env→org seam: environments are real rows

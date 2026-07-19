@@ -860,6 +860,8 @@ paths:
     post: {tags: [auth], operationId: totpEnroll, summary: "TOTP fallback: reveal-once secret + otpauth URI", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {secret: {type: string}, otpauth_uri: {type: string}}}}}}}}
   /auth/mfa/totp:verify:
     post: {tags: [auth], operationId: totpVerify, requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string}}}}}}, responses: {"204": {description: Enabled}}}
+  /auth/mfa:
+    delete: {tags: [auth], operationId: disableMfa, summary: "Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.", responses: {"204": {description: Disabled}}}
   /auth/mfa/recovery:regenerate:
     post: {tags: [auth], operationId: regenerateRecoveryCodes, summary: "Reveal-once recovery codes; the previous set is invalidated", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {codes: {type: array, items: {type: string}}}}}}}}}
   /me:
@@ -1842,6 +1844,7 @@ components:
       properties:
         email: {type: string, format: email}
         password: {type: string}
+        mfa_code: {type: string, description: "TOTP or recovery code — required to complete login for an MFA-enabled account (the first call returns status=mfa_required; retry with this). S-process with T7.1."}
     LoginResult:
       type: object
       required: [status]

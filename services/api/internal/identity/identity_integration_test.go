@@ -81,7 +81,11 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	q := store.New(pool)
 	hub := events.NewHub()
 	recorder := events.NewRecorder(q, hub)
-	svc, err := identity.NewService(pool, hasher, mgr, ratelimit.New(100, time.Minute), recorder)
+	kek, err := secrets.NewEnvKEK("test-v1", testKEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := identity.NewService(pool, hasher, mgr, ratelimit.New(100, time.Minute), recorder, kek)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,10 +95,6 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(q))
 	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies), recorder)
-	kek, err := secrets.NewEnvKEK("test-v1", testKEK)
-	if err != nil {
-		t.Fatal(err)
-	}
 	vault := secrets.NewVault(q, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q))
 	mux := http.NewServeMux()
