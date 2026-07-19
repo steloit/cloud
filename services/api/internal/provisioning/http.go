@@ -133,6 +133,12 @@ func (h *Handlers) CreateProject(ctx context.Context, req gen.CreateProjectReque
 			inputs = *req.Body.RequiredInputs
 		}
 		if err := h.svc.InstantiateTemplate(ctx, h.est, org, env, tpl, inputs, actor); err != nil {
+			// COMPENSATION (review finding: non-atomic instantiation must not
+			// strand a half-built, name-squatting project): tear the freshly
+			// created project down — bindings first (they RESTRICT service
+			// deletion), then the project cascade. All-or-nothing semantics.
+			_ = h.q.DeleteBindingsForProject(ctx, prj.ID)
+			_ = h.q.HardDeleteProject(ctx, prj.ID)
 			return nil, err
 		}
 	}

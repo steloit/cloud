@@ -44,3 +44,14 @@ SELECT * FROM environments WHERE project_id = $1 AND name = $2;
 SELECT b.* FROM bindings b
 JOIN services s ON s.id = b.source_id
 WHERE s.env_id = $1 AND b.status <> 'revoked';
+
+-- name: DeleteBindingsForProject :exec
+-- Instantiation COMPENSATION only (T12.4): bindings RESTRICT service deletion,
+-- so a failed half-instantiation clears them before the project cascade.
+DELETE FROM bindings b USING services s, environments e
+WHERE b.source_id = s.id AND s.env_id = e.id AND e.project_id = $1;
+
+-- name: HardDeleteProject :exec
+-- Instantiation COMPENSATION only: cascade removes envs -> services -> secrets.
+-- Normal deletion is the scheduled soft path — never this.
+DELETE FROM projects WHERE id = $1;

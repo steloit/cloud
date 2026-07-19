@@ -1644,7 +1644,7 @@ export type CreateProjectData = {
          */
         region?: string;
         /**
-         * wiring for bindings the template captured as inputs (T3)
+         * credential VALUES for the template's required inputs (T3/ADR-021: credentials re-mint per consumer) — each lands as a sealed secret in the new env, never a live link to the excluded service
          */
         required_inputs?: {
             [key: string]: string;

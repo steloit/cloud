@@ -10,10 +10,13 @@ import (
 	"context"
 	"encoding/json"
 
+	"errors"
+
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
+	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -45,6 +48,9 @@ func (h *Handlers) CaptureTemplate(ctx context.Context, req gen.CaptureTemplateR
 	visibility := ""
 	if req.Body.Visibility != nil {
 		visibility = string(*req.Body.Visibility)
+		if visibility != "org" && visibility != "restricted" {
+			return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "visibility", Detail: "one of org|restricted"}})}
+		}
 	}
 	row, err := h.svc.CaptureTemplate(ctx, org, req.Body.Name, visibility,
 		req.Body.Source.Project, req.Body.Source.Env, req.Body.Services, actor)
@@ -55,8 +61,7 @@ func (h *Handlers) CaptureTemplate(ctx context.Context, req gen.CaptureTemplateR
 }
 
 func (h *Handlers) ListTemplates(ctx context.Context, req gen.ListTemplatesRequestObject) (gen.ListTemplatesResponseObject, error) {
-	actor, err := h.requireOrg(ctx, req.OrgPathParam, "template.consume", false)
-	if err != nil {
+	if _, err := h.requireOrg(ctx, req.OrgPathParam, "template.consume", false); err != nil {
 		return nil, err
 	}
 	rows, err := h.q.ListTemplates(ctx, req.OrgPathParam)
@@ -64,7 +69,6 @@ func (h *Handlers) ListTemplates(ctx context.Context, req gen.ListTemplatesReque
 		return nil, err
 	}
 	canManage := h.canManageTemplates(ctx, req.OrgPathParam)
-	_ = actor
 	out := make([]gen.Template, 0, len(rows))
 	for _, t := range rows {
 		if t.Visibility == "restricted" && !canManage {
@@ -98,32 +102,40 @@ func (h *Handlers) UpdateTemplate(ctx context.Context, req gen.UpdateTemplateReq
 			params.Name = tplText(*req.Body.Name)
 		}
 		if req.Body.Visibility != nil {
-			params.Visibility = tplText(string(*req.Body.Visibility))
+			v := string(*req.Body.Visibility)
+			if v != "org" && v != "restricted" {
+				return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "visibility", Detail: "one of org|restricted"}})}
+			}
+			params.Visibility = tplText(v)
 		}
 		if req.Body.Contents != nil {
-			// contents edits re-run the whole safety chain: whitelist decode →
-			// re-price → the DB CHECK still guards at write.
+			// contents edits re-run the WHOLE safety chain and — crucially —
+			// what is stored is the RE-MARSHALED whitelist PROJECTION, never the
+			// caller's raw bytes (review blocker: unknown keys must not persist
+			// into an org-shared artifact). Shapes additionally project through
+			// the closed per-product schema; then re-price; the DB CHECK still
+			// guards at write.
 			raw, _ := json.Marshal(*req.Body.Contents)
-			shapes, _, err := TemplateShapes(store.Template{Contents: raw})
+			shapes, decoded, err := TemplateShapes(store.Template{Contents: raw})
 			if err != nil {
 				return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "contents", Detail: "not a valid template contents object"}})}
+			}
+			for i := range decoded.Services {
+				decoded.Services[i].Shape = estimates.ProjectShape(decoded.Services[i].Product, decoded.Services[i].Shape)
+				shapes[i].Shape = decoded.Services[i].Shape
 			}
 			_, total, err := estimates.PriceAll(shapes)
 			if err != nil {
 				return nil, err
 			}
 			params.MonthlyEstimateCents = tplCents(total)
-			params.Contents = raw
+			projected, _ := json.Marshal(decoded)
+			params.Contents = projected
 		}
 	}
 	row, err := h.q.UpdateTemplate(ctx, params)
 	if err != nil {
-		if isSecretGuardViolation(err) {
-			return nil, problemError{p: problem.Conflict(
-				[]string{"edit would introduce secret material (DB-level guard)"},
-				"Templates never carry credentials (ADR-021).")}
-		}
-		return nil, err
+		return nil, mapTemplateWriteError(err)
 	}
 	return gen.UpdateTemplate200JSONResponse(templateToAPI(row)), nil
 }
@@ -159,6 +171,9 @@ func (h *Handlers) templateScoped(ctx context.Context, tplID string, perm string
 		return store.Template{}, notFound("template")
 	}
 	if _, err := h.requireOrg(ctx, tpl.OrgID, rbac.Permission(perm), mutating); err != nil {
+		if errors.Is(err, identity.ErrNoSession) {
+			return store.Template{}, err // unauthenticated is a 401, never a 404
+		}
 		return store.Template{}, notFound("template") // foreign org: indistinguishable from missing
 	}
 	return tpl, nil

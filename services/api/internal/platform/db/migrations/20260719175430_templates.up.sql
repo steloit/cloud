@@ -26,9 +26,9 @@ CREATE TABLE templates (
     -- or ciphertext fields. Conservative by design — a capture tripping this is
     -- rejected loudly (problem+json), never silently stripped-after-the-fact.
     CONSTRAINT templates_no_secret_material CHECK (
-        position('sec_' in contents::text) = 0
-        AND position('secret_ref' in contents::text) = 0
-        AND position('ciphertext' in contents::text) = 0
+        position('sec_' in lower(contents::text)) = 0
+        AND position('secret_ref' in lower(contents::text)) = 0
+        AND position('ciphertext' in lower(contents::text)) = 0
     )
 );
 CREATE INDEX templates_org_idx ON templates (org_id, updated_at DESC);

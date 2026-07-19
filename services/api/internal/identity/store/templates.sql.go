@@ -20,6 +20,18 @@ func (q *Queries) BumpTemplateUsage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteBindingsForProject = `-- name: DeleteBindingsForProject :exec
+DELETE FROM bindings b USING services s, environments e
+WHERE b.source_id = s.id AND s.env_id = e.id AND e.project_id = $1
+`
+
+// Instantiation COMPENSATION only (T12.4): bindings RESTRICT service deletion,
+// so a failed half-instantiation clears them before the project cascade.
+func (q *Queries) DeleteBindingsForProject(ctx context.Context, projectID string) error {
+	_, err := q.db.Exec(ctx, deleteBindingsForProject, projectID)
+	return err
+}
+
 const deleteTemplate = `-- name: DeleteTemplate :execrows
 DELETE FROM templates WHERE id = $1 AND org_id = $2
 `
@@ -90,6 +102,17 @@ func (q *Queries) GetTemplate(ctx context.Context, id string) (Template, error) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const hardDeleteProject = `-- name: HardDeleteProject :exec
+DELETE FROM projects WHERE id = $1
+`
+
+// Instantiation COMPENSATION only: cascade removes envs -> services -> secrets.
+// Normal deletion is the scheduled soft path — never this.
+func (q *Queries) HardDeleteProject(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, hardDeleteProject, id)
+	return err
 }
 
 const insertTemplate = `-- name: InsertTemplate :one

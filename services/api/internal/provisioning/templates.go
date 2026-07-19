@@ -14,9 +14,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/steloit/cloud/services/api/internal/estimates"
@@ -81,12 +82,7 @@ func (s *Service) CaptureTemplate(ctx context.Context, org store.Org, name, visi
 		MonthlyEstimateCents: cents, UpdatedBy: actorID,
 	})
 	if err != nil {
-		if isSecretGuardViolation(err) {
-			return store.Template{}, problemError{p: problem.Conflict(
-				[]string{"capture would include secret material (DB-level guard)"},
-				"Remove secret-bearing fields from the source shapes and retry — templates never carry credentials (ADR-021).")}
-		}
-		return store.Template{}, err
+		return store.Template{}, mapTemplateWriteError(err)
 	}
 	s.record(ctx, events.Input{
 		OrgID: org.ID, Kind: "lifecycle", Via: "user", Actor: actorID,
@@ -108,6 +104,9 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 	}
 	captured := map[string]store.Service{} // id -> row (subset; empty selection = all)
 	for _, svc := range all {
+		if svc.Status == "deleting" {
+			continue // a service on its way out is never frozen into a template
+		}
 		if len(want) == 0 || want[svc.ID] {
 			captured[svc.ID] = svc
 		}
@@ -117,12 +116,23 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 			[]problem.FieldError{{Field: "services", Detail: "no captured services match this environment"}})}
 	}
 
+	// deterministic order (map iteration is random → noisy version diffs).
+	ordered := make([]store.Service, 0, len(captured))
+	for _, svc := range captured {
+		ordered = append(ordered, svc)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Name < ordered[j].Name })
+
 	var contents tplContents
 	var shapes []estimates.ShapeInput
-	for _, svc := range captured {
+	for _, svc := range ordered {
 		var shape, scaling map[string]any
 		_ = json.Unmarshal(svc.Shape, &shape)
 		_ = json.Unmarshal(svc.Scaling, &scaling)
+		// defense in depth on top of Price's closed schema: the projection
+		// guarantees no unknown key from a stored shape rides into an
+		// org-shared artifact.
+		shape = estimates.ProjectShape(svc.Product, shape)
 		contents.Services = append(contents.Services, tplService{
 			Name: svc.Name, Product: svc.Product, Intent: svc.Intent.String,
 			Shape: shape, Scaling: scaling,
@@ -153,10 +163,31 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 				continue
 			}
 		}
-		// external provider or excluded service — a required input.
-		desc := "binding from " + src.Name + " (" + b.TargetType + "); credentials re-mint per consumer"
+		// external provider or excluded service — a required input. The name
+		// carries the TARGET identity so two distinct dependencies never
+		// collapse onto one credential (review finding).
+		targetLabel := b.TargetType
+		if b.TargetType == "service" && b.TargetID.Valid {
+			if tgt, err := s.q.GetService(ctx, b.TargetID.String); err == nil {
+				targetLabel = tgt.Name
+			}
+		} else if b.Provider.Valid && b.Provider.String != "" {
+			targetLabel = b.Provider.String
+		}
+		inputName := src.Name + "-" + targetLabel
+		dup := false
+		for _, r := range required {
+			if r.Name == inputName {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue // identical (source,target) pair — one credential is correct
+		}
 		required = append(required, tplRequiredInput{
-			Name: src.Name + "-" + b.TargetType, Description: desc,
+			Name:        inputName,
+			Description: "binding from " + src.Name + " to " + targetLabel + "; credentials re-mint per consumer",
 		})
 	}
 
@@ -193,7 +224,7 @@ func (s *Service) RefreshTemplate(ctx context.Context, tpl store.Template, actor
 		MonthlyEstimateCents: pgtype.Int8{Int64: cents, Valid: true},
 	})
 	if err != nil {
-		return store.Template{}, err
+		return store.Template{}, mapTemplateWriteError(err)
 	}
 	s.record(ctx, events.Input{
 		OrgID: tpl.OrgID, Kind: "lifecycle", Via: "user", Actor: actorID,
@@ -245,19 +276,19 @@ func (s *Service) InstantiateTemplate(ctx context.Context, est *estimates.Servic
 
 	// one estimate per service through the standard gate (F2 + the T11.6 cap).
 	nameToID := map[string]string{}
-	for i, sh := range shapes {
+	for _, sh := range shapes {
 		row, err := est.Create(ctx, org.ID, env.ID, []estimates.ShapeInput{sh})
 		if err != nil {
 			return err
 		}
 		svcRow, err := s.CreateService(ctx, est, env, org.ID, CreateServiceInput{
 			Name: sh.Name, Product: sh.Product, Intent: sh.Intent,
-			Shape: sh.Shape, EstimateID: row.Row.ID,
+			Shape: sh.Shape, EstimateID: row.Row.ID, ActorID: actorID,
 		})
 		if err != nil {
 			return err
 		}
-		nameToID[contents.Services[i].Name] = svcRow.ID
+		nameToID[sh.Name] = svcRow.ID
 	}
 	// internal bindings, re-wired to the new ids.
 	for _, b := range contents.Bindings {
@@ -292,17 +323,27 @@ func (s *Service) InstantiateTemplate(ctx context.Context, est *estimates.Servic
 	return nil
 }
 
-// isSecretGuardViolation detects the templates_no_secret_material CHECK.
-func isSecretGuardViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "templates_no_secret_material")
+// mapTemplateWriteError maps template INSERT/UPDATE constraint failures to
+// problem+json (never a raw 500): the secret guard and the unique name.
+func mapTemplateWriteError(err error) error {
+	var pgerr *pgconn.PgError
+	if errors.As(err, &pgerr) {
+		switch pgerr.ConstraintName {
+		case "templates_no_secret_material":
+			return problemError{p: problem.Conflict(
+				[]string{"capture would include secret material (DB-level guard)"},
+				"Remove secret-bearing values (and names containing sec_/secret_ref/ciphertext) from the source and retry — templates never carry credentials (ADR-021).")}
+		case "templates_org_id_name_key":
+			return problemError{p: problem.Conflict(
+				[]string{"a template with this name already exists in the organization"},
+				"Pick a different name, or update/refresh the existing template.")}
+		}
+	}
+	return err
 }
 
-// GetTemplateFenced loads a template fenced to an org; restricted visibility is
-// the caller's (handler's) concern.
-func (s *Service) GetTemplateFenced(ctx context.Context, tplID, orgID string) (store.Template, error) {
-	tpl, err := s.q.GetTemplate(ctx, tplID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && tpl.OrgID != orgID) {
-		return store.Template{}, problemError{p: problem.NotFound("template")}
-	}
-	return tpl, err
+// isSecretGuardViolation is kept for the handler's contents-edit path.
+func isSecretGuardViolation(err error) bool {
+	var pgerr *pgconn.PgError
+	return errors.As(err, &pgerr) && pgerr.ConstraintName == "templates_no_secret_material"
 }

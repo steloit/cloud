@@ -59,7 +59,7 @@ func TestTemplates(t *testing.T) {
 	}
 	apiID := mk("api", "web", `{"size":"standard-1","instances":1}`)
 	dbID := mk("db", "postgres", `{"size":"dev","storage_gb":10}`)
-	cacheID := mk("cache", "valkey", `{"memory_gb":1}`)
+	cacheID := mk("cache", "valkey", `{"memory_mb":1024}`)
 	// internal binding api->db (captured); excluded binding api->cache.
 	apiSvc, err := store.New(w.pool).GetService(ctx, apiID)
 	if err != nil {
@@ -163,6 +163,66 @@ func TestTemplates(t *testing.T) {
 		t.Fatalf("required input did not land as a sealed secret in the new env: %d", secretCount)
 	}
 	_ = cacheID
+
+	// --- closed shape schema: smuggling a secret via a shape key is REJECTED --
+	r, sb := w.post(t, "/v1/estimates", `{"env":"`+env.ID+`","services":[{"product":"web","name":"evil","shape":{"size":"standard-1","env":{"STRIPE_KEY":"sk_live_x"}}}]}`, ownerCk)
+	if r.StatusCode != 422 || !strings.Contains(sb, "closed schema") {
+		t.Fatalf("open-bag shape accepted (the review blocker): %d %s", r.StatusCode, sb)
+	}
+
+	// --- PATCH stores the PROJECTION, never raw client bytes ------------------
+	r, _ = w.patch(t, "/v1/templates/"+tpl.Id,
+		`{"contents":{"services":[{"name":"db","product":"postgres","shape":{"size":"dev","storage_gb":10,"smuggled_password":"hunter2"}}],"notes":{"db_password":"hunter2"}}}`, ownerCk)
+	if r.StatusCode != 200 {
+		t.Fatalf("patch contents: %d", r.StatusCode)
+	}
+	var patched string
+	_ = w.pool.QueryRow(ctx, "select contents::text from templates where id=$1", tpl.Id).Scan(&patched)
+	if strings.Contains(patched, "hunter2") || strings.Contains(patched, "notes") || strings.Contains(patched, "smuggled_password") {
+		t.Fatalf("PATCH persisted non-whitelist material: %s", patched)
+	}
+
+	// --- duplicate name -> clean 409, never a raw 500 -------------------------
+	r, db2 := w.post(t, "/v1/orgs/"+org.Id+"/templates",
+		`{"name":"renamed-will-not-exist-yet","source":{"project":"`+prj.ID+`","env":"`+env.ID+`"},"services":[]}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("second capture: %d %s", r.StatusCode, db2)
+	}
+	r, db2 = w.post(t, "/v1/orgs/"+org.Id+"/templates",
+		`{"name":"renamed-will-not-exist-yet","source":{"project":"`+prj.ID+`","env":"`+env.ID+`"},"services":[]}`, ownerCk)
+	if r.StatusCode != 409 || !strings.Contains(db2, "already exists") {
+		t.Fatalf("duplicate template name should 409 cleanly: %d %s", r.StatusCode, db2)
+	}
+
+	// --- cross-org fencing + restricted visibility ----------------------------
+	otherCk, otherID := w.signupUser(t, "tpl-outsider@example.com")
+	if _, err := w.svc.CreateOrgWithOwner(ctx, "otherco", otherID); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := w.get(t, "/v1/templates/"+tpl.Id, otherCk); r.StatusCode != 404 {
+		t.Fatalf("cross-org get should 404: %d", r.StatusCode)
+	}
+	if r, _ := w.post(t, "/v1/estimates", `{"template_id":"`+tpl.Id+`"}`, otherCk); r.StatusCode != 404 {
+		t.Fatalf("cross-org estimate-at-consume should 404: %d", r.StatusCode)
+	}
+	// restricted: a developer (template.consume, no manage) cannot see it.
+	if r, _ := w.patch(t, "/v1/templates/"+tpl.Id, `{"visibility":"restricted"}`, ownerCk); r.StatusCode != 200 {
+		t.Fatal("set restricted")
+	}
+	devCk, devID := w.signupUser(t, "tpl-dev@example.com")
+	if _, err := w.pool.Exec(ctx, "insert into members (id,org_id,user_id,role) values ('mem_tpldev',$1,$2,'developer')", org.Id, devID); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := w.get(t, "/v1/templates/"+tpl.Id, devCk); r.StatusCode != 404 {
+		t.Fatalf("restricted template visible to a developer: %d", r.StatusCode)
+	}
+	_, devList := w.get(t, "/v1/orgs/"+org.Id+"/templates", devCk)
+	if strings.Contains(devList, tpl.Id) {
+		t.Fatalf("restricted template listed for a developer: %s", devList)
+	}
+	if r, _ := w.patch(t, "/v1/templates/"+tpl.Id, `{"visibility":"org"}`, ownerCk); r.StatusCode != 200 {
+		t.Fatal("unset restricted")
+	}
 
 	// --- frozen copy: edit + delete the template; instantiations untouched ----
 	if r, _ := w.patch(t, "/v1/templates/"+tpl.Id, `{"name":"renamed"}`, ownerCk); r.StatusCode != 200 {

@@ -144,3 +144,8 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   idempotency comment on a bell/outbox insert is a lie if the only unique column is the
   always-fresh PK — add the partial unique index (`(user_id, event_id) WHERE event_id IS NOT
   NULL`) the conflict is supposed to hit (T10.3).
+- **An "open bag" jsonb input is a secret-smuggling vector the moment it is re-shared.** A shape
+  map whose unknown keys are silently accepted lets a caller stash credentials that a later
+  feature (templates, exports) ships org-wide. Closed schemas: reject unknown keys at the pricing/
+  validation gate (the canon's shape vocabulary is the whitelist), and every re-share path stores a
+  PROJECTION of the decoded whitelist struct — never the caller's raw bytes (T12.4 review blocker).
