@@ -58,3 +58,12 @@ the regression numbers ($208-family, 87/100GB → ~$1.62). See `canon-testing`.
 - Adding a pricing/quota table that DUPLICATES a constant already in code (T11.1 had a fresh
   `included_seats` while `identity/orgs.go` still held a `seatAllowance` map) — grep the value
   first and unify onto the one table, or you've re-created the exact "second pricing constant" bug.
+- A state-machine transition as a bare `UPDATE ... WHERE id=$1` (no status precondition) — the
+  read-decide-write is non-atomic, so a concurrent transition (a payment webhook racing the dunning
+  worker, or a worker running in every replica) causes a lost update that can silently re-suspend a
+  customer who just paid. Compare-and-swap: `WHERE id=$1 AND status=$expected`, 0 rows = stale =
+  re-read, never clobber (T11.2).
+- A lifecycle timestamp written but never read (`trial_ends_at` with no expiry transition) — the state
+  never advances, so a trial delivers a paid plan free forever. Every time-driven state needs a sweep
+  that reads its deadline; and a transition guard must check the FULL precondition (StartTrial needs
+  status==current AND plan==free, else a paying customer flips back to trial) (T11.2).
