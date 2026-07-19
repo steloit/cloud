@@ -59,6 +59,18 @@ type Service struct {
 	kek     secrets.KEK // MFA TOTP secret envelope (nil = MFA unavailable)
 	now     func() time.Time
 	dummy   string
+	// knownPolicyKind reports whether a policy key has a registered evaluator
+	// (wired from the policy engine post-construction). Authoring refuses
+	// promoting an unimplemented kind to `enforce`. nil ⇒ treat all as unknown.
+	knownPolicyKind func(string) bool
+}
+
+// SetPolicyKinds wires the policy engine's kind registry into the authoring
+// service (T12.1) — composition-root only, after both are constructed.
+func (s *Service) SetPolicyKinds(known func(string) bool) { s.knownPolicyKind = known }
+
+func (s *Service) policyKindKnown(key string) bool {
+	return s.knownPolicyKind != nil && s.knownPolicyKind(key)
 }
 
 func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder, kek secrets.KEK) (*Service, error) {

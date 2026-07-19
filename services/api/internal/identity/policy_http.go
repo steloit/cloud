@@ -13,9 +13,24 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
+	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
+
+// actorFrom derives the audit actor from the principal: an org key is a machine
+// (system, identified by its token id), a user/personal-token acts as the user.
+func actorFrom(ctx context.Context) Actor {
+	p, _ := session.PrincipalFrom(ctx)
+	if p.IsOrgKey() {
+		return Actor{ID: p.TokenID, Via: "system"}
+	}
+	id := p.UserID
+	if id == "" {
+		id = p.TokenID
+	}
+	return Actor{ID: id, Via: "user"}
+}
 
 func (h *Handlers) CreatePolicy(ctx context.Context, req gen.CreatePolicyRequestObject) (gen.CreatePolicyResponseObject, error) {
 	actor, err := h.requireOrg(ctx, req.OrgPathParam, "policy.manage", true)
@@ -52,7 +67,8 @@ func (h *Handlers) CreatePolicy(ctx context.Context, req gen.CreatePolicyRequest
 		return gen.CreatePolicy200JSONResponse(impactToAPI(impact)), nil
 	}
 
-	pol, err := h.svc.CreatePolicy(ctx, draft, actor)
+	_ = actor // authorization only; the audit actor is derived from the principal
+	pol, err := h.svc.CreatePolicy(ctx, draft, actorFrom(ctx))
 	if err != nil {
 		return nil, err // policyConflictError → 409 via the carrier seam
 	}
@@ -87,10 +103,6 @@ func (h *Handlers) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyRequest
 	if err != nil {
 		return nil, err
 	}
-	actor, err := h.requireOrg(ctx, pol.OrgID, "policy.manage", true)
-	if err != nil {
-		return nil, err
-	}
 	patch := PolicyPatch{}
 	if req.Body != nil {
 		if req.Body.Enforcement != nil {
@@ -102,7 +114,7 @@ func (h *Handlers) UpdatePolicy(ctx context.Context, req gen.UpdatePolicyRequest
 		}
 		patch.EnforceFrom = req.Body.EnforceFrom
 	}
-	updated, err := h.svc.UpdatePolicy(ctx, pol.ID, patch, actor)
+	updated, err := h.svc.UpdatePolicy(ctx, pol.ID, patch, actorFrom(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +133,11 @@ func (h *Handlers) policyScoped(ctx context.Context, policyID string, perm rbac.
 	}
 	if _, err := h.requireOrg(ctx, pol.OrgID, perm, mutating); err != nil {
 		var ad AccessDeniedError
-		if errors.As(err, &ad) && strings.HasPrefix(ad.DeniedBy, "membership:") {
-			// a non-member must not learn the policy exists
+		// A principal with no standing in the org — a non-member (membership:none)
+		// or an org key scoped to a different org (key:…) — must not learn the
+		// policy exists: 404, not a 403 oracle. A member who merely lacks the
+		// permission (role:…) gets the honest 403.
+		if errors.As(err, &ad) && (strings.HasPrefix(ad.DeniedBy, "membership:") || strings.HasPrefix(ad.DeniedBy, "key:")) {
 			return store.Policy{}, notFoundError{what: "policy"}
 		}
 		return store.Policy{}, err

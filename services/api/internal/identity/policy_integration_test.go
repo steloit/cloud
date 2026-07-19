@@ -44,13 +44,13 @@ func TestPolicyLayerAgainstDB(t *testing.T) {
 
 	// Org-wide ai_assistant=disabled narrows ai.* for EVERY role, owner included.
 	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, key, enforcement) values ('pol_org1', $1, 'ai_assistant', 'disabled')`,
+		`insert into policies (id, org_id, key, enforcement) values ('pol_org1', $1, 'ai-assistant', 'disabled')`,
 		org.ID); err != nil {
 		t.Fatal(err)
 	}
 	err = check("ai.use", orgScope)
 	var denied identity.AccessDeniedError
-	if !errors.As(err, &denied) || !strings.Contains(denied.DeniedBy, "policy:ai_assistant") {
+	if !errors.As(err, &denied) || !strings.Contains(denied.DeniedBy, "policy:ai-assistant") {
 		t.Fatalf("org-wide disabled did not narrow owner: %v", err)
 	}
 	// …and does not touch non-ai permissions (tighten is per-key, not blanket).
@@ -83,7 +83,7 @@ func TestPolicyLayerAgainstDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, project_id, key, enforcement) values ('pol_prj1', $1, $2, 'ai_assistant', 'enabled')`,
+		`insert into policies (id, org_id, project_id, key, enforcement) values ('pol_prj1', $1, $2, 'ai-assistant', 'enabled')`,
 		org.ID, prjA.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestPolicyLayerAgainstDB(t *testing.T) {
 	// UNIQUE (org_id, project_id, key): a second org-wide row of the same key
 	// must be rejected by the schema, not deduplicated in code.
 	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, key, enforcement) values ('pol_org2', $1, 'ai_assistant', 'enabled')`,
+		`insert into policies (id, org_id, key, enforcement) values ('pol_org2', $1, 'ai-assistant', 'enabled')`,
 		org.ID); err == nil {
 		t.Fatal("duplicate org-wide policy row accepted")
 	}

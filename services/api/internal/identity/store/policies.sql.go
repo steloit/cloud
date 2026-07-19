@@ -27,18 +27,20 @@ SELECT count(*) FROM events
 WHERE org_id = $1
   AND action = 'authz.denied'
   AND at > now() - interval '30 days'
-  AND detail->>'denied_by' LIKE 'policy:' || $2 || '%'
+  AND detail->>'denied_by' LIKE 'policy:' || $2 || ' %'
 `
 
 type CountPolicyViolations30dParams struct {
-	OrgID   string
-	Column2 pgtype.Text
+	OrgID string
+	Key   pgtype.Text
 }
 
 // Warn-mode telemetry (G12): denials attributed to this policy key on the spine
-// in the trailing 30 days — what makes promote-to-enforce a data-backed click.
+// in the trailing 30 days. The denial detail is "policy:<key> <reason>", so the
+// key is anchored with a trailing space — a prefix like 'ai' can't bleed into
+// 'ai-assistant'. The key charset is validated at authoring (no LIKE wildcards).
 func (q *Queries) CountPolicyViolations30d(ctx context.Context, arg CountPolicyViolations30dParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPolicyViolations30d, arg.OrgID, arg.Column2)
+	row := q.db.QueryRow(ctx, countPolicyViolations30d, arg.OrgID, arg.Key)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -47,7 +49,7 @@ func (q *Queries) CountPolicyViolations30d(ctx context.Context, arg CountPolicyV
 const countSameKeyPolicies = `-- name: CountSameKeyPolicies :one
 SELECT count(*) FROM policies
 WHERE org_id = $1 AND key = $2
-  AND (project_id IS NULL OR project_id IS NOT DISTINCT FROM $3)
+  AND project_id IS NOT DISTINCT FROM $3
 `
 
 type CountSameKeyPoliciesParams struct {
@@ -56,8 +58,9 @@ type CountSameKeyPoliciesParams struct {
 	ProjectID pgtype.Text
 }
 
-// Conflict detection for dry-run: existing policies of the same key attached at
-// an overlapping scope (org-wide, or the same project).
+// Conflict detection: a policy of the same key at the EXACT same scope (the
+// unique constraint's granularity). A project-scoped policy does NOT conflict
+// with an org-wide one of the same key — closest-wins is the intended override.
 func (q *Queries) CountSameKeyPolicies(ctx context.Context, arg CountSameKeyPoliciesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countSameKeyPolicies, arg.OrgID, arg.Key, arg.ProjectID)
 	var count int64
@@ -88,6 +91,18 @@ func (q *Queries) GetPolicyByID(ctx context.Context, id string) (Policy, error) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getProjectOrg = `-- name: GetProjectOrg :one
+SELECT org_id FROM projects WHERE id = $1
+`
+
+// Cross-org isolation: a policy's project_id must belong to the policy's org.
+func (q *Queries) GetProjectOrg(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, getProjectOrg, id)
+	var org_id string
+	err := row.Scan(&org_id)
+	return org_id, err
 }
 
 const insertPolicy = `-- name: InsertPolicy :one
@@ -180,6 +195,35 @@ func (q *Queries) InsertPolicyVersion(ctx context.Context, arg InsertPolicyVersi
 	return err
 }
 
+const linkPolicyEvent = `-- name: LinkPolicyEvent :exec
+UPDATE policies SET last_change_event = $2 WHERE id = $1
+`
+
+type LinkPolicyEventParams struct {
+	ID              string
+	LastChangeEvent pgtype.Text
+}
+
+func (q *Queries) LinkPolicyEvent(ctx context.Context, arg LinkPolicyEventParams) error {
+	_, err := q.db.Exec(ctx, linkPolicyEvent, arg.ID, arg.LastChangeEvent)
+	return err
+}
+
+const linkPolicyVersionEvent = `-- name: LinkPolicyVersionEvent :exec
+UPDATE policy_versions SET change_event = $3 WHERE policy_id = $1 AND version = $2
+`
+
+type LinkPolicyVersionEventParams struct {
+	PolicyID    string
+	Version     int32
+	ChangeEvent pgtype.Text
+}
+
+func (q *Queries) LinkPolicyVersionEvent(ctx context.Context, arg LinkPolicyVersionEventParams) error {
+	_, err := q.db.Exec(ctx, linkPolicyVersionEvent, arg.PolicyID, arg.Version, arg.ChangeEvent)
+	return err
+}
+
 const listPoliciesPage = `-- name: ListPoliciesPage :many
 SELECT id, org_id, project_id, key, enforcement, config, created_at, rule, description, version, enforce_from, last_change_event, updated_at FROM policies WHERE org_id = $1 ORDER BY created_at DESC, id
 `
@@ -267,6 +311,8 @@ type ListSameKeyPoliciesParams struct {
 	ProjectID pgtype.Text
 }
 
+// For the dry-run preview: same-key policies at the same OR org-wide scope, so
+// the user sees what already governs (informational, broader than the 409).
 func (q *Queries) ListSameKeyPolicies(ctx context.Context, arg ListSameKeyPoliciesParams) ([]Policy, error) {
 	rows, err := q.db.Query(ctx, listSameKeyPolicies, arg.OrgID, arg.Key, arg.ProjectID)
 	if err != nil {

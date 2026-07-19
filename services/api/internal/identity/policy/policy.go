@@ -45,7 +45,9 @@ type Source interface {
 
 func NewEngine(source Source) *Engine {
 	e := &Engine{kinds: map[string]Kind{}, source: source}
-	e.Register("ai_assistant", aiAssistantKind)
+	// The registered key MUST match the authored `key` verbatim (the DB stores
+	// what the API accepts) — the contract spells it "ai-assistant" (hyphen).
+	e.Register("ai-assistant", aiAssistantKind)
 	return e
 }
 
@@ -56,6 +58,16 @@ func (e *Engine) Register(key string, k Kind) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.kinds[key] = k
+}
+
+// Knows reports whether a policy key has a registered evaluator. The authoring
+// layer (T12.1) uses it to refuse promoting an unimplemented kind to `enforce`:
+// a policy the platform cannot evaluate must never be a hard block.
+func (e *Engine) Knows(key string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	_, ok := e.kinds[key]
+	return ok
 }
 
 // Evaluate implements rbac.PolicyLayer: resolve closest-wins per key, then
@@ -84,11 +96,22 @@ func (e *Engine) Evaluate(ctx context.Context, role rbac.Role, perm rbac.Permiss
 		}
 	}
 	for key, row := range effective {
+		// Warn-first (G9): a policy in `warn` posture is telemetry only — it
+		// counts violations, never denies. Only enforcing postures affect authZ.
+		if row.Enforcement == "warn" {
+			continue
+		}
 		kind, known := e.kinds[key]
 		if !known {
-			// An unrecognized key denies fail-closed with its name: a policy
-			// someone attached must never be silently ignored.
-			return rbac.Decision{Allowed: false, DeniedBy: fmt.Sprintf("policy:%s is not a recognized kind — denied fail-closed", key)}
+			// An unimplemented kind is inert UNLESS it is actively enforcing.
+			// Authoring refuses `enforce` for an unknown kind (T12.1), so this
+			// is defense-in-depth: an enforcing policy we cannot evaluate fails
+			// closed rather than silently permitting; a non-enforcing one (a
+			// warn/opt_in row for a future kind) is ignored, never a lockout.
+			if row.Enforcement == "enforce" {
+				return rbac.Decision{Allowed: false, DeniedBy: fmt.Sprintf("policy:%s is enforcing but not a recognized kind — denied fail-closed", key)}
+			}
+			continue
 		}
 		if reason := kind(ctx, row, role, perm, scope); reason != "" {
 			return rbac.Decision{Allowed: false, DeniedBy: fmt.Sprintf("policy:%s %s", key, reason)}

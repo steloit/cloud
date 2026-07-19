@@ -59,13 +59,13 @@ func TestUS22TwoLayerAuthorizationSentence(t *testing.T) {
 
 	// --- Layer 2: attach ai_assistant=disabled — matrix Y AND policy deny ---
 	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, key, enforcement) values ('pol_us22', $1, 'ai_assistant', 'disabled')`,
+		`insert into policies (id, org_id, key, enforcement) values ('pol_us22', $1, 'ai-assistant', 'disabled')`,
 		org.ID); err != nil {
 		t.Fatal(err)
 	}
 	err = w.authz.Require(ctx, session.Principal{Kind: "session", UserID: ownerID}, "ai.use", scope)
 	var denied identity.AccessDeniedError
-	if !errors.As(err, &denied) || !strings.HasPrefix(denied.DeniedBy, "policy:ai_assistant") {
+	if !errors.As(err, &denied) || !strings.HasPrefix(denied.DeniedBy, "policy:ai-assistant") {
 		t.Fatalf("policy denial does not name the policy: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestUS22TwoLayerAuthorizationSentence(t *testing.T) {
 	}
 	if err := w.pool.QueryRow(ctx,
 		`select count(*) from events where org_id=$1 and action='authz.denied' and kind='policy_trigger'
-		   and detail->>'denied_by' like 'policy:ai_assistant%'`,
+		   and detail->>'denied_by' like 'policy:ai-assistant%'`,
 		org.ID).Scan(&policyDenials); err != nil || policyDenials != 1 {
 		t.Fatalf("policy denial not audited: %d %v", policyDenials, err)
 	}

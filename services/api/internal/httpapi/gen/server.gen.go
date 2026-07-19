@@ -3343,6 +3343,20 @@ func (response GetPolicy200JSONResponse) VisitGetPolicyResponse(w http.ResponseW
 	return err
 }
 
+type GetPolicy404ApplicationProblemPlusJSONResponse Problem
+
+func (response GetPolicy404ApplicationProblemPlusJSONResponse) VisitGetPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type UpdatePolicyRequestObject struct {
 	Policy string `json:"policy"`
 	Body   *UpdatePolicyJSONRequestBody
@@ -3362,6 +3376,20 @@ func (response UpdatePolicy200JSONResponse) VisitUpdatePolicyResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePolicy404ApplicationProblemPlusJSONResponse Problem
+
+func (response UpdatePolicy404ApplicationProblemPlusJSONResponse) VisitUpdatePolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }

@@ -150,6 +150,7 @@ func main() {
 		os.Exit(1)
 	}
 	policies := policy.NewEngine(identity.NewPolicySource(queries))
+	svc.SetPolicyKinds(policies.Knows) // T12.1: authoring refuses enforce on an unimplemented kind
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
 	vault := secrets.NewVault(queries, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries))

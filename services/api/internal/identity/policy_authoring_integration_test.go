@@ -92,17 +92,20 @@ func TestPolicyAuthoringLifecycle(t *testing.T) {
 	}
 
 	// --- update: version bumps, PRIOR version retained, new audit link -----
-	resp, out = w.patch(t, "/v1/policies/"+pol.Id, `{"enforcement":"enforce"}`, ck)
+	// Set a promote-to-enforce date (a valid version-bumping change; the kind
+	// stays in warn since 'allowed-regions' has no evaluator).
+	resp, out = w.patch(t, "/v1/policies/"+pol.Id, `{"enforce_from":"2026-08-01T00:00:00Z"}`, ck)
 	if resp.StatusCode != 200 {
 		t.Fatalf("update: %d %s", resp.StatusCode, out)
 	}
 	var upd struct {
 		Version         int    `json:"version"`
 		Enforcement     string `json:"enforcement"`
+		EnforceFrom     string `json:"enforce_from"`
 		LastChangeEvent string `json:"last_change_event"`
 	}
 	_ = json.Unmarshal([]byte(out), &upd)
-	if upd.Version != 2 || upd.Enforcement != "enforce" {
+	if upd.Version != 2 || upd.Enforcement != "warn" || upd.EnforceFrom == "" {
 		t.Fatalf("update shape: %s", out)
 	}
 	if upd.LastChangeEvent == pol.LastChangeEvent || !strings.HasPrefix(upd.LastChangeEvent, "evt_") {
@@ -115,10 +118,31 @@ func TestPolicyAuthoringLifecycle(t *testing.T) {
 		t.Fatalf("policy_versions retained %d, want 2", versions)
 	}
 
+	// --- warn-first: the org is NOT bricked by an unimplemented rule kind ----
+	// (the duplicate-409 and get/list above already succeeded AFTER creating
+	// the unregistered 'allowed-regions' kind — proof policy.manage still works,
+	// i.e. the eval layer did not fail-close the org.)
+
 	// --- enforcement vocabulary is per-key (warn|enforce for rule policies) -
 	resp, out = w.post(t, base, `{"key":"compute-ceiling","rule":{"max":4},"enforcement":"enabled"}`, ck)
 	if resp.StatusCode != 422 {
 		t.Fatalf("bad enforcement should be 422: %d %s", resp.StatusCode, out)
+	}
+	// promote-to-enforce is refused for a kind with no evaluator (would deny
+	// fail-closed) — keep it in warn until the kind ships.
+	resp, out = w.post(t, base, `{"key":"compute-ceiling","rule":{"max":4},"enforcement":"enforce"}`, ck)
+	if resp.StatusCode != 422 || !strings.Contains(out, "no evaluator") {
+		t.Fatalf("enforce on unimplemented kind should be 422: %d %s", resp.StatusCode, out)
+	}
+	// ...but authoring it in warn (telemetry) is fine.
+	resp, out = w.post(t, base, `{"key":"compute-ceiling","rule":{"max":4}}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("compute-ceiling warn should create: %d %s", resp.StatusCode, out)
+	}
+	// a malformed key (LIKE metacharacters) is rejected before it reaches SQL.
+	resp, _ = w.post(t, base, `{"key":"bad%key","rule":{}}`, ck)
+	if resp.StatusCode != 422 {
+		t.Fatalf("malformed key should be 422: %d", resp.StatusCode)
 	}
 	// ai-assistant DOES accept the enabled|opt_in|disabled triad
 	resp, out = w.post(t, base, `{"key":"ai-assistant","rule":{},"enforcement":"disabled"}`, ck)
@@ -169,5 +193,46 @@ func TestPolicyManageRequired(t *testing.T) {
 	}
 	if !strings.Contains(out, "policy.manage") {
 		t.Fatalf("403 should name the missing permission: %s", out)
+	}
+}
+
+// A policy may not be attached to a project owned by a DIFFERENT org — the
+// project_id is validated against the policy's org (tenant isolation).
+func TestPolicyCrossOrgProjectRejected(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+
+	// org A (the attacker) and org B (owns the project)
+	aCk, aID := w.signupUser(t, "a@example.com")
+	orgA, err := w.svc.CreateOrgWithOwner(ctx, "orga", aID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bID := w.signupUser(t, "b@example.com")
+	orgB, err := w.svc.CreateOrgWithOwner(ctx, "orgb", bID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgBRow, _ := w.svc.GetOrg(ctx, orgB.ID)
+	if _, err := w.pool.Exec(ctx, "update orgs set plan='pro' where id=$1", orgB.ID); err != nil {
+		t.Fatal(err)
+	}
+	orgBRow.Plan = "pro"
+	prjB, _, err := w.prov.CreateProject(ctx, orgBRow, "b-proj", "", bID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// org A's owner tries to attach a policy to org B's project → 422, not a
+	// silent cross-tenant row.
+	body := `{"key":"allowed-regions","rule":{"regions":["eu"]},"scope":{"project_id":"` + prjB.ID + `"}}`
+	resp, out := w.post(t, "/v1/orgs/"+orgA.ID+"/policies", body, aCk)
+	if resp.StatusCode != 422 || !strings.Contains(out, "different organization") {
+		t.Fatalf("cross-org project attach should be 422: %d %s", resp.StatusCode, out)
+	}
+	var n int
+	_ = w.pool.QueryRow(ctx, "select count(*) from policies where org_id=$1", orgA.ID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("cross-org policy persisted (%d)", n)
 	}
 }

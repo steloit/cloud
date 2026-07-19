@@ -11,9 +11,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/steloit/cloud/services/api/internal/events"
@@ -128,31 +131,78 @@ func (s *Service) PreviewPolicy(ctx context.Context, d PolicyDraft) (PolicyImpac
 	return impact, nil
 }
 
-// CreatePolicy persists a new policy (version 1), records the audit event, and
-// stamps its id back as last_change_event. Conflict (a same-scope same-key
-// policy) is refused BEFORE any write, so the spine never records a create that
-// didn't happen.
-func (s *Service) CreatePolicy(ctx context.Context, d PolicyDraft, actor string) (store.Policy, error) {
-	n, err := s.q.CountSameKeyPolicies(ctx, store.CountSameKeyPoliciesParams{
-		OrgID: d.OrgID, Key: d.Key, ProjectID: nullText(d.ProjectID),
-	})
+// Actor identifies who performed a change for the audit spine: a user id or a
+// token id, with its provenance. Derived from the principal, never the target.
+type Actor struct {
+	ID  string // usr_ or tok_
+	Via string // user | system
+}
+
+// keyPattern constrains policy keys to a safe, LIKE-metacharacter-free charset
+// (the key is interpolated into the violation-count LIKE pattern).
+var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// validateDraft applies the invariants that hold for both create and the
+// resulting update: a well-formed key, and the enforce-only-what-we-can-evaluate
+// rule — a kind with no registered evaluator may exist as telemetry (warn) but
+// must never be a hard block (enforce), which would deny fail-closed.
+func (s *Service) validateDraft(key, enforcement string, projectOrg string, orgID string) error {
+	if !keyPattern.MatchString(key) {
+		return validationError{fields: []problem.FieldError{{Field: "key",
+			Detail: "must be lowercase letters, digits and hyphens (e.g. allowed-regions)"}}}
+	}
+	if enforcement == "enforce" && !s.policyKindKnown(key) {
+		return validationError{fields: []problem.FieldError{{Field: "enforcement",
+			Detail: fmt.Sprintf("%q has no evaluator yet — keep it in warn (telemetry) until its kind ships; enforce would deny fail-closed", key)}}}
+	}
+	if projectOrg != "" && projectOrg != orgID {
+		return validationError{fields: []problem.FieldError{{Field: "scope.project_id",
+			Detail: "project belongs to a different organization"}}}
+	}
+	return nil
+}
+
+// projectOrg returns the owning org of a project id (or "" if none given / not
+// found — a missing project is a validation error the caller surfaces).
+func (s *Service) projectOrg(ctx context.Context, projectID string) (string, bool, error) {
+	if projectID == "" {
+		return "", true, nil
+	}
+	org, err := s.q.GetProjectOrg(ctx, nullText(projectID).String)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return org, true, nil
+}
+
+// CreatePolicy persists a new policy (version 1) and records the audit event on
+// the spine AFTER the state commits — so a failed insert never orphans an event
+// ("the spine never records a create that didn't happen"). A same-scope
+// same-key conflict is a 409, caught both pre-check and at the unique constraint
+// (the race).
+func (s *Service) CreatePolicy(ctx context.Context, d PolicyDraft, actor Actor) (store.Policy, error) {
+	porg, ok, err := s.projectOrg(ctx, d.ProjectID)
 	if err != nil {
 		return store.Policy{}, err
 	}
-	if n > 0 {
+	if !ok {
+		return store.Policy{}, validationError{fields: []problem.FieldError{{Field: "scope.project_id", Detail: "project not found"}}}
+	}
+	if err := s.validateDraft(d.Key, d.Enforcement, porg, d.OrgID); err != nil {
+		return store.Policy{}, err
+	}
+	if n, err := s.q.CountSameKeyPolicies(ctx, store.CountSameKeyPoliciesParams{
+		OrgID: d.OrgID, Key: d.Key, ProjectID: nullText(d.ProjectID),
+	}); err != nil {
+		return store.Policy{}, err
+	} else if n > 0 {
 		return store.Policy{}, policyConflictError{key: d.Key}
 	}
 
 	id := ids.New("pol")
-	evt, err := s.rec.Append(ctx, events.Input{
-		OrgID: d.OrgID, Kind: "policy", Via: viaFor(actor), Actor: actor,
-		Action: "policy.created", Subject: id,
-		Detail: policyDetail(d.Key, d.Enforcement, 1),
-	})
-	if err != nil {
-		return store.Policy{}, fmt.Errorf("identity: policy audit: %w", err)
-	}
-
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return store.Policy{}, err
@@ -164,23 +214,26 @@ func (s *Service) CreatePolicy(ctx context.Context, d PolicyDraft, actor string)
 		ID: id, OrgID: d.OrgID, ProjectID: nullText(d.ProjectID), Key: d.Key,
 		Enforcement: d.Enforcement, Rule: jsonOrEmpty(d.Rule), Config: []byte("{}"),
 		Description: nullText(d.Description), EnforceFrom: nullTime(d.EnforceFrom),
-		LastChangeEvent: nullText(evt.ID),
 	})
 	if err != nil {
-		return store.Policy{}, err
+		return store.Policy{}, mapPolicyWriteErr(err, d.Key)
 	}
-	if err := q.InsertPolicyVersion(ctx, versionRow(pol, evt.ID, actor)); err != nil {
+	if err := q.InsertPolicyVersion(ctx, versionRow(pol, "", actor.ID)); err != nil {
 		return store.Policy{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Policy{}, err
 	}
+
+	// State is durable: NOW record the audit event and link it back.
+	evtID := s.linkPolicyEvent(ctx, pol.OrgID, "policy.created", pol, actor)
+	pol.LastChangeEvent = nullText(evtID)
 	return pol, nil
 }
 
 // UpdatePolicy applies a patch, bumping the version, retaining the prior state
-// in policy_versions, and linking the audit event.
-func (s *Service) UpdatePolicy(ctx context.Context, id string, patch PolicyPatch, actor string) (store.Policy, error) {
+// in policy_versions, and recording the audit event AFTER commit (no orphans).
+func (s *Service) UpdatePolicy(ctx context.Context, id string, patch PolicyPatch, actor Actor) (store.Policy, error) {
 	cur, err := s.q.GetPolicyByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -196,6 +249,11 @@ func (s *Service) UpdatePolicy(ctx context.Context, id string, patch PolicyPatch
 			return store.Policy{}, validationError{fields: []problem.FieldError{{Field: "enforcement", Detail: err.Error()}}}
 		}
 	}
+	// same enforce-only-what-we-can-evaluate gate as create (promote-to-enforce).
+	if enforcement == "enforce" && !s.policyKindKnown(cur.Key) {
+		return store.Policy{}, validationError{fields: []problem.FieldError{{Field: "enforcement",
+			Detail: fmt.Sprintf("%q has no evaluator yet — keep it in warn until its kind ships", cur.Key)}}}
+	}
 	config := cur.Config
 	if patch.Config != nil {
 		config = jsonOrEmpty(patch.Config)
@@ -203,15 +261,6 @@ func (s *Service) UpdatePolicy(ctx context.Context, id string, patch PolicyPatch
 	enforceFrom := cur.EnforceFrom
 	if patch.EnforceFrom != nil {
 		enforceFrom = nullTime(patch.EnforceFrom)
-	}
-
-	evt, err := s.rec.Append(ctx, events.Input{
-		OrgID: cur.OrgID, Kind: "policy", Via: viaFor(actor), Actor: actor,
-		Action: "policy.updated", Subject: id,
-		Detail: policyDetail(cur.Key, enforcement, int(cur.Version)+1),
-	})
-	if err != nil {
-		return store.Policy{}, fmt.Errorf("identity: policy audit: %w", err)
 	}
 
 	tx, err := s.db.Begin(ctx)
@@ -223,17 +272,20 @@ func (s *Service) UpdatePolicy(ctx context.Context, id string, patch PolicyPatch
 
 	updated, err := q.UpdatePolicyRow(ctx, store.UpdatePolicyRowParams{
 		ID: id, Enforcement: enforcement, Rule: cur.Rule, Config: config,
-		Description: cur.Description, EnforceFrom: enforceFrom, LastChangeEvent: nullText(evt.ID),
+		Description: cur.Description, EnforceFrom: enforceFrom,
 	})
 	if err != nil {
 		return store.Policy{}, err
 	}
-	if err := q.InsertPolicyVersion(ctx, versionRow(updated, evt.ID, actor)); err != nil {
+	if err := q.InsertPolicyVersion(ctx, versionRow(updated, "", actor.ID)); err != nil {
 		return store.Policy{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Policy{}, err
 	}
+
+	evtID := s.linkPolicyEvent(ctx, updated.OrgID, "policy.updated", updated, actor)
+	updated.LastChangeEvent = nullText(evtID)
 	return updated, nil
 }
 
@@ -260,7 +312,7 @@ func (s *Service) PolicyVersions(ctx context.Context, id string) ([]store.Policy
 // this policy key on the spine over the trailing 30 days.
 func (s *Service) PolicyViolations30d(ctx context.Context, orgID, key string) (int, error) {
 	n, err := s.q.CountPolicyViolations30d(ctx, store.CountPolicyViolations30dParams{
-		OrgID: orgID, Column2: nullText(key),
+		OrgID: orgID, Key: nullText(key),
 	})
 	return int(n), err
 }
@@ -274,7 +326,7 @@ func versionRow(p store.Policy, eventID, actor string) store.InsertPolicyVersion
 	}
 }
 
-func policyDetail(key, enforcement string, version int) []byte {
+func policyDetail(key, enforcement string, version int32) []byte {
 	return []byte(fmt.Sprintf(`{"key":%q,"enforcement":%q,"version":%d}`, key, enforcement, version))
 }
 
@@ -285,12 +337,45 @@ func jsonOrEmpty(b []byte) []byte {
 	return b
 }
 
-// viaFor tags the spine's provenance column: a token actor is a machine.
-func viaFor(actor string) string {
-	if len(actor) >= 4 && actor[:4] == "tok_" {
-		return "system"
+// linkPolicyEvent appends the audit event AFTER the state is committed and links
+// its id back onto the row + version (G7). A ledger failure here is logged
+// loudly, never rolled back onto the committed change (the codebase's outbox
+// discipline until the tx-outbox lands). Returns the event id ("" on failure).
+func (s *Service) linkPolicyEvent(ctx context.Context, orgID, action string, p store.Policy, actor Actor) string {
+	if s.rec == nil {
+		return ""
 	}
-	return "user"
+	evt, err := s.rec.Append(ctx, events.Input{
+		OrgID: orgID, Kind: "policy", Via: actor.Via, Actor: actor.ID,
+		Action: action, Subject: p.ID, Detail: policyDetail(p.Key, p.Enforcement, p.Version),
+	})
+	if err != nil {
+		slog.Error("events: policy audit append failed after commit", "action", action, "policy", p.ID, "err", err)
+		return ""
+	}
+	if err := s.q.LinkPolicyEvent(ctx, store.LinkPolicyEventParams{ID: p.ID, LastChangeEvent: nullText(evt.ID)}); err != nil {
+		slog.Error("events: policy event link failed", "policy", p.ID, "err", err)
+	}
+	if err := s.q.LinkPolicyVersionEvent(ctx, store.LinkPolicyVersionEventParams{PolicyID: p.ID, Version: p.Version, ChangeEvent: nullText(evt.ID)}); err != nil {
+		slog.Error("events: policy version event link failed", "policy", p.ID, "err", err)
+	}
+	return evt.ID
+}
+
+// mapPolicyWriteErr turns the unique/foreign-key violations of the policies
+// insert into the right client errors: a same-scope duplicate (the conflict
+// pre-check's race) is a 409, a bad project_id an FK violation → 422.
+func mapPolicyWriteErr(err error, key string) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) {
+		switch pg.Code {
+		case "23505": // unique_violation
+			return policyConflictError{key: key}
+		case "23503": // foreign_key_violation (project_id)
+			return validationError{fields: []problem.FieldError{{Field: "scope.project_id", Detail: "project not found"}}}
+		}
+	}
+	return err
 }
 
 // policyConflictError renders the 409 as a checklist with fixes (G11), never a

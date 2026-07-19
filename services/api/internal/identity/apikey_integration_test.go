@@ -110,7 +110,7 @@ func TestOrgApiKeyAuthorization(t *testing.T) {
 		t.Fatalf("ai.use granted key denied before policy: %v", err)
 	}
 	if _, err := w.pool.Exec(ctx,
-		`insert into policies (id, org_id, key, enforcement) values ('pol_key', $1, 'ai_assistant', 'disabled')`,
+		`insert into policies (id, org_id, key, enforcement) values ('pol_key', $1, 'ai-assistant', 'disabled')`,
 		org.Id); err != nil {
 		t.Fatal(err)
 	}
