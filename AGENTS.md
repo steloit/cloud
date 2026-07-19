@@ -13,6 +13,7 @@ views* — never edit them; edit the files here and run sync.
 | `packages/` | `contracts` (generated from openapi.yaml) · `canon` (fixtures + invariants as test utils) |
 | `docs/product/` | **The design authority** (the spec package; internal numbering 00–24 is load-bearing) |
 | `docs/architecture.md` | **Architecture v1 (FROZEN, ADR-0001)** — stack, boundaries, toolchain; deltas need an ADR |
+| `docs/founder-config.md` | **Founder-owned decisions** (providers, P1 identifiers, pricing, secrets) — consume directly; interrupt only for a `NEEDS FOUNDER INPUT` row |
 | `docs/adr/` | Engineering ADRs · `docs/plan/` — roadmap, workflow, migration record |
 | `contexts/` | Context Packs — cross-cutting domain knowledge; load the ones your task lists |
 | `tasks/` | Execution layer: one file per work item (YAML frontmatter + implementation closure) |
