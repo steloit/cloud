@@ -1,7 +1,7 @@
 # T1.2 — the database platform layer (ADR-0003 · ADR-0007/A6 ratified
 # 2026-07-19): CNPG operator + the proven PD-CSI storage/snapshot classes +
-# (optionally) the control-plane CNPG cluster. One apply path: everything is
-# Terraform (helm/kubernetes providers configured by the env from gke-cell
+# (optionally) the control-plane CNPG cluster. One apply TOOL (Terraform) — the apply itself is STAGED
+# (infra/README.md): everything is Terraform (helm/kubernetes providers configured by the env from gke-cell
 # outputs). ZFS-LocalPV install is NOT here — it is the Cell-1 density option
 # (INF-001 A6), kit retained under infra/spike/.
 
@@ -33,7 +33,7 @@ resource "helm_release" "cnpg_operator" {
 
 # --- storage: the T1.0-proven classes, VERBATIM ------------------------------
 # Source of truth is infra/k8s/storage/*.yaml (the yaml the spike proved);
-# Terraform applies the same files — one truth, one apply path.
+# Terraform applies the same files — one truth, one tool (apply is staged).
 resource "kubernetes_manifest" "pd_storageclass" {
   manifest = yamldecode(file("${path.module}/../../k8s/storage/pd-storageclass.yaml"))
 }
