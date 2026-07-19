@@ -175,6 +175,12 @@ func (s *testAPI) ListDeployments(ctx context.Context, r gen.ListDeploymentsRequ
 func (s *testAPI) RollbackDeployment(ctx context.Context, r gen.RollbackDeploymentRequestObject) (gen.RollbackDeploymentResponseObject, error) {
 	return s.Handlers2.RollbackDeployment(ctx, r)
 }
+func (s *testAPI) RenameEnvironment(ctx context.Context, r gen.RenameEnvironmentRequestObject) (gen.RenameEnvironmentResponseObject, error) {
+	return s.Handlers2.RenameEnvironment(ctx, r)
+}
+func (s *testAPI) DeleteEnvironment(ctx context.Context, r gen.DeleteEnvironmentRequestObject) (gen.DeleteEnvironmentResponseObject, error) {
+	return s.Handlers2.DeleteEnvironment(ctx, r)
+}
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
 	t.Helper()

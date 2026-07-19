@@ -34,9 +34,9 @@ func (q *Queries) CountProjects(ctx context.Context, orgID string) (int64, error
 }
 
 const createEnvironment = `-- name: CreateEnvironment :one
-INSERT INTO environments (id, project_id, name, region_override, kind)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at
+INSERT INTO environments (id, project_id, name, region_override, kind, implicit)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at
 `
 
 type CreateEnvironmentParams struct {
@@ -45,6 +45,7 @@ type CreateEnvironmentParams struct {
 	Name           string
 	RegionOverride pgtype.Text
 	Kind           string
+	Implicit       bool
 }
 
 func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentParams) (Environment, error) {
@@ -54,6 +55,7 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		arg.Name,
 		arg.RegionOverride,
 		arg.Kind,
+		arg.Implicit,
 	)
 	var i Environment
 	err := row.Scan(
@@ -65,6 +67,8 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		&i.PolicyFlags,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.Implicit,
+		&i.DeletionScheduledAt,
 	)
 	return i, err
 }
@@ -98,7 +102,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const getEnvironment = `-- name: GetEnvironment :one
-SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at FROM environments WHERE id = $1
+SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at FROM environments WHERE id = $1
 `
 
 func (q *Queries) GetEnvironment(ctx context.Context, id string) (Environment, error) {
@@ -113,6 +117,8 @@ func (q *Queries) GetEnvironment(ctx context.Context, id string) (Environment, e
 		&i.PolicyFlags,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.Implicit,
+		&i.DeletionScheduledAt,
 	)
 	return i, err
 }
@@ -136,7 +142,7 @@ func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 const listEnvironments = `-- name: ListEnvironments :many
-SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at FROM environments WHERE project_id = $1 ORDER BY created_at
+SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at FROM environments WHERE project_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListEnvironments(ctx context.Context, projectID string) ([]Environment, error) {
@@ -157,6 +163,8 @@ func (q *Queries) ListEnvironments(ctx context.Context, projectID string) ([]Env
 			&i.PolicyFlags,
 			&i.ExpiresAt,
 			&i.CreatedAt,
+			&i.Implicit,
+			&i.DeletionScheduledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -228,6 +236,33 @@ func (q *Queries) OrgForEnvironment(ctx context.Context, id string) (string, err
 	return org_id, err
 }
 
+const renameEnvironment = `-- name: RenameEnvironment :one
+UPDATE environments SET name = $2 WHERE id = $1 RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at
+`
+
+type RenameEnvironmentParams struct {
+	ID   string
+	Name string
+}
+
+func (q *Queries) RenameEnvironment(ctx context.Context, arg RenameEnvironmentParams) (Environment, error) {
+	row := q.db.QueryRow(ctx, renameEnvironment, arg.ID, arg.Name)
+	var i Environment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.RegionOverride,
+		&i.Kind,
+		&i.PolicyFlags,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.Implicit,
+		&i.DeletionScheduledAt,
+	)
+	return i, err
+}
+
 const renameProject = `-- name: RenameProject :one
 UPDATE projects SET name = $2 WHERE id = $1 RETURNING id, org_id, name, cell_id, deletion_scheduled_at, created_at
 `
@@ -249,6 +284,19 @@ func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (P
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const scheduleEnvDeletion = `-- name: ScheduleEnvDeletion :execrows
+UPDATE environments SET deletion_scheduled_at = now()
+WHERE id = $1 AND deletion_scheduled_at IS NULL
+`
+
+func (q *Queries) ScheduleEnvDeletion(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, scheduleEnvDeletion, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const scheduleProjectDeletion = `-- name: ScheduleProjectDeletion :execrows

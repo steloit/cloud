@@ -124,6 +124,7 @@ func (s *Service) CreateProject(ctx context.Context, org store.Org, name, region
 	}
 	env, err := q.CreateEnvironment(ctx, store.CreateEnvironmentParams{
 		ID: ids.New("env"), ProjectID: prj.ID, Name: "production", RegionOverride: override, Kind: "standard",
+		Implicit: true, // ADR-037: the born env's identity is the FLAG (the name may rename)
 	})
 	if err != nil {
 		return store.Project{}, store.Environment{}, fmt.Errorf("provisioning: implicit env: %w", err)
@@ -187,7 +188,7 @@ func (s *Service) DeleteProject(ctx context.Context, prj store.Project, actorID 
 	}
 	var reasons []string
 	for _, e := range envs {
-		if e.Name != "production" {
+		if !e.Implicit && !e.DeletionScheduledAt.Valid {
 			reasons = append(reasons, "environment "+e.Name+" exists")
 		}
 	}
@@ -227,7 +228,7 @@ func (s *Service) CreateEnvironment(ctx context.Context, prj store.Project, name
 		override = pgtype.Text{String: region, Valid: true}
 	}
 	env, err := s.q.CreateEnvironment(ctx, store.CreateEnvironmentParams{
-		ID: ids.New("env"), ProjectID: prj.ID, Name: name, RegionOverride: override, Kind: "standard",
+		ID: ids.New("env"), ProjectID: prj.ID, Name: name, RegionOverride: override, Kind: "standard", Implicit: false,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -248,4 +249,68 @@ func (s *Service) CreateEnvironment(ctx context.Context, prj store.Project, name
 
 func (s *Service) ListEnvironments(ctx context.Context, projectID string) ([]store.Environment, error) {
 	return s.q.ListEnvironments(ctx, projectID)
+}
+
+// RenameEnvironment — ADR-037's explicit escape hatch (a capability, never
+// role magic). The implicit flag, not the name, carries the born identity,
+// so even `production` may take a different word.
+func (s *Service) RenameEnvironment(ctx context.Context, env store.Environment, prj store.Project, name, actorID string) (store.Environment, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return store.Environment{}, problemError{p: problem.ValidationFailed(
+			[]problem.FieldError{{Field: "name", Detail: "required"}})}
+	}
+	out, err := s.q.RenameEnvironment(ctx, store.RenameEnvironmentParams{ID: env.ID, Name: name})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return store.Environment{}, problemError{p: problem.Conflict(
+				[]string{"an environment with this name already exists in the project"},
+				"Pick a different name.")}
+		}
+		return store.Environment{}, err
+	}
+	s.record(ctx, events.Input{
+		OrgID: prj.OrgID, Kind: "lifecycle", Via: "user", Actor: actorID,
+		Action: "env.renamed", Subject: env.ID,
+		Detail: []byte(`{"before":` + strconv.Quote(env.Name) + `,"after":` + strconv.Quote(name) + `}`),
+	})
+	return out, nil
+}
+
+// DeleteEnvironment — teardown (U6): the implicit env never deletes (that is
+// project deletion); every existing service is NAMED as a blocker.
+func (s *Service) DeleteEnvironment(ctx context.Context, env store.Environment, prj store.Project, actorID string) error {
+	if env.Implicit {
+		return problemError{p: problem.Conflict(
+			[]string{"this is the project's implicit environment (born with it — ADR-037)"},
+			"Tearing it down is project deletion: delete the project instead.")}
+	}
+	svcs, err := s.q.ListServicesForEnv(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	var reasons []string
+	for _, sv := range svcs {
+		if sv.Status != "deleting" {
+			reasons = append(reasons, "service "+sv.Name+" exists ("+sv.ID+")")
+		}
+	}
+	if len(reasons) > 0 {
+		return problemError{p: problem.Conflict(reasons,
+			"Delete the listed services first — each takes its final backup (U6).")}
+	}
+	n, err := s.q.ScheduleEnvDeletion(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return problemError{p: problem.Conflict([]string{"teardown already scheduled"},
+			"The environment is already tearing down.")}
+	}
+	s.record(ctx, events.Input{
+		OrgID: prj.OrgID, Kind: "lifecycle", Via: "user", Actor: actorID,
+		Action: "env.deletion_scheduled", Subject: env.ID,
+	})
+	return nil
 }

@@ -93,6 +93,12 @@ func (s *apiServer) ListDeployments(ctx context.Context, r gen.ListDeploymentsRe
 func (s *apiServer) RollbackDeployment(ctx context.Context, r gen.RollbackDeploymentRequestObject) (gen.RollbackDeploymentResponseObject, error) {
 	return s.Handlers2.RollbackDeployment(ctx, r)
 }
+func (s *apiServer) RenameEnvironment(ctx context.Context, r gen.RenameEnvironmentRequestObject) (gen.RenameEnvironmentResponseObject, error) {
+	return s.Handlers2.RenameEnvironment(ctx, r)
+}
+func (s *apiServer) DeleteEnvironment(ctx context.Context, r gen.DeleteEnvironmentRequestObject) (gen.DeleteEnvironmentResponseObject, error) {
+	return s.Handlers2.DeleteEnvironment(ctx, r)
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))

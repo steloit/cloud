@@ -3067,6 +3067,11 @@ type UpdateDashboardJSONBody struct {
 	Visibility *Visibility             `json:"visibility,omitempty"`
 }
 
+// RenameEnvironmentJSONBody defines parameters for RenameEnvironment.
+type RenameEnvironmentJSONBody struct {
+	Name string `json:"name"`
+}
+
 // CreateDeploymentJSONBody defines parameters for CreateDeployment.
 type CreateDeploymentJSONBody struct {
 	GitSha *string `json:"git_sha,omitempty"`
@@ -3387,6 +3392,9 @@ type UpdateDashboardJSONRequestBody UpdateDashboardJSONBody
 
 // AddWidgetJSONRequestBody defines body for AddWidget for application/json ContentType.
 type AddWidgetJSONRequestBody = WidgetInput
+
+// RenameEnvironmentJSONRequestBody defines body for RenameEnvironment for application/json ContentType.
+type RenameEnvironmentJSONRequestBody RenameEnvironmentJSONBody
 
 // CreateDeploymentJSONRequestBody defines body for CreateDeployment for application/json ContentType.
 type CreateDeploymentJSONRequestBody CreateDeploymentJSONBody

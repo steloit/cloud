@@ -37,6 +37,12 @@ type ServerInterface interface {
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(w http.ResponseWriter, r *http.Request, dep string)
+	// DeleteEnvironment Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+	// (DELETE /envs/{env})
+	DeleteEnvironment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam)
+	// RenameEnvironment Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	// (PATCH /envs/{env})
+	RenameEnvironment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam)
 	// ListDeployments Immutable history — id, git sha, actor, state, annotations (DP1)
 	// (GET /envs/{env}/deployments)
 	ListDeployments(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam)
@@ -291,6 +297,58 @@ func (siw *ServerInterfaceWrapper) RollbackDeployment(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RollbackDeployment(w, r, dep)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteEnvironment operation middleware
+func (siw *ServerInterfaceWrapper) DeleteEnvironment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "env" -------------
+	var envPathParam EnvPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "env", r.PathValue("env"), &envPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "env", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteEnvironment(w, r, envPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameEnvironment operation middleware
+func (siw *ServerInterfaceWrapper) RenameEnvironment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "env" -------------
+	var envPathParam EnvPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "env", r.PathValue("env"), &envPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "env", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameEnvironment(w, r, envPathParam)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1561,6 +1619,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/projects/{project}", wrapper.UpdateProject)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{project}/envs", wrapper.ListEnvironments)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{project}/envs", wrapper.CreateEnvironment)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/envs/{env}", wrapper.DeleteEnvironment)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/envs/{env}", wrapper.RenameEnvironment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/estimates", wrapper.CreateEstimate)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/services", wrapper.ListServices)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/envs/{env}/services", wrapper.CreateService)
@@ -1753,6 +1813,77 @@ func (response RollbackDeployment201JSONResponse) VisitRollbackDeploymentRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteEnvironmentRequestObject struct {
+	EnvPathParam EnvPathParam `json:"env"`
+}
+
+type DeleteEnvironmentResponseObject interface {
+	VisitDeleteEnvironmentResponse(w http.ResponseWriter) error
+}
+
+type DeleteEnvironment202Response struct {
+}
+
+func (response DeleteEnvironment202Response) VisitDeleteEnvironmentResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type DeleteEnvironment409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteEnvironment409ApplicationProblemPlusJSONResponse) VisitDeleteEnvironmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameEnvironmentRequestObject struct {
+	EnvPathParam EnvPathParam `json:"env"`
+	Body         *RenameEnvironmentJSONRequestBody
+}
+
+type RenameEnvironmentResponseObject interface {
+	VisitRenameEnvironmentResponse(w http.ResponseWriter) error
+}
+
+type RenameEnvironment200JSONResponse Environment
+
+func (response RenameEnvironment200JSONResponse) VisitRenameEnvironmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameEnvironment409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response RenameEnvironment409ApplicationProblemPlusJSONResponse) VisitRenameEnvironmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2772,6 +2903,12 @@ type StrictServerInterface interface {
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(ctx context.Context, request RollbackDeploymentRequestObject) (RollbackDeploymentResponseObject, error)
+	// DeleteEnvironment Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+	// (DELETE /envs/{env})
+	DeleteEnvironment(ctx context.Context, request DeleteEnvironmentRequestObject) (DeleteEnvironmentResponseObject, error)
+	// RenameEnvironment Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+	// (PATCH /envs/{env})
+	RenameEnvironment(ctx context.Context, request RenameEnvironmentRequestObject) (RenameEnvironmentResponseObject, error)
 	// ListDeployments Immutable history — id, git sha, actor, state, annotations (DP1)
 	// (GET /envs/{env}/deployments)
 	ListDeployments(ctx context.Context, request ListDeploymentsRequestObject) (ListDeploymentsResponseObject, error)
@@ -3087,6 +3224,65 @@ func (sh *strictHandler) RollbackDeployment(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RollbackDeploymentResponseObject); ok {
 		if err := validResponse.VisitRollbackDeploymentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteEnvironment operation middleware
+func (sh *strictHandler) DeleteEnvironment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam) {
+	var request DeleteEnvironmentRequestObject
+
+	request.EnvPathParam = envPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteEnvironment(ctx, request.(DeleteEnvironmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteEnvironment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteEnvironmentResponseObject); ok {
+		if err := validResponse.VisitDeleteEnvironmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameEnvironment operation middleware
+func (sh *strictHandler) RenameEnvironment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam) {
+	var request RenameEnvironmentRequestObject
+
+	request.EnvPathParam = envPathParam
+
+	var body RenameEnvironmentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameEnvironment(ctx, request.(RenameEnvironmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameEnvironment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameEnvironmentResponseObject); ok {
+		if err := validResponse.VisitRenameEnvironmentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

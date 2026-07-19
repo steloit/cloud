@@ -1759,6 +1759,60 @@ export type CreateEnvironmentResponses = {
 
 export type CreateEnvironmentResponse = CreateEnvironmentResponses[keyof CreateEnvironmentResponses];
 
+export type DeleteEnvironmentData = {
+    body?: never;
+    path: {
+        env: string;
+    };
+    query?: never;
+    url: '/envs/{env}';
+};
+
+export type DeleteEnvironmentErrors = {
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+};
+
+export type DeleteEnvironmentError = DeleteEnvironmentErrors[keyof DeleteEnvironmentErrors];
+
+export type DeleteEnvironmentResponses = {
+    /**
+     * Teardown scheduled; final backups per U6
+     */
+    202: unknown;
+};
+
+export type RenameEnvironmentData = {
+    body: {
+        name: string;
+    };
+    path: {
+        env: string;
+    };
+    query?: never;
+    url: '/envs/{env}';
+};
+
+export type RenameEnvironmentErrors = {
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+};
+
+export type RenameEnvironmentError = RenameEnvironmentErrors[keyof RenameEnvironmentErrors];
+
+export type RenameEnvironmentResponses = {
+    /**
+     * OK
+     */
+    200: Environment;
+};
+
+export type RenameEnvironmentResponse = RenameEnvironmentResponses[keyof RenameEnvironmentResponses];
+
 export type ListCatalogData = {
     body?: never;
     path?: never;

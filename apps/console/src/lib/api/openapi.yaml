@@ -263,6 +263,24 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EnvironmentList"}}}}
 
+  /envs/{env}:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    patch:
+      tags: [projects]
+      operationId: renameEnvironment
+      summary: "Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037)."
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Environment"}}}}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [projects]
+      operationId: deleteEnvironment
+      summary: "Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)"
+      responses:
+        "202": {description: "Teardown scheduled; final backups per U6"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
   /catalog:
     get:
       tags: [services]

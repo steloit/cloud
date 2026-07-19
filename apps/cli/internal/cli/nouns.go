@@ -23,6 +23,7 @@ func init() {
 	register("project", "inspect", "one project", runProjectInspect)
 	register("env", "create", "new environment in the project", runEnvCreate)
 	register("env", "list", "environments with regions", runEnvList)
+	register("env", "delete", "tear down an environment (--confirm <exact-name>)", runEnvDelete)
 	register("db", "create", "PostgreSQL instance — estimate shown first", runDBCreate)
 	register("db", "list", "databases in the env", func(inv *Invocation) int { return runServiceList(inv, "postgres") })
 	register("db", "inspect", "one database", runServiceInspect)
@@ -222,6 +223,61 @@ func runEnvList(inv *Invocation) int {
 	return ExitOK
 }
 
+// runEnvDelete — U6 grammar: blast radius via the API's named blockers;
+// --confirm <exact-name>; the implicit env refuses with the project-deletion
+// remediation (rendered from the API's 409).
+func runEnvDelete(inv *Invocation) int {
+	c, code := inv.client()
+	if code != ExitOK {
+		return code
+	}
+	if len(inv.Args) == 0 {
+		fmt.Fprintln(inv.Stderr, "✕ usage: steloit env delete <name> --confirm <exact-name>")
+		return ExitUsage
+	}
+	name := inv.Args[0]
+	if inv.Flags["confirm"] != name {
+		fmt.Fprintf(inv.Stderr, "✕ tearing down %s deletes its services' data · final backups are taken first (restorable 30 d)\n", name)
+		fmt.Fprintf(inv.Stderr, "  → re-run with --confirm %s (the exact name; there is no --force)\n", name)
+		return ExitUsage
+	}
+	project, code := inv.needProject()
+	if code != ExitOK {
+		return code
+	}
+	listResp, err := c.ListEnvironmentsWithResponse(context.Background(), project)
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if listResp.JSON200 == nil {
+		return inv.fail(listResp.Body, listResp.HTTPResponse)
+	}
+	envID := ""
+	if listResp.JSON200.Data != nil {
+		for _, e := range *listResp.JSON200.Data {
+			if e.Name == name || e.Id == name {
+				envID = e.Id
+			}
+		}
+	}
+	if envID == "" {
+		fmt.Fprintf(inv.Stderr, "✕ environment %q not found in project %s\n", name, project)
+		return ExitNotFound
+	}
+	delResp, err := c.DeleteEnvironmentWithResponse(context.Background(), envID)
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if delResp.HTTPResponse == nil || delResp.HTTPResponse.StatusCode != 202 {
+		var resp0 = delResp.HTTPResponse
+		return inv.fail(delResp.Body, resp0)
+	}
+	fmt.Fprintf(inv.Stdout, "· %s tearing down · final backups recorded (restorable 30 d)\n", name)
+	return ExitOK
+}
+
 // renderRegion: display `aws · ap-south-1` from flag value `aws/ap-south-1`.
 func renderRegion(v string) string { return strings.Replace(v, "/", " · ", 1) }
 
@@ -257,7 +313,7 @@ func runDBCreate(inv *Invocation) int {
 	// 1) estimate — ALWAYS shown; --yes accepts a SHOWN estimate, nothing skips seeing it
 	product := contracts.Postgres
 	estBody := contracts.CreateEstimateJSONRequestBody{
-		Env: &envID,
+		Env:      &envID,
 		Services: &[]contracts.ServiceShapeInput{{Product: product, Name: &name, Shape: &shape}},
 	}
 	estResp, err := c.CreateEstimateWithResponse(context.Background(), &contracts.CreateEstimateParams{}, estBody)
