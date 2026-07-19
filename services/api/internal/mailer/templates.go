@@ -28,6 +28,10 @@ type Directory interface {
 	// InviteEmail returns the invitee's address, the org id, and template data
 	// for an invite event whose Subject is the invite id.
 	InviteEmail(ctx context.Context, inviteID string) (recipient, orgID string, data map[string]string, err error)
+	// PasswordResetEmail returns the account's address and template data (incl.
+	// the reset link built from the sealed token) for a reset event whose
+	// Subject is the reset-token id. Account-level: orgID is "".
+	PasswordResetEmail(ctx context.Context, resetID string) (recipient, orgID string, data map[string]string, err error)
 }
 
 // Rule binds a spine Event action to the template it sends and how to resolve
@@ -59,6 +63,23 @@ var inviteTemplate = Template{
 	},
 }
 
+var passwordResetTemplate = Template{
+	Name:    "password-reset",
+	Version: 1,
+	render: func(d map[string]string) (string, string, string) {
+		url := d["reset_url"]
+		eURL := html.EscapeString(url)
+		subject := "Reset your Steloit password"
+		text := "We received a request to reset your Steloit password.\n\n" +
+			"Reset it here: " + url + "\n\nThis link expires in 1 hour. " +
+			"If you didn't request this, you can ignore this email — your password is unchanged."
+		htmlBody := "<p>We received a request to reset your Steloit password.</p>" +
+			`<p><a href="` + eURL + `">Reset your password</a></p>` +
+			"<p>This link expires in 1 hour. If you didn't request this, you can ignore this email — your password is unchanged.</p>"
+		return subject, htmlBody, text
+	},
+}
+
 // registry maps event actions to their email rule. Adding a mail-triggering
 // event = adding a rule here; nothing else can send mail.
 func registry() map[string]Rule {
@@ -67,6 +88,12 @@ func registry() map[string]Rule {
 			Template: inviteTemplate,
 			Resolve: func(ctx context.Context, dir Directory, evt store.Event) (string, string, map[string]string, error) {
 				return dir.InviteEmail(ctx, evt.Subject)
+			},
+		},
+		"password.reset_requested": {
+			Template: passwordResetTemplate,
+			Resolve: func(ctx context.Context, dir Directory, evt store.Event) (string, string, map[string]string, error) {
+				return dir.PasswordResetEmail(ctx, evt.Subject)
 			},
 		},
 	}

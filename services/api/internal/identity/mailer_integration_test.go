@@ -69,7 +69,7 @@ func TestEmailOutboxDeliversInvite(t *testing.T) {
 	}
 
 	spy := &spyProvider{}
-	dispatcher := mailer.NewDispatcher(spy, q, identity.NewMailDirectory(q, "https://console.test"), "Steloit <noreply@steloit.app>")
+	dispatcher := mailer.NewDispatcher(spy, q, identity.NewMailDirectory(q, "https://console.test", w.kek), "Steloit <noreply@steloit.app>")
 
 	// only invite.created is a mail action
 	if !dispatcher.Sends("invite.created") || dispatcher.Sends("member.added") {
@@ -126,7 +126,7 @@ func TestEmailOutboxRetriesTransientFailure(t *testing.T) {
 	}
 
 	flaky := &flakyProvider{failFirst: 1} // fail once, then succeed
-	dispatcher := mailer.NewDispatcher(flaky, q, identity.NewMailDirectory(q, "https://c"), "noreply@steloit.app")
+	dispatcher := mailer.NewDispatcher(flaky, q, identity.NewMailDirectory(q, "https://c", w.kek), "noreply@steloit.app")
 
 	// first drain: provider fails → recorded 'failed', not lost, not phantom-sent
 	_, _ = dispatcher.ProcessPending(ctx)
@@ -165,7 +165,7 @@ func TestEmailOutboxSkipsVanishedInvite(t *testing.T) {
 	}
 
 	spy := &spyProvider{}
-	dispatcher := mailer.NewDispatcher(spy, q, identity.NewMailDirectory(q, "https://c"), "noreply@steloit.app")
+	dispatcher := mailer.NewDispatcher(spy, q, identity.NewMailDirectory(q, "https://c", w.kek), "noreply@steloit.app")
 	if _, err := dispatcher.ProcessPending(ctx); err != nil {
 		t.Fatal(err)
 	}

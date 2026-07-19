@@ -47,6 +47,7 @@ type world struct {
 	rec   *events.Recorder
 	prov  *provisioning.Service
 	vault *secrets.Vault
+	kek   secrets.KEK
 }
 
 func newWorld(t *testing.T, ttl time.Duration) *world {
@@ -110,7 +111,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, rec: recorder, prov: prov, vault: vault}
+	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, rec: recorder, prov: prov, vault: vault, kek: kek}
 }
 
 // testAPI composes the module handler sets exactly like the composition root.
