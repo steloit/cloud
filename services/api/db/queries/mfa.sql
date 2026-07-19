@@ -6,7 +6,7 @@ VALUES ($1, $2, $3, $4, $5, $6, NULL)
 ON CONFLICT (user_id) DO UPDATE SET
     ciphertext = EXCLUDED.ciphertext, nonce = EXCLUDED.nonce,
     wrapped_dek = EXCLUDED.wrapped_dek, dek_nonce = EXCLUDED.dek_nonce,
-    kek_id = EXCLUDED.kek_id, confirmed_at = NULL, created_at = now();
+    kek_id = EXCLUDED.kek_id, confirmed_at = NULL, last_step = NULL, created_at = now();
 
 -- name: GetTotp :one
 SELECT * FROM mfa_totp WHERE user_id = $1;

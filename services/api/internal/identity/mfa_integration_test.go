@@ -106,20 +106,18 @@ func TestMFATotpLifecycle(t *testing.T) {
 	if resp.StatusCode != 401 {
 		t.Fatalf("login wrong code: %d", resp.StatusCode)
 	}
-	// live TOTP → session
-	good, _ = totp.Code(enr.Secret, time.Now())
-	resp, body = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+good+`"}`, "")
+	// --- live TOTP → session, and that same code can't be replayed ---------
+	// The replay guard is monotonic on the RFC 6238 step, so a single fast test
+	// can consume exactly one step above the one recorded at verify. Use the
+	// NEXT window's code (accepted now via the +1 skew, higher step); the
+	// verify step is already consumed, so a current-window code would collide.
+	next, _ := totp.Code(enr.Secret, time.Now().Add(30*time.Second))
+	resp, body = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+next+`"}`, "")
 	if resp.StatusCode != 200 || !strings.Contains(body, `"status":"session"`) {
 		t.Fatalf("login with TOTP: %d %s", resp.StatusCode, body)
 	}
-
-	// --- a TOTP code is single-use within its window (no replay) -----------
-	replay, _ := totp.Code(enr.Secret, time.Now())
-	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+replay+`"}`, "")
-	if resp.StatusCode != 200 {
-		t.Fatalf("first use of code: %d", resp.StatusCode)
-	}
-	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+replay+`"}`, "")
+	// replay of the SAME code → rejected (step already consumed)
+	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+next+`"}`, "")
 	if resp.StatusCode != 401 {
 		t.Fatalf("TOTP code replayed within window: %d", resp.StatusCode)
 	}
