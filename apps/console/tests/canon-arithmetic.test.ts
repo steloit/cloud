@@ -29,10 +29,11 @@ describe("canon arithmetic invariants (16-qa)", () => {
   });
 
   it("ratified anchors are present (a uniformly-corrupt copy can't pass)", () => {
-    const bill = sectionOf<{ resources_cents: number; plan_fee_cents: number; forecast_cents: number }>(
-      raw,
-      "billing_overview",
-    );
+    const bill = sectionOf<{
+      resources_cents: number;
+      plan_fee_cents: number;
+      forecast_cents: number;
+    }>(raw, "billing_overview");
     expect(bill.resources_cents).toBe(38300);
     expect(bill.plan_fee_cents).toBe(9900);
     expect(bill.forecast_cents).toBe(48200);
@@ -43,7 +44,10 @@ describe("canon arithmetic invariants (16-qa)", () => {
       raw,
       "billing_overview",
     );
-    const projects = sectionOf<Array<{ name: string; monthly_cost_cents?: number }>>(raw, "projects");
+    const projects = sectionOf<Array<{ name: string; monthly_cost_cents?: number }>>(
+      raw,
+      "projects",
+    );
     for (const line of billing.by_project) {
       const project = projects.find((p) => p.name === line.name);
       expect(project?.monthly_cost_cents).toBe(line.forecast_cents);
