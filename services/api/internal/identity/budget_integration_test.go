@@ -49,8 +49,24 @@ func TestBudgetCapAndExports(t *testing.T) {
 	_ = json.Unmarshal([]byte(eb), &est)
 	r, cb := w.post(t, "/v1/envs/"+env.ID+"/services",
 		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
-	if r.StatusCode != 409 || !strings.Contains(cb, "cap") {
-		t.Fatalf("over-cap create should 409 naming the cap: %d %s", r.StatusCode, cb)
+	if r.StatusCode != 402 || !strings.Contains(cb, "cap") {
+		t.Fatalf("over-cap create should 402 (quota_exceeded family) naming the cap: %d %s", r.StatusCode, cb)
+	}
+	// US-11.7: the refusal carries the sanctioned catalog type + Payment Required.
+	if !strings.Contains(cb, "quota_exceeded") {
+		t.Fatalf("over-cap refusal must be the 402 quota_exceeded type: %s", cb)
+	}
+	// AC3: every cap hit lands on the events spine (auditable, not just a toast).
+	var capEvents int
+	_ = w.pool.QueryRow(ctx, "select count(*) from events where org_id=$1 and action='billing.spend_cap_reached'", org.Id).Scan(&capEvents)
+	if capEvents < 1 {
+		t.Fatalf("over-cap refusal must emit a billing.spend_cap_reached spine event, found %d", capEvents)
+	}
+	// blocked-not-warned: the service was NOT created.
+	var svcCount int
+	_ = w.pool.QueryRow(ctx, "select count(*) from services s join environments e on s.env_id=e.id join projects p on e.project_id=p.id where p.org_id=$1", org.Id).Scan(&svcCount)
+	if svcCount != 0 {
+		t.Fatalf("over-cap provision was NOT blocked — %d service(s) created despite the cap", svcCount)
 	}
 	// the math is shown (a dollar figure appears in the refusal)
 	if !strings.Contains(cb, "$") {
@@ -82,8 +98,8 @@ func TestBudgetCapAndExports(t *testing.T) {
 		t.Fatalf("tighten cap: %d %s", r.StatusCode, b)
 	}
 	sr, sb := w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"standard","storage_gb":50}}`, ownerCk)
-	if sr.StatusCode != 409 || !strings.Contains(sb, "cap") {
-		t.Fatalf("scale-up past the cap must 409 (create-only enforcement is a bypass): %d %s", sr.StatusCode, sb)
+	if sr.StatusCode != 402 || !strings.Contains(sb, "cap") {
+		t.Fatalf("scale-up past the cap must 402 (create-only enforcement is a bypass): %d %s", sr.StatusCode, sb)
 	}
 
 	// --- budget changes are audited on the spine -----------------------------

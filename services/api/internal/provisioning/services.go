@@ -55,9 +55,22 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 	current := planFee + committed
 	projected := current + newMonthlyCents
 	if projected > limit {
-		return problemError{p: problem.Conflict(
-			[]string{fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
-				dollars(projected), dollars(current), dollars(newMonthlyCents), dollars(limit))},
+		// F9 flagship: an ENFORCED bound, refused at accept time (402) with the
+		// arithmetic shown — never an alert-only. Every cap hit lands on the
+		// events spine (AC3) so "the cap is real" is auditable, not just a UI toast.
+		s.record(ctx, events.Input{
+			OrgID: orgID, Kind: "policy_trigger", Via: "system", Actor: "system",
+			Action: "billing.spend_cap_reached", Subject: orgID,
+			Detail: []byte(fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
+				limit, current, newMonthlyCents, projected)),
+		})
+		// The hard spend cap is a 402 quota_exceeded (the x-error-catalog's
+		// sanctioned "hard quota: fails with remediation" — NOT a new error
+		// class): an ENFORCED bound refused at accept time with the arithmetic,
+		// never an alert-only.
+		return problemError{p: problem.QuotaHard(
+			fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
+				dollars(projected), dollars(current), dollars(newMonthlyCents), dollars(limit)),
 			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
 	}
 	return nil
