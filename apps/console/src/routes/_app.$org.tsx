@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { Ctx } from "@/app/shell/ctx";
 import { Rail, type RailActive } from "@/app/shell/rail";
+import { RealtimeMount } from "@/app/shell/realtime-mount";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
@@ -56,6 +57,10 @@ function OrgShell() {
           <span className="flex-1" />
           <Skeleton className="h-5 w-64" />
         </header>
+        <RealtimeMount
+          project={activeProject?.name}
+          env={childParams.project ? envName : undefined}
+        />
         <div className="fbody">
           <nav className="rail" aria-label="Products">
             {[0, 1, 2, 3].map((i) => (
@@ -136,6 +141,10 @@ function OrgShell() {
           childParams.service ? "Search or jump…" : "Search projects, services, docs…"
         }
         showAssistant
+      />
+      <RealtimeMount
+        project={activeProject?.name}
+        env={childParams.project ? envName : undefined}
       />
       <div className="fbody">
         <Rail

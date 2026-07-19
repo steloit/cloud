@@ -22,7 +22,8 @@ import {
 /** Live unread count for the orchestrator's bell dot. */
 export function useUnreadCount(): number {
   const readIds = useNotificationsStore((s) => s.readIds);
-  return NOTIFICATIONS.filter((n) => isUnread(n, readIds)).length;
+  const liveUnread = useNotificationsStore((s) => s.liveUnread);
+  return NOTIFICATIONS.filter((n) => isUnread(n, readIds)).length + liveUnread;
 }
 
 /** insights?proposal= — extra key rides the URL past the env-only schema. */
