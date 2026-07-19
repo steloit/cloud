@@ -1,0 +1,16 @@
+{
+  "name": "node-alpha-loop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The Steloit alpha loop from Node: estimate → create → bind → deploy → events, via @steloit/sdk",
+  "type": "module",
+  "scripts": {
+    "start": "tsx index.mjs"
+  },
+  "dependencies": {
+    "@steloit/sdk": "file:../../packages/sdk"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
