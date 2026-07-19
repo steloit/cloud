@@ -103,8 +103,8 @@ func TestRetryAfterHeaderAndField(t *testing.T) {
 	if w.Header().Get("Retry-After") != "30" {
 		t.Fatalf("Retry-After header missing")
 	}
-	if !strings.Contains(w.Body.String(), "\"retry_after_s\":30") {
-		t.Fatalf("retry_after_s field missing: %s", w.Body.String())
+	if strings.Contains(w.Body.String(), "retry_after_s") {
+		t.Fatalf("retry_after_s must never be in the body (header-only contract): %s", w.Body.String())
 	}
 }
 
