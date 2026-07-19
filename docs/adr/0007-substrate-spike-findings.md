@@ -165,9 +165,10 @@ What this preserves (the promises that actually matter, all mechanism-agnostic):
 
 What changes vs ADR-0003's sketch: the per-branch marginal cost constant
 (PD snapshot delta vs ZFS CoW delta) and the density ceiling (PD volumes per
-node vs datasets per zpool). Both are capacity/pricing knobs, not shape — no
-frozen-architecture delta. The **semantic contract is unchanged**; the execution
-model is the replaceable part (ADR-039 language, applied to storage).
+node vs datasets per zpool) — plus the named storage driver itself, which IS
+frozen text in architecture.md §3 / INF-001 A4, which is exactly why §4 above
+proposes the formal v1.3 delta + Amendment A6 rather than reinterpreting. The
+*semantic contract* (branch/hibernate/restore/RPO) is unchanged throughout.
 
 ## 5 · Consequences
 
