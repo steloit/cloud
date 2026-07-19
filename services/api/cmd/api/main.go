@@ -141,17 +141,17 @@ func main() {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
 	}
-	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder, kek)
+	plans, err := billing.Load()
+	if err != nil {
+		logger.Error("boot failed", "err", err)
+		os.Exit(1)
+	}
+	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder, kek, plans)
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
 	}
 	matrix, err := rbac.Load()
-	if err != nil {
-		logger.Error("boot failed", "err", err)
-		os.Exit(1)
-	}
-	plans, err := billing.Load()
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)

@@ -18,10 +18,9 @@ var plansJSON []byte
 // custom/negotiated (Enterprise) — never a hard-coded number. A -1 limit is
 // unlimited.
 type Plan struct {
-	FeeCents         *int `json:"fee_cents"`
-	ProjectLimit     int  `json:"project_limit"`
-	IncludedEgressGB int  `json:"included_egress_gb"`
-	IncludedSeats    int  `json:"included_seats"`
+	FeeCents      *int `json:"fee_cents"`
+	ProjectLimit  int  `json:"project_limit"`
+	IncludedSeats int  `json:"included_seats"`
 }
 
 // Overage is the soft-quota unit-price schedule (plan-independent).
@@ -46,9 +45,13 @@ type Table struct {
 // present, fees non-negative, allowances sane. Any deviation fails boot —
 // pricing data must never be silently wrong. ("$note" annotation keys are
 // ignored; the invariant checks and the canon test guard the real values.)
-func Load() (*Table, error) {
+func Load() (*Table, error) { return parse(plansJSON) }
+
+// parse is Load's testable core: decode + validate (any bad data fails, so a
+// typo can never silently ship a $0 meter or an unlimited allowance).
+func parse(data []byte) (*Table, error) {
 	var t Table
-	if err := json.Unmarshal(plansJSON, &t); err != nil {
+	if err := json.Unmarshal(data, &t); err != nil {
 		return nil, fmt.Errorf("billing: parse plans.json: %w", err)
 	}
 	for _, name := range []string{"free", "pro", "business", "enterprise"} {
@@ -59,11 +62,35 @@ func Load() (*Table, error) {
 		if p.FeeCents != nil && *p.FeeCents < 0 {
 			return nil, fmt.Errorf("billing: plan %q has a negative fee", name)
 		}
+		// -1 = unlimited; anything below is a typo that would silently unlimit.
+		if p.ProjectLimit < -1 || p.IncludedSeats < -1 {
+			return nil, fmt.Errorf("billing: plan %q has an invalid allowance (< -1)", name)
+		}
 	}
-	if t.Overage.EgressCentsPerGB <= 0 {
-		return nil, fmt.Errorf("billing: overage schedule is empty")
+	// Every overage rate must be a positive price — a typo'd 0 would silently
+	// bill an entire meter for free.
+	for label, cents := range map[string]int{
+		"egress_cents_per_gb":     t.Overage.EgressCentsPerGB,
+		"seat_cents":              t.Overage.SeatCents,
+		"build_cents_per_min":     t.Overage.BuildCentsPerMin,
+		"event_cents_per_million": t.Overage.EventCentsPerMillion,
+		"ai_cents_per_1k":         t.Overage.AICentsPer1k,
+	} {
+		if cents <= 0 {
+			return nil, fmt.Errorf("billing: overage %q must be a positive price, got %d", label, cents)
+		}
 	}
 	return &t, nil
+}
+
+// IncludedSeats is the seat allowance for a plan (0 for an unknown plan — fail
+// closed). The seat gate reads this; there is no second seat constant.
+func (t *Table) IncludedSeats(plan string) int {
+	p, ok := t.Plans[plan]
+	if !ok {
+		return 0
+	}
+	return p.IncludedSeats
 }
 
 // Plan returns a tier by name (the second result is false for an unknown tier —

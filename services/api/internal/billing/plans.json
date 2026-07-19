@@ -1,13 +1,13 @@
 {
-  "$note": "Pricing + quota as DATA (T11.1) — the ONE table consumed by the estimate engine, the quota evaluator (T11.5), and the invoice generator (T11.3). A second pricing constant anywhere is a bug (billing pack). Money is integer cents (ADR-025). Sources: billing pack (F9) + ADR-041 (Pro $29 canonical; Jobs/Search/Vector are included DB capabilities within allowances). Plan fees reproduce canon (Business $99 = 9900). project_limit: -1 = unlimited. Enterprise fee is custom (null = negotiated, never a hard-coded number).",
+  "$note": "Pricing + quota as DATA (T11.1) — the plan/quota axis of the ONE billing table. Resource-shape prices live in estimates/pricing.json (the PAYG infrastructure axis, T3.1); the two axes are disjoint (ADR-022/041 hybrid model) — no price appears in both. The estimate engine, quota evaluator (T11.5), and invoice generator (T11.3) read the plan/quota numbers HERE; a second copy of any of these constants is a bug (billing pack). Money is integer cents (ADR-025). Sources: F9 (feature-specs.md — Free 3 / Pro 5 / Business 20 seats; Pro $29 canonical per ADR-041; Business $99 = canon plan_fee_cents) and the shipped seat gate (identity/orgs.go). project_limit / included_seats: -1 = unlimited; enterprise seats 1000 matches the shipped SubscriptionInfo. Enterprise fee is custom (null). Per-plan EGRESS allowances are deferred to T11.5 (only the Business org's 100 GB is canon-pinned; Free/Pro are not sourced yet — do not invent them here).",
   "plans": {
-    "free":       {"fee_cents": 0,    "project_limit": 1,  "included_egress_gb": 10,  "included_seats": 1},
-    "pro":        {"fee_cents": 2900, "project_limit": 3,  "included_egress_gb": 100, "included_seats": 5},
-    "business":   {"fee_cents": 9900, "project_limit": -1, "included_egress_gb": 500, "included_seats": 25},
-    "enterprise": {"fee_cents": null, "project_limit": -1, "included_egress_gb": -1,  "included_seats": -1}
+    "free":       {"fee_cents": 0,    "project_limit": 1,  "included_seats": 3},
+    "pro":        {"fee_cents": 2900, "project_limit": 3,  "included_seats": 5},
+    "business":   {"fee_cents": 9900, "project_limit": -1, "included_seats": 20},
+    "enterprise": {"fee_cents": null, "project_limit": -1, "included_seats": 1000}
   },
   "overage": {
-    "$note": "Soft-quota unit prices (billing pack). Plan-independent; charged beyond the plan's included allowance, only with confirm=true + shown price.",
+    "$note": "Soft-quota unit prices (F9 / billing pack). Plan-independent; charged beyond the plan's included allowance, only with confirm=true + shown price.",
     "egress_cents_per_gb": 9,
     "seat_cents": 700,
     "build_cents_per_min": 1,
@@ -15,7 +15,7 @@
     "ai_cents_per_1k": 200
   },
   "never_gated": {
-    "$note": "Plans gate capabilities, never safety (billing pack / F9). This list is law — a table-driven test asserts none of these is ever plan-checked.",
+    "$note": "Plans gate capabilities, never safety (F9 / billing pack). This list is law; the quota evaluator (T11.5) consults IsNeverGated before any plan gate, and a test asserts the list is complete.",
     "capabilities": ["tls", "backups", "mfa", "policies", "alerts", "dunning_protections", "self_deletion"]
   }
 }

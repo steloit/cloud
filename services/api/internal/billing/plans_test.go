@@ -41,6 +41,20 @@ func TestLoadAndInvariants(t *testing.T) {
 	if got := tbl.ProjectLimit("business"); got != -1 {
 		t.Fatalf("business project limit = %d (want -1/unlimited)", got)
 	}
+	// F9 seat allowances (Free 3 / Pro 5 / Business 20; enterprise 1000)
+	for plan, want := range map[string]int{"free": 3, "pro": 5, "business": 20, "enterprise": 1000} {
+		if got := tbl.IncludedSeats(plan); got != want {
+			t.Errorf("%s seats = %d (want %d)", plan, got, want)
+		}
+	}
+	if tbl.IncludedSeats("nope") != 0 {
+		t.Fatal("unknown plan granted seats")
+	}
+	// F9 soft-overage schedule (exact prices, integer cents)
+	if o := tbl.Overage; o.EgressCentsPerGB != 9 || o.SeatCents != 700 || o.BuildCentsPerMin != 1 ||
+		o.EventCentsPerMillion != 120 || o.AICentsPer1k != 200 {
+		t.Fatalf("overage schedule drifted: %+v", o)
+	}
 	// deny-by-default: an unknown plan gets no allowance and no fee
 	if tbl.ProjectLimit("nope") != 0 {
 		t.Fatal("unknown plan granted a project allowance")
@@ -70,6 +84,30 @@ func TestBillingReconcilesWithCanon(t *testing.T) {
 	if w.Billing.ResourcesCents+int64(fee) != w.Billing.ForecastCents {
 		t.Fatalf("resources %d + business fee %d ≠ org total %d",
 			w.Billing.ResourcesCents, fee, w.Billing.ForecastCents)
+	}
+}
+
+// The loader fails loudly on bad data — a typo must never silently ship a $0
+// meter, an unlimited allowance, or a missing plan.
+func TestLoadRejectsBadData(t *testing.T) {
+	good := `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3},
+		"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},
+		"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},
+		"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},
+		"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`
+	if _, err := parse([]byte(good)); err != nil {
+		t.Fatalf("valid table rejected: %v", err)
+	}
+	bad := map[string]string{
+		"missing plan":     `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"zero overage":     `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":0,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"negative limit":   `{"plans":{"free":{"fee_cents":0,"project_limit":-5,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"negative fee":     `{"plans":{"free":{"fee_cents":-1,"project_limit":1,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+	}
+	for name, js := range bad {
+		if _, err := parse([]byte(js)); err == nil {
+			t.Errorf("%s: bad table accepted", name)
+		}
 	}
 }
 
