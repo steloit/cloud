@@ -2,9 +2,11 @@
 // against a scripted fetch — no invented shapes, wire bodies asserted.
 import { describe, expect, it } from "vitest";
 import {
+  AuthenticationError,
   ConflictError,
   fmtMoney,
   QuotaExceededError,
+  RateLimitedError,
   Steloit,
 } from "../src/index.ts";
 
@@ -70,17 +72,14 @@ describe("the alpha loop", () => {
     expect((estCall.body as any).env).toBe("env_1");
   });
 
-  it("pagination is an iterator over {data, next_cursor}", async () => {
-    let page = 0;
+  it("pagination iterates and terminates on a null cursor", async () => {
     const client = new Steloit({
       apiUrl: "https://api.test",
       token: "stp_t",
       org: "org_1",
       fetch: scriptedFetch([], {
         "GET /v1/orgs/org_1/projects": () =>
-          json(200, ++page === 1
-            ? { data: [{ id: "prj_a", org_id: "org_1", name: "a" }], next_cursor: "c1" }
-            : { data: [{ id: "prj_b", org_id: "org_1", name: "b" }], next_cursor: null }),
+          json(200, { data: [{ id: "prj_a", org_id: "org_1", name: "a" }, { id: "prj_b", org_id: "org_1", name: "b" }], next_cursor: null }),
       }),
     });
     const seen: string[] = [];
@@ -89,22 +88,92 @@ describe("the alpha loop", () => {
   });
 
   it("errors are typed problem+json with remediation preserved", async () => {
+    let projectCalls = 0;
     const client = new Steloit({
       apiUrl: "https://api.test",
       token: "stp_t",
       org: "org_1",
+      env: "env_1",
       fetch: scriptedFetch([], {
-        "POST /v1/orgs/org_1/projects": () =>
-          json(402, { title: "Plan required", status: 402, required_plan: "pro", remediation: "Upgrade to the pro plan." }),
-        "POST /v1/orgs/org_1/invites": () => json(409, { title: "Conflict", status: 409, reasons: ["a", "b"] }),
+        "POST /v1/orgs/org_1/projects": () => {
+          projectCalls++;
+          return projectCalls === 1
+            ? json(402, { title: "Plan required", status: 402, required_plan: "pro", remediation: "Upgrade to the pro plan." })
+            : json(409, {
+                title: "Conflict", status: 409, remediation: "Resolve the listed blockers and retry.",
+                reasons: [
+                  { code: "name_taken", message: "a project with this name exists", remediation: "Pick a different name." },
+                  { code: "org_deleting", message: "organization scheduled for deletion" },
+                ],
+              });
+        },
+        "GET /v1/auth/session": () => json(401, { title: "Authentication failed", status: 401, remediation: "Sign in first." }),
+        "POST /v1/envs/env_1/deployments": () =>
+          new Response(JSON.stringify({ title: "Rate limited", status: 429, remediation: "Slow down." }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "30" },
+          }),
       }),
     });
-    const err = await client.projects.create({ name: "second" }).catch((e) => e);
-    expect(err).toBeInstanceOf(QuotaExceededError);
-    expect(err.requiredPlan).toBe("pro");
-    expect(err.remediation).toContain("Upgrade");
-    expect(err.status).toBe(402);
-    expect(ConflictError.name).toBe("ConflictError");
+    // 402 → QuotaExceededError with the plan and remediation
+    const quota = await client.projects.create({ name: "second" }).catch((e) => e);
+    expect(quota).toBeInstanceOf(QuotaExceededError);
+    expect(quota.requiredPlan).toBe("pro");
+    expect(quota.remediation).toContain("Upgrade");
+    // 409 → a REAL ConflictError instance carrying every blocker (contract object shape)
+    const conflict = await client.projects.create({ name: "second" }).catch((e) => e);
+    expect(conflict).toBeInstanceOf(ConflictError);
+    expect(conflict.reasons).toHaveLength(2);
+    expect(conflict.reasons[0].remediation).toBe("Pick a different name.");
+    expect(conflict.remediation).toContain("Resolve");
+    // 401 is authentication, never permission-denied (E3 grammar is 403-only)
+    const auth = await client.auth.session().catch((e) => e);
+    expect(auth).toBeInstanceOf(AuthenticationError);
+    // 429 → retryAfterS from the Retry-After HEADER (the contract channel)
+    const rate = await client.deployments.create({ service: "svc_1" }).catch((e) => e);
+    expect(rate).toBeInstanceOf(RateLimitedError);
+    expect(rate.retryAfterS).toBe(30);
+  });
+
+  it("a failed mutation is sent exactly once — mutations never auto-retry", async () => {
+    const calls: Call[] = [];
+    const client = new Steloit({
+      apiUrl: "https://api.test", token: "stp_t", env: "env_1",
+      fetch: scriptedFetch(calls, {
+        "POST /v1/envs/env_1/deployments": () =>
+          new Response(JSON.stringify({ title: "Rate limited", status: 429 }), {
+            status: 429, headers: { "Content-Type": "application/json", "Retry-After": "1" },
+          }),
+      }),
+    });
+    await client.deployments.create({ service: "svc_1" }).catch(() => {});
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+
+  it("pagination never loops when the operation cannot send a cursor", async () => {
+    let n = 0;
+    const client = new Steloit({
+      apiUrl: "https://api.test", token: "stp_t", org: "org_1",
+      fetch: scriptedFetch([], {
+        // a server echoing a constant next_cursor on a cursorless op: the
+        // iterator must yield ONE page and stop — never a duplicate loop
+        "GET /v1/orgs/org_1/projects": () =>
+          json(200, { data: [{ id: "prj_" + ++n, org_id: "org_1", name: "p" }], next_cursor: "stuck" }),
+      }),
+    });
+    const seen: string[] = [];
+    for await (const p of client.projects.list()) seen.push(p.id);
+    expect(seen).toEqual(["prj_1"]);
+  });
+
+  it("the client never serializes its credential", async () => {
+    const client = new Steloit({ apiUrl: "https://api.test", token: "stp_supersecret" });
+    expect(JSON.stringify(client).includes("stp_supersecret")).toBe(false);
+  });
+
+  it("estimates.create never guesses the environment", async () => {
+    const client = new Steloit({ apiUrl: "https://api.test", token: "stp_t" });
+    await expect(client.estimates.create({ services: [] })).rejects.toThrow(/no env in context/);
   });
 
   it("reveal-once: the secret exists in the returned object and nowhere else", async () => {
@@ -152,10 +221,12 @@ describe("the alpha loop", () => {
 });
 
 describe("money", () => {
-  it("is integer cents with the one arithmetic", () => {
+  it("reproduces the console fmtMoney exactly (one arithmetic, everywhere)", () => {
     expect(fmtMoney(5800)).toBe("$58");
     expect(fmtMoney(20800)).toBe("$208");
     expect(fmtMoney(162)).toBe("$1.62");
+    expect(fmtMoney(19910)).toBe("$199.10"); // the canon environments split
+    expect(fmtMoney(100000)).toBe("$1,000"); // Intl grouping, like the console
     expect(() => fmtMoney(1.5)).toThrow();
   });
 });

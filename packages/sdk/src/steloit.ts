@@ -6,23 +6,22 @@ import { createClient, createConfig, type Client } from "./generated/client";
 import * as gen from "./generated/sdk.gen.ts";
 import type {
   Estimate,
+  Problem,
   ServiceShapeInput,
   TokenCreated,
 } from "./generated/types.gen.ts";
 
 // ---- typed errors (problem+json, remediation preserved — §3) ----------------
 
-export interface ProblemFields {
-  title?: string;
-  detail?: string;
-  status?: number;
+/** One 409 blocker — the generated Problem.reasons item shape, verbatim. */
+export interface Reason {
+  code?: string;
+  message?: string;
   remediation?: string;
-  denied_by?: string;
-  reasons?: string[];
-  overage_price_cents?: number;
-  required_plan?: string;
-  retry_after_s?: number;
 }
+
+/** The wire error body — the generated Problem schema (never hand-invented). */
+export type ProblemFields = Partial<Problem>;
 
 export class SteloitError extends Error {
   readonly status: number;
@@ -37,21 +36,32 @@ export class SteloitError extends Error {
   }
 }
 
+export class AuthenticationError extends SteloitError {
+  constructor(p: ProblemFields, status: number) {
+    super(p, status);
+    this.name = "AuthenticationError";
+  }
+}
+
 export class PermissionDeniedError extends SteloitError {
-  readonly deniedBy?: string;
+  /** the E3 grammar lives in detail ("role:… lacks …" | "policy:… …") */
+  readonly denyingPolicy?: string;
   constructor(p: ProblemFields, status: number) {
     super(p, status);
     this.name = "PermissionDeniedError";
-    this.deniedBy = p.denied_by;
+    this.denyingPolicy = p.detail;
   }
 }
 
 export class ConflictError extends SteloitError {
-  readonly reasons: string[];
+  /** ALL blockers, the contract's object shape (a string[] server emission is
+   *  tolerated during the recorded drift-fix window) */
+  readonly reasons: Reason[];
   constructor(p: ProblemFields, status: number) {
     super(p, status);
     this.name = "ConflictError";
-    this.reasons = p.reasons ?? [];
+    const raw = (p.reasons ?? []) as unknown[];
+    this.reasons = raw.map((r) => (typeof r === "string" ? { message: r } : (r as Reason)));
   }
 }
 
@@ -74,18 +84,20 @@ export class NotFoundError extends SteloitError {
 }
 
 export class RateLimitedError extends SteloitError {
+  /** from the Retry-After HEADER — the contract's channel for 429 */
   readonly retryAfterS?: number;
-  constructor(p: ProblemFields, status: number) {
+  constructor(p: ProblemFields, status: number, retryAfterS?: number) {
     super(p, status);
     this.name = "RateLimitedError";
-    this.retryAfterS = p.retry_after_s;
+    this.retryAfterS = retryAfterS;
   }
 }
 
-function toError(body: unknown, status: number): SteloitError {
+function toError(body: unknown, status: number, response?: Response): SteloitError {
   const p = (body ?? {}) as ProblemFields;
   switch (status) {
     case 401:
+      return new AuthenticationError(p, status);
     case 403:
       return new PermissionDeniedError(p, status);
     case 404:
@@ -94,8 +106,10 @@ function toError(body: unknown, status: number): SteloitError {
       return new ConflictError(p, status);
     case 402:
       return new QuotaExceededError(p, status);
-    case 429:
-      return new RateLimitedError(p, status);
+    case 429: {
+      const h = response?.headers.get("Retry-After");
+      return new RateLimitedError(p, status, h ? Number(h) : undefined);
+    }
     default:
       return new SteloitError(p, status);
   }
@@ -104,18 +118,20 @@ function toError(body: unknown, status: number): SteloitError {
 // unwrap turns the generated {data, error, response} result into data-or-throw.
 function unwrap<T>(r: { data?: T; error?: unknown; response?: Response }): T {
   if (r.response?.ok && r.data !== undefined) return r.data;
-  throw toError(r.error, r.response?.status ?? 0);
+  throw toError(r.error, r.response?.status ?? 0, r.response);
 }
 
 // ---- money (integer cents, one arithmetic — §3) -----------------------------
 
 export function fmtMoney(cents: number): string {
   if (!Number.isInteger(cents)) throw new TypeError("money is integer cents (ADR-025)");
-  const sign = cents < 0 ? "-" : "";
-  const abs = Math.abs(cents);
-  return abs % 100 === 0
-    ? `${sign}$${abs / 100}`
-    : `${sign}$${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+  const hasCents = cents % 100 !== 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
+  }).format(cents / 100);
 }
 
 // ---- the client -------------------------------------------------------------
@@ -130,14 +146,22 @@ export interface SteloitOptions {
   fetch?: typeof fetch;
 }
 
+/**
+ * Iterate {data, next_cursor}. cursorSupported=false marks operations whose
+ * contract declares NO cursor parameter (a recorded openapi gap): the
+ * iterator then stops after the first page instead of refetching page one
+ * forever — no silent duplicate loop, ever.
+ */
 async function* paginate<Item>(
   fetchPage: (cursor?: string) => Promise<{ data?: Item[]; next_cursor?: string | null }>,
+  cursorSupported: boolean,
 ): AsyncGenerator<Item> {
   let cursor: string | undefined;
   for (;;) {
     const page = await fetchPage(cursor);
     for (const item of page.data ?? []) yield item;
     if (!page.next_cursor) return;
+    if (!cursorSupported || page.next_cursor === cursor) return; // guard: never loop on an unsendable/echoed cursor
     cursor = page.next_cursor;
   }
 }
@@ -163,6 +187,11 @@ export class Steloit {
     );
   }
 
+  /** debug/telemetry redaction (sdk.md §3): the credential never serializes */
+  toJSON(): Record<string, unknown> {
+    return { apiUrl: this.apiUrl, context: this.ctx, token: "[redacted]" };
+  }
+
   private need(name: "org" | "project" | "env", override?: string): string {
     const v = override ?? this.ctx[name];
     if (!v) throw new Error(`steloit: no ${name} in context — pass {${name}} or set it at construction`);
@@ -181,7 +210,7 @@ export class Steloit {
     list: (ctx?: { org?: string }) =>
       paginate(async () =>
         unwrap(await gen.listProjects({ client: this.core, path: { org: this.need("org", ctx?.org) } })),
-      ),
+      false),
     get: async (project?: string) =>
       unwrap(await gen.getProject({ client: this.core, path: { project: this.need("project", project) } })),
   };
@@ -195,13 +224,18 @@ export class Steloit {
     list: (ctx?: { project?: string }) =>
       paginate(async () =>
         unwrap(await gen.listEnvironments({ client: this.core, path: { project: this.need("project", ctx?.project) } })),
-      ),
+      false),
   };
 
   // -- estimates (the gate: create → inspect → pass — no shortcut exists) --
   readonly estimates = {
     create: async (body: { env?: string; services?: ServiceShapeInput[] }): Promise<Estimate> =>
-      unwrap(await gen.createEstimate({ client: this.core, body: { env: body.env ?? this.ctx.env, services: body.services } })),
+      unwrap(
+        await gen.createEstimate({
+          client: this.core,
+          body: { env: this.need("env", body.env), services: body.services },
+        }),
+      ),
   };
 
   // -- services (estimate-before-provision IS the method signature — §3) --
@@ -226,7 +260,7 @@ export class Steloit {
     list: (ctx?: { env?: string }) =>
       paginate(async () =>
         unwrap(await gen.listServices({ client: this.core, path: { env: this.need("env", ctx?.env) } })),
-      ),
+      false),
     get: async (service: string) =>
       unwrap(await gen.getService({ client: this.core, path: { service } })),
     delete: async (service: string) => {
@@ -258,7 +292,7 @@ export class Steloit {
     list: (ctx?: { env?: string }) =>
       paginate(async () =>
         unwrap(await gen.listDeployments({ client: this.core, path: { env: this.need("env", ctx?.env) } })),
-      ),
+      false),
     rollback: async (dep: string) =>
       unwrap(await gen.rollbackDeployment({ client: this.core, path: { dep } })),
   };
@@ -268,7 +302,7 @@ export class Steloit {
   readonly tokens = {
     create: async (body: { name: string; scope?: "read_only" | "full" }): Promise<TokenCreated> =>
       unwrap(await gen.createPersonalToken({ client: this.core, body })),
-    list: () => paginate(async () => unwrap(await gen.listPersonalTokens({ client: this.core }))),
+    list: () => paginate(async () => unwrap(await gen.listPersonalTokens({ client: this.core })), false),
     revoke: async (tok: string) => {
       const r = await gen.revokePersonalToken({ client: this.core, path: { tok } });
       if (!r.response?.ok) throw toError(r.error, r.response?.status ?? 0);
@@ -321,14 +355,26 @@ export class Steloit {
           buf += decoder.decode(value, { stream: true });
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl);
+            let line = buf.slice(0, nl);
             buf = buf.slice(nl + 1);
-            if (line.startsWith("id: ")) frame.id = line.slice(4);
-            else if (line.startsWith("event: ")) frame.event = line.slice(7);
-            else if (line.startsWith("data: ")) frame.data = line.slice(6);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            const field = (name: string): string | undefined =>
+              line.startsWith(name + ":") ? line.slice(name.length + 1).replace(/^ /, "") : undefined;
+            const id = field("id");
+            const event = field("event");
+            const data = field("data");
+            if (id !== undefined) frame.id = id;
+            else if (event !== undefined) frame.event = event;
+            else if (data !== undefined) frame.data = frame.data ? frame.data + "\n" + data : data;
             else if (line === "" && frame.data) {
               if (frame.id) cursor = frame.id;
-              yield { id: frame.id, event: frame.event, data: JSON.parse(frame.data) };
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(frame.data);
+              } catch {
+                throw new SteloitError({ title: "stream frame was not valid JSON", detail: frame.data.slice(0, 200) }, 0);
+              }
+              yield { id: frame.id, event: frame.event, data: parsed };
               frame = {};
             }
           }
@@ -337,7 +383,15 @@ export class Steloit {
         reader.releaseLock();
       }
       if (opts?.signal?.aborted) return;
-      await new Promise((r) => setTimeout(r, 1000)); // reconnect, resuming from cursor
+      // reconnect after 1s, resuming from cursor; abort during the wait exits cleanly
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 1000);
+        opts?.signal?.addEventListener("abort", () => {
+          clearTimeout(t);
+          resolve();
+        }, { once: true });
+      });
+      if (opts?.signal?.aborted) return;
     }
   }
 }

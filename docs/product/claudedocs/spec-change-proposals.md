@@ -176,3 +176,10 @@ Routes the console added minimally (each carried as a finding) that the URL map 
 ## 9 · Priorities
 
 By number of blocked surfaces: **notifications endpoints** (8 surfaces) → **the §1 data-plane decision** (~20 surfaces across all D-tabs) → **gateway canonization** (6) → **dashboard fixture coverage** (6) → **auth section** (the whole A/P plane rests on a local seam) → **the two spec defects** (invite renew path param; invite DELETE missing) which are mechanical and unblock generated-client cleanliness immediately.
+
+## 10 · Findings from implementation (Phase 2 review loop, 2026-07-19)
+
+| Finding | Evidence | Proposed change |
+|---|---|---|
+| **List operations declare no `cursor`/`limit` query params** (listProjects, listEnvironments, listServices, listDeployments, listPersonalTokens, listInvites, listMembers…) while api-conventions mandates cursor pagination and every List schema carries `next_cursor` — no client can request page 2 | surfaced by the SDK pagination review (PR #233); generated ops have `query?: never` | add `cursor` (+ optional `limit`) query params to every list op in openapi.yaml; until ruled, SDK iterators stop after page one on cursorless ops (guarded, never a duplicate loop) |
+| **Problem emission drifts from the schema**: the server's `problem` package writes `reasons: []string` and a `retry_after_s` body field; the contract says `reasons: [{code, message, remediation}]` and carries 429 timing in the `Retry-After` header only | services/api/internal/platform/problem/problem.go vs openapi.yaml `Problem` | server-side conformance fix (structured reasons; drop the body field — header stays); SDK tolerates both shapes during the window |
