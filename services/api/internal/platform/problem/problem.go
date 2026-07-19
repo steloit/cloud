@@ -30,11 +30,11 @@ type Problem struct {
 	Remediation string `json:"remediation"`
 
 	Errors            []FieldError `json:"errors,omitempty"`              // 422
-	Reasons           []string     `json:"reasons,omitempty"`             // 409
+	Reasons           []Reason     `json:"reasons,omitempty"`             // 409: ALL blockers, contract object shape
 	RequiredPlan      string       `json:"required_plan,omitempty"`       // 402 plan gate
 	OveragePriceCents *int64       `json:"overage_price_cents,omitempty"` // 402 soft quota
 	EventID           string       `json:"event_id,omitempty"`            // 5xx
-	RetryAfterS       int          `json:"retry_after_s,omitempty"`       // 429
+	RetryAfterS       int          `json:"-"`                             // 429: the Retry-After HEADER is the contract channel, never the body
 }
 
 const typeBase = "https://api.steloit.app/problems/"
@@ -98,8 +98,27 @@ type Carrier interface {
 	Problem() Problem
 }
 
+// Reason is one 409 blocker — the contract's object shape (Problem schema:
+// {code, message, remediation}); conformance fix 2026-07-19, closing the
+// Phase-2 review finding (server emitted bare strings).
+type Reason struct {
+	Code        string `json:"code,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
 // Conflict — 409 with the blocking reasons (downgrade blockers, dependents…).
+// Callers pass messages; richer blockers use ConflictReasons.
 func Conflict(reasons []string, remediation string) Problem {
+	structured := make([]Reason, 0, len(reasons))
+	for _, r := range reasons {
+		structured = append(structured, Reason{Message: r})
+	}
+	return ConflictReasons(structured, remediation)
+}
+
+// ConflictReasons — 409 with fully structured blockers.
+func ConflictReasons(reasons []Reason, remediation string) Problem {
 	return Problem{
 		Type: typeBase + "conflict", Title: "Conflict", Status: http.StatusConflict,
 		Reasons: reasons, Remediation: nonEmpty(remediation, "Resolve the listed blockers and retry."),
