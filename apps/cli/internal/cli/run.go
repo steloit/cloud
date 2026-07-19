@@ -6,12 +6,16 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 )
 
 // Version is stamped by the release build (-ldflags "-X ...").
 var Version = "dev"
+
+// stdinReader is a seam so tests can feed the paste flow.
+var stdinReader io.Reader = os.Stdin
 
 // Exit codes — cli.md §4, verbatim.
 const (
