@@ -89,6 +89,9 @@ importers:
       '@hey-api/openapi-ts':
         specifier: 0.98.2
         version: 0.98.2(typescript@5.9.3)
+      '@steloit/canon':
+        specifier: workspace:*
+        version: link:../../packages/canon
       '@tailwindcss/vite':
         specifier: 4.3.1
         version: 4.3.1(vite@8.0.16(@types/node@24.10.9)(jiti@2.7.0))
@@ -125,6 +128,15 @@ importers:
       vitest:
         specifier: 4.1.8
         version: 4.1.8(@types/node@24.10.9)(msw@2.12.9(@types/node@24.10.9)(typescript@5.9.3))(vite@8.0.16(@types/node@24.10.9)(jiti@2.7.0))
+
+  packages/canon:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@24.10.9)(lightningcss@1.32.0)(msw@2.12.9(@types/node@24.10.9)(typescript@5.9.3))
 
   packages/sdk:
     devDependencies:

@@ -20,6 +20,8 @@ gen-sql:
 
 gen-ts:
 	cp $(SPEC) apps/console/src/lib/api/openapi.yaml
+	cp docs/product/19-canon/fixtures.json packages/canon/src/fixtures.json
+	cp docs/product/19-canon/fixtures.json apps/console/src/lib/canon/fixtures.json
 	pnpm --filter console gen:api
 	pnpm --filter @steloit/sdk gen:api
 
