@@ -147,6 +147,15 @@ func (s *testAPI) DeleteDashboard(ctx context.Context, r gen.DeleteDashboardRequ
 func (s *testAPI) AddWidget(ctx context.Context, r gen.AddWidgetRequestObject) (gen.AddWidgetResponseObject, error) {
 	return s.Handlers2.AddWidget(ctx, r)
 }
+func (s *testAPI) ForkDashboard(ctx context.Context, r gen.ForkDashboardRequestObject) (gen.ForkDashboardResponseObject, error) {
+	return s.Handlers2.ForkDashboard(ctx, r)
+}
+func (s *testAPI) DuplicateDashboard(ctx context.Context, r gen.DuplicateDashboardRequestObject) (gen.DuplicateDashboardResponseObject, error) {
+	return s.Handlers2.DuplicateDashboard(ctx, r)
+}
+func (s *testAPI) DeleteWidget(ctx context.Context, r gen.DeleteWidgetRequestObject) (gen.DeleteWidgetResponseObject, error) {
+	return s.Handlers2.DeleteWidget(ctx, r)
+}
 func (s *testAPI) CaptureTemplate(ctx context.Context, r gen.CaptureTemplateRequestObject) (gen.CaptureTemplateResponseObject, error) {
 	return s.Handlers2.CaptureTemplate(ctx, r)
 }

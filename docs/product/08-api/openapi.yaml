@@ -670,6 +670,23 @@ paths:
       responses:
         "204": {description: Deleted}
 
+  /dashboards/{dash}/fork:
+    parameters: [{name: dash, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [observe]
+      operationId: forkDashboard
+      summary: "Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current."
+      responses:
+        "201": {description: Forked, content: {application/json: {schema: {$ref: "#/components/schemas/Dashboard"}}}}
+  /dashboards/{dash}/duplicate:
+    parameters: [{name: dash, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [observe]
+      operationId: duplicateDashboard
+      summary: "Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c)."
+      responses:
+        "201": {description: Duplicated, content: {application/json: {schema: {$ref: "#/components/schemas/Dashboard"}}}}
+
   /dashboards/{dash}/widgets:
     parameters: [{name: dash, in: path, required: true, schema: {type: string}}]
     post:
@@ -683,6 +700,17 @@ paths:
             schema: {$ref: "#/components/schemas/WidgetInput"}
       responses:
         "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Widget"}}}}
+
+  /dashboards/{dash}/widgets/{wdg}:
+    parameters:
+      - {name: dash, in: path, required: true, schema: {type: string}}
+      - {name: wdg, in: path, required: true, schema: {type: string}}
+    delete:
+      tags: [observe]
+      operationId: deleteWidget
+      summary: "Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c)."
+      responses:
+        "204": {description: Deleted}
 
   /orgs/{org}/templates:
     parameters: [{$ref: "#/components/parameters/org"}]
