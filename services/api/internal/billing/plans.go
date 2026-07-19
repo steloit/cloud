@@ -120,6 +120,20 @@ func (t *Table) PlanFeeCents(plan string) (int, bool) {
 	return *p.FeeCents, true
 }
 
+// SpendToDate is the org's month-to-date spend: the plan fee plus every metered
+// accrual. It is the SAME arithmetic the invoice freezes (plan fee + Σ
+// quota_usage.rate_cents), so the number the hard cap (T11.6) enforces against
+// is exactly the number the overview and invoice show — one arithmetic
+// everywhere (F9). meteredRateCents are the per-meter accrued cents for the
+// current period.
+func SpendToDate(planFeeCents int64, meteredRateCents ...int64) int64 {
+	total := planFeeCents
+	for _, c := range meteredRateCents {
+		total += c
+	}
+	return total
+}
+
 // IsNeverGated reports whether a capability is on the never-plan-gated safety
 // list (billing pack / F9 — TLS, backups, MFA, policies, alerts, dunning,
 // deletion). Plans gate capabilities, never safety.

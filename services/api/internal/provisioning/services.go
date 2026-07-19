@@ -25,6 +25,49 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
+// enforceBudget is the hard spend cap (T11.6, F9): before an estimate is
+// accepted, project the org's committed monthly run-rate (plan fee + Σ active
+// services' monthly estimates) plus this service's monthly cost against the
+// bound. Over the bound → refuse with the arithmetic shown. Uncapped (no row or
+// a null limit) → always proceeds. Running services are NEVER touched — the cap
+// pauses new provisioning only (US-11.5: cancel/pause ≠ delete).
+func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCents int64) error {
+	budget, err := s.q.GetBudget(ctx, orgID)
+	if errors.Is(err, pgx.ErrNoRows) || !budget.LimitCents.Valid {
+		return nil // uncapped
+	}
+	if err != nil {
+		return err
+	}
+	limit := budget.LimitCents.Int64
+	org, err := s.q.GetOrg(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	var planFee int64
+	if fee, ok := s.plans.PlanFeeCents(org.Plan); ok {
+		planFee = int64(fee)
+	}
+	committed, err := s.q.SumOrgMonthlyEstimate(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	current := planFee + committed
+	projected := current + newMonthlyCents
+	if projected > limit {
+		return problemError{p: problem.Conflict(
+			[]string{fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
+				dollars(projected), dollars(current), dollars(newMonthlyCents), dollars(limit))},
+			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
+	}
+	return nil
+}
+
+// dollars renders integer cents as $D.CC for the cap's shown arithmetic.
+func dollars(cents int64) string {
+	return fmt.Sprintf("$%d.%02d", cents/100, ((cents%100)+100)%100)
+}
+
 // transitions is the closed status machine. deleting is terminal (the
 // reconciler removes the row after teardown + final backup).
 var transitions = map[string][]string{
@@ -113,6 +156,13 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		return store.Service{}, problemError{p: problem.Conflict(
 			[]string{"the estimate does not cover this shape"},
 			"Estimate the exact shape you are creating, accept it, then create — the estimate IS the contract.")}
+	}
+	// T11.6 hard spend cap (F9): refuse BEFORE burning the one-shot estimate, so
+	// a capped-out create leaves the estimate usable (raise the cap, retry).
+	// Enforced here at the API layer — crossing the cap is impossible by
+	// construction, never client-only advice.
+	if err := s.enforceBudget(ctx, orgID, line.MonthlyCents); err != nil {
+		return store.Service{}, err
 	}
 	if _, _, err := est.Accept(ctx, in.EstimateID, env.ID); err != nil {
 		return store.Service{}, err
@@ -248,6 +298,16 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 		params.Shape = merged
 		params.MonthlyEstimateCents = pgtype.Int8{Int64: line.MonthlyCents, Valid: true}
+		// T11.6 hard cap: a scale-UP raises committed monthly spend and MUST
+		// respect the cap exactly like a create — otherwise the cap is trivially
+		// bypassed by scaling an existing service up. The run-rate already
+		// includes this service's OLD cost, so only the increase is projected (a
+		// scale-down is always allowed).
+		if delta := line.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
+				return store.Service{}, err
+			}
+		}
 	}
 	params.Scaling = scaling
 	params.Override = override

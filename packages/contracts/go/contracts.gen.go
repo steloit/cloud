@@ -1783,6 +1783,24 @@ type BranchList struct {
 	} `json:"data,omitempty"`
 }
 
+// Budget defines model for Budget.
+type Budget struct {
+	AlertThresholds *[]int `json:"alert_thresholds,omitempty"`
+	LimitCents      *int   `json:"limit_cents,omitempty"`
+
+	// UsedPercent month-to-date spend as a percent of the cap; 0 when uncapped
+	UsedPercent *float32 `json:"used_percent,omitempty"`
+}
+
+// BudgetInput defines model for BudgetInput.
+type BudgetInput struct {
+	// AlertThresholds percent points that warn (e.g. [80]); routing rides B8
+	AlertThresholds *[]int `json:"alert_thresholds,omitempty"`
+
+	// LimitCents the hard monthly bound in cents; null removes the cap
+	LimitCents *int `json:"limit_cents,omitempty"`
+}
+
 // CatalogIntent defines model for CatalogIntent.
 type CatalogIntent struct {
 	// Contract the one-line semantic contract — what the state is, what it branches/joins with, what the meter is. Execution models are replaceable; semantic contracts are not (ADR-040).
@@ -3185,6 +3203,11 @@ type GetUsageParams struct {
 	Project *string `form:"project,omitempty" json:"project,omitempty"`
 }
 
+// ExportUsageParams defines parameters for ExportUsage.
+type ExportUsageParams struct {
+	Month *string `form:"month,omitempty" json:"month,omitempty"`
+}
+
 // ConnectCellJSONBody defines parameters for ConnectCell.
 type ConnectCellJSONBody struct {
 	// AccountRef customer account/project id
@@ -3440,6 +3463,9 @@ type UpdateOrgJSONRequestBody UpdateOrgJSONBody
 
 // CreateApiKeyJSONRequestBody defines body for CreateApiKey for application/json ContentType.
 type CreateApiKeyJSONRequestBody = TokenInput
+
+// SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
+type SetBudgetJSONRequestBody = BudgetInput
 
 // ConnectCellJSONRequestBody defines body for ConnectCell for application/json ContentType.
 type ConnectCellJSONRequestBody ConnectCellJSONBody
@@ -4068,10 +4094,29 @@ type ClientInterface interface {
 	// Corresponds with GET /orgs/{org}/audit (the `ListAuditEvents` operationId).
 	ListAuditEvents(ctx context.Context, orgPathParam OrgPathParam, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// SetBudgetWithBody The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+	SetBudgetWithBody(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetBudget The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+	SetBudget(ctx context.Context, orgPathParam OrgPathParam, body SetBudgetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 	//
 	// Corresponds with GET /orgs/{org}/billing/invoices (the `ListInvoices` operationId).
 	ListInvoices(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportInvoices Invoices as CSV (B3): one line per invoice with period, status, and total.
+	//
+	// Corresponds with GET /orgs/{org}/billing/invoices:export (the `ExportInvoices` operationId).
+	ExportInvoices(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetBillingOverview One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere.
 	//
@@ -4087,6 +4132,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /orgs/{org}/billing/usage (the `GetUsage` operationId).
 	GetUsage(ctx context.Context, orgPathParam OrgPathParam, params *GetUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportUsage The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line.
+	//
+	// Corresponds with GET /orgs/{org}/billing/usage:export (the `ExportUsage` operationId).
+	ExportUsage(ctx context.Context, orgPathParam OrgPathParam, params *ExportUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListCells performs a GET /orgs/{org}/cells (the `ListCells` operationId) request.
 	ListCells(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5888,11 +5938,60 @@ func (c *Client) ListAuditEvents(ctx context.Context, orgPathParam OrgPathParam,
 	return c.Client.Do(req)
 }
 
+// SetBudgetWithBody The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+func (c *Client) SetBudgetWithBody(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetBudgetRequestWithBody(c.Server, orgPathParam, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetBudget The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+func (c *Client) SetBudget(ctx context.Context, orgPathParam OrgPathParam, body SetBudgetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetBudgetRequest(c.Server, orgPathParam, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 //
 // Corresponds with GET /orgs/{org}/billing/invoices (the `ListInvoices` operationId).
 func (c *Client) ListInvoices(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListInvoicesRequest(c.Server, orgPathParam)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportInvoices Invoices as CSV (B3): one line per invoice with period, status, and total.
+//
+// Corresponds with GET /orgs/{org}/billing/invoices:export (the `ExportInvoices` operationId).
+func (c *Client) ExportInvoices(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportInvoicesRequest(c.Server, orgPathParam)
 	if err != nil {
 		return nil, err
 	}
@@ -5938,6 +6037,21 @@ func (c *Client) GetQuotas(ctx context.Context, orgPathParam OrgPathParam, reqEd
 // Corresponds with GET /orgs/{org}/billing/usage (the `GetUsage` operationId).
 func (c *Client) GetUsage(ctx context.Context, orgPathParam OrgPathParam, params *GetUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetUsageRequest(c.Server, orgPathParam, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportUsage The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line.
+//
+// Corresponds with GET /orgs/{org}/billing/usage:export (the `ExportUsage` operationId).
+func (c *Client) ExportUsage(ctx context.Context, orgPathParam OrgPathParam, params *ExportUsageParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportUsageRequest(c.Server, orgPathParam, params)
 	if err != nil {
 		return nil, err
 	}
@@ -9773,6 +9887,53 @@ func NewListAuditEventsRequest(server string, orgPathParam OrgPathParam, params 
 	return req, nil
 }
 
+// NewSetBudgetRequest calls the generic SetBudget builder with application/json body
+func NewSetBudgetRequest(server string, orgPathParam OrgPathParam, body SetBudgetJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetBudgetRequestWithBody(server, orgPathParam, "application/json", bodyReader)
+}
+
+// NewSetBudgetRequestWithBody constructs an http.Request for the SetBudget method, with any body, and a specified content type
+func NewSetBudgetRequestWithBody(server string, orgPathParam OrgPathParam, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/billing/budget", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListInvoicesRequest constructs an http.Request for the ListInvoices method
 func NewListInvoicesRequest(server string, orgPathParam OrgPathParam) (*http.Request, error) {
 	var err error
@@ -9790,6 +9951,40 @@ func NewListInvoicesRequest(server string, orgPathParam OrgPathParam) (*http.Req
 	}
 
 	operationPath := fmt.Sprintf("/orgs/%s/billing/invoices", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportInvoicesRequest constructs an http.Request for the ExportInvoices method
+func NewExportInvoicesRequest(server string, orgPathParam OrgPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/billing/invoices:export", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -9925,6 +10120,67 @@ func NewGetUsageRequest(server string, orgPathParam OrgPathParam, params *GetUsa
 		if params.Project != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "project", *params.Project, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportUsageRequest constructs an http.Request for the ExportUsage method
+func NewExportUsageRequest(server string, orgPathParam OrgPathParam, params *ExportUsageParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/billing/usage:export", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Month != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "month", *params.Month, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -12949,12 +13205,33 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /orgs/{org}/audit (the `ListAuditEvents` operationId).
 	ListAuditEventsWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *ListAuditEventsParams, reqEditors ...RequestEditorFn) (*ListAuditEventsResponse, error)
 
+	// SetBudgetWithBodyWithResponse The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+	SetBudgetWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetBudgetResponse, error)
+
+	// SetBudgetWithResponse The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+	SetBudgetWithResponse(ctx context.Context, orgPathParam OrgPathParam, body SetBudgetJSONRequestBody, reqEditors ...RequestEditorFn) (*SetBudgetResponse, error)
+
 	// ListInvoicesWithResponse An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /orgs/{org}/billing/invoices (the `ListInvoices` operationId).
 	ListInvoicesWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*ListInvoicesResponse, error)
+
+	// ExportInvoicesWithResponse Invoices as CSV (B3): one line per invoice with period, status, and total.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{org}/billing/invoices:export (the `ExportInvoices` operationId).
+	ExportInvoicesWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*ExportInvoicesResponse, error)
 
 	// GetBillingOverviewWithResponse One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere.
 	//
@@ -12976,6 +13253,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /orgs/{org}/billing/usage (the `GetUsage` operationId).
 	GetUsageWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *GetUsageParams, reqEditors ...RequestEditorFn) (*GetUsageResponse, error)
+
+	// ExportUsageWithResponse The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /orgs/{org}/billing/usage:export (the `ExportUsage` operationId).
+	ExportUsageWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *ExportUsageParams, reqEditors ...RequestEditorFn) (*ExportUsageResponse, error)
 
 	// ListCellsWithResponse performs a GET /orgs/{org}/cells (the `ListCells` operationId) request.
 	//
@@ -16039,6 +16323,47 @@ func (r ListAuditEventsResponse) ContentType() string {
 	return ""
 }
 
+type SetBudgetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Budget
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetBudgetResponse) GetJSON200() *Budget {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r SetBudgetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetBudgetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetBudgetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetBudgetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListInvoicesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -16074,6 +16399,40 @@ func (r ListInvoicesResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListInvoicesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ExportInvoicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportInvoicesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportInvoicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportInvoicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportInvoicesResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16201,6 +16560,40 @@ func (r GetUsageResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetUsageResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ExportUsageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportUsageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportUsageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportUsageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportUsageResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -19695,6 +20088,32 @@ func (c *ClientWithResponses) ListAuditEventsWithResponse(ctx context.Context, o
 	return ParseListAuditEventsResponse(rsp)
 }
 
+// SetBudgetWithBodyWithResponse The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+func (c *ClientWithResponses) SetBudgetWithBodyWithResponse(ctx context.Context, orgPathParam OrgPathParam, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetBudgetResponse, error) {
+	rsp, err := c.SetBudgetWithBody(ctx, orgPathParam, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetBudgetResponse(rsp)
+}
+
+// SetBudgetWithResponse The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /orgs/{org}/billing/budget (the `SetBudget` operationId).
+func (c *ClientWithResponses) SetBudgetWithResponse(ctx context.Context, orgPathParam OrgPathParam, body SetBudgetJSONRequestBody, reqEditors ...RequestEditorFn) (*SetBudgetResponse, error) {
+	rsp, err := c.SetBudget(ctx, orgPathParam, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetBudgetResponse(rsp)
+}
+
 // ListInvoicesWithResponse An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
 //
 // Returns a wrapper object for the known response body format(s).
@@ -19706,6 +20125,19 @@ func (c *ClientWithResponses) ListInvoicesWithResponse(ctx context.Context, orgP
 		return nil, err
 	}
 	return ParseListInvoicesResponse(rsp)
+}
+
+// ExportInvoicesWithResponse Invoices as CSV (B3): one line per invoice with period, status, and total.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{org}/billing/invoices:export (the `ExportInvoices` operationId).
+func (c *ClientWithResponses) ExportInvoicesWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*ExportInvoicesResponse, error) {
+	rsp, err := c.ExportInvoices(ctx, orgPathParam, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportInvoicesResponse(rsp)
 }
 
 // GetBillingOverviewWithResponse One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere.
@@ -19745,6 +20177,19 @@ func (c *ClientWithResponses) GetUsageWithResponse(ctx context.Context, orgPathP
 		return nil, err
 	}
 	return ParseGetUsageResponse(rsp)
+}
+
+// ExportUsageWithResponse The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /orgs/{org}/billing/usage:export (the `ExportUsage` operationId).
+func (c *ClientWithResponses) ExportUsageWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *ExportUsageParams, reqEditors ...RequestEditorFn) (*ExportUsageResponse, error) {
+	rsp, err := c.ExportUsage(ctx, orgPathParam, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportUsageResponse(rsp)
 }
 
 // ListCellsWithResponse performs a GET /orgs/{org}/cells (the `ListCells` operationId) request.
@@ -22305,6 +22750,32 @@ func ParseListAuditEventsResponse(rsp *http.Response) (*ListAuditEventsResponse,
 	return response, nil
 }
 
+// ParseSetBudgetResponse parses an HTTP response from a SetBudgetWithResponse call
+func ParseSetBudgetResponse(rsp *http.Response) (*SetBudgetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetBudgetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Budget
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListInvoicesResponse parses an HTTP response from a ListInvoicesWithResponse call
 func ParseListInvoicesResponse(rsp *http.Response) (*ListInvoicesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -22326,6 +22797,22 @@ func ParseListInvoicesResponse(rsp *http.Response) (*ListInvoicesResponse, error
 		}
 		response.JSON200 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseExportInvoicesResponse parses an HTTP response from a ExportInvoicesWithResponse call
+func ParseExportInvoicesResponse(rsp *http.Response) (*ExportInvoicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportInvoicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil
@@ -22406,6 +22893,22 @@ func ParseGetUsageResponse(rsp *http.Response) (*GetUsageResponse, error) {
 		}
 		response.JSON200 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseExportUsageResponse parses an HTTP response from a ExportUsageWithResponse call
+func ParseExportUsageResponse(rsp *http.Response) (*ExportUsageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportUsageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil

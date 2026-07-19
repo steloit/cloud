@@ -791,6 +791,26 @@ export type Estimate = {
     expires_at?: string;
 };
 
+export type BudgetInput = {
+    /**
+     * the hard monthly bound in cents; null removes the cap
+     */
+    limit_cents?: number | null;
+    /**
+     * percent points that warn (e.g. [80]); routing rides B8
+     */
+    alert_thresholds?: Array<number>;
+};
+
+export type Budget = {
+    limit_cents?: number | null;
+    /**
+     * month-to-date spend as a percent of the cap; 0 when uncapped
+     */
+    used_percent?: number;
+    alert_thresholds?: Array<number>;
+};
+
 export type BillingOverview = {
     mtd_cents?: number;
     forecast_cents?: number;
@@ -3659,6 +3679,74 @@ export type GetBillingOverviewResponses = {
 };
 
 export type GetBillingOverviewResponse = GetBillingOverviewResponses[keyof GetBillingOverviewResponses];
+
+export type SetBudgetData = {
+    body: BudgetInput;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/billing/budget';
+};
+
+export type SetBudgetResponses = {
+    /**
+     * OK
+     */
+    200: Budget;
+};
+
+export type SetBudgetResponse = SetBudgetResponses[keyof SetBudgetResponses];
+
+export type ExportUsageData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: {
+        /**
+         * YYYY-MM
+         */
+        month?: string;
+    };
+    url: '/orgs/{org}/billing/usage:export';
+};
+
+export type ExportUsageResponses = {
+    /**
+     * CSV
+     */
+    200: string;
+};
+
+export type ExportUsageResponse = ExportUsageResponses[keyof ExportUsageResponses];
+
+export type ExportInvoicesData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/billing/invoices:export';
+};
+
+export type ExportInvoicesResponses = {
+    /**
+     * CSV
+     */
+    200: string;
+};
+
+export type ExportInvoicesResponse = ExportInvoicesResponses[keyof ExportInvoicesResponses];
 
 export type GetUsageData = {
     body?: never;

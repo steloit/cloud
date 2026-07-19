@@ -23,6 +23,13 @@ type Binding struct {
 	CreatedAt      pgtype.Timestamptz
 }
 
+type Budget struct {
+	OrgID           string
+	LimitCents      pgtype.Int8
+	AlertThresholds []int32
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type Deployment struct {
 	ID            string
 	Number        int32
