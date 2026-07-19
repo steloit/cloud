@@ -12,7 +12,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
+	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
@@ -62,14 +64,17 @@ func (h *Handlers) requireScopeAccess(ctx context.Context, orgID, scope string) 
 
 func (h *Handlers) CreateDashboard(ctx context.Context, req gen.CreateDashboardRequestObject) (gen.CreateDashboardResponseObject, error) {
 	orgID := req.OrgPathParam
-	if req.Body == nil || req.Body.Name == "" {
-		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "name", Detail: "required"}})}
+	if req.Body == nil || req.Body.Name == "" || len(req.Body.Name) > 200 {
+		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "name", Detail: "required, 1–200 chars"}})}
 	}
 	scope := req.Body.Scope
 	if scope != "org" && scopeProject(scope) == "" {
 		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "scope", Detail: `must be "org" or "project:prj_…"`}})}
 	}
 	vis := string(req.Body.Visibility)
+	if !validVisibility(vis) {
+		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "visibility", Detail: "personal|org|restricted"}})}
+	}
 
 	// VISIBILITY axis: creating a shared (org/restricted) dashboard needs the
 	// share-org grant (billing role is denied); personal needs only create.
@@ -169,45 +174,66 @@ func (h *Handlers) GetDashboard(ctx context.Context, req gen.GetDashboardRequest
 
 // requireDashboardEditor: the owner, or a member with share-org rights, may
 // mutate a shared dashboard (edits are live for all viewers + audited, F7).
-func (h *Handlers) requireDashboardEditor(ctx context.Context, dashID string) (store.Dashboard, error) {
+// Returns the dashboard and the acting user id.
+func (h *Handlers) requireDashboardEditor(ctx context.Context, dashID string) (store.Dashboard, string, error) {
 	d, err := h.q.GetDashboard(ctx, dashID)
 	if err != nil {
-		return store.Dashboard{}, notFound("dashboard")
+		return store.Dashboard{}, "", notFound("dashboard")
 	}
 	p, err := h.memberOrg(ctx, d.OrgID)
 	if err != nil {
-		return store.Dashboard{}, notFound("dashboard")
+		return store.Dashboard{}, "", notFound("dashboard")
+	}
+	// Mutating with a limited-scope token is refused on EVERY edit path — the
+	// owner path must not skip it (review H1: an owner's read_only token could
+	// otherwise PATCH/DELETE/add-widget).
+	if p.Kind == "token" && p.Scope != "full" {
+		return store.Dashboard{}, "", identity.ErrScopeDenied
+	}
+	// The SCOPE born-filter binds on the editor path too, not only reads
+	// (review: defense-in-depth + a scoped-project-deleted dashboard must not be
+	// editable when it is no longer readable).
+	if prj := scopeProject(d.Scope); prj != "" {
+		if _, _, err := h.projectScoped(ctx, prj); err != nil {
+			return store.Dashboard{}, "", notFound("dashboard")
+		}
 	}
 	if d.OwnerID == p.UserID {
-		if !dashboardVisibleTo(d, p.UserID) { // owner always passes; scope still binds below
-			return store.Dashboard{}, notFound("dashboard")
-		}
-		return d, nil
+		return d, p.UserID, nil
 	}
 	// not the owner → needs the share-org grant AND the dashboard must be shared
 	if d.Visibility != "org" {
-		return store.Dashboard{}, notFound("dashboard") // personal/restricted: invisible to non-owners
+		return store.Dashboard{}, "", notFound("dashboard") // personal/restricted: invisible to non-owners
 	}
 	if _, err := h.requireOrg(ctx, d.OrgID, "dashboard.share_org", true); err != nil {
-		return store.Dashboard{}, err
+		return store.Dashboard{}, "", err
 	}
-	return d, nil
+	return d, p.UserID, nil
 }
 
 func (h *Handlers) UpdateDashboard(ctx context.Context, req gen.UpdateDashboardRequestObject) (gen.UpdateDashboardResponseObject, error) {
-	d, err := h.requireDashboardEditor(ctx, req.Dash)
+	d, actor, err := h.requireDashboardEditor(ctx, req.Dash)
 	if err != nil {
 		return nil, err
 	}
 	params := store.UpdateDashboardParams{ID: d.ID}
 	if req.Body != nil {
 		if req.Body.Name != nil {
+			if len(*req.Body.Name) == 0 || len(*req.Body.Name) > 200 {
+				return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "name", Detail: "1–200 chars"}})}
+			}
 			params.Name = pgtype.Text{String: *req.Body.Name, Valid: true}
 		}
 		if req.Body.Visibility != nil {
 			v := string(*req.Body.Visibility)
-			// raising visibility to shared needs the share-org grant.
-			if v != "personal" && d.Visibility == "personal" {
+			if !validVisibility(v) {
+				return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "visibility", Detail: "personal|org|restricted"}})}
+			}
+			// Any transition into OR out of the shared (org) state is a
+			// governance change → needs the share-org grant (review: a share_org
+			// re-check that only fired on personal→X let restricted→org and
+			// org→personal slip through).
+			if v != d.Visibility && (v == "org" || d.Visibility == "org") {
 				if _, err := h.requireOrg(ctx, d.OrgID, "dashboard.share_org", true); err != nil {
 					return nil, err
 				}
@@ -223,27 +249,55 @@ func (h *Handlers) UpdateDashboard(ctx context.Context, req gen.UpdateDashboardR
 	if err != nil {
 		return nil, err
 	}
+	// F7: an edit to a shared dashboard is live for all viewers and AUDITED.
+	if out.Visibility == "org" {
+		h.svc.record(ctx, events.Input{
+			OrgID: out.OrgID, Kind: "policy_trigger", Via: "user", Actor: actor,
+			Action: "dashboard.updated", Subject: out.ID,
+		})
+	}
 	return gen.UpdateDashboard200JSONResponse(dashboardToAPI(out, nil)), nil
 }
 
 func (h *Handlers) DeleteDashboard(ctx context.Context, req gen.DeleteDashboardRequestObject) (gen.DeleteDashboardResponseObject, error) {
-	d, err := h.requireDashboardEditor(ctx, req.Dash)
+	d, actor, err := h.requireDashboardEditor(ctx, req.Dash)
 	if err != nil {
 		return nil, err
 	}
 	if err := h.q.DeleteDashboard(ctx, d.ID); err != nil {
 		return nil, err
 	}
+	if d.Visibility == "org" {
+		h.svc.record(ctx, events.Input{
+			OrgID: d.OrgID, Kind: "policy_trigger", Via: "user", Actor: actor,
+			Action: "dashboard.deleted", Subject: d.ID,
+		})
+	}
 	return gen.DeleteDashboard204Response{}, nil
 }
 
 func (h *Handlers) AddWidget(ctx context.Context, req gen.AddWidgetRequestObject) (gen.AddWidgetResponseObject, error) {
-	d, err := h.requireDashboardEditor(ctx, req.Dash)
+	d, _, err := h.requireDashboardEditor(ctx, req.Dash)
 	if err != nil {
 		return nil, err
 	}
 	if req.Body == nil {
 		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "source", Detail: "required"}})}
+	}
+	// Validate the closed enums at the boundary → a clean 422, never a raw DB
+	// CHECK violation surfacing as 500 (review).
+	var fe []problem.FieldError
+	if !req.Body.Source.Valid() {
+		fe = append(fe, problem.FieldError{Field: "source", Detail: "metrics|logs|cost|deploys|ai|alerts"})
+	}
+	if !req.Body.Viz.Valid() {
+		fe = append(fe, problem.FieldError{Field: "viz", Detail: "line|area|stat|table|list"})
+	}
+	if req.Body.Query == "" || len(req.Body.Query) > 4096 {
+		fe = append(fe, problem.FieldError{Field: "query", Detail: "1–4096 chars"})
+	}
+	if len(fe) > 0 {
+		return nil, problemError{p: problem.ValidationFailed(fe)}
 	}
 	pos := json.RawMessage("{}")
 	if req.Body.Pos != nil {
@@ -259,6 +313,10 @@ func (h *Handlers) AddWidget(ctx context.Context, req gen.AddWidgetRequestObject
 		return nil, err
 	}
 	return gen.AddWidget201JSONResponse(widgetToAPI(wdg)), nil
+}
+
+func validVisibility(v string) bool {
+	return v == "personal" || v == "org" || v == "restricted"
 }
 
 func dashboardToAPI(d store.Dashboard, widgets []store.DashboardWidget) gen.Dashboard {

@@ -8,6 +8,7 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -166,5 +167,135 @@ func TestDashboardBillingRoleCannotShare(t *testing.T) {
 		`{"name":"shared","scope":"org","visibility":"org"}`, billingCk)
 	if r.StatusCode != 403 {
 		t.Fatalf("billing share must be 403, got %d %s", r.StatusCode, b)
+	}
+}
+
+// TestDashboardReadOnlyTokenCannotMutate — an owner's read_only personal token
+// must be refused on every edit path, including the owner branch (review H1).
+func TestDashboardReadOnlyTokenCannotMutate(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ownerCk, _ := w.signupUser(t, "dsh-tok-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"tokco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards",
+		`{"name":"mine","scope":"org","visibility":"personal"}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("create: %d %s", r.StatusCode, b)
+	}
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &dsh)
+	// mint a read_only personal token for the SAME owner
+	r, tb := w.post(t, "/v1/me/tokens", `{"name":"ro","scope":"read_only"}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("mint token: %d %s", r.StatusCode, tb)
+	}
+	var tk struct{ Token string }
+	_ = json.Unmarshal([]byte(tb), &tk)
+	// DELETE via the read_only token → 403, never a silent success
+	req, _ := http.NewRequest(http.MethodDelete, w.srv.URL+"/v1/dashboards/"+dsh.Id, nil)
+	req.Header.Set("Authorization", "Bearer "+tk.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Fatalf("read_only token DELETE must 403, got %d", res.StatusCode)
+	}
+}
+
+// TestDashboardCrossOrgIDOR — a member of org A cannot GET or DELETE a
+// dashboard in org B (bare dash id, no org in path).
+func TestDashboardCrossOrgIDOR(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	aCk, _ := w.signupUser(t, "dsh-a@example.com")
+	ra, ba := w.post(t, "/v1/orgs", `{"name":"orgA"}`, aCk)
+	if ra.StatusCode != 201 {
+		t.Fatalf("orgA: %d %s", ra.StatusCode, ba)
+	}
+	var orgA struct{ Id string }
+	_ = json.Unmarshal([]byte(ba), &orgA)
+	r, db := w.post(t, "/v1/orgs/"+orgA.Id+"/dashboards",
+		`{"name":"a-shared","scope":"org","visibility":"org"}`, aCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("create A dashboard: %d %s", r.StatusCode, db)
+	}
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(db), &dsh)
+
+	// a totally separate user/org
+	bCk, _ := w.signupUser(t, "dsh-b@example.com")
+	rb, bb := w.post(t, "/v1/orgs", `{"name":"orgB"}`, bCk)
+	if rb.StatusCode != 201 {
+		t.Fatalf("orgB: %d %s", rb.StatusCode, bb)
+	}
+	// B GETs A's dashboard by id → 404 (no cross-org read, no existence oracle)
+	r, _ = w.get(t, "/v1/dashboards/"+dsh.Id, bCk)
+	if r.StatusCode != 404 {
+		t.Fatalf("cross-org GET must 404, got %d", r.StatusCode)
+	}
+	// B DELETEs A's dashboard → 404
+	r, _ = w.del(t, "/v1/dashboards/"+dsh.Id, bCk)
+	if r.StatusCode != 404 {
+		t.Fatalf("cross-org DELETE must 404, got %d", r.StatusCode)
+	}
+}
+
+// TestDashboardInvalidWidgetEnum — an out-of-set source/viz is a clean 422,
+// never a raw DB CHECK 500 (review).
+func TestDashboardInvalidWidgetEnum(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ownerCk, _ := w.signupUser(t, "dsh-enum@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"enumco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards",
+		`{"name":"d","scope":"org","visibility":"org"}`, ownerCk)
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &dsh)
+	r, b = w.post(t, "/v1/dashboards/"+dsh.Id+"/widgets",
+		`{"source":"telepathy","query":"x","viz":"line"}`, ownerCk)
+	if r.StatusCode != 422 {
+		t.Fatalf("invalid widget source must be 422 (not 500), got %d %s", r.StatusCode, b)
+	}
+}
+
+// TestDashboardRaiseToOrgNeedsShareGrant — transitioning a personal dashboard
+// to org via PATCH requires dashboard.share_org (review: the raise gate must
+// fire on the transition, and billing lacks the grant).
+func TestDashboardRaiseToOrgNeedsShareGrant(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, _ := w.signupUser(t, "dsh-raise-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"raiseco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	billingCk, billingID := w.signupUser(t, "dsh-raise-billing@example.com")
+	if _, err := w.pool.Exec(ctx,
+		"insert into members (id,org_id,user_id,role) values ('mbr_raise',$1,$2,'billing')", org.Id, billingID); err != nil {
+		t.Fatal(err)
+	}
+	// billing creates a personal dashboard (allowed)
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards",
+		`{"name":"mine","scope":"org","visibility":"personal"}`, billingCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("billing personal create: %d %s", r.StatusCode, b)
+	}
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &dsh)
+	// billing PATCHes it to org → 403 (no share_org grant)
+	r, b = w.patch(t, "/v1/dashboards/"+dsh.Id, `{"visibility":"org"}`, billingCk)
+	if r.StatusCode != 403 {
+		t.Fatalf("raise-to-org without share_org must 403, got %d %s", r.StatusCode, b)
 	}
 }
