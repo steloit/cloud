@@ -18,6 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
@@ -28,10 +29,10 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/metering"
+	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
-	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
 )
@@ -104,7 +105,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	vault := secrets.NewVault(q, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q), plans)
 	mux := http.NewServeMux()
-	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q))
+	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q), notify.NewRouter(q, kek))
 	idHandlers.Mount(mux, &testAPI{
 		Handlers:  idHandlers,
 		Handlers2: provisioning.NewHandlers(prov, authz, q, svc, estimates.NewService(q)),

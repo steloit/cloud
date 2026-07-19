@@ -75,7 +75,10 @@ func TestDeployments(t *testing.T) {
 
 	// second deployment numbers 2
 	resp, body = w.post(t, "/v1/envs/"+env.ID+"/deployments", `{"service":"`+api+`","git_sha":"bbb2222"}`, ownerCk)
-	var d2 struct{ Id string; Number int }
+	var d2 struct {
+		Id     string
+		Number int
+	}
 	_ = json.Unmarshal([]byte(body), &d2)
 	if d2.Number != 2 {
 		t.Fatalf("d2 number: %d", d2.Number)

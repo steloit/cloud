@@ -11,6 +11,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
@@ -24,10 +25,11 @@ type Handlers struct {
 	reader *events.Reader
 	envs   events.EnvResolver
 	usage  usageRoller
+	notify *notify.Router
 }
 
-func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver, usage usageRoller) *Handlers {
-	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs, usage: usage}
+func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver, usage usageRoller, router *notify.Router) *Handlers {
+	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs, usage: usage, notify: router}
 }
 
 // Mount wires the strict server onto mux under /v1 with the module's
@@ -41,6 +43,9 @@ func (h *Handlers) Mount(mux *http.ServeMux, ssi gen.StrictServerInterface) {
 			RequestErrorHandlerFunc:  h.requestError,
 			ResponseErrorHandlerFunc: h.responseError,
 		})
+	// testWebhook is registered pre-strict: its contract path glues a `:verb`
+	// custom-method onto a wildcard, which the stdlib mux can't parse.
+	h.MountWebhookTest(mux)
 	gen.HandlerWithOptions(strict, gen.StdHTTPServerOptions{
 		BaseURL:    "/v1",
 		BaseRouter: mux,

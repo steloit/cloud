@@ -114,3 +114,33 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   leaked/guessable id can be looped to flood the recipient's inbox and burn provider quota
   (email bombing). Every public email-triggering endpoint must rate-limit by requester IP, like
   password-reset and invite-renew do (`s.limiter.Allow("<ns>|"+ip)`) (T7.5).
+- **Reveal-once secret stored as a HASH when you must re-sign with it.** A token is only ever
+  *verified*, so `session.HashToken` (sha256, one-way) is right. A webhook signing secret must
+  sign *every* outbound POST, so it must be RECOVERABLE — envelope-encrypt it (`secrets.Seal`,
+  AAD-bound to the row), never hash it. Reveal-once still holds: return the plaintext once, store
+  ciphertext, never return it again (T10.3).
+- **A `{param}:verb` custom-method path breaks the stdlib `ServeMux`** — `"/webhooks/{wbh}:test"`
+  panics at registration ("wildcard segment must end with }"). `:verb` on a *literal* segment
+  (`/x:read`) is fine; on a wildcard it is not. Register such routes pre-strict on a subtree
+  pattern (`POST /v1/webhooks/`) and parse the id yourself, reusing `h.responseError` for the
+  error→problem mapping — the SSE streamer established this pre-strict pattern (T10.3).
+- **Random-hex `ids.New` values are NOT time-sortable** — cursor-paginating on `id` gives a
+  stable but chronologically meaningless order (newest-first is violated). Keyset on
+  `(created_at, id)`: the cursor resolves the last row's `created_at` and pages strictly older,
+  with `id` as the tiebreak (T10.3).
+- **An SSRF guard that only validates the URL is bypassable two ways.** (1) The default
+  `http.Client` follows redirects — a public target can `302` to `169.254.169.254` (cloud
+  metadata) or an RFC1918 host, and a re-validate-the-URL check never sees the hop. Set
+  `CheckRedirect` to reject. (2) `net.LookupIP` then a separate `Do()` is a DNS-rebinding TOCTOU:
+  the dial re-resolves and can land on a different (internal) IP. Pin the ACTUAL dialed IP with a
+  `net.Dialer.Control` hook that blocks loopback/private/link-local at connect time, not a
+  pre-dial lookup (T10.3).
+- **A PATCH that defaults unmentioned fields is a silent full-replace.** `{"quiet_hours":…}` with
+  no `channels` must NOT reset email/inapp to their defaults — it re-enables a channel the user
+  disabled. Load the stored row and overlay only the sent fields; a nil pointer means "leave
+  as-is" (T10.3). Note the pointer types can't express explicit-null-to-clear distinct from
+  absent — a known PATCH limitation.
+- **`ON CONFLICT DO NOTHING` dedupes NOTHING without a matching unique constraint.** An
+  idempotency comment on a bell/outbox insert is a lie if the only unique column is the
+  always-fresh PK — add the partial unique index (`(user_id, event_id) WHERE event_id IS NOT
+  NULL`) the conflict is supposed to hit (T10.3).

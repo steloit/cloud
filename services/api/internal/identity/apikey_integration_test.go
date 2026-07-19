@@ -187,11 +187,11 @@ func TestOrgKeyMalformedPermissions(t *testing.T) {
 	_ = json.Unmarshal([]byte(body), &org)
 
 	for _, bad := range []string{
-		`["  "]`,                        // whitespace-only
-		`["deploy.promote "]`,           // trailing space (not canonical)
-		`["Deploy.Promote"]`,            // case-variant
-		`["deploy.promote",""]`,         // an empty element among valid
-		`[""]`,                          // empty element
+		`["  "]`,                // whitespace-only
+		`["deploy.promote "]`,   // trailing space (not canonical)
+		`["Deploy.Promote"]`,    // case-variant
+		`["deploy.promote",""]`, // an empty element among valid
+		`[""]`,                  // empty element
 	} {
 		resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
 			`{"name":"x","scope":"full","permissions":`+bad+`}`, ownerCk)

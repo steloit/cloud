@@ -22,6 +22,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/mailer"
 	"github.com/steloit/cloud/services/api/internal/metering"
+	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/config"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
@@ -176,6 +177,10 @@ func main() {
 	// T11.2: the subscription lifecycle sweep (dunning/anchor progression).
 	subs := subscription.NewService(queries, recorder)
 	go subs.RunLifecycle(ctx, time.Hour)
+	// T10.3: the notification routing matrix. The webhook route runs off the
+	// spine via a durable outbox (signed, SSRF-guarded, bounded retry).
+	router := notify.NewRouter(queries, kek)
+	go router.RunOutbox(ctx, 10*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -183,7 +188,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	github.NewHandler(queries, recorder, cfg.GithubWebhookSecret).Mount(mux)
-	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs, metering.NewEmitter(queries))
+	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs, metering.NewEmitter(queries), router)
 	// One strict server, module handler sets composed by embedding (§15).
 	idHandlers.Mount(mux, &apiServer{
 		Handlers:  idHandlers,
