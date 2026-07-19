@@ -2,7 +2,7 @@
 id: CK-M3
 title: Estimate-gated provisioning end-to-end
 epic: E3
-status: stub
+status: blocked
 phase: MVP
 priority: critical
 sprint: 4
@@ -27,4 +27,6 @@ Estimate-gated provisioning end-to-end
 - [ ] `steloit db create` → estimate → approved → `ready`, metered
 - [ ] Canon arithmetic invariants green against the estimate engine
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E3.
+## Blocked
+
+Blocked on P1 via US-3.3: estimate-gated provisioning end-to-end needs a real cell. Everything control-plane-side of the checkpoint is green.

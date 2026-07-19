@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, queryOptions, type UseMutationOptions } from '@tanstack/react-query';
 
 import { client } from '../client.gen';
-import { acceptInvite, addDomain, addPaymentMethod, addWidget, applyProposal, backtestAlertRule, cancelSubscription, captureTemplate, changeMemberRole, changePlan, connectCell, createAlertRule, createApiKey, createBinding, createDashboard, createDeployment, createEnvironment, createEstimate, createInvite, createLifecycleRule, createOrg, createPersonalToken, createPolicy, createProject, createSchedule, createService, createThread, createWebhook, declineInvite, deleteBinding, deleteDashboard, deleteOrg, deleteProject, deleteService, deleteTemplate, dryRunLifecycleRule, getBillingOverview, getDashboard, getInvitePublic, getNotificationPrefs, getOrg, getPolicy, getProject, getProposal, getQuotas, getService, getSession, getSubscription, getTemplate, getTrace, getUsage, listAlertRules, listApiKeys, listAuditEvents, listBackups, listBindings, listBranches, listCatalog, listCells, listDashboards, listDeployments, listDomains, listEnvironments, listEvents, listInsights, listInvites, listInvoices, listKeys, listLifecycleRules, listMembers, listMyOrgs, listNotifications, listPaymentMethods, listPersonalTokens, listPolicies, listProjects, listSchedules, listServices, listSessions, listTables, listTemplates, listThreads, listWebhooks, login, logout, markNotificationsRead, type Options, postMessage, previewSchedule, queryLogs, queryMetrics, refreshTemplate, regenerateRecoveryCodes, removeMember, renewInvite, requestPasswordReset, resetPassword, revokeInvite, revokePersonalToken, revokeSession, rollbackDeployment, signup, sqlQuery, testWebhook, totpEnroll, totpVerify, updateDashboard, updateInsight, updateNotificationPrefs, updateOrg, updatePolicy, updateProject, updateService, updateTemplate, webauthnLoginBegin, webauthnLoginFinish, webauthnRegisterBegin, webauthnRegisterFinish } from '../sdk.gen';
-import type { AcceptInviteData, AddDomainData, AddDomainResponse, AddPaymentMethodData, AddPaymentMethodResponse, AddWidgetData, AddWidgetResponse, ApplyProposalData, ApplyProposalError, ApplyProposalResponse, BacktestAlertRuleData, BacktestAlertRuleResponse, CancelSubscriptionData, CancelSubscriptionResponse, CaptureTemplateData, CaptureTemplateResponse, ChangeMemberRoleData, ChangeMemberRoleError, ChangeMemberRoleResponse, ChangePlanData, ChangePlanError, ChangePlanResponse, ConnectCellData, ConnectCellError, ConnectCellResponse, CreateAlertRuleData, CreateAlertRuleResponse, CreateApiKeyData, CreateApiKeyResponse, CreateBindingData, CreateBindingError, CreateBindingResponse, CreateDashboardData, CreateDashboardResponse, CreateDeploymentData, CreateDeploymentResponse, CreateEnvironmentData, CreateEnvironmentResponse, CreateEstimateData, CreateEstimateResponse, CreateInviteData, CreateInviteError, CreateInviteResponse, CreateLifecycleRuleData, CreateLifecycleRuleResponse, CreateOrgData, CreateOrgError, CreateOrgResponse, CreatePersonalTokenData, CreatePersonalTokenResponse, CreatePolicyData, CreatePolicyError, CreatePolicyResponse, CreateProjectData, CreateProjectError, CreateProjectResponse, CreateScheduleData, CreateScheduleResponse, CreateServiceData, CreateServiceError, CreateServiceResponse, CreateThreadData, CreateThreadResponse, CreateWebhookData, CreateWebhookResponse, DeclineInviteData, DeclineInviteResponse, DeleteBindingData, DeleteBindingResponse, DeleteDashboardData, DeleteDashboardResponse, DeleteOrgData, DeleteOrgError, DeleteProjectData, DeleteProjectError, DeleteServiceData, DeleteServiceError, DeleteTemplateData, DeleteTemplateResponse, DryRunLifecycleRuleData, DryRunLifecycleRuleResponse, GetBillingOverviewData, GetBillingOverviewResponse, GetDashboardData, GetDashboardResponse, GetInvitePublicData, GetInvitePublicResponse, GetNotificationPrefsData, GetNotificationPrefsResponse, GetOrgData, GetOrgResponse, GetPolicyData, GetPolicyResponse, GetProjectData, GetProjectResponse, GetProposalData, GetProposalResponse, GetQuotasData, GetQuotasResponse, GetServiceData, GetServiceResponse, GetSessionData, GetSessionResponse, GetSubscriptionData, GetSubscriptionResponse, GetTemplateData, GetTemplateResponse, GetTraceData, GetTraceResponse, GetUsageData, GetUsageResponse, ListAlertRulesData, ListAlertRulesResponse, ListApiKeysData, ListApiKeysResponse, ListAuditEventsData, ListAuditEventsResponse, ListBackupsData, ListBackupsResponse, ListBindingsData, ListBindingsResponse, ListBranchesData, ListBranchesResponse, ListCatalogData, ListCatalogResponse, ListCellsData, ListCellsResponse, ListDashboardsData, ListDashboardsResponse, ListDeploymentsData, ListDeploymentsResponse, ListDomainsData, ListDomainsResponse, ListEnvironmentsData, ListEnvironmentsResponse, ListEventsData, ListEventsResponse, ListInsightsData, ListInsightsResponse, ListInvitesData, ListInvitesResponse, ListInvoicesData, ListInvoicesResponse, ListKeysData, ListKeysResponse, ListLifecycleRulesData, ListLifecycleRulesResponse, ListMembersData, ListMembersResponse, ListMyOrgsData, ListMyOrgsResponse, ListNotificationsData, ListNotificationsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPersonalTokensData, ListPersonalTokensResponse, ListPoliciesData, ListPoliciesResponse, ListProjectsData, ListProjectsResponse, ListSchedulesData, ListSchedulesResponse, ListServicesData, ListServicesResponse, ListSessionsData, ListSessionsResponse, ListTablesData, ListTablesResponse, ListTemplatesData, ListTemplatesResponse, ListThreadsData, ListThreadsResponse, ListWebhooksData, ListWebhooksResponse, LoginData, LoginResponse, LogoutData, LogoutResponse, MarkNotificationsReadData, MarkNotificationsReadResponse, PostMessageData, PostMessageResponse, PreviewScheduleData, PreviewScheduleError, PreviewScheduleResponse, QueryLogsData, QueryLogsResponse, QueryMetricsData, QueryMetricsResponse, RefreshTemplateData, RefreshTemplateResponse, RegenerateRecoveryCodesData, RegenerateRecoveryCodesResponse, RemoveMemberData, RemoveMemberResponse, RenewInviteData, RequestPasswordResetData, ResetPasswordData, ResetPasswordResponse, RevokeInviteData, RevokeInviteResponse, RevokePersonalTokenData, RevokePersonalTokenResponse, RevokeSessionData, RevokeSessionResponse, RollbackDeploymentData, RollbackDeploymentResponse, SignupData, SignupResponse, SqlQueryData, SqlQueryResponse, TestWebhookData, TestWebhookResponse, TotpEnrollData, TotpEnrollResponse, TotpVerifyData, TotpVerifyResponse, UpdateDashboardData, UpdateDashboardResponse, UpdateInsightData, UpdateInsightResponse, UpdateNotificationPrefsData, UpdateNotificationPrefsResponse, UpdateOrgData, UpdateOrgResponse, UpdatePolicyData, UpdatePolicyResponse, UpdateProjectData, UpdateProjectResponse, UpdateServiceData, UpdateServiceResponse, UpdateTemplateData, UpdateTemplateResponse, WebauthnLoginBeginData, WebauthnLoginBeginResponse, WebauthnLoginFinishData, WebauthnLoginFinishResponse, WebauthnRegisterBeginData, WebauthnRegisterBeginResponse, WebauthnRegisterFinishData } from '../types.gen';
+import { acceptInvite, addDomain, addPaymentMethod, addWidget, applyProposal, backtestAlertRule, cancelSubscription, captureTemplate, changeMemberRole, changePlan, connectCell, createAlertRule, createApiKey, createBinding, createDashboard, createDeployment, createEnvironment, createEstimate, createInvite, createLifecycleRule, createOrg, createPersonalToken, createPolicy, createProject, createSchedule, createService, createThread, createWebhook, declineInvite, deleteAccount, deleteBinding, deleteDashboard, deleteEnvironment, deleteOrg, deleteProject, deleteService, deleteTemplate, disableMfa, dryRunLifecycleRule, exportInvoices, exportUsage, getBillingOverview, getDashboard, getInvitePublic, getNotificationPrefs, getOrg, getPolicy, getProject, getProposal, getQuotas, getService, getSession, getSubscription, getTemplate, getTrace, getUsage, leaveOrg, listAlertRules, listApiKeys, listAuditEvents, listBackups, listBindings, listBranches, listCatalog, listCells, listDashboards, listDeployments, listDomains, listEnvironments, listEvents, listInsights, listInvites, listInvoices, listKeys, listLifecycleRules, listMembers, listMyOrgs, listNotifications, listPaymentMethods, listPersonalTokens, listPolicies, listProjects, listSchedules, listServices, listSessions, listTables, listTemplates, listThreads, listWebhooks, login, logout, markNotificationsRead, type Options, postMessage, previewSchedule, queryLogs, queryMetrics, refreshTemplate, regenerateRecoveryCodes, removeMember, renameEnvironment, renewInvite, requestPasswordReset, resetPassword, revokeApiKey, revokeInvite, revokePersonalToken, revokeSession, rollbackDeployment, setBudget, signup, sqlQuery, testWebhook, totpEnroll, totpVerify, updateDashboard, updateInsight, updateNotificationPrefs, updateOrg, updatePolicy, updateProject, updateService, updateTemplate, webauthnLoginBegin, webauthnLoginFinish, webauthnRegisterBegin, webauthnRegisterFinish } from '../sdk.gen';
+import type { AcceptInviteData, AddDomainData, AddDomainResponse, AddPaymentMethodData, AddPaymentMethodResponse, AddWidgetData, AddWidgetResponse, ApplyProposalData, ApplyProposalError, ApplyProposalResponse, BacktestAlertRuleData, BacktestAlertRuleResponse, CancelSubscriptionData, CancelSubscriptionResponse, CaptureTemplateData, CaptureTemplateResponse, ChangeMemberRoleData, ChangeMemberRoleError, ChangeMemberRoleResponse, ChangePlanData, ChangePlanError, ChangePlanResponse, ConnectCellData, ConnectCellError, ConnectCellResponse, CreateAlertRuleData, CreateAlertRuleResponse, CreateApiKeyData, CreateApiKeyResponse, CreateBindingData, CreateBindingError, CreateBindingResponse, CreateDashboardData, CreateDashboardResponse, CreateDeploymentData, CreateDeploymentResponse, CreateEnvironmentData, CreateEnvironmentResponse, CreateEstimateData, CreateEstimateResponse, CreateInviteData, CreateInviteError, CreateInviteResponse, CreateLifecycleRuleData, CreateLifecycleRuleResponse, CreateOrgData, CreateOrgError, CreateOrgResponse, CreatePersonalTokenData, CreatePersonalTokenResponse, CreatePolicyData, CreatePolicyError, CreatePolicyResponse, CreateProjectData, CreateProjectError, CreateProjectResponse, CreateScheduleData, CreateScheduleResponse, CreateServiceData, CreateServiceError, CreateServiceResponse, CreateThreadData, CreateThreadResponse, CreateWebhookData, CreateWebhookResponse, DeclineInviteData, DeclineInviteResponse, DeleteAccountData, DeleteAccountError, DeleteBindingData, DeleteBindingResponse, DeleteDashboardData, DeleteDashboardResponse, DeleteEnvironmentData, DeleteEnvironmentError, DeleteOrgData, DeleteOrgError, DeleteProjectData, DeleteProjectError, DeleteServiceData, DeleteServiceError, DeleteTemplateData, DeleteTemplateResponse, DisableMfaData, DisableMfaResponse, DryRunLifecycleRuleData, DryRunLifecycleRuleResponse, ExportInvoicesData, ExportInvoicesResponse, ExportUsageData, ExportUsageResponse, GetBillingOverviewData, GetBillingOverviewResponse, GetDashboardData, GetDashboardResponse, GetInvitePublicData, GetInvitePublicResponse, GetNotificationPrefsData, GetNotificationPrefsResponse, GetOrgData, GetOrgResponse, GetPolicyData, GetPolicyError, GetPolicyResponse, GetProjectData, GetProjectResponse, GetProposalData, GetProposalResponse, GetQuotasData, GetQuotasResponse, GetServiceData, GetServiceResponse, GetSessionData, GetSessionResponse, GetSubscriptionData, GetSubscriptionResponse, GetTemplateData, GetTemplateResponse, GetTraceData, GetTraceResponse, GetUsageData, GetUsageResponse, LeaveOrgData, LeaveOrgError, LeaveOrgResponse, ListAlertRulesData, ListAlertRulesResponse, ListApiKeysData, ListApiKeysResponse, ListAuditEventsData, ListAuditEventsResponse, ListBackupsData, ListBackupsResponse, ListBindingsData, ListBindingsResponse, ListBranchesData, ListBranchesResponse, ListCatalogData, ListCatalogResponse, ListCellsData, ListCellsResponse, ListDashboardsData, ListDashboardsResponse, ListDeploymentsData, ListDeploymentsResponse, ListDomainsData, ListDomainsResponse, ListEnvironmentsData, ListEnvironmentsResponse, ListEventsData, ListEventsResponse, ListInsightsData, ListInsightsResponse, ListInvitesData, ListInvitesResponse, ListInvoicesData, ListInvoicesResponse, ListKeysData, ListKeysResponse, ListLifecycleRulesData, ListLifecycleRulesResponse, ListMembersData, ListMembersResponse, ListMyOrgsData, ListMyOrgsResponse, ListNotificationsData, ListNotificationsResponse, ListPaymentMethodsData, ListPaymentMethodsResponse, ListPersonalTokensData, ListPersonalTokensResponse, ListPoliciesData, ListPoliciesResponse, ListProjectsData, ListProjectsResponse, ListSchedulesData, ListSchedulesResponse, ListServicesData, ListServicesResponse, ListSessionsData, ListSessionsResponse, ListTablesData, ListTablesResponse, ListTemplatesData, ListTemplatesResponse, ListThreadsData, ListThreadsResponse, ListWebhooksData, ListWebhooksResponse, LoginData, LoginResponse, LogoutData, LogoutResponse, MarkNotificationsReadData, MarkNotificationsReadResponse, PostMessageData, PostMessageResponse, PreviewScheduleData, PreviewScheduleError, PreviewScheduleResponse, QueryLogsData, QueryLogsResponse, QueryMetricsData, QueryMetricsResponse, RefreshTemplateData, RefreshTemplateResponse, RegenerateRecoveryCodesData, RegenerateRecoveryCodesResponse, RemoveMemberData, RemoveMemberResponse, RenameEnvironmentData, RenameEnvironmentError, RenameEnvironmentResponse, RenewInviteData, RequestPasswordResetData, ResetPasswordData, ResetPasswordResponse, RevokeApiKeyData, RevokeApiKeyResponse, RevokeInviteData, RevokeInviteResponse, RevokePersonalTokenData, RevokePersonalTokenResponse, RevokeSessionData, RevokeSessionResponse, RollbackDeploymentData, RollbackDeploymentResponse, SetBudgetData, SetBudgetResponse, SignupData, SignupResponse, SqlQueryData, SqlQueryResponse, TestWebhookData, TestWebhookResponse, TotpEnrollData, TotpEnrollResponse, TotpVerifyData, TotpVerifyResponse, UpdateDashboardData, UpdateDashboardResponse, UpdateInsightData, UpdateInsightResponse, UpdateNotificationPrefsData, UpdateNotificationPrefsResponse, UpdateOrgData, UpdateOrgResponse, UpdatePolicyData, UpdatePolicyError, UpdatePolicyResponse, UpdateProjectData, UpdateProjectResponse, UpdateServiceData, UpdateServiceResponse, UpdateTemplateData, UpdateTemplateResponse, WebauthnLoginBeginData, WebauthnLoginBeginResponse, WebauthnLoginFinishData, WebauthnLoginFinishResponse, WebauthnRegisterBeginData, WebauthnRegisterBeginResponse, WebauthnRegisterFinishData } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -402,6 +402,40 @@ export const createEnvironmentMutation = (options?: Partial<Options<CreateEnviro
     const mutationOptions: UseMutationOptions<CreateEnvironmentResponse, DefaultError, Options<CreateEnvironmentData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await createEnvironment({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)
+ */
+export const deleteEnvironmentMutation = (options?: Partial<Options<DeleteEnvironmentData>>): UseMutationOptions<unknown, DeleteEnvironmentError, Options<DeleteEnvironmentData>> => {
+    const mutationOptions: UseMutationOptions<unknown, DeleteEnvironmentError, Options<DeleteEnvironmentData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteEnvironment({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037).
+ */
+export const renameEnvironmentMutation = (options?: Partial<Options<RenameEnvironmentData>>): UseMutationOptions<RenameEnvironmentResponse, RenameEnvironmentError, Options<RenameEnvironmentData>> => {
+    const mutationOptions: UseMutationOptions<RenameEnvironmentResponse, RenameEnvironmentError, Options<RenameEnvironmentData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await renameEnvironment({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -1310,7 +1344,7 @@ export const createPolicyMutation = (options?: Partial<Options<CreatePolicyData>
 
 export const getPolicyQueryKey = (options: Options<GetPolicyData>) => createQueryKey('getPolicy', options);
 
-export const getPolicyOptions = (options: Options<GetPolicyData>) => queryOptions<GetPolicyResponse, DefaultError, GetPolicyResponse, ReturnType<typeof getPolicyQueryKey>>({
+export const getPolicyOptions = (options: Options<GetPolicyData>) => queryOptions<GetPolicyResponse, GetPolicyError, GetPolicyResponse, ReturnType<typeof getPolicyQueryKey>>({
     queryFn: async ({ queryKey, signal }) => {
         const { data } = await getPolicy({
             ...options,
@@ -1326,8 +1360,8 @@ export const getPolicyOptions = (options: Options<GetPolicyData>) => queryOption
 /**
  * Versioned; one-click audited revert; incl. the ai-assistant policy (AI3: enabled|opt_in|disabled — disable hides all AI surfaces, deletes nothing)
  */
-export const updatePolicyMutation = (options?: Partial<Options<UpdatePolicyData>>): UseMutationOptions<UpdatePolicyResponse, DefaultError, Options<UpdatePolicyData>> => {
-    const mutationOptions: UseMutationOptions<UpdatePolicyResponse, DefaultError, Options<UpdatePolicyData>> = {
+export const updatePolicyMutation = (options?: Partial<Options<UpdatePolicyData>>): UseMutationOptions<UpdatePolicyResponse, UpdatePolicyError, Options<UpdatePolicyData>> => {
+    const mutationOptions: UseMutationOptions<UpdatePolicyResponse, UpdatePolicyError, Options<UpdatePolicyData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await updatePolicy({
                 ...options,
@@ -1611,12 +1645,63 @@ export const totpVerifyMutation = (options?: Partial<Options<TotpVerifyData>>): 
 };
 
 /**
+ * Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.
+ */
+export const disableMfaMutation = (options?: Partial<Options<DisableMfaData>>): UseMutationOptions<DisableMfaResponse, DefaultError, Options<DisableMfaData>> => {
+    const mutationOptions: UseMutationOptions<DisableMfaResponse, DefaultError, Options<DisableMfaData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await disableMfa({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
  * Reveal-once recovery codes; the previous set is invalidated
  */
 export const regenerateRecoveryCodesMutation = (options?: Partial<Options<RegenerateRecoveryCodesData>>): UseMutationOptions<RegenerateRecoveryCodesResponse, DefaultError, Options<RegenerateRecoveryCodesData>> => {
     const mutationOptions: UseMutationOptions<RegenerateRecoveryCodesResponse, DefaultError, Options<RegenerateRecoveryCodesData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await regenerateRecoveryCodes({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+ */
+export const deleteAccountMutation = (options?: Partial<Options<DeleteAccountData>>): UseMutationOptions<unknown, DeleteAccountError, Options<DeleteAccountData>> => {
+    const mutationOptions: UseMutationOptions<unknown, DeleteAccountError, Options<DeleteAccountData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await deleteAccount({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+ */
+export const leaveOrgMutation = (options?: Partial<Options<LeaveOrgData>>): UseMutationOptions<LeaveOrgResponse, LeaveOrgError, Options<LeaveOrgData>> => {
+    const mutationOptions: UseMutationOptions<LeaveOrgResponse, LeaveOrgError, Options<LeaveOrgData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await leaveOrg({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -1883,6 +1968,23 @@ export const createApiKeyMutation = (options?: Partial<Options<CreateApiKeyData>
     return mutationOptions;
 };
 
+/**
+ * Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+ */
+export const revokeApiKeyMutation = (options?: Partial<Options<RevokeApiKeyData>>): UseMutationOptions<RevokeApiKeyResponse, DefaultError, Options<RevokeApiKeyData>> => {
+    const mutationOptions: UseMutationOptions<RevokeApiKeyResponse, DefaultError, Options<RevokeApiKeyData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await revokeApiKey({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const getBillingOverviewQueryKey = (options: Options<GetBillingOverviewData>) => createQueryKey('getBillingOverview', options);
 
 /**
@@ -1899,6 +2001,59 @@ export const getBillingOverviewOptions = (options: Options<GetBillingOverviewDat
         return data;
     },
     queryKey: getBillingOverviewQueryKey(options)
+});
+
+/**
+ * The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only.
+ */
+export const setBudgetMutation = (options?: Partial<Options<SetBudgetData>>): UseMutationOptions<SetBudgetResponse, DefaultError, Options<SetBudgetData>> => {
+    const mutationOptions: UseMutationOptions<SetBudgetResponse, DefaultError, Options<SetBudgetData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await setBudget({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const exportUsageQueryKey = (options: Options<ExportUsageData>) => createQueryKey('exportUsage', options);
+
+/**
+ * The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line.
+ */
+export const exportUsageOptions = (options: Options<ExportUsageData>) => queryOptions<ExportUsageResponse, DefaultError, ExportUsageResponse, ReturnType<typeof exportUsageQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await exportUsage({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: exportUsageQueryKey(options)
+});
+
+export const exportInvoicesQueryKey = (options: Options<ExportInvoicesData>) => createQueryKey('exportInvoices', options);
+
+/**
+ * Invoices as CSV (B3): one line per invoice with period, status, and total.
+ */
+export const exportInvoicesOptions = (options: Options<ExportInvoicesData>) => queryOptions<ExportInvoicesResponse, DefaultError, ExportInvoicesResponse, ReturnType<typeof exportInvoicesQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await exportInvoices({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: exportInvoicesQueryKey(options)
 });
 
 export const getUsageQueryKey = (options: Options<GetUsageData>) => createQueryKey('getUsage', options);

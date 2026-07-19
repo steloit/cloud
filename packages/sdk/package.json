@@ -1,0 +1,18 @@
+{
+  "name": "@steloit/sdk",
+  "version": "0.1.0",
+  "description": "Steloit TypeScript SDK — generated core from openapi.yaml + a thin ergonomics layer (20-clients/sdk.md)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "gen:api": "openapi-ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.98.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

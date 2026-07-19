@@ -2,7 +2,7 @@
 id: US-5.2
 title: Output modes: human tables + six marks, --json verbatim, --quiet ids, exit codes 0–7
 epic: E5
-status: stub
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -13,7 +13,8 @@ labels: [CLI]
 module: M10 Clients
 contexts: [api-conventions]
 files: []
-verify: []
+verify:
+  - cd apps/cli && go test ./...
 owner: agent
 ---
 
@@ -25,4 +26,12 @@ Output modes: human tables + six marks, --json verbatim, --quiet ids, exit codes
 
 **AC:** `--json` = raw API shapes (snake_case, *_cents, {data,next_cursor}); NO_COLOR/non-TTY degrade losslessly; exit-code map tested.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E5.
+## Acceptance criteria
+
+- [x] `--json` = raw API bytes verbatim (RawJSON re-emits; snake_case/*_cents/
+      {data,next_cursor} untouched); `--quiet` = ids only; six marks; NO_COLOR strips
+      escapes losslessly; exit-code map (0–7) pinned in `output_test.go`.
+
+## Outcome
+
+Carried by T5.5 (the shared output package) + T5.3 (every noun renders through it).

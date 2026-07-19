@@ -41,3 +41,36 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - Inventing demo/seed data outside canon (ADR-026 violation).
 - Testing the happy path of a four-state surface only (fault-inject the other three).
 - Weakening an invariant to make a feature fit (that's a canon decision for founders, e.g. the X1 $208 case).
+- A Docker-gated integration test as the ONLY assertion of a security invariant — it `t.Skip`s
+  where no container runtime exists and the suite still prints `PASS ok`, masking the guard green.
+  Every critical invariant needs a store-free unit assertion that always runs (Q4: the org-key
+  delegation ceiling; the user-minter half can stay integration-gated, but not the whole property).
+- A property test whose assertions live inside an `if allowed {…}` branch — if the positive branch
+  never runs (a regressed matrix, a mistyped grant list), it passes vacuously. Count the positive
+  cases and `t.Fatal` on zero (Q4: tighten-only logs "N allowed", org-key sweep asserts len(granted)).
+- A "drift guard" that checks a hand-maintained list instead of DERIVING from source — it can't catch
+  the drift it's named for (a new call site the list forgot). Scan the actual call sites and assert
+  set-equality both directions (Q4: enforced-permission set regex'd from the handler source).
+- Claiming "drift fails CI" via a `make gen` + `git diff` gate WITHOUT checking the gate actually runs
+  that gen step and diffs that path. The go job runs `gen-go` (not `gen-ts`); the diff was scoped
+  `-- services packages` (excluding `apps/`). A synced COPY is only protected if some CI step
+  regenerates it AND the diff covers its path. Prefer an in-process test that reads the canonical
+  source (fs, via import.meta.url / runtime.Caller) and asserts the copy equals it — it fails wherever
+  it runs, independent of CI plumbing (Q2).
+- A copy-vs-copy identity test (`consoleCopy.toEqual(packagesCopy)`) proves nothing when both copies
+  can be equally stale — compare each copy to the CANONICAL source, not to a sibling (Q2).
+- A guard that passes on a zeroed world: `proj == null` is false for `0`, so `0 === 0` sails through.
+  Reject empty/zero explicitly, and keep Go and TS guards symmetric or one language passes what the
+  other rejects (Q2).
+- A test placed outside the runner's include glob (console vitest is `tests/**`, not `src/**`) never
+  runs and never fails — a green suite that silently skips your new test. Confirm the file is actually
+  collected (the test count goes up) before trusting it (Q2).
+- A conformance/coverage test that checks a HANDFUL of cases and reads as "covered" — Q3 first shipped
+  checking 5 of 18 canon response sections, so drift in the other 13 passed green. Drive coverage off a
+  registry with a completeness tripwire (every fixtures section must have a check, or fail), so the
+  gap is visible, not silent.
+- Detecting a MISSING required field by zero-ness of the decoded value — `used: 0` is a legitimate
+  required value, not a missing one. Check key PRESENCE in the raw JSON instead; strict decode
+  (`DisallowUnknownFields`) catches extra fields, presence catches dropped/renamed required ones.
+- `git diff --exit-code` as a drift gate misses newly-generated UNTRACKED files (returns clean). Stage
+  first: `git add -A -- <paths> && git diff --cached --exit-code -- <paths>` (Q3).

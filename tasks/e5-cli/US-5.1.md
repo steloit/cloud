@@ -2,7 +2,7 @@
 id: US-5.1
 title: steloit init / create with the estimate-first safety grammar
 epic: E5
-status: stub
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -13,7 +13,8 @@ labels: [CLI]
 module: M10 Clients
 contexts: [api-conventions]
 files: []
-verify: []
+verify:
+  - cd apps/cli && go test ./...
 owner: agent
 ---
 
@@ -29,4 +30,18 @@ steloit init / create with the estimate-first safety grammar
 
 - [ ] create without seeing an estimate is impossible.
 
-> **Stub** — run the spec-author skill to enrich to `ready` before starting. Plan reference: docs/plan/implementation-plan.md §5 E5.
+## Acceptance criteria
+
+- [x] Estimate-first safety grammar: `db create` always shows the lines + total before
+      the prompt; `--yes` accepts a SHOWN estimate (no skip-seeing flag exists); the
+      worn context is echoed on state-changing commands (T5.3 tests).
+- [x] Implicit-env rules (ADR-037): n=1 never asks; n≥2 reads default to production;
+      n≥2 MUTATIONS never guess — TTY prompts with the env list, non-TTY exits 2 with
+      `pass --env` (implemented in this closeout; `env_rules_test.go` covers all four
+      paths: read-default, non-TTY refusal, TTY prompt+choice, explicit flag).
+
+## Outcome
+
+The verification pass found the never-guess rule unimplemented (resolveEnvID silently
+defaulted to production for mutations at n≥2) — closed here with a `mutating` parameter
+and TTY detection behind the test seam.

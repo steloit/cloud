@@ -9,3 +9,8 @@ CLAUDE.local.md
 
 # Terraform working dirs (provider binaries) — lock files ARE committed
 .terraform/
+# Local Terraform state (real state lives in gs://<project>-tfstate; never commit)
+*.tfstate
+*.tfstate.*
+tfplan
+.auto.tfvars

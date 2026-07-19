@@ -1,0 +1,5 @@
+# §17 ①a: full contract models (every schema, all tags).
+package: gen
+output: internal/httpapi/gen/types.gen.go
+generate:
+  models: true

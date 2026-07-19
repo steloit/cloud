@@ -1,0 +1,20 @@
+# T1.3: unsigned images are REJECTED (invariant 11). Applied via T1.2's
+# Terraform apply path (one apply path rule). Enforcement is namespace-labeled
+# (policy.sigstore.dev/include=true) — core + customer namespaces, never
+# kube-system. Break-glass = edit this policy via PR, never disable the
+# controller (task edge-case rule).
+apiVersion: policy.sigstore.dev/v1beta1
+kind: ClusterImagePolicy
+metadata:
+  name: steloit-signed-images
+spec:
+  images:
+    - glob: "*-docker.pkg.dev/**/steloit/*"
+  authorities:
+    - keyless:
+        url: https://fulcio.sigstore.dev
+        identities:
+          - issuer: https://token.actions.githubusercontent.com
+            subjectRegExp: "^https://github.com/steloit/cloud/\\.github/workflows/image\\.yml@.*$"
+      ctlog:
+        url: https://rekor.sigstore.dev

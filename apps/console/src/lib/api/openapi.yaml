@@ -23,6 +23,7 @@ x-conventions:
   idempotency: "every mutating POST accepts Idempotency-Key (client-generated, ≤255 chars); server dedupes on (principal, endpoint, key) for 24h; replay returns the original response with Idempotent-Replay: true; same key + different body = 409 problem+json with remediation (S7 ruling, 2026-07-18)"
 x-error-catalog:
   validation_failed: {status: 422, note: "field errors under errors[]; client renders inline under the field"}
+  auth_failed: {status: 401, note: "invalid credentials or missing/expired session; never discloses account existence; body carries remediation (S-process 2026-07-19, T2.1 finding)"}
   permission_denied: {status: 403, note: "detail names missing role OR denying policy (E3 grammar); denial audited"}
   plan_gated: {status: 402, note: "carries required_plan; client renders B6 lock grammar"}
   quota_exceeded: {status: 402, note: "soft quota: carries overage_price_cents and proceeds only on explicit confirm=true; hard quota: fails with remediation"}
@@ -124,6 +125,8 @@ paths:
       tags: [orgs]
       operationId: createInvite
       summary: "Invite by email + role (A11/U1); 7-day expiry; dedupe against members + pending"
+      parameters:
+        - {name: confirm, in: query, schema: {type: boolean, default: false}, description: "accept the shown seat overage — the x-error-catalog quota_exceeded contract (soft 402 proceeds only on explicit confirm=true). S-process gap fill with T2.7."}
       requestBody:
         required: true
         content:
@@ -259,6 +262,24 @@ paths:
       summary: Environments with per-env cost and parity info (M3)
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/EnvironmentList"}}}}
+
+  /envs/{env}:
+    parameters: [{$ref: "#/components/parameters/env"}]
+    patch:
+      tags: [projects]
+      operationId: renameEnvironment
+      summary: "Rename (ADR-037's explicit escape hatch for teams that want a different word than `production` — a capability, never role magic); consequences stated: `?env=` deep links use names. S-process with T4.7; the rename op itself was founder-ratified 2026-07-18 (ADR-037)."
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string}}}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Environment"}}}}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [projects]
+      operationId: deleteEnvironment
+      summary: "Teardown (U6, spec-change §2b via T4.7): typed-confirm client-side; 409 names every service that exists; the IMPLICIT environment never deletes — tearing it down is project deletion (ADR-037: born, not created)"
+      responses:
+        "202": {description: "Teardown scheduled; final backups per U6"}
+        "409": {$ref: "#/components/responses/Conflict"}
 
   /catalog:
     get:
@@ -748,6 +769,7 @@ paths:
       operationId: getPolicy
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+        "404": {description: "Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
     patch:
       tags: [governance]
       operationId: updatePolicy
@@ -755,6 +777,7 @@ paths:
       requestBody: {content: {application/json: {schema: {type: object, properties: {enforcement: {$ref: "#/components/schemas/Enforcement"}, config: {type: object}, enforce_from: {type: string, format: date-time}}}}}}
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Policy"}}}}
+        "404": {description: "Not found — also returned for a policy in an org the caller has no standing in (existence is not leaked)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
 
   /orgs/{org}/cells:
     parameters: [{$ref: "#/components/parameters/org"}]
@@ -806,6 +829,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SignupRequest"}}}}
       responses:
         "201": {description: "Session cookie set", content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}
+        "409": {description: "Email already registered — reasons[] + remediation (S-process 2026-07-19)"}
         "429": {description: Rate limited}
   /auth/login:
     post:
@@ -816,11 +840,12 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LoginRequest"}}}}
       responses:
         "200": {description: "Session or mfa_required", content: {application/json: {schema: {$ref: "#/components/schemas/LoginResult"}}}}
+        "401": {description: "auth_failed — invalid credentials; identical body for unknown email (no disclosure)"}
         "429": {description: Rate limited}
   /auth/logout:
-    post: {tags: [auth], operationId: logout, summary: "Revoke the current session", responses: {"204": {description: Logged out}}}
+    post: {tags: [auth], operationId: logout, summary: "Revoke the current session", responses: {"204": {description: Logged out}, "401": {description: "auth_failed — no active session"}}}
   /auth/session:
-    get: {tags: [auth], operationId: getSession, summary: "Current user + session — the console boot call", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}}}
+    get: {tags: [auth], operationId: getSession, summary: "Current user + session — the console boot call", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionInfo"}}}}, "401": {description: "auth_failed — no active session"}}}
   /auth/password:reset-request:
     post: {tags: [auth], security: [], operationId: requestPasswordReset, summary: "Always 202 (no account disclosure); email carries a single-use token", requestBody: {required: true, content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}}, responses: {"202": {description: Accepted}}}
   /auth/password:reset:
@@ -837,8 +862,29 @@ paths:
     post: {tags: [auth], operationId: totpEnroll, summary: "TOTP fallback: reveal-once secret + otpauth URI", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {secret: {type: string}, otpauth_uri: {type: string}}}}}}}}
   /auth/mfa/totp:verify:
     post: {tags: [auth], operationId: totpVerify, requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string}}}}}}, responses: {"204": {description: Enabled}}}
+  /auth/mfa:
+    delete: {tags: [auth], operationId: disableMfa, summary: "Disable MFA (T7.6/F9: never plan-gated; removes TOTP + recovery codes). Requires a current session.", responses: {"204": {description: Disabled}}}
   /auth/mfa/recovery:regenerate:
     post: {tags: [auth], operationId: regenerateRecoveryCodes, summary: "Reveal-once recovery codes; the previous set is invalidated", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {codes: {type: array, items: {type: string}}}}}}}}}
+  /me:
+    delete:
+      tags: [account]
+      operationId: deleteAccount
+      summary: "Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time."
+      responses:
+        "202": {description: "Deletion scheduled; grace window before purge"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /orgs/{org}/leave:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [orgs]
+      operationId: leaveOrg
+      summary: "Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6)."
+      responses:
+        "204": {description: "Left the organization"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
   /me/sessions:
     get: {tags: [account], operationId: listSessions, summary: "P-series security page: device, last-seen, current flag", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionList"}}}}}}
   /me/sessions/{ses}:
@@ -923,6 +969,15 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TokenList"}}}}
 
+  /orgs/{org}/api-keys/{key}:
+    parameters: [{$ref: "#/components/parameters/org"}, {name: key, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [governance]
+      operationId: revokeApiKey
+      summary: "Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit."
+      responses:
+        "204": {description: Revoked}
+
   /orgs/{org}/billing/overview:
     parameters: [{$ref: "#/components/parameters/org"}]
     get:
@@ -931,6 +986,36 @@ paths:
       summary: "One number, then how it's built (B1). Per-project rollup reconciles EXACTLY to the sidebars — one arithmetic, everywhere."
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/BillingOverview"}}}}
+
+  /orgs/{org}/billing/budget:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    put:
+      tags: [billing]
+      operationId: setBudget
+      summary: "The hard spend cap (B1, F9 flagship): set a monthly bound the platform ENFORCES at the estimate-accept gate — crossing it is impossible by construction, never alerts-only. A null limit_cents removes the cap. Running services are never touched; the cap pauses new provisioning only."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/BudgetInput"}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Budget"}}}}
+
+  /orgs/{org}/billing/usage:export:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: exportUsage
+      summary: "The B2 meter as CSV (`steloit usage export` parity). Same rows as getUsage, one meter per line."
+      parameters:
+        - {name: month, in: query, schema: {type: string, description: "YYYY-MM"}}
+      responses:
+        "200": {description: CSV, content: {text/csv: {schema: {type: string}}}}
+
+  /orgs/{org}/billing/invoices:export:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    get:
+      tags: [billing]
+      operationId: exportInvoices
+      summary: "Invoices as CSV (B3): one line per invoice with period, status, and total."
+      responses:
+        "200": {description: CSV, content: {text/csv: {schema: {type: string}}}}
 
   /orgs/{org}/billing/usage:
     parameters: [{$ref: "#/components/parameters/org"}]
@@ -1080,11 +1165,11 @@ components:
       scheme: bearer
       description: "Personal token (stp_…) or org API key. Tokens act as their user and shrink with role changes."
   parameters:
-    org: {name: org, in: path, required: true, schema: {type: string}, description: "org_… or slug"}
-    project: {name: project, in: path, required: true, schema: {type: string}}
-    env: {name: env, in: path, required: true, schema: {type: string}}
-    service: {name: service, in: path, required: true, schema: {type: string}}
-    idempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 255}, description: "S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409"}
+    org: {name: org, in: path, required: true, schema: {type: string}, description: "org_… or slug", x-go-name: OrgPathParam}
+    project: {name: project, in: path, required: true, schema: {type: string}, x-go-name: ProjectPathParam}
+    env: {name: env, in: path, required: true, schema: {type: string}, x-go-name: EnvPathParam}
+    service: {name: service, in: path, required: true, schema: {type: string}, x-go-name: ServicePathParam}
+    idempotencyKey: {name: Idempotency-Key, in: header, required: false, schema: {type: string, maxLength: 255}, description: "S7: 24h dedupe on (principal, endpoint, key); replay marked Idempotent-Replay: true; body mismatch = 409", x-go-name: IdempotencyKeyHeader}
   responses:
     Conflict:
       description: Conflict with blocking reasons
@@ -1595,6 +1680,7 @@ components:
         name: {type: string}
         scope: {type: string, enum: [full, read_only], default: read_only}
         expires_in_days: {type: integer, enum: [30, 60, 90, 365], default: 90}
+        permissions: {type: array, items: {type: string}, description: "org API keys ONLY (ADR-0007): the explicit least-privilege subset of matrix permissions this key may exercise (e.g. deploy.promote, observe.read). Required and non-empty for createApiKey; ignored for personal tokens (which act as their user). Each must be a canonical matrix permission; keys never grant outside this list."}
     TokenCreated:
       type: object
       required: [id, token, shown_once, prefix, hash_stored]
@@ -1609,6 +1695,7 @@ components:
       type: object
       required: [id, name, prefix, scope]
       properties:
+        permissions: {type: array, items: {type: string}, description: "org keys: the granted matrix-permission subset (ADR-0007)"}
         id: {type: string}
         name: {type: string}
         prefix: {type: string}
@@ -1638,6 +1725,17 @@ components:
               basis: {type: string, description: "fixed | usage_projection ($0 if unused, labeled a projection)"}
               egress_note: {type: [string, "null"], description: "cross-region: egress priced here, never a billing surprise (C7)"}
         expires_at: {type: string, format: date-time}
+    BudgetInput:
+      type: object
+      properties:
+        limit_cents: {type: [integer, "null"], description: "the hard monthly bound in cents; null removes the cap"}
+        alert_thresholds: {type: array, items: {type: integer}, description: "percent points that warn (e.g. [80]); routing rides B8"}
+    Budget:
+      type: object
+      properties:
+        limit_cents: {type: [integer, "null"]}
+        used_percent: {type: number, description: "month-to-date spend as a percent of the cap; 0 when uncapped"}
+        alert_thresholds: {type: array, items: {type: integer}}
     BillingOverview:
       type: object
       properties:
@@ -1789,6 +1887,7 @@ components:
       properties:
         email: {type: string, format: email}
         password: {type: string}
+        mfa_code: {type: string, description: "TOTP or recovery code — required to complete login for an MFA-enabled account (the first call returns status=mfa_required; retry with this). S-process with T7.1."}
     LoginResult:
       type: object
       required: [status]
