@@ -862,6 +862,25 @@ paths:
     post: {tags: [auth], operationId: totpVerify, requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string}}}}}}, responses: {"204": {description: Enabled}}}
   /auth/mfa/recovery:regenerate:
     post: {tags: [auth], operationId: regenerateRecoveryCodes, summary: "Reveal-once recovery codes; the previous set is invalidated", responses: {"200": {description: Reveal-once, content: {application/json: {schema: {type: object, properties: {codes: {type: array, items: {type: string}}}}}}}}}
+  /me:
+    delete:
+      tags: [account]
+      operationId: deleteAccount
+      summary: "Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time."
+      responses:
+        "202": {description: "Deletion scheduled; grace window before purge"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+  /orgs/{org}/leave:
+    parameters: [{$ref: "#/components/parameters/org"}]
+    post:
+      tags: [orgs]
+      operationId: leaveOrg
+      summary: "Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6)."
+      responses:
+        "204": {description: "Left the organization"}
+        "409": {$ref: "#/components/responses/Conflict"}
+
   /me/sessions:
     get: {tags: [account], operationId: listSessions, summary: "P-series security page: device, last-seen, current flag", responses: {"200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/SessionList"}}}}}}
   /me/sessions/{ses}:
