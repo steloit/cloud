@@ -69,3 +69,16 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Letting an execution model change silently under a Product, or migrating one without a visible, priced,
   consented estimate (ADR-040: the Composer proposes; the accepted estimate is the contract).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.
+- **Never hand-append to a committed raw evidence log.** If an ad-hoc command produced the number
+  (a diagnosis mid-spike), the fix is: commit the producing command as a script/manifest, and record
+  line-by-line provenance (results/PROVENANCE.md) — an unattributed append to a "raw" log defeats
+  the entire point of committing evidence, and reviewers WILL catch the timestamp/format seams (T1.0).
+- **A findings ADR that changes frozen text is a formal delta, not a reinterpretation.** If
+  architecture.md/00-sources literally name the thing you're replacing, propose the amendment text
+  (the ADR-0003→A4 precedent) — never claim "no delta because the semantic contract is unchanged";
+  the catalog-plane "execution models are replaceable" language does not apply to founder-ratified
+  infrastructure decisions (T1.0 review C1).
+- **Spike kits need a committed idempotent teardown with evidence.** In-cluster cleanup + "I deleted
+  it in the console/session" is not teardown: commit a script that is safe to re-run (waits for PVC
+  reclaim before cluster delete, removes bucket-IAM tombstones of deleted SAs, ends with an orphan
+  sweep) and commit its output as the $0-state proof (T1.0 QA review).
