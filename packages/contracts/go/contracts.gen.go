@@ -2805,8 +2805,11 @@ type Token struct {
 	Id         string     `json:"id"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	Scope      TokenScope `json:"scope"`
+
+	// Permissions org keys: the granted matrix-permission subset (ADR-0007)
+	Permissions *[]string  `json:"permissions,omitempty"`
+	Prefix      string     `json:"prefix"`
+	Scope       TokenScope `json:"scope"`
 }
 
 // TokenScope defines model for Token.Scope.
@@ -2834,7 +2837,10 @@ type TokenCreatedShownOnce bool
 type TokenInput struct {
 	ExpiresInDays *TokenInputExpiresInDays `json:"expires_in_days,omitempty"`
 	Name          string                   `json:"name"`
-	Scope         *TokenInputScope         `json:"scope,omitempty"`
+
+	// Permissions org API keys ONLY (ADR-0007): the explicit least-privilege subset of matrix permissions this key may exercise (e.g. deploy.promote, observe.read). Required and non-empty for createApiKey; ignored for personal tokens (which act as their user). Each must be a canonical matrix permission; keys never grant outside this list.
+	Permissions *[]string        `json:"permissions,omitempty"`
+	Scope       *TokenInputScope `json:"scope,omitempty"`
 }
 
 // TokenInputExpiresInDays defines model for TokenInput.ExpiresInDays.
@@ -4043,6 +4049,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /orgs/{org}/api-keys (the `CreateApiKey` operationId).
 	CreateApiKey(ctx context.Context, orgPathParam OrgPathParam, body CreateApiKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RevokeApiKey Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+	//
+	// Corresponds with DELETE /orgs/{org}/api-keys/{key} (the `RevokeApiKey` operationId).
+	RevokeApiKey(ctx context.Context, orgPathParam OrgPathParam, key string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	//
@@ -5814,6 +5825,21 @@ func (c *Client) CreateApiKeyWithBody(ctx context.Context, orgPathParam OrgPathP
 // Corresponds with POST /orgs/{org}/api-keys (the `CreateApiKey` operationId).
 func (c *Client) CreateApiKey(ctx context.Context, orgPathParam OrgPathParam, body CreateApiKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateApiKeyRequest(c.Server, orgPathParam, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RevokeApiKey Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+//
+// Corresponds with DELETE /orgs/{org}/api-keys/{key} (the `RevokeApiKey` operationId).
+func (c *Client) RevokeApiKey(ctx context.Context, orgPathParam OrgPathParam, key string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokeApiKeyRequest(c.Server, orgPathParam, key)
 	if err != nil {
 		return nil, err
 	}
@@ -9571,6 +9597,47 @@ func NewCreateApiKeyRequestWithBody(server string, orgPathParam OrgPathParam, co
 	return req, nil
 }
 
+// NewRevokeApiKeyRequest constructs an http.Request for the RevokeApiKey method
+func NewRevokeApiKeyRequest(server string, orgPathParam OrgPathParam, key string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "key", key, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/api-keys/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListAuditEventsRequest constructs an http.Request for the ListAuditEvents method
 func NewListAuditEventsRequest(server string, orgPathParam OrgPathParam, params *ListAuditEventsParams) (*http.Request, error) {
 	var err error
@@ -12811,6 +12878,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /orgs/{org}/api-keys (the `CreateApiKey` operationId).
 	CreateApiKeyWithResponse(ctx context.Context, orgPathParam OrgPathParam, body CreateApiKeyJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateApiKeyResponse, error)
 
+	// RevokeApiKeyWithResponse Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /orgs/{org}/api-keys/{key} (the `RevokeApiKey` operationId).
+	RevokeApiKeyWithResponse(ctx context.Context, orgPathParam OrgPathParam, key string, reqEditors ...RequestEditorFn) (*RevokeApiKeyResponse, error)
+
 	// ListAuditEventsWithResponse Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -15793,6 +15867,40 @@ func (r CreateApiKeyResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreateApiKeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RevokeApiKeyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r RevokeApiKeyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokeApiKeyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokeApiKeyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevokeApiKeyResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -19443,6 +19551,19 @@ func (c *ClientWithResponses) CreateApiKeyWithResponse(ctx context.Context, orgP
 	return ParseCreateApiKeyResponse(rsp)
 }
 
+// RevokeApiKeyWithResponse Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /orgs/{org}/api-keys/{key} (the `RevokeApiKey` operationId).
+func (c *ClientWithResponses) RevokeApiKeyWithResponse(ctx context.Context, orgPathParam OrgPathParam, key string, reqEditors ...RequestEditorFn) (*RevokeApiKeyResponse, error) {
+	rsp, err := c.RevokeApiKey(ctx, orgPathParam, key, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokeApiKeyResponse(rsp)
+}
+
 // ListAuditEventsWithResponse Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -22003,6 +22124,22 @@ func ParseCreateApiKeyResponse(rsp *http.Response) (*CreateApiKeyResponse, error
 		}
 		response.JSON201 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseRevokeApiKeyResponse parses an HTTP response from a RevokeApiKeyWithResponse call
+func ParseRevokeApiKeyResponse(rsp *http.Response) (*RevokeApiKeyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokeApiKeyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil

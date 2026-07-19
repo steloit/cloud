@@ -965,6 +965,15 @@ paths:
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/TokenList"}}}}
 
+  /orgs/{org}/api-keys/{key}:
+    parameters: [{$ref: "#/components/parameters/org"}, {name: key, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [governance]
+      operationId: revokeApiKey
+      summary: "Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit."
+      responses:
+        "204": {description: Revoked}
+
   /orgs/{org}/billing/overview:
     parameters: [{$ref: "#/components/parameters/org"}]
     get:
@@ -1637,6 +1646,7 @@ components:
         name: {type: string}
         scope: {type: string, enum: [full, read_only], default: read_only}
         expires_in_days: {type: integer, enum: [30, 60, 90, 365], default: 90}
+        permissions: {type: array, items: {type: string}, description: "org API keys ONLY (ADR-0007): the explicit least-privilege subset of matrix permissions this key may exercise (e.g. deploy.promote, observe.read). Required and non-empty for createApiKey; ignored for personal tokens (which act as their user). Each must be a canonical matrix permission; keys never grant outside this list."}
     TokenCreated:
       type: object
       required: [id, token, shown_once, prefix, hash_stored]
@@ -1651,6 +1661,7 @@ components:
       type: object
       required: [id, name, prefix, scope]
       properties:
+        permissions: {type: array, items: {type: string}, description: "org keys: the granted matrix-permission subset (ADR-0007)"}
         id: {type: string}
         name: {type: string}
         prefix: {type: string}

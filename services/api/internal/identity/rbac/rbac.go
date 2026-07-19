@@ -168,3 +168,20 @@ func (e *Evaluator) Check(ctx context.Context, role Role, perm Permission, scope
 	}
 	return Decision{Allowed: true}
 }
+
+// Known / Delegated expose the matrix predicates for principal types that
+// authorize outside the role model (org keys — ADR-0007) but must still honor
+// the same deny-by-default and delegated-permission rules.
+func (e *Evaluator) Known(perm Permission) bool     { return e.matrix.Known(perm) }
+func (e *Evaluator) Delegated(perm Permission) bool { return e.matrix.Delegated(perm) }
+
+// CheckPolicies runs ONLY the narrowing layer (no role/ceiling): for a
+// principal whose ceiling is its own granted subset (an org key), policies
+// still tighten. The policy layer is role-agnostic in practice; "" is passed
+// where a role would be. Permit when no layer is registered.
+func (e *Evaluator) CheckPolicies(ctx context.Context, perm Permission, scope Scope) Decision {
+	if e.policies == nil {
+		return Decision{Allowed: true}
+	}
+	return e.policies.Evaluate(ctx, Role(""), perm, scope)
+}

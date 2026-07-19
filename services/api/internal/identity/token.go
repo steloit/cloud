@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -77,7 +78,9 @@ func (s *Service) RevokePersonalToken(ctx context.Context, userID, tokenID strin
 // reveal-once/hash contract, same secret prefix as personal tokens (a
 // distinct display prefix is an S-process candidate, noted in T2.7's PR).
 // actorID is the creating user; the creation lands on the spine (US-2.5).
-func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope, actorID string, expiresInDays int) (MintedToken, error) {
+// permissions is the explicit least-privilege subset (ADR-0007), pre-validated
+// against the matrix by the caller.
+func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope, actorID string, permissions []string, expiresInDays int) (MintedToken, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return MintedToken{}, fmt.Errorf("identity: token entropy: %w", err)
@@ -85,24 +88,35 @@ func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope, actorID st
 	secret := personalTokenPrefix + hex.EncodeToString(b)
 	expires := s.now().AddDate(0, 0, expiresInDays)
 	row, err := s.q.CreateToken(ctx, store.CreateTokenParams{
-		ID:        ids.New("tok"),
-		Kind:      "org",
-		OrgID:     pgtype.Text{String: orgID, Valid: true},
-		Name:      name,
-		Scope:     scope,
-		Prefix:    secret[:prefixLen],
-		TokenHash: session.HashToken(secret),
-		ExpiresAt: tstz(expires),
+		ID:          ids.New("tok"),
+		Kind:        "org",
+		OrgID:       pgtype.Text{String: orgID, Valid: true},
+		Name:        name,
+		Scope:       scope,
+		Prefix:      secret[:prefixLen],
+		TokenHash:   session.HashToken(secret),
+		ExpiresAt:   tstz(expires),
+		Permissions: permissions,
 	})
 	if err != nil {
 		return MintedToken{}, fmt.Errorf("identity: create org key: %w", err)
 	}
+	permJSON, _ := json.Marshal(permissions)
 	s.record(ctx, events.Input{
 		OrgID: orgID, Kind: "lifecycle", Via: "user", Actor: actorID,
 		Action: "api_key.created", Subject: row.ID,
-		Detail: []byte(`{"name":` + strconv.Quote(name) + `,"scope":` + strconv.Quote(scope) + `}`),
+		Detail: []byte(`{"name":` + strconv.Quote(name) + `,"permissions":` + string(permJSON) + `}`),
 	})
 	return MintedToken{Row: row, Secret: secret}, nil
+}
+
+// RevokeOrgKey revokes an org key scoped to its org (cross-org id → not found).
+func (s *Service) RevokeOrgKey(ctx context.Context, orgID, keyID string) (bool, error) {
+	n, err := s.q.RevokeOrgKey(ctx, store.RevokeOrgKeyParams{ID: keyID, OrgID: pgtype.Text{String: orgID, Valid: true}})
+	if err != nil {
+		return false, fmt.Errorf("identity: revoke org key: %w", err)
+	}
+	return n > 0, nil
 }
 
 func (s *Service) ListOrgKeys(ctx context.Context, orgID string) ([]store.Token, error) {
@@ -124,6 +138,12 @@ func (s *Service) ResolveBearer(ctx context.Context, secret string) (session.Pri
 	p := session.Principal{Kind: "token", TokenID: row.ID, Scope: row.Scope, CreatedAt: row.CreatedAt.Time}
 	if row.UserID.Valid {
 		p.UserID = row.UserID.String
+	}
+	// Org keys carry their granted permission subset + org scope (ADR-0007):
+	// they authorize against this list directly, never a membership role.
+	if row.OrgID.Valid {
+		p.OrgID = row.OrgID.String
+		p.Permissions = row.Permissions
 	}
 	return p, nil
 }

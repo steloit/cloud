@@ -93,7 +93,16 @@ type Principal struct {
 	Device     string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+
+	// Org-key principals (ADR-0007): a token with no user, bound to an org,
+	// authorizing against an explicit permission subset instead of a role.
+	OrgID       string   // set for org-key principals
+	Permissions []string // the granted matrix-permission subset (org keys only)
 }
+
+// IsOrgKey reports whether this is an org-key principal (no user identity;
+// authorizes against its own permission list, not membership).
+func (p Principal) IsOrgKey() bool { return p.Kind == "token" && p.UserID == "" && p.OrgID != "" }
 
 type principalKey struct{}
 

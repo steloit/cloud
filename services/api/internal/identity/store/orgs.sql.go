@@ -313,7 +313,7 @@ func (q *Queries) ListMembers(ctx context.Context, orgID string) ([]ListMembersR
 }
 
 const listOrgTokens = `-- name: ListOrgTokens :many
-SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
+SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at, permissions FROM tokens
 WHERE kind = 'org' AND org_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC
 `
@@ -340,6 +340,7 @@ func (q *Queries) ListOrgTokens(ctx context.Context, orgID pgtype.Text) ([]Token
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.Permissions,
 		); err != nil {
 			return nil, err
 		}

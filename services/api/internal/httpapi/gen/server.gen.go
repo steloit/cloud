@@ -112,6 +112,9 @@ type ServerInterface interface {
 	// CreateApiKey Org automation keys (G8): explicit least-privilege scopes; same reveal-once/hash contract; stale keys flagged for hygiene
 	// (POST /orgs/{org}/api-keys)
 	CreateApiKey(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// RevokeApiKey Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+	// (DELETE /orgs/{org}/api-keys/{key})
+	RevokeApiKey(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, key string)
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
@@ -967,6 +970,41 @@ func (siw *ServerInterfaceWrapper) CreateApiKey(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeApiKey operation middleware
+func (siw *ServerInterfaceWrapper) RevokeApiKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeApiKey(w, r, orgPathParam, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListAuditEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -1798,6 +1836,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/tokens/{tok}", wrapper.RevokePersonalToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.ListApiKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/api-keys/{key}", wrapper.RevokeApiKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/usage", wrapper.GetUsage)
 
 	return m
@@ -2588,6 +2627,23 @@ func (response CreateApiKey201JSONResponse) VisitCreateApiKeyResponse(w http.Res
 	return err
 }
 
+type RevokeApiKeyRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Key          string       `json:"key"`
+}
+
+type RevokeApiKeyResponseObject interface {
+	VisitRevokeApiKeyResponse(w http.ResponseWriter) error
+}
+
+type RevokeApiKey204Response struct {
+}
+
+func (response RevokeApiKey204Response) VisitRevokeApiKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
 type ListAuditEventsRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 	Params       ListAuditEventsParams
@@ -3256,6 +3312,9 @@ type StrictServerInterface interface {
 	// CreateApiKey Org automation keys (G8): explicit least-privilege scopes; same reveal-once/hash contract; stale keys flagged for hygiene
 	// (POST /orgs/{org}/api-keys)
 	CreateApiKey(ctx context.Context, request CreateApiKeyRequestObject) (CreateApiKeyResponseObject, error)
+	// RevokeApiKey Revoke an org API key (G8): live requests with it stop immediately; the row survives revoked for audit.
+	// (DELETE /orgs/{org}/api-keys/{key})
+	RevokeApiKey(ctx context.Context, request RevokeApiKeyRequestObject) (RevokeApiKeyResponseObject, error)
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
@@ -4219,6 +4278,33 @@ func (sh *strictHandler) CreateApiKey(w http.ResponseWriter, r *http.Request, or
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateApiKeyResponseObject); ok {
 		if err := validResponse.VisitCreateApiKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeApiKey operation middleware
+func (sh *strictHandler) RevokeApiKey(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, key string) {
+	var request RevokeApiKeyRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeApiKey(ctx, request.(RevokeApiKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeApiKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeApiKeyResponseObject); ok {
+		if err := validResponse.VisitRevokeApiKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

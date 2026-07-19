@@ -89,21 +89,22 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const createToken = `-- name: CreateToken :one
-INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at
+INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, permissions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at, permissions
 `
 
 type CreateTokenParams struct {
-	ID        string
-	Kind      string
-	UserID    pgtype.Text
-	OrgID     pgtype.Text
-	Name      string
-	Scope     string
-	Prefix    string
-	TokenHash []byte
-	ExpiresAt pgtype.Timestamptz
+	ID          string
+	Kind        string
+	UserID      pgtype.Text
+	OrgID       pgtype.Text
+	Name        string
+	Scope       string
+	Prefix      string
+	TokenHash   []byte
+	ExpiresAt   pgtype.Timestamptz
+	Permissions []string
 }
 
 func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token, error) {
@@ -117,6 +118,7 @@ func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token
 		arg.Prefix,
 		arg.TokenHash,
 		arg.ExpiresAt,
+		arg.Permissions,
 	)
 	var i Token
 	err := row.Scan(
@@ -132,6 +134,7 @@ func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Permissions,
 	)
 	return i, err
 }
@@ -191,7 +194,7 @@ func (q *Queries) GetActiveSessionByTokenHash(ctx context.Context, tokenHash []b
 }
 
 const getActiveTokenByHash = `-- name: GetActiveTokenByHash :one
-SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
+SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at, permissions FROM tokens
 WHERE token_hash = $1 AND revoked_at IS NULL
   AND (expires_at IS NULL OR expires_at > now())
 `
@@ -212,6 +215,7 @@ func (q *Queries) GetActiveTokenByHash(ctx context.Context, tokenHash []byte) (T
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.Permissions,
 	)
 	return i, err
 }
@@ -306,7 +310,7 @@ func (q *Queries) ListActiveSessionsForUser(ctx context.Context, userID string) 
 }
 
 const listPersonalTokens = `-- name: ListPersonalTokens :many
-SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
+SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at, permissions FROM tokens
 WHERE kind = 'personal' AND user_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC
 `
@@ -333,6 +337,7 @@ func (q *Queries) ListPersonalTokens(ctx context.Context, userID pgtype.Text) ([
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.Permissions,
 		); err != nil {
 			return nil, err
 		}
@@ -461,6 +466,25 @@ func (q *Queries) RemoveOwnMembership(ctx context.Context, arg RemoveOwnMembersh
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const revokeOrgKey = `-- name: RevokeOrgKey :execrows
+UPDATE tokens SET revoked_at = now()
+WHERE id = $1 AND org_id = $2 AND kind = 'org' AND revoked_at IS NULL
+`
+
+type RevokeOrgKeyParams struct {
+	ID    string
+	OrgID pgtype.Text
+}
+
+// Org-scoped: revoking a key from another org's id is a 404 (no cross-org).
+func (q *Queries) RevokeOrgKey(ctx context.Context, arg RevokeOrgKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOrgKey, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokePersonalToken = `-- name: RevokePersonalToken :execrows

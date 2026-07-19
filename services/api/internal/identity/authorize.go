@@ -36,12 +36,25 @@ func NewAuthorizer(q *store.Queries, e *rbac.Evaluator, rec *events.Recorder) *A
 	return &Authorizer{q: q, evaluator: e, rec: rec}
 }
 
+// ValidGrantable reports whether a permission may be granted to an org key
+// (ADR-0007): a registered, non-delegated matrix permission. Delegated
+// permissions (AI Law 1) are never grantable directly.
+func (a *Authorizer) ValidGrantable(perm rbac.Permission) bool {
+	return a.evaluator.Known(perm) && !a.evaluator.Delegated(perm)
+}
+
 // Require resolves the principal's role in the scope's org and runs the
 // two-layer check. read_only bearer tokens are ceiling-limited to
 // non-mutating checks by the caller (requireUser); role logic lives here.
 // DENIALS ARE AUDITED (US-2.2 / spine contract: "grants, denials — yes,
 // denials"): every deny lands on the spine naming what denied it.
 func (a *Authorizer) Require(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope) error {
+	// ADR-0007: an org-key principal authorizes against its explicit granted
+	// permission subset (one canonical matrix vocabulary, no role, no
+	// membership) — then policies may still NARROW, never widen.
+	if p.IsOrgKey() {
+		return a.requireOrgKey(ctx, p, perm, scope)
+	}
 	role, err := a.q.GetMemberRole(ctx, store.GetMemberRoleParams{OrgID: scope.OrgID, UserID: p.UserID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -51,6 +64,38 @@ func (a *Authorizer) Require(ctx context.Context, p session.Principal, perm rbac
 	}
 	d := a.evaluator.Check(ctx, rbac.Role(role), perm, scope)
 	if !d.Allowed {
+		return a.deny(ctx, p, perm, scope, d.DeniedBy)
+	}
+	return nil
+}
+
+// requireOrgKey authorizes a service-principal against its granted subset.
+// The key's org must match the scope; the permission must be in the key's
+// list AND be a real, non-delegated matrix permission (deny-by-default for
+// unknown or delegated perms, exactly as for roles); then policies narrow.
+func (a *Authorizer) requireOrgKey(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope) error {
+	if scope.OrgID == "" || scope.OrgID != p.OrgID {
+		return a.deny(ctx, p, perm, scope, "key:scoped to a different organization")
+	}
+	if a.evaluator.Delegated(perm) {
+		return a.deny(ctx, p, perm, scope,
+			fmt.Sprintf("permission:%s is evaluated per underlying action — check that permission instead (AI Law 1)", perm))
+	}
+	if !a.evaluator.Known(perm) {
+		return a.deny(ctx, p, perm, scope, fmt.Sprintf("permission:%s is not registered in the matrix", perm))
+	}
+	granted := false
+	for _, g := range p.Permissions {
+		if rbac.Permission(g) == perm {
+			granted = true
+			break
+		}
+	}
+	if !granted {
+		return a.deny(ctx, p, perm, scope, fmt.Sprintf("key:not granted %s (least-privilege — add it to the key's scope)", perm))
+	}
+	// policies still apply (tighten-only) to service principals
+	if d := a.evaluator.CheckPolicies(ctx, perm, scope); !d.Allowed {
 		return a.deny(ctx, p, perm, scope, d.DeniedBy)
 	}
 	return nil
