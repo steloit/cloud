@@ -91,10 +91,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, evt store.Event) error {
 		return err
 	}
 	if recipient == "" {
-		return nil // nothing to send to
+		// Nothing to send (vanished invite / missing org). Record a TERMINAL
+		// skipped row so the event drops out of the scan — otherwise the outbox
+		// re-resolves it every poll and can starve newer mail (poison-event).
+		return d.q.RecordSkippedDelivery(ctx, store.RecordSkippedDeliveryParams{
+			ID: ids.New("eml"), EventID: evt.ID, OrgID: nullText(orgID),
+			Recipient: "(skipped)", Template: rule.Template.Name,
+			TemplateVersion: int32(rule.Template.Version), Provider: d.provider.Name(),
+		})
 	}
 
-	// Claim first: the idempotency gate. No id back ⇒ already delivered.
+	// Claim first as `pending` (written BEFORE the send): the idempotency gate.
+	// No id back ⇒ already sent/skipped or retries exhausted ⇒ skip.
 	id, err := d.q.ClaimEmailDelivery(ctx, store.ClaimEmailDeliveryParams{
 		ID: ids.New("eml"), EventID: evt.ID, OrgID: nullText(orgID),
 		Recipient: recipient, Template: rule.Template.Name,
@@ -104,7 +112,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, evt store.Event) error {
 		return err
 	}
 	if id == "" {
-		return nil // already claimed/delivered for this event+recipient
+		return nil // already delivered/terminal, or retries exhausted
 	}
 
 	subject, html, text := rule.Template.Render(data)

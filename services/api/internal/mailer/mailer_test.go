@@ -25,6 +25,22 @@ func TestInviteTemplateRenders(t *testing.T) {
 	}
 }
 
+// A crafted org name must NOT inject markup into the HTML body (phishing from a
+// trusted sender). The plain-text body is inert and left unescaped.
+func TestInviteTemplateEscapesHTML(t *testing.T) {
+	_, htmlBody, _ := inviteTemplate.Render(map[string]string{
+		"org":        `"><a href="https://evil.example">Reset</a>`,
+		"role":       "<img src=x onerror=alert(1)>",
+		"accept_url": "https://c/invite/inv_1",
+	})
+	if strings.Contains(htmlBody, "<a href=\"https://evil.example\"") || strings.Contains(htmlBody, "<img src=x") {
+		t.Fatalf("HTML injection not escaped: %q", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "&lt;") && !strings.Contains(htmlBody, "&gt;") && !strings.Contains(htmlBody, "&#34;") {
+		t.Fatalf("expected escaped entities in: %q", htmlBody)
+	}
+}
+
 // The registry IS the event→template map: only listed actions send mail.
 func TestRegistryIsTheEventMap(t *testing.T) {
 	reg := registry()

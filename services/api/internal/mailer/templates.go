@@ -2,6 +2,7 @@ package mailer
 
 import (
 	"context"
+	"html"
 
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
@@ -42,13 +43,19 @@ var inviteTemplate = Template{
 	Name:    "org-invite",
 	Version: 1,
 	render: func(d map[string]string) (string, string, string) {
-		subject := "You've been invited to " + d["org"] + " on Steloit"
-		text := "You've been invited to join " + d["org"] + " as " + d["role"] + ".\n\n" +
-			"Accept: " + d["accept_url"] + "\n\nThis invitation expires in 7 days."
-		html := "<p>You've been invited to join <strong>" + d["org"] + "</strong> as " + d["role"] + ".</p>" +
-			`<p><a href="` + d["accept_url"] + `">Accept the invitation</a></p>` +
+		// org/role are free-form user input (an org can be renamed to arbitrary
+		// text). The plain-text subject/body are inert; the HTML body MUST
+		// escape every interpolated value or a crafted org name injects markup
+		// into an email sent from a trusted domain (phishing).
+		org, role, url := d["org"], d["role"], d["accept_url"]
+		eOrg, eRole, eURL := html.EscapeString(org), html.EscapeString(role), html.EscapeString(url)
+		subject := "You've been invited to " + org + " on Steloit"
+		text := "You've been invited to join " + org + " as " + role + ".\n\n" +
+			"Accept: " + url + "\n\nThis invitation expires in 7 days."
+		htmlBody := "<p>You've been invited to join <strong>" + eOrg + "</strong> as " + eRole + ".</p>" +
+			`<p><a href="` + eURL + `">Accept the invitation</a></p>` +
 			"<p>This invitation expires in 7 days.</p>"
-		return subject, html, text
+		return subject, htmlBody, text
 	},
 }
 

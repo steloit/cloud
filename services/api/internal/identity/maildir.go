@@ -36,6 +36,9 @@ func (m *MailDirectory) InviteEmail(ctx context.Context, inviteID string) (recip
 	}
 	org, err := m.q.GetOrg(ctx, inv.OrgID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil, nil // org gone → skip, never a poison-pill error
+		}
 		return "", "", nil, err
 	}
 	data = map[string]string{

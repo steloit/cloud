@@ -13,9 +13,12 @@ import (
 
 const claimEmailDelivery = `-- name: ClaimEmailDelivery :one
 
-INSERT INTO email_deliveries (id, event_id, org_id, recipient, template, template_version, provider, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7, 'sent')
-ON CONFLICT (event_id, recipient) DO NOTHING
+INSERT INTO email_deliveries (id, event_id, org_id, recipient, template, template_version, provider, status, attempts)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 1)
+ON CONFLICT (event_id, recipient) DO UPDATE
+    SET status = 'pending', attempts = email_deliveries.attempts + 1, updated_at = now()
+    WHERE email_deliveries.status NOT IN ('sent', 'skipped')
+      AND email_deliveries.attempts < 5
 RETURNING id
 `
 
@@ -29,10 +32,13 @@ type ClaimEmailDeliveryParams struct {
 	Provider        string
 }
 
-// T10.4: the email delivery ledger (idempotent by event_id + recipient).
-// Claim the (event, recipient) pair BEFORE sending: if a row already exists
-// (the event was re-processed), no id is returned and the caller skips the send
-// — the claim is the idempotency gate, the UNIQUE constraint the backstop.
+// T10.4: the email delivery ledger + durable outbox (idempotent, bounded retry).
+// Claim the (event, recipient) as `pending` BEFORE sending — the row is written
+// first so a crash mid-send leaves an honest reclaimable pending, never a
+// phantom sent. Reclaims a prior pending/failed (crash recovery / transient
+// retry), bumping attempts; a `sent`/`skipped` row is terminal (no id → skip),
+// and attempts are capped so a permanent failure dead-letters instead of
+// hot-looping. Single-writer per (event,recipient) via the UNIQUE constraint.
 func (q *Queries) ClaimEmailDelivery(ctx context.Context, arg ClaimEmailDeliveryParams) (string, error) {
 	row := q.db.QueryRow(ctx, claimEmailDelivery,
 		arg.ID,
@@ -49,7 +55,7 @@ func (q *Queries) ClaimEmailDelivery(ctx context.Context, arg ClaimEmailDelivery
 }
 
 const getEmailDelivery = `-- name: GetEmailDelivery :one
-SELECT id, event_id, org_id, recipient, template, template_version, status, provider, provider_id, error, created_at FROM email_deliveries WHERE event_id = $1 AND recipient = $2
+SELECT id, event_id, org_id, recipient, template, template_version, status, attempts, provider, provider_id, error, created_at, updated_at FROM email_deliveries WHERE event_id = $1 AND recipient = $2
 `
 
 type GetEmailDeliveryParams struct {
@@ -68,10 +74,12 @@ func (q *Queries) GetEmailDelivery(ctx context.Context, arg GetEmailDeliveryPara
 		&i.Template,
 		&i.TemplateVersion,
 		&i.Status,
+		&i.Attempts,
 		&i.Provider,
 		&i.ProviderID,
 		&i.Error,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -79,14 +87,16 @@ func (q *Queries) GetEmailDelivery(ctx context.Context, arg GetEmailDeliveryPara
 const listPendingMailEvents = `-- name: ListPendingMailEvents :many
 SELECT e.id, e.org_id, e.kind, e.via, e.actor, e.action, e.subject, e.at, e.detail FROM events e
 LEFT JOIN email_deliveries d ON d.event_id = e.id
-WHERE e.action = ANY($1::text[]) AND d.id IS NULL
+WHERE e.action = ANY($1::text[])
+  AND (d.id IS NULL OR (d.status NOT IN ('sent', 'skipped') AND d.attempts < 5))
 ORDER BY e.at ASC
 LIMIT 100
 `
 
-// The durable outbox scan: spine events whose action triggers mail but which
-// have no delivery yet. The spine + delivery ledger ARE the outbox — no row is
-// lost on restart, and Dispatch is idempotent, so re-scanning is safe.
+// The durable outbox scan: spine events whose action triggers mail and which
+// have no TERMINAL delivery (sent/skipped) and are not a dead-lettered failure
+// (attempts exhausted). Pending (crashed mid-send) and transient-failed rows are
+// reclaimed; the spine + ledger ARE the outbox, so nothing is lost on restart.
 func (q *Queries) ListPendingMailEvents(ctx context.Context, actions []string) ([]Event, error) {
 	rows, err := q.db.Query(ctx, listPendingMailEvents, actions)
 	if err != nil {
@@ -118,7 +128,7 @@ func (q *Queries) ListPendingMailEvents(ctx context.Context, actions []string) (
 }
 
 const markEmailDeliveryFailed = `-- name: MarkEmailDeliveryFailed :exec
-UPDATE email_deliveries SET status = 'failed', error = $2 WHERE id = $1
+UPDATE email_deliveries SET status = 'failed', error = $2, updated_at = now() WHERE id = $1
 `
 
 type MarkEmailDeliveryFailedParams struct {
@@ -132,7 +142,7 @@ func (q *Queries) MarkEmailDeliveryFailed(ctx context.Context, arg MarkEmailDeli
 }
 
 const markEmailDeliverySent = `-- name: MarkEmailDeliverySent :exec
-UPDATE email_deliveries SET status = 'sent', provider_id = $2, error = NULL WHERE id = $1
+UPDATE email_deliveries SET status = 'sent', provider_id = $2, error = NULL, updated_at = now() WHERE id = $1
 `
 
 type MarkEmailDeliverySentParams struct {
@@ -142,5 +152,36 @@ type MarkEmailDeliverySentParams struct {
 
 func (q *Queries) MarkEmailDeliverySent(ctx context.Context, arg MarkEmailDeliverySentParams) error {
 	_, err := q.db.Exec(ctx, markEmailDeliverySent, arg.ID, arg.ProviderID)
+	return err
+}
+
+const recordSkippedDelivery = `-- name: RecordSkippedDelivery :exec
+INSERT INTO email_deliveries (id, event_id, org_id, recipient, template, template_version, provider, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'skipped')
+ON CONFLICT (event_id, recipient) DO NOTHING
+`
+
+type RecordSkippedDeliveryParams struct {
+	ID              string
+	EventID         string
+	OrgID           pgtype.Text
+	Recipient       string
+	Template        string
+	TemplateVersion int32
+	Provider        string
+}
+
+// Terminal "nothing to send" (vanished invite / missing org) so the event drops
+// out of the scan instead of being re-resolved every poll (poison-event guard).
+func (q *Queries) RecordSkippedDelivery(ctx context.Context, arg RecordSkippedDeliveryParams) error {
+	_, err := q.db.Exec(ctx, recordSkippedDelivery,
+		arg.ID,
+		arg.EventID,
+		arg.OrgID,
+		arg.Recipient,
+		arg.Template,
+		arg.TemplateVersion,
+		arg.Provider,
+	)
 	return err
 }

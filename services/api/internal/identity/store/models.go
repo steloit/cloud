@@ -48,10 +48,12 @@ type EmailDelivery struct {
 	Template        string
 	TemplateVersion int32
 	Status          string
+	Attempts        int32
 	Provider        string
 	ProviderID      pgtype.Text
 	Error           pgtype.Text
 	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type Environment struct {
