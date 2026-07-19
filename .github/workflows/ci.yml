@@ -15,6 +15,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Task files valid (schema, deps, caps)
         run: node scripts/spec-sync/validate.mjs
+      - name: Client regeneration drift (type drift fails the build — Q3/§17)
+        run: |
+          make gen-ts
+          git diff --exit-code -- apps packages docs
       - name: Console lint + typecheck + tests + build
         run: |
           pnpm --filter console lint
