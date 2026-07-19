@@ -21,6 +21,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/quota"
 )
 
 const inviteTTLDays = 7
@@ -85,8 +86,13 @@ func (s *Service) CreateInvite(ctx context.Context, orgID, email, role, inviterI
 	if err != nil {
 		return store.Invite{}, err
 	}
-	if seats.Used >= seats.Included && !confirm {
-		return store.Invite{}, SeatOverageError{PriceCents: int64(seats.OveragePriceCents)}
+	// Seats are a SOFT quota: adding a member over the plan allowance proceeds
+	// only with confirm=true and the price shown — the T11.5 evaluator decides,
+	// so soft-quota behaviour is identical to every other metered limit.
+	seatDecision := quota.Evaluate(quota.Soft, int64(seats.Included), int64(seats.Used), 1,
+		int64(seats.OveragePriceCents), confirm)
+	if seatDecision.SoftBlocked {
+		return store.Invite{}, SeatOverageError{PriceCents: seatDecision.OveragePriceCents}
 	}
 
 	id, err := newInviteID()
@@ -107,7 +113,9 @@ func (s *Service) CreateInvite(ctx context.Context, orgID, email, role, inviterI
 	s.record(ctx, events.Input{
 		OrgID: orgID, Kind: "membership", Via: "user", Actor: inviterID,
 		Action: "invite.created", Subject: inv.ID,
-		Detail: []byte(`{"role":` + strconv.Quote(role) + `,"confirmed_overage":` + strconv.FormatBool(seats.Used >= seats.Included) + `}`),
+		// the evaluator is the single source of truth for whether this crossed
+		// into overage — never re-derive the threshold (correct for unlimited seats).
+		Detail: []byte(`{"role":` + strconv.Quote(role) + `,"confirmed_overage":` + strconv.FormatBool(seatDecision.OverageConfirmed) + `}`),
 	})
 	return inv, nil
 }
