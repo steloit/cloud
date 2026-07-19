@@ -136,6 +136,9 @@ type ServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
+	// ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
+	// (GET /orgs/{org}/billing/invoices)
+	ListInvoices(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params GetUsageParams)
@@ -1187,6 +1190,32 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListInvoices operation middleware
+func (siw *ServerInterfaceWrapper) ListInvoices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInvoices(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetUsage operation middleware
 func (siw *ServerInterfaceWrapper) GetUsage(w http.ResponseWriter, r *http.Request) {
 
@@ -2082,6 +2111,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/api-keys/{key}", wrapper.RevokeApiKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/usage", wrapper.GetUsage)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/invoices", wrapper.ListInvoices)
 
 	return m
 }
@@ -3021,6 +3051,28 @@ func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w ht
 	return err
 }
 
+type ListInvoicesRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListInvoicesResponseObject interface {
+	VisitListInvoicesResponse(w http.ResponseWriter) error
+}
+
+type ListInvoices200JSONResponse InvoiceList
+
+func (response ListInvoices200JSONResponse) VisitListInvoicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetUsageRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 	Params       GetUsageParams
@@ -3837,6 +3889,9 @@ type StrictServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// ListInvoices An invoice is data, not just a PDF (B3): every line expands to the usage rows behind it, queryable forever
+	// (GET /orgs/{org}/billing/invoices)
+	ListInvoices(ctx context.Context, request ListInvoicesRequestObject) (ListInvoicesResponseObject, error)
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(ctx context.Context, request GetUsageRequestObject) (GetUsageResponseObject, error)
@@ -5028,6 +5083,32 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInvoices operation middleware
+func (sh *strictHandler) ListInvoices(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListInvoicesRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInvoices(ctx, request.(ListInvoicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInvoices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInvoicesResponseObject); ok {
+		if err := validResponse.VisitListInvoicesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

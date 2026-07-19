@@ -283,3 +283,9 @@ func (s *Service) ScheduleAccountDeletion(ctx context.Context, userID string) (o
 	}
 	return memberOrgs, nil, nil
 }
+
+// ListInvoices reads an org's invoices (T11.3; billing.view). The generator
+// (internal/invoice) writes them; this is the B3 read surface.
+func (s *Service) ListInvoices(ctx context.Context, orgID string) ([]store.Invoice, error) {
+	return s.q.ListInvoices(ctx, orgID)
+}
