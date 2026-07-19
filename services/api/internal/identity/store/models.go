@@ -216,18 +216,19 @@ type Subscription struct {
 }
 
 type Token struct {
-	ID         string
-	Kind       string
-	UserID     pgtype.Text
-	OrgID      pgtype.Text
-	Name       string
-	Scope      string
-	Prefix     string
-	TokenHash  []byte
-	ExpiresAt  pgtype.Timestamptz
-	LastUsedAt pgtype.Timestamptz
-	CreatedAt  pgtype.Timestamptz
-	RevokedAt  pgtype.Timestamptz
+	ID          string
+	Kind        string
+	UserID      pgtype.Text
+	OrgID       pgtype.Text
+	Name        string
+	Scope       string
+	Prefix      string
+	TokenHash   []byte
+	ExpiresAt   pgtype.Timestamptz
+	LastUsedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
+	Permissions []string
 }
 
 type UsageEvent struct {

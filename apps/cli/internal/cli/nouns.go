@@ -35,6 +35,9 @@ func init() {
 	register("token", "create", "personal token — shown exactly once", runTokenCreate)
 	register("token", "list", "your tokens (prefix + metadata only)", runTokenList)
 	register("token", "revoke", "revoke a token by id", runTokenRevoke)
+	register("key", "create", "org API key — explicit --permissions (least-privilege), shown once", runKeyCreate)
+	register("key", "list", "org API keys (prefix + granted permissions)", runKeyList)
+	register("key", "revoke", "revoke an org API key by id", runKeyRevoke)
 	register("events", "", "the env's event spine (deploy markers included)", runEvents)
 	register("logs", "", "query logs (shared query grammar)", runLogs)
 	register("dev", "", "local dev with injected config (arrives with E4)", runDevStub)
@@ -773,6 +776,124 @@ func runTokenRevoke(inv *Invocation) int {
 		return inv.fail(resp.Body, resp.HTTPResponse)
 	}
 	fmt.Fprintln(inv.Stdout, "✓ revoked — live requests with it stop now")
+	return ExitOK
+}
+
+// ---- org API keys (G8 / ADR-0007) -------------------------------------------
+
+func runKeyCreate(inv *Invocation) int {
+	c, code := inv.client()
+	if code != ExitOK {
+		return code
+	}
+	org, code := inv.needOrg()
+	if code != ExitOK {
+		return code
+	}
+	if len(inv.Args) == 0 {
+		fmt.Fprintln(inv.Stderr, "\u2715 usage: steloit key create <name> --permissions <p1,p2,\u2026> [--scope read_only|full]")
+		return ExitUsage
+	}
+	permsFlag := inv.Flags["permissions"]
+	if permsFlag == "" {
+		fmt.Fprintln(inv.Stderr, "\u2715 an org key grants only the permissions you list \u2014 pass --permissions <matrix perms> (least-privilege, ADR-0007)")
+		return ExitUsage
+	}
+	var perms []string
+	for _, part := range strings.Split(permsFlag, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			perms = append(perms, p)
+		}
+	}
+	if len(perms) == 0 {
+		fmt.Fprintln(inv.Stderr, "\u2715 --permissions listed no permissions")
+		return ExitUsage
+	}
+	body := contracts.CreateApiKeyJSONRequestBody{Name: inv.Args[0], Permissions: &perms}
+	if s := inv.Flags["scope"]; s != "" {
+		scope := contracts.TokenInputScope(s)
+		body.Scope = &scope
+	}
+	resp, err := c.CreateApiKeyWithResponse(context.Background(), org, body)
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if resp.JSON201 == nil {
+		return inv.fail(resp.Body, resp.HTTPResponse)
+	}
+	if inv.JSON() {
+		output.RawJSON(inv.Stdout, resp.Body)
+		return ExitOK
+	}
+	fmt.Fprintln(inv.Stdout, resp.JSON201.Token)
+	fmt.Fprintln(inv.Stderr, "shown once \u2014 we store only a hash; copy it now")
+	return ExitOK
+}
+
+func runKeyList(inv *Invocation) int {
+	c, code := inv.client()
+	if code != ExitOK {
+		return code
+	}
+	org, code := inv.needOrg()
+	if code != ExitOK {
+		return code
+	}
+	resp, err := c.ListApiKeysWithResponse(context.Background(), org)
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if resp.JSON200 == nil {
+		return inv.fail(resp.Body, resp.HTTPResponse)
+	}
+	if inv.JSON() {
+		output.RawJSON(inv.Stdout, resp.Body)
+		return ExitOK
+	}
+	tab := output.NewTable("ID", "NAME", "PREFIX", "PERMISSIONS")
+	var ids []string
+	if resp.JSON200.Data != nil {
+		for _, k := range *resp.JSON200.Data {
+			perms := ""
+			if k.Permissions != nil {
+				perms = strings.Join(*k.Permissions, " ")
+			}
+			tab.Row(k.Id, k.Name, k.Prefix, perms)
+			ids = append(ids, k.Id)
+		}
+	}
+	if inv.Quiet() {
+		output.Quiet(inv.Stdout, ids...)
+		return ExitOK
+	}
+	tab.Write(inv.Stdout)
+	return ExitOK
+}
+
+func runKeyRevoke(inv *Invocation) int {
+	c, code := inv.client()
+	if code != ExitOK {
+		return code
+	}
+	org, code := inv.needOrg()
+	if code != ExitOK {
+		return code
+	}
+	if len(inv.Args) == 0 {
+		fmt.Fprintln(inv.Stderr, "\u2715 usage: steloit key revoke <key_id>")
+		return ExitUsage
+	}
+	resp, err := c.RevokeApiKeyWithResponse(context.Background(), org, inv.Args[0])
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if resp.HTTPResponse == nil || resp.HTTPResponse.StatusCode != 204 {
+		return inv.fail(resp.Body, resp.HTTPResponse)
+	}
+	fmt.Fprintln(inv.Stdout, "\u2713 revoked \u2014 live requests with it stop now")
 	return ExitOK
 }
 

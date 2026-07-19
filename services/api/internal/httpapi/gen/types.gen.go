@@ -2796,8 +2796,11 @@ type Token struct {
 	Id         string     `json:"id"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Name       string     `json:"name"`
-	Prefix     string     `json:"prefix"`
-	Scope      TokenScope `json:"scope"`
+
+	// Permissions org keys: the granted matrix-permission subset (ADR-0007)
+	Permissions *[]string  `json:"permissions,omitempty"`
+	Prefix      string     `json:"prefix"`
+	Scope       TokenScope `json:"scope"`
 }
 
 // TokenScope defines model for Token.Scope.
@@ -2825,7 +2828,10 @@ type TokenCreatedShownOnce bool
 type TokenInput struct {
 	ExpiresInDays *TokenInputExpiresInDays `json:"expires_in_days,omitempty"`
 	Name          string                   `json:"name"`
-	Scope         *TokenInputScope         `json:"scope,omitempty"`
+
+	// Permissions org API keys ONLY (ADR-0007): the explicit least-privilege subset of matrix permissions this key may exercise (e.g. deploy.promote, observe.read). Required and non-empty for createApiKey; ignored for personal tokens (which act as their user). Each must be a canonical matrix permission; keys never grant outside this list.
+	Permissions *[]string        `json:"permissions,omitempty"`
+	Scope       *TokenInputScope `json:"scope,omitempty"`
 }
 
 // TokenInputExpiresInDays defines model for TokenInput.ExpiresInDays.

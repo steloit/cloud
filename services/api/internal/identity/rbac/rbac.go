@@ -168,3 +168,23 @@ func (e *Evaluator) Check(ctx context.Context, role Role, perm Permission, scope
 	}
 	return Decision{Allowed: true}
 }
+
+// Known / Delegated expose the matrix predicates for principal types that
+// authorize outside the role model (org keys — ADR-0007) but must still honor
+// the same deny-by-default and delegated-permission rules.
+func (e *Evaluator) Known(perm Permission) bool     { return e.matrix.Known(perm) }
+func (e *Evaluator) Delegated(perm Permission) bool { return e.matrix.Delegated(perm) }
+
+// CheckPolicies runs ONLY the narrowing layer (no role/ceiling): for a
+// principal whose ceiling is its own granted subset (an org key), policies
+// still tighten. Service principals have NO role, so "" is passed — policy
+// kinds MUST therefore key off permission/scope, never role, or they will not
+// narrow org keys (the sole kind today, aiAssistantKind, is role-agnostic; a
+// future role-branching kind must handle role=="" as "no role privileges").
+// Permit when no layer is registered.
+func (e *Evaluator) CheckPolicies(ctx context.Context, perm Permission, scope Scope) Decision {
+	if e.policies == nil {
+		return Decision{Allowed: true}
+	}
+	return e.policies.Evaluate(ctx, Role(""), perm, scope)
+}

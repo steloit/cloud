@@ -29,8 +29,8 @@ SELECT count(*) FROM sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now();
 
 -- name: CreateToken :one
-INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO tokens (id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, permissions)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: ListPersonalTokens :many
@@ -95,3 +95,8 @@ DELETE FROM members WHERE org_id = $1 AND user_id = $2 RETURNING *;
 
 -- name: OrgsForMember :many
 SELECT org_id FROM members WHERE user_id = $1;
+
+-- name: RevokeOrgKey :execrows
+-- Org-scoped: revoking a key from another org's id is a 404 (no cross-org).
+UPDATE tokens SET revoked_at = now()
+WHERE id = $1 AND org_id = $2 AND kind = 'org' AND revoked_at IS NULL;

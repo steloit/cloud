@@ -334,7 +334,30 @@ func (h *Handlers) CreateApiKey(ctx context.Context, req gen.CreateApiKeyRequest
 	if req.Body.ExpiresInDays != nil {
 		days = int(*req.Body.ExpiresInDays)
 	}
-	minted, err := h.svc.MintOrgKey(ctx, req.OrgPathParam, req.Body.Name, scope, actor, days)
+	// ADR-0007: an org key MUST carry an explicit non-empty subset of matrix
+	// permissions (least-privilege — no implicit full grant). Each must be a
+	// real, non-delegated matrix permission.
+	if req.Body.Permissions == nil || len(*req.Body.Permissions) == 0 {
+		return nil, validationError{fields: []problem.FieldError{{Field: "permissions",
+			Detail: "required and non-empty — an org key grants only the permissions you list (ADR-0007)"}}}
+	}
+	perms := *req.Body.Permissions
+	minter, _ := session.PrincipalFrom(ctx)
+	keyScope := rbac.Scope{OrgID: req.OrgPathParam}
+	for _, p := range perms {
+		if !h.authz.ValidGrantable(rbac.Permission(p)) {
+			return nil, validationError{fields: []problem.FieldError{{Field: "permissions",
+				Detail: p + " is not a grantable permission (must be a canonical matrix permission; delegated permissions like ai.apply_proposal cannot be granted directly)"}}}
+		}
+		// Delegation ceiling (ADR-0007): you cannot grant a permission you do
+		// not yourself hold — otherwise an admin (api_keys.manage) could mint a
+		// key with owner-only perms and escalate.
+		if !h.authz.Holds(ctx, minter, rbac.Permission(p), keyScope) {
+			return nil, validationError{fields: []problem.FieldError{{Field: "permissions",
+				Detail: p + " cannot be granted: you do not hold it (a key never exceeds its creator's authority)"}}}
+		}
+	}
+	minted, err := h.svc.MintOrgKey(ctx, req.OrgPathParam, req.Body.Name, scope, actor, perms, days)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +388,25 @@ func (h *Handlers) ListApiKeys(ctx context.Context, req gen.ListApiKeysRequestOb
 		if r.LastUsedAt.Valid {
 			t.LastUsedAt = &r.LastUsedAt.Time
 		}
+		if len(r.Permissions) > 0 {
+			perms := r.Permissions
+			t.Permissions = &perms
+		}
 		data = append(data, t)
 	}
 	return gen.ListApiKeys200JSONResponse(gen.TokenList{Data: &data}), nil
+}
+
+func (h *Handlers) RevokeApiKey(ctx context.Context, req gen.RevokeApiKeyRequestObject) (gen.RevokeApiKeyResponseObject, error) {
+	if _, err := h.requireOrg(ctx, req.OrgPathParam, "api_keys.manage", true); err != nil {
+		return nil, err
+	}
+	ok, err := h.svc.RevokeOrgKey(ctx, req.OrgPathParam, req.Key)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, notFoundError{what: "api key " + req.Key}
+	}
+	return gen.RevokeApiKey204Response{}, nil
 }

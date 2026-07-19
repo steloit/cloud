@@ -276,7 +276,7 @@ func TestOrgGovernance(t *testing.T) {
 	}
 
 	// --- org API keys (G8): reveal-once, listed hash-only, RBAC-gated -------
-	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys", `{"name":"ci","scope":"read_only"}`, ownerCk)
+	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys", `{"name":"ci","scope":"read_only","permissions":["observe.read"]}`, ownerCk)
 	if resp.StatusCode != 201 || !strings.Contains(body, `"token":"stp_`) {
 		t.Fatalf("createApiKey: %d %s", resp.StatusCode, body)
 	}

@@ -732,6 +732,10 @@ export type TokenInput = {
     name: string;
     scope?: 'full' | 'read_only';
     expires_in_days?: 30 | 60 | 90 | 365;
+    /**
+     * org API keys ONLY (ADR-0007): the explicit least-privilege subset of matrix permissions this key may exercise (e.g. deploy.promote, observe.read). Required and non-empty for createApiKey; ignored for personal tokens (which act as their user). Each must be a canonical matrix permission; keys never grant outside this list.
+     */
+    permissions?: Array<string>;
 };
 
 export type TokenCreated = {
@@ -747,6 +751,10 @@ export type TokenCreated = {
 };
 
 export type Token = {
+    /**
+     * org keys: the granted matrix-permission subset (ADR-0007)
+     */
+    permissions?: Array<string>;
     id: string;
     name: string;
     prefix: string;
@@ -3570,6 +3578,28 @@ export type CreateApiKeyResponses = {
 };
 
 export type CreateApiKeyResponse = CreateApiKeyResponses[keyof CreateApiKeyResponses];
+
+export type RevokeApiKeyData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+        key: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/api-keys/{key}';
+};
+
+export type RevokeApiKeyResponses = {
+    /**
+     * Revoked
+     */
+    204: void;
+};
+
+export type RevokeApiKeyResponse = RevokeApiKeyResponses[keyof RevokeApiKeyResponses];
 
 export type GetBillingOverviewData = {
     body?: never;
