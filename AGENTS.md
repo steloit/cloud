@@ -43,6 +43,10 @@ never hand-written · demo data from `19-canon` only.
 3. **Load** this file (automatic) → the task file → its `contexts:` packs → its Read-first list. Stop there.
 4. Implement on the branch (worktree recommended). Touch only paths in the task's `files:` globs.
 5. **Done** = every command in the task's `verify:` block passes. Put evidence (output) in the PR — assertions don't count.
+5a. **Review pipeline (MANDATORY for every significant PR — ADR-0008):** Implementation Agent →
+   Architecture Reviewer → Security/QA Reviewer → CI → Merge. The two reviewers are read-only and
+   independent, run on the branch diff *before* merge; blocking findings are fixed and re-verified,
+   non-blocking ones recorded. Only pure typo/comment/doc edits are exempt.
 6. PR title `<id>: <title>`. Flip `status: done` and append the task's `## Outcome` (5–10 lines) in the same PR.
 7. Spec conflicts you discover are **findings**: record them in the PR and file a follow-up task — never resolve silently.
 8. Lessons that should outlive the task go to a *living file* — the domain pack's mistake bank, the nearest
