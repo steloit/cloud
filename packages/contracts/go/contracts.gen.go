@@ -3827,6 +3827,16 @@ type ClientInterface interface {
 	// Corresponds with PATCH /dashboards/{dash} (the `UpdateDashboard` operationId).
 	UpdateDashboard(ctx context.Context, dash string, body UpdateDashboardJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DuplicateDashboard Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+	//
+	// Corresponds with POST /dashboards/{dash}/duplicate (the `DuplicateDashboard` operationId).
+	DuplicateDashboard(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ForkDashboard Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+	//
+	// Corresponds with POST /dashboards/{dash}/fork (the `ForkDashboard` operationId).
+	ForkDashboard(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// AddWidgetWithBody Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 	//
 	// Takes any type of body and a specified content type.
@@ -3840,6 +3850,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /dashboards/{dash}/widgets (the `AddWidget` operationId).
 	AddWidget(ctx context.Context, dash string, body AddWidgetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteWidget Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+	//
+	// Corresponds with DELETE /dashboards/{dash}/widgets/{wdg} (the `DeleteWidget` operationId).
+	DeleteWidget(ctx context.Context, dash string, wdg string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	//
@@ -5201,6 +5216,36 @@ func (c *Client) UpdateDashboard(ctx context.Context, dash string, body UpdateDa
 	return c.Client.Do(req)
 }
 
+// DuplicateDashboard Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+//
+// Corresponds with POST /dashboards/{dash}/duplicate (the `DuplicateDashboard` operationId).
+func (c *Client) DuplicateDashboard(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDuplicateDashboardRequest(c.Server, dash)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ForkDashboard Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+//
+// Corresponds with POST /dashboards/{dash}/fork (the `ForkDashboard` operationId).
+func (c *Client) ForkDashboard(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewForkDashboardRequest(c.Server, dash)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // AddWidgetWithBody Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 //
 // Takes any type of body and a specified content type.
@@ -5225,6 +5270,21 @@ func (c *Client) AddWidgetWithBody(ctx context.Context, dash string, contentType
 // Corresponds with POST /dashboards/{dash}/widgets (the `AddWidget` operationId).
 func (c *Client) AddWidget(ctx context.Context, dash string, body AddWidgetJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAddWidgetRequest(c.Server, dash, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteWidget Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+//
+// Corresponds with DELETE /dashboards/{dash}/widgets/{wdg} (the `DeleteWidget` operationId).
+func (c *Client) DeleteWidget(ctx context.Context, dash string, wdg string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteWidgetRequest(c.Server, dash, wdg)
 	if err != nil {
 		return nil, err
 	}
@@ -8302,6 +8362,74 @@ func NewUpdateDashboardRequestWithBody(server string, dash string, contentType s
 	return req, nil
 }
 
+// NewDuplicateDashboardRequest constructs an http.Request for the DuplicateDashboard method
+func NewDuplicateDashboardRequest(server string, dash string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "dash", dash, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/dashboards/%s/duplicate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewForkDashboardRequest constructs an http.Request for the ForkDashboard method
+func NewForkDashboardRequest(server string, dash string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "dash", dash, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/dashboards/%s/fork", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewAddWidgetRequest calls the generic AddWidget builder with application/json body
 func NewAddWidgetRequest(server string, dash string, body AddWidgetJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -8345,6 +8473,47 @@ func NewAddWidgetRequestWithBody(server string, dash string, contentType string,
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteWidgetRequest constructs an http.Request for the DeleteWidget method
+func NewDeleteWidgetRequest(server string, dash string, wdg string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "dash", dash, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "wdg", wdg, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/dashboards/%s/widgets/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -12888,6 +13057,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PATCH /dashboards/{dash} (the `UpdateDashboard` operationId).
 	UpdateDashboardWithResponse(ctx context.Context, dash string, body UpdateDashboardJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateDashboardResponse, error)
 
+	// DuplicateDashboardWithResponse Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /dashboards/{dash}/duplicate (the `DuplicateDashboard` operationId).
+	DuplicateDashboardWithResponse(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*DuplicateDashboardResponse, error)
+
+	// ForkDashboardWithResponse Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /dashboards/{dash}/fork (the `ForkDashboard` operationId).
+	ForkDashboardWithResponse(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*ForkDashboardResponse, error)
+
 	// AddWidgetWithBodyWithResponse Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -12901,6 +13084,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /dashboards/{dash}/widgets (the `AddWidget` operationId).
 	AddWidgetWithResponse(ctx context.Context, dash string, body AddWidgetJSONRequestBody, reqEditors ...RequestEditorFn) (*AddWidgetResponse, error)
+
+	// DeleteWidgetWithResponse Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /dashboards/{dash}/widgets/{wdg} (the `DeleteWidget` operationId).
+	DeleteWidgetWithResponse(ctx context.Context, dash string, wdg string, reqEditors ...RequestEditorFn) (*DeleteWidgetResponse, error)
 
 	// RollbackDeploymentWithResponse Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	//
@@ -14875,6 +15065,88 @@ func (r UpdateDashboardResponse) ContentType() string {
 	return ""
 }
 
+type DuplicateDashboardResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Dashboard
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r DuplicateDashboardResponse) GetJSON201() *Dashboard {
+	return r.JSON201
+}
+
+// GetBody returns the raw response body bytes
+func (r DuplicateDashboardResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DuplicateDashboardResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DuplicateDashboardResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DuplicateDashboardResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ForkDashboardResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Dashboard
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r ForkDashboardResponse) GetJSON201() *Dashboard {
+	return r.JSON201
+}
+
+// GetBody returns the raw response body bytes
+func (r ForkDashboardResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ForkDashboardResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ForkDashboardResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ForkDashboardResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type AddWidgetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -14910,6 +15182,40 @@ func (r AddWidgetResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AddWidgetResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteWidgetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteWidgetResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteWidgetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteWidgetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteWidgetResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -19489,6 +19795,32 @@ func (c *ClientWithResponses) UpdateDashboardWithResponse(ctx context.Context, d
 	return ParseUpdateDashboardResponse(rsp)
 }
 
+// DuplicateDashboardWithResponse Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /dashboards/{dash}/duplicate (the `DuplicateDashboard` operationId).
+func (c *ClientWithResponses) DuplicateDashboardWithResponse(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*DuplicateDashboardResponse, error) {
+	rsp, err := c.DuplicateDashboard(ctx, dash, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDuplicateDashboardResponse(rsp)
+}
+
+// ForkDashboardWithResponse Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /dashboards/{dash}/fork (the `ForkDashboard` operationId).
+func (c *ClientWithResponses) ForkDashboardWithResponse(ctx context.Context, dash string, reqEditors ...RequestEditorFn) (*ForkDashboardResponse, error) {
+	rsp, err := c.ForkDashboard(ctx, dash, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseForkDashboardResponse(rsp)
+}
+
 // AddWidgetWithBodyWithResponse Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -19513,6 +19845,19 @@ func (c *ClientWithResponses) AddWidgetWithResponse(ctx context.Context, dash st
 		return nil, err
 	}
 	return ParseAddWidgetResponse(rsp)
+}
+
+// DeleteWidgetWithResponse Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /dashboards/{dash}/widgets/{wdg} (the `DeleteWidget` operationId).
+func (c *ClientWithResponses) DeleteWidgetWithResponse(ctx context.Context, dash string, wdg string, reqEditors ...RequestEditorFn) (*DeleteWidgetResponse, error) {
+	rsp, err := c.DeleteWidget(ctx, dash, wdg, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteWidgetResponse(rsp)
 }
 
 // RollbackDeploymentWithResponse Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
@@ -21851,6 +22196,58 @@ func ParseUpdateDashboardResponse(rsp *http.Response) (*UpdateDashboardResponse,
 	return response, nil
 }
 
+// ParseDuplicateDashboardResponse parses an HTTP response from a DuplicateDashboardWithResponse call
+func ParseDuplicateDashboardResponse(rsp *http.Response) (*DuplicateDashboardResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DuplicateDashboardResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Dashboard
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseForkDashboardResponse parses an HTTP response from a ForkDashboardWithResponse call
+func ParseForkDashboardResponse(rsp *http.Response) (*ForkDashboardResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ForkDashboardResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Dashboard
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseAddWidgetResponse parses an HTTP response from a AddWidgetWithResponse call
 func ParseAddWidgetResponse(rsp *http.Response) (*AddWidgetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -21872,6 +22269,22 @@ func ParseAddWidgetResponse(rsp *http.Response) (*AddWidgetResponse, error) {
 		}
 		response.JSON201 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseDeleteWidgetResponse parses an HTTP response from a DeleteWidgetWithResponse call
+func ParseDeleteWidgetResponse(rsp *http.Response) (*DeleteWidgetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteWidgetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil

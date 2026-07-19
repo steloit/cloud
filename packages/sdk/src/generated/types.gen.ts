@@ -2681,6 +2681,42 @@ export type UpdateDashboardResponses = {
 
 export type UpdateDashboardResponse = UpdateDashboardResponses[keyof UpdateDashboardResponses];
 
+export type ForkDashboardData = {
+    body?: never;
+    path: {
+        dash: string;
+    };
+    query?: never;
+    url: '/dashboards/{dash}/fork';
+};
+
+export type ForkDashboardResponses = {
+    /**
+     * Forked
+     */
+    201: Dashboard;
+};
+
+export type ForkDashboardResponse = ForkDashboardResponses[keyof ForkDashboardResponses];
+
+export type DuplicateDashboardData = {
+    body?: never;
+    path: {
+        dash: string;
+    };
+    query?: never;
+    url: '/dashboards/{dash}/duplicate';
+};
+
+export type DuplicateDashboardResponses = {
+    /**
+     * Duplicated
+     */
+    201: Dashboard;
+};
+
+export type DuplicateDashboardResponse = DuplicateDashboardResponses[keyof DuplicateDashboardResponses];
+
 export type AddWidgetData = {
     body: WidgetInput;
     path: {
@@ -2698,6 +2734,25 @@ export type AddWidgetResponses = {
 };
 
 export type AddWidgetResponse = AddWidgetResponses[keyof AddWidgetResponses];
+
+export type DeleteWidgetData = {
+    body?: never;
+    path: {
+        dash: string;
+        wdg: string;
+    };
+    query?: never;
+    url: '/dashboards/{dash}/widgets/{wdg}';
+};
+
+export type DeleteWidgetResponses = {
+    /**
+     * Deleted
+     */
+    204: void;
+};
+
+export type DeleteWidgetResponse = DeleteWidgetResponses[keyof DeleteWidgetResponses];
 
 export type ListTemplatesData = {
     body?: never;

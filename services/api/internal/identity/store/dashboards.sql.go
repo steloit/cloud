@@ -98,6 +98,20 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteWidget = `-- name: DeleteWidget :exec
+DELETE FROM dashboard_widgets WHERE id = $1 AND dashboard_id = $2
+`
+
+type DeleteWidgetParams struct {
+	ID          string
+	DashboardID string
+}
+
+func (q *Queries) DeleteWidget(ctx context.Context, arg DeleteWidgetParams) error {
+	_, err := q.db.Exec(ctx, deleteWidget, arg.ID, arg.DashboardID)
+	return err
+}
+
 const getDashboard = `-- name: GetDashboard :one
 SELECT id, org_id, name, scope, visibility, owner_id, prebuilt, layout, created_at FROM dashboards WHERE id = $1
 `
@@ -114,6 +128,30 @@ func (q *Queries) GetDashboard(ctx context.Context, id string) (Dashboard, error
 		&i.OwnerID,
 		&i.Prebuilt,
 		&i.Layout,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWidget = `-- name: GetWidget :one
+SELECT id, dashboard_id, source, query, viz, pos, created_at FROM dashboard_widgets WHERE id = $1 AND dashboard_id = $2
+`
+
+type GetWidgetParams struct {
+	ID          string
+	DashboardID string
+}
+
+func (q *Queries) GetWidget(ctx context.Context, arg GetWidgetParams) (DashboardWidget, error) {
+	row := q.db.QueryRow(ctx, getWidget, arg.ID, arg.DashboardID)
+	var i DashboardWidget
+	err := row.Scan(
+		&i.ID,
+		&i.DashboardID,
+		&i.Source,
+		&i.Query,
+		&i.Viz,
+		&i.Pos,
 		&i.CreatedAt,
 	)
 	return i, err

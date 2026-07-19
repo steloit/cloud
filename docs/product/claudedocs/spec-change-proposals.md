@@ -75,7 +75,7 @@ All paths follow the spec's own `x-conventions` (plural nouns, `:verb` action su
 | Logs: `?around=` context param, saved searches, message deep-links | O3 | `logs.tsx:177,232` |
 | Metrics: `?compare=` and `?group_by=` params | O2 compare/split-by | `metrics.tsx:302` |
 | `GET /envs/{env}/traces` (list; spans for more than one trace) | O6 selection | `traces.tsx:17` |
-| Dashboards: `POST /dashboards/{dash}:fork` · `:duplicate`, `DELETE /dashboards/{dash}/widgets/{wdg}`, share grants | DB2/3/5/7 | `dashboards.$dashId.tsx:77` |
+| Dashboards: fork/duplicate/delete-widget — LANDED in T12.7 as `POST /dashboards/{dash}/fork` · `/duplicate`, `DELETE /dashboards/{dash}/widgets/{wdg}` (sub-path form for stdlib-mux compat). **Share grants DEFERRED**: no shape in §2c and no restricted-share member model exists (restricted=owner-only, T12.6) — needs a founder decision on the grant model before implementing. | DB2/3/5/7 | `dashboards.$dashId.tsx:77` |
 
 ### 2d · Account, auth & billing
 

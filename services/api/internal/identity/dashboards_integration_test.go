@@ -311,3 +311,126 @@ func TestDashboardRaiseToOrgNeedsShareGrant(t *testing.T) {
 		t.Fatalf("raise-to-org without share_org must 403, got %d %s", r.StatusCode, b)
 	}
 }
+
+// TestDashboardForkAndPrebuilt — a prebuilt dashboard (generated view) is
+// read-only: it cannot be edited or deleted, only FORKED into a personal
+// editable copy (spec §2c / Design-Spec §244). Widgets copy with the fork.
+func TestDashboardForkAndPrebuilt(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "dsh-fork-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"forkco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+
+	// seed a PREBUILT dashboard (generated view — system row, prebuilt=true) with
+	// a widget, org-visible so the member can read+fork it.
+	if _, err := w.pool.Exec(ctx,
+		`insert into dashboards (id,org_id,name,scope,visibility,owner_id,prebuilt) values ('dsh_pb',$1,'PostgreSQL Health','org','org',$2,true)`,
+		org.Id, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`insert into dashboard_widgets (id,dashboard_id,source,query,viz) values ('wdg_pb','dsh_pb','metrics','pg_up','stat')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// a prebuilt cannot be edited or deleted — must fork.
+	r, b := w.patch(t, "/v1/dashboards/dsh_pb", `{"name":"hacked"}`, ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("editing a prebuilt must 409 (fork instead), got %d %s", r.StatusCode, b)
+	}
+	r, _ = w.del(t, "/v1/dashboards/dsh_pb", ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("deleting a prebuilt must 409, got %d", r.StatusCode)
+	}
+	r, b = w.post(t, "/v1/dashboards/dsh_pb/widgets", `{"source":"logs","query":"x","viz":"list"}`, ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("adding a widget to a prebuilt must 409, got %d %s", r.StatusCode, b)
+	}
+
+	// FORK → a personal editable copy owned by the caller, widget copied.
+	r, b = w.post(t, "/v1/dashboards/dsh_pb/fork", ``, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("fork: %d %s", r.StatusCode, b)
+	}
+	var fork struct {
+		Id, Visibility string
+		Prebuilt       bool
+	}
+	_ = json.Unmarshal([]byte(b), &fork)
+	if fork.Visibility != "personal" || fork.Prebuilt {
+		t.Fatalf("fork must be a personal, non-prebuilt copy: %s", b)
+	}
+	// the fork renders the copied widget and IS editable (rename works).
+	r, b = w.get(t, "/v1/dashboards/"+fork.Id, ownerCk)
+	if r.StatusCode != 200 || !strings.Contains(b, "pg_up") {
+		t.Fatalf("fork should carry the copied widget: %d %s", r.StatusCode, b)
+	}
+	r, b = w.patch(t, "/v1/dashboards/"+fork.Id, `{"name":"my pg"}`, ownerCk)
+	if r.StatusCode != 200 || !strings.Contains(b, "my pg") {
+		t.Fatalf("fork must be editable: %d %s", r.StatusCode, b)
+	}
+	// the prebuilt source is untouched (still there, still prebuilt).
+	var stillPrebuilt bool
+	_ = w.pool.QueryRow(ctx, "select prebuilt from dashboards where id='dsh_pb'").Scan(&stillPrebuilt)
+	if !stillPrebuilt {
+		t.Fatal("fork mutated the prebuilt source")
+	}
+}
+
+// TestDashboardDuplicateAndDeleteWidget — duplicate copies a custom dashboard
+// into a personal one; deleteWidget removes a widget (editor-gated).
+func TestDashboardDuplicateAndDeleteWidget(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ownerCk, _ := w.signupUser(t, "dsh-dup-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"dupco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards", `{"name":"ops","scope":"org","visibility":"org"}`, ownerCk)
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &dsh)
+	r, b = w.post(t, "/v1/dashboards/"+dsh.Id+"/widgets", `{"source":"metrics","query":"rate(x)","viz":"line"}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("addWidget: %d %s", r.StatusCode, b)
+	}
+	var wdg struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &wdg)
+
+	// duplicate → personal copy with the widget
+	r, b = w.post(t, "/v1/dashboards/"+dsh.Id+"/duplicate", ``, ownerCk)
+	if r.StatusCode != 201 || !strings.Contains(b, "rate(x)") {
+		t.Fatalf("duplicate should copy widgets: %d %s", r.StatusCode, b)
+	}
+	var dup struct{ Id, Visibility string }
+	_ = json.Unmarshal([]byte(b), &dup)
+	if dup.Visibility != "personal" {
+		t.Fatalf("duplicate must be personal: %s", b)
+	}
+
+	// deleteWidget on the original (editor-gated)
+	r, _ = w.del(t, "/v1/dashboards/"+dsh.Id+"/widgets/"+wdg.Id, ownerCk)
+	if r.StatusCode != 204 {
+		t.Fatalf("deleteWidget: %d", r.StatusCode)
+	}
+	r, b = w.get(t, "/v1/dashboards/"+dsh.Id, ownerCk)
+	if strings.Contains(b, "rate(x)") {
+		t.Fatalf("widget should be gone from the original: %s", b)
+	}
+	// the duplicate keeps ITS copy (independent)
+	r, b = w.get(t, "/v1/dashboards/"+dup.Id, ownerCk)
+	if !strings.Contains(b, "rate(x)") {
+		t.Fatalf("duplicate must keep its own widget after original's delete: %s", b)
+	}
+	// cross-dashboard widget delete is 404 (widget not on this dashboard)
+	r, _ = w.del(t, "/v1/dashboards/"+dup.Id+"/widgets/"+wdg.Id, ownerCk)
+	if r.StatusCode != 404 {
+		t.Fatalf("deleting a widget not on this dashboard must 404, got %d", r.StatusCode)
+	}
+}

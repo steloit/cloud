@@ -198,6 +198,14 @@ func (h *Handlers) requireDashboardEditor(ctx context.Context, dashID string) (s
 			return store.Dashboard{}, "", notFound("dashboard")
 		}
 	}
+	// Prebuilt dashboards are GENERATED VIEWS, not files (Design-Spec §244): they
+	// are always-current and immutable — never edited or deleted, only forked
+	// ("Customize"). Refuse every mutation with the remediation that names fork.
+	if d.Prebuilt {
+		return store.Dashboard{}, "", problemError{p: problem.Conflict(
+			[]string{"prebuilt dashboards are generated views and cannot be edited"},
+			"Fork it (Customize) to get an editable copy in My dashboards.")}
+	}
 	if d.OwnerID == p.UserID {
 		return d, p.UserID, nil
 	}
@@ -370,4 +378,83 @@ func widgetToAPI(w store.DashboardWidget) gen.Widget {
 		}
 	}
 	return out
+}
+
+// copyToPersonal is the shared fork/duplicate engine (spec §2c, Design-Spec
+// §244: prebuilt dashboards are views, not files — "Customize" forks a copy
+// into My dashboards with template copy-semantics). The source must be READABLE
+// by the caller (both axes); the copy is a NEW personal dashboard owned by the
+// caller, with the source's scope, layout, and widgets duplicated. The source
+// is never mutated (a prebuilt stays read-only and always-current).
+func (h *Handlers) copyToPersonal(ctx context.Context, dashID, nameSuffix string) (gen.Dashboard, error) {
+	src, p, err := h.dashboardReadable(ctx, dashID)
+	if err != nil {
+		return gen.Dashboard{}, err
+	}
+	// A project-scoped source stays project-scoped in the copy — the born-filter
+	// travels with it (the caller already proved project access via readable).
+	copyName := src.Name
+	if nameSuffix != "" {
+		copyName = src.Name + nameSuffix
+	}
+	dsh, err := h.q.CreateDashboard(ctx, store.CreateDashboardParams{
+		ID: ids.New("dsh"), OrgID: src.OrgID, Name: copyName,
+		Scope: src.Scope, Visibility: "personal", OwnerID: p.UserID, Layout: src.Layout,
+	})
+	if err != nil {
+		return gen.Dashboard{}, err
+	}
+	widgets, err := h.q.ListWidgetsForDashboard(ctx, src.ID)
+	if err != nil {
+		return gen.Dashboard{}, err
+	}
+	copied := make([]store.DashboardWidget, 0, len(widgets))
+	for _, w := range widgets {
+		nw, err := h.q.AddWidget(ctx, store.AddWidgetParams{
+			ID: ids.New("wdg"), DashboardID: dsh.ID,
+			Source: w.Source, Query: w.Query, Viz: w.Viz, Pos: w.Pos,
+		})
+		if err != nil {
+			return gen.Dashboard{}, err
+		}
+		copied = append(copied, nw)
+	}
+	return dashboardToAPI(dsh, copied), nil
+}
+
+func (h *Handlers) ForkDashboard(ctx context.Context, req gen.ForkDashboardRequestObject) (gen.ForkDashboardResponseObject, error) {
+	out, err := h.copyToPersonal(ctx, req.Dash, " (customized)")
+	if err != nil {
+		return nil, err
+	}
+	return gen.ForkDashboard201JSONResponse(out), nil
+}
+
+func (h *Handlers) DuplicateDashboard(ctx context.Context, req gen.DuplicateDashboardRequestObject) (gen.DuplicateDashboardResponseObject, error) {
+	out, err := h.copyToPersonal(ctx, req.Dash, " (copy)")
+	if err != nil {
+		return nil, err
+	}
+	return gen.DuplicateDashboard201JSONResponse(out), nil
+}
+
+func (h *Handlers) DeleteWidget(ctx context.Context, req gen.DeleteWidgetRequestObject) (gen.DeleteWidgetResponseObject, error) {
+	d, actor, err := h.requireDashboardEditor(ctx, req.Dash)
+	if err != nil {
+		return nil, err
+	}
+	// widget must belong to this dashboard (no cross-dashboard delete).
+	if _, err := h.q.GetWidget(ctx, store.GetWidgetParams{ID: req.Wdg, DashboardID: d.ID}); err != nil {
+		return nil, notFound("widget")
+	}
+	if err := h.q.DeleteWidget(ctx, store.DeleteWidgetParams{ID: req.Wdg, DashboardID: d.ID}); err != nil {
+		return nil, err
+	}
+	if d.Visibility == "org" {
+		h.svc.record(ctx, events.Input{
+			OrgID: d.OrgID, Kind: "lifecycle", Via: "user", Actor: actor,
+			Action: "dashboard.updated", Subject: d.ID,
+		})
+	}
+	return gen.DeleteWidget204Response{}, nil
 }

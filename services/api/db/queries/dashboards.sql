@@ -32,3 +32,9 @@ RETURNING *;
 
 -- name: ListWidgetsForDashboard :many
 SELECT * FROM dashboard_widgets WHERE dashboard_id = $1 ORDER BY created_at;
+
+-- name: GetWidget :one
+SELECT * FROM dashboard_widgets WHERE id = $1 AND dashboard_id = $2;
+
+-- name: DeleteWidget :exec
+DELETE FROM dashboard_widgets WHERE id = $1 AND dashboard_id = $2;

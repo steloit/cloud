@@ -67,9 +67,18 @@ type ServerInterface interface {
 	// UpdateDashboard Layout, rename, visibility. Editing a shared dashboard is live for all viewers and audited (F7).
 	// (PATCH /dashboards/{dash})
 	UpdateDashboard(w http.ResponseWriter, r *http.Request, dash string)
+	// DuplicateDashboard Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+	// (POST /dashboards/{dash}/duplicate)
+	DuplicateDashboard(w http.ResponseWriter, r *http.Request, dash string)
+	// ForkDashboard Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+	// (POST /dashboards/{dash}/fork)
+	ForkDashboard(w http.ResponseWriter, r *http.Request, dash string)
 	// AddWidget Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 	// (POST /dashboards/{dash}/widgets)
 	AddWidget(w http.ResponseWriter, r *http.Request, dash string)
+	// DeleteWidget Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+	// (DELETE /dashboards/{dash}/widgets/{wdg})
+	DeleteWidget(w http.ResponseWriter, r *http.Request, dash string, wdg string)
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(w http.ResponseWriter, r *http.Request, dep string)
@@ -596,6 +605,58 @@ func (siw *ServerInterfaceWrapper) UpdateDashboard(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// DuplicateDashboard operation middleware
+func (siw *ServerInterfaceWrapper) DuplicateDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DuplicateDashboard(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ForkDashboard operation middleware
+func (siw *ServerInterfaceWrapper) ForkDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForkDashboard(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AddWidget operation middleware
 func (siw *ServerInterfaceWrapper) AddWidget(w http.ResponseWriter, r *http.Request) {
 
@@ -613,6 +674,41 @@ func (siw *ServerInterfaceWrapper) AddWidget(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AddWidget(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWidget operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWidget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "wdg" -------------
+	var wdg string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "wdg", r.PathValue("wdg"), &wdg, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "wdg", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWidget(w, r, dash, wdg)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2815,7 +2911,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/dashboards/{dash}", wrapper.DeleteDashboard)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/dashboards/{dash}", wrapper.GetDashboard)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/dashboards/{dash}", wrapper.UpdateDashboard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/dashboards/{dash}/fork", wrapper.ForkDashboard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/dashboards/{dash}/duplicate", wrapper.DuplicateDashboard)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/dashboards/{dash}/widgets", wrapper.AddWidget)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/dashboards/{dash}/widgets/{wdg}", wrapper.DeleteWidget)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.ListTemplates)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.CaptureTemplate)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/templates/{tpl}", wrapper.DeleteTemplate)
@@ -3238,6 +3337,50 @@ func (response UpdateDashboard200JSONResponse) VisitUpdateDashboardResponse(w ht
 	return err
 }
 
+type DuplicateDashboardRequestObject struct {
+	Dash string `json:"dash"`
+}
+
+type DuplicateDashboardResponseObject interface {
+	VisitDuplicateDashboardResponse(w http.ResponseWriter) error
+}
+
+type DuplicateDashboard201JSONResponse Dashboard
+
+func (response DuplicateDashboard201JSONResponse) VisitDuplicateDashboardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForkDashboardRequestObject struct {
+	Dash string `json:"dash"`
+}
+
+type ForkDashboardResponseObject interface {
+	VisitForkDashboardResponse(w http.ResponseWriter) error
+}
+
+type ForkDashboard201JSONResponse Dashboard
+
+func (response ForkDashboard201JSONResponse) VisitForkDashboardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type AddWidgetRequestObject struct {
 	Dash string `json:"dash"`
 	Body *AddWidgetJSONRequestBody
@@ -3259,6 +3402,23 @@ func (response AddWidget201JSONResponse) VisitAddWidgetResponse(w http.ResponseW
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type DeleteWidgetRequestObject struct {
+	Dash string `json:"dash"`
+	Wdg  string `json:"wdg"`
+}
+
+type DeleteWidgetResponseObject interface {
+	VisitDeleteWidgetResponse(w http.ResponseWriter) error
+}
+
+type DeleteWidget204Response struct {
+}
+
+func (response DeleteWidget204Response) VisitDeleteWidgetResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
 }
 
 type RollbackDeploymentRequestObject struct {
@@ -5136,9 +5296,18 @@ type StrictServerInterface interface {
 	// UpdateDashboard Layout, rename, visibility. Editing a shared dashboard is live for all viewers and audited (F7).
 	// (PATCH /dashboards/{dash})
 	UpdateDashboard(ctx context.Context, request UpdateDashboardRequestObject) (UpdateDashboardResponseObject, error)
+	// DuplicateDashboard Duplicate any readable dashboard into a personal editable copy (widgets+layout copied); the caller owns the copy (spec §2c).
+	// (POST /dashboards/{dash}/duplicate)
+	DuplicateDashboard(ctx context.Context, request DuplicateDashboardRequestObject) (DuplicateDashboardResponseObject, error)
+	// ForkDashboard Customize (DB2/3/5): a prebuilt (generated) dashboard is a view, not a file — fork copies its widgets+layout into a personal, editable dashboard in My dashboards (spec §2c; sub-path form per the /deployments/{dep}/rollback router convention). The prebuilt stays read-only and always-current.
+	// (POST /dashboards/{dash}/fork)
+	ForkDashboard(ctx context.Context, request ForkDashboardRequestObject) (ForkDashboardResponseObject, error)
 	// AddWidget Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
 	// (POST /dashboards/{dash}/widgets)
 	AddWidget(ctx context.Context, request AddWidgetRequestObject) (AddWidgetResponseObject, error)
+	// DeleteWidget Remove a widget from a dashboard (editor-gated; on a shared dashboard the edit is live for all viewers and audited, F7) (spec §2c).
+	// (DELETE /dashboards/{dash}/widgets/{wdg})
+	DeleteWidget(ctx context.Context, request DeleteWidgetRequestObject) (DeleteWidgetResponseObject, error)
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(ctx context.Context, request RollbackDeploymentRequestObject) (RollbackDeploymentResponseObject, error)
@@ -5845,6 +6014,58 @@ func (sh *strictHandler) UpdateDashboard(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// DuplicateDashboard operation middleware
+func (sh *strictHandler) DuplicateDashboard(w http.ResponseWriter, r *http.Request, dash string) {
+	var request DuplicateDashboardRequestObject
+
+	request.Dash = dash
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DuplicateDashboard(ctx, request.(DuplicateDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DuplicateDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DuplicateDashboardResponseObject); ok {
+		if err := validResponse.VisitDuplicateDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ForkDashboard operation middleware
+func (sh *strictHandler) ForkDashboard(w http.ResponseWriter, r *http.Request, dash string) {
+	var request ForkDashboardRequestObject
+
+	request.Dash = dash
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ForkDashboard(ctx, request.(ForkDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ForkDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ForkDashboardResponseObject); ok {
+		if err := validResponse.VisitForkDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // AddWidget operation middleware
 func (sh *strictHandler) AddWidget(w http.ResponseWriter, r *http.Request, dash string) {
 	var request AddWidgetRequestObject
@@ -5871,6 +6092,33 @@ func (sh *strictHandler) AddWidget(w http.ResponseWriter, r *http.Request, dash 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(AddWidgetResponseObject); ok {
 		if err := validResponse.VisitAddWidgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWidget operation middleware
+func (sh *strictHandler) DeleteWidget(w http.ResponseWriter, r *http.Request, dash string, wdg string) {
+	var request DeleteWidgetRequestObject
+
+	request.Dash = dash
+	request.Wdg = wdg
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWidget(ctx, request.(DeleteWidgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWidget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWidgetResponseObject); ok {
+		if err := validResponse.VisitDeleteWidgetResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
