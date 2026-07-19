@@ -59,7 +59,7 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 		// arithmetic shown — never an alert-only. Every cap hit lands on the
 		// events spine (AC3) so "the cap is real" is auditable, not just a UI toast.
 		s.record(ctx, events.Input{
-			OrgID: orgID, Kind: "policy_trigger", Via: "system", Actor: "system",
+			OrgID: orgID, Kind: "billing", Via: "system", Actor: "system",
 			Action: "billing.spend_cap_reached", Subject: orgID,
 			Detail: []byte(fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
 				limit, current, newMonthlyCents, projected)),

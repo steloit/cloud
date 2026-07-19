@@ -2008,6 +2008,15 @@ export type UpdateServiceData = {
     url: '/services/{service}';
 };
 
+export type UpdateServiceErrors = {
+    /**
+     * Hard spend cap / quota: a scale-up that crosses the org cap is refused with the math (x-error-catalog quota_exceeded)
+     */
+    402: Problem;
+};
+
+export type UpdateServiceError = UpdateServiceErrors[keyof UpdateServiceErrors];
+
 export type UpdateServiceResponses = {
     /**
      * OK
