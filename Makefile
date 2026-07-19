@@ -21,6 +21,7 @@ gen-sql:
 gen-ts:
 	cp $(SPEC) apps/console/src/lib/api/openapi.yaml
 	pnpm --filter console gen:api
+	pnpm --filter @steloit/sdk gen:api
 
 MIGRATE := go run github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
 MIGRATIONS_DIR := services/api/internal/platform/db/migrations

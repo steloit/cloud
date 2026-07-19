@@ -21,6 +21,10 @@ jobs:
           pnpm --filter console typecheck
           pnpm --filter console test
           pnpm --filter console build
+      - name: SDK typecheck + tests
+        run: |
+          pnpm --filter @steloit/sdk typecheck
+          pnpm --filter @steloit/sdk test
   go:
     runs-on: ubuntu-latest
     steps:
