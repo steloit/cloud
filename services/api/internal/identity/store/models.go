@@ -144,6 +144,15 @@ type Project struct {
 	CreatedAt           pgtype.Timestamptz
 }
 
+type QuotaUsage struct {
+	OrgID      string
+	Meter      string
+	Period     string
+	Used       int64
+	RateCents  int64
+	ComputedAt pgtype.Timestamptz
+}
+
 type RepoLink struct {
 	ID        string
 	OrgID     string
