@@ -799,9 +799,15 @@ func runKeyCreate(inv *Invocation) int {
 		fmt.Fprintln(inv.Stderr, "\u2715 an org key grants only the permissions you list \u2014 pass --permissions <matrix perms> (least-privilege, ADR-0007)")
 		return ExitUsage
 	}
-	perms := strings.Split(permsFlag, ",")
-	for i := range perms {
-		perms[i] = strings.TrimSpace(perms[i])
+	var perms []string
+	for _, part := range strings.Split(permsFlag, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			perms = append(perms, p)
+		}
+	}
+	if len(perms) == 0 {
+		fmt.Fprintln(inv.Stderr, "\u2715 --permissions listed no permissions")
+		return ExitUsage
 	}
 	body := contracts.CreateApiKeyJSONRequestBody{Name: inv.Args[0], Permissions: &perms}
 	if s := inv.Flags["scope"]; s != "" {

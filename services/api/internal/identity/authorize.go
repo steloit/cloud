@@ -43,6 +43,35 @@ func (a *Authorizer) ValidGrantable(perm rbac.Permission) bool {
 	return a.evaluator.Known(perm) && !a.evaluator.Delegated(perm)
 }
 
+// Holds reports whether the principal currently has a permission in scope,
+// WITHOUT auditing — used for mint-time CEILING checks: a delegation can never
+// exceed the delegator's own authority (ADR-0007 — the granted subset is a
+// ceiling, and you cannot grant what you do not hold). Mirrors Require's
+// per-principal branching but is side-effect-free.
+func (a *Authorizer) Holds(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope) bool {
+	if p.IsOrgKey() {
+		if scope.OrgID == "" || scope.OrgID != p.OrgID {
+			return false
+		}
+		if a.evaluator.Delegated(perm) || !a.evaluator.Known(perm) {
+			return false
+		}
+		granted := false
+		for _, g := range p.Permissions {
+			if rbac.Permission(g) == perm {
+				granted = true
+				break
+			}
+		}
+		return granted && a.evaluator.CheckPolicies(ctx, perm, scope).Allowed
+	}
+	role, err := a.q.GetMemberRole(ctx, store.GetMemberRoleParams{OrgID: scope.OrgID, UserID: p.UserID})
+	if err != nil {
+		return false
+	}
+	return a.evaluator.Check(ctx, rbac.Role(role), perm, scope).Allowed
+}
+
 // Require resolves the principal's role in the scope's org and runs the
 // two-layer check. read_only bearer tokens are ceiling-limited to
 // non-mutating checks by the caller (requireUser); role logic lives here.

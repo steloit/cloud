@@ -139,3 +139,127 @@ func TestOrgApiKeyAuthorization(t *testing.T) {
 	}
 	_ = ownerID
 }
+
+// The delegation ceiling (ADR-0007, reviewer finding): a minter can never
+// grant a permission it does not itself hold — no admin→owner escalation.
+func TestOrgKeyDelegationCeiling(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+
+	ownerCk, ownerID := w.signupUser(t, "dc-owner@example.com")
+	adminCk, adminID := w.signupUser(t, "dc-admin@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"dcco"}`, ownerCk)
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	if err := w.svc.AddMember(ctx, org.Id, adminID, "admin", ownerID); err != nil {
+		t.Fatal(err)
+	}
+
+	// admin holds api_keys.manage but NOT org.delete (owner-only) → cannot
+	// grant it (would be an admin→owner escalation)
+	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+		`{"name":"esc","scope":"full","permissions":["org.delete"]}`, adminCk)
+	if resp.StatusCode != 422 || !strings.Contains(body, "do not hold it") {
+		t.Fatalf("admin granting owner-only perm: %d %s", resp.StatusCode, body)
+	}
+	// admin CAN grant a permission it holds (project.create is admin-Y)
+	resp, _ = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+		`{"name":"ok","scope":"full","permissions":["project.create"]}`, adminCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("admin granting held perm: %d", resp.StatusCode)
+	}
+	// the owner CAN grant org.delete (holds it)
+	resp, _ = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+		`{"name":"own","scope":"full","permissions":["org.delete"]}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("owner granting owner-only perm: %d", resp.StatusCode)
+	}
+}
+
+// Attack-class inputs at create time all fail closed (the matrix lookup is
+// exact + case-sensitive; empties/dupes are handled).
+func TestOrgKeyMalformedPermissions(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "mp-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"mpco"}`, ownerCk)
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+
+	for _, bad := range []string{
+		`["  "]`,                        // whitespace-only
+		`["deploy.promote "]`,           // trailing space (not canonical)
+		`["Deploy.Promote"]`,            // case-variant
+		`["deploy.promote",""]`,         // an empty element among valid
+		`[""]`,                          // empty element
+	} {
+		resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+			`{"name":"x","scope":"full","permissions":`+bad+`}`, ownerCk)
+		if resp.StatusCode != 422 {
+			t.Fatalf("malformed %s accepted: %d %s", bad, resp.StatusCode, body)
+		}
+	}
+
+	// duplicates are deduped, not rejected (no escalation; canonical storage)
+	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+		`{"name":"dup","scope":"full","permissions":["observe.read","observe.read"]}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("dupe perms: %d %s", resp.StatusCode, body)
+	}
+	var key struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &key)
+	var stored []string
+	if err := w.pool.QueryRow(ctx, "select permissions from tokens where id=$1", key.Id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("permissions not deduped: %v", stored)
+	}
+	_ = ownerID
+
+	// a read_only org key cannot perform a mutating op even if it holds the
+	// permission — the coarse scope ceiling ∩ the permission subset
+	resp, body = w.post(t, "/v1/orgs/"+org.Id+"/api-keys",
+		`{"name":"ro","scope":"read_only","permissions":["project.create"]}`, ownerCk)
+	var roKey struct{ Token string }
+	_ = json.Unmarshal([]byte(body), &roKey)
+	req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/orgs/"+org.Id+"/projects",
+		strings.NewReader(`{"name":"nope"}`))
+	req.Header.Set("Authorization", "Bearer "+roKey.Token)
+	req.Header.Set("Content-Type", "application/json")
+	res, _ := http.DefaultClient.Do(req)
+	rbBytes, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 403 || !strings.Contains(string(rbBytes), "read_only") {
+		t.Fatalf("read_only key mutating: %d %s", res.StatusCode, string(rbBytes))
+	}
+}
+
+// Fail-closed for the un-guarded mint path is now CONTRACTUAL (MintOrgKey
+// rejects empty), and a personal token is never misclassified as an org key.
+func TestOrgKeyMintGuardsAndPrincipalKind(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	_, ownerID := w.signupUser(t, "mg-owner@example.com")
+	org, err := w.svc.CreateOrgWithOwner(ctx, "mgco", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// service-layer guard: no empty-permission org key can be minted
+	if _, err := w.svc.MintOrgKey(ctx, org.ID, "empty", "full", ownerID, nil, 90); err == nil {
+		t.Fatal("MintOrgKey accepted an empty permission list")
+	}
+	// a personal token carries a UserID → never an org key, even though
+	// ResolveBearer now populates OrgID for org tokens
+	minted, err := w.svc.MintPersonalToken(ctx, ownerID, "pt", "full", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := w.svc.ResolveBearer(ctx, minted.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.IsOrgKey() {
+		t.Fatal("a personal token was misclassified as an org key")
+	}
+}

@@ -177,8 +177,11 @@ func (e *Evaluator) Delegated(perm Permission) bool { return e.matrix.Delegated(
 
 // CheckPolicies runs ONLY the narrowing layer (no role/ceiling): for a
 // principal whose ceiling is its own granted subset (an org key), policies
-// still tighten. The policy layer is role-agnostic in practice; "" is passed
-// where a role would be. Permit when no layer is registered.
+// still tighten. Service principals have NO role, so "" is passed — policy
+// kinds MUST therefore key off permission/scope, never role, or they will not
+// narrow org keys (the sole kind today, aiAssistantKind, is role-agnostic; a
+// future role-branching kind must handle role=="" as "no role privileges").
+// Permit when no layer is registered.
 func (e *Evaluator) CheckPolicies(ctx context.Context, perm Permission, scope Scope) Decision {
 	if e.policies == nil {
 		return Decision{Allowed: true}

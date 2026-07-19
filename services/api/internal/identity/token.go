@@ -81,6 +81,23 @@ func (s *Service) RevokePersonalToken(ctx context.Context, userID, tokenID strin
 // permissions is the explicit least-privilege subset (ADR-0007), pre-validated
 // against the matrix by the caller.
 func (s *Service) MintOrgKey(ctx context.Context, orgID, name, scope, actorID string, permissions []string, expiresInDays int) (MintedToken, error) {
+	// Contractual least-privilege guard (ADR-0007): an org key with no
+	// permissions authorizes nothing — and the mint path must never produce
+	// one, even if a future caller skips the handler validation. Dedup keeps
+	// the stored list canonical.
+	seen := map[string]bool{}
+	deduped := make([]string, 0, len(permissions))
+	for _, perm := range permissions {
+		if perm == "" || seen[perm] {
+			continue
+		}
+		seen[perm] = true
+		deduped = append(deduped, perm)
+	}
+	if len(deduped) == 0 {
+		return MintedToken{}, fmt.Errorf("identity: an org key requires at least one permission")
+	}
+	permissions = deduped
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return MintedToken{}, fmt.Errorf("identity: token entropy: %w", err)
