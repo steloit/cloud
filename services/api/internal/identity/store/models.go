@@ -278,12 +278,16 @@ type Session struct {
 }
 
 type Subscription struct {
-	OrgID       string
-	Plan        string
-	AnchorDay   int32
-	Status      string
-	TrialEndsAt pgtype.Timestamptz
-	CreatedAt   pgtype.Timestamptz
+	OrgID            string
+	Plan             string
+	AnchorDay        int32
+	Status           string
+	TrialEndsAt      pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	DunningStartedAt pgtype.Timestamptz
+	NextRetryAt      pgtype.Timestamptz
+	PlanEndsAt       pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type Token struct {

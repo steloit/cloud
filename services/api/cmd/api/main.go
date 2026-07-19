@@ -28,6 +28,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
+	"github.com/steloit/cloud/services/api/internal/subscription"
 )
 
 var _ = gen.SessionInfo{} // anchor: the contract types this binary serves
@@ -172,6 +173,9 @@ func main() {
 	logger.Info("email provider", "provider", mailProvider.Name())
 	dispatcher := mailer.NewDispatcher(mailProvider, queries, identity.NewMailDirectory(queries, cfg.ConsoleBaseURL, kek), cfg.EmailFrom)
 	go dispatcher.RunOutbox(ctx, 10*time.Second)
+	// T11.2: the subscription lifecycle sweep (dunning/anchor progression).
+	subs := subscription.NewService(queries, recorder)
+	go subs.RunLifecycle(ctx, time.Hour)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
