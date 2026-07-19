@@ -43,23 +43,43 @@ Phase 1 (`infra/spike/run-pdcsi.sh`, 2026-07-19, results/pdcsi.log):
 | 6 | Snapshot storage | `snapshot_restore_size=10Gi` (logical); billed bytes are the *incremental* `storageBytes` — measured in phase 2 (`cow_delta_bytes`) | the per-branch cost basis |
 
 Phase 2 (`infra/spike/run-pdcsi-phase2.sh` — WAL→GCS via workload identity,
-hibernation wake, divergence snapshot delta, PITR-to-new):
+hibernation wake, divergence snapshot delta, PITR-to-new; results/pdcsi-phase2.log):
 
 | # | Measurement | Value | Notes |
 |---|---|---|---|
-| 7 | First WAL archived to GCS | `wal_first_archive_s` | barman → `gs://…-wal-customer`, WI auth |
-| 8 | Divergence snapshot delta | `cow_delta_bytes` | 2nd snapshot's incremental storageBytes after ~10% new rows |
-| 9 | Hibernation wake | `wake_latency_s` | CNPG declarative hibernation off → accepting |
-| 10 | RPO worst-case window | `rpo_measured_s` | unarchived window at kill; `archive_timeout=300s` is the hard bound (A1.3) |
-| 11 | PITR to a NEW cluster | `pitr_to_new_s` | restore-never-in-place |
+| 7 | WAL archiving to GCS | **working** (`ContinuousArchiving=True`; base+WALs verified in the bucket) | barman → `gs://…-wal-customer`, WI auth; the phase-2 "no WAL in 300s" WARN was a script glob bug (barman nests a `serverName/` dir) |
+| 8 | Divergence snapshot delta | **`cow_delta_bytes=64855872`** (~62 MB) | 2nd snapshot's *incremental* storageBytes after ~10% new rows (~33 MB data + WAL/checkpoint overhead) — PD snapshots bill deltas, confirmed |
+| 9 | Hibernation wake | **`wake_latency_s=8.0`** | CNPG declarative hibernation off → accepting connections |
+| 10 | RPO worst-case window | **`rpo_measured_s=2`** at kill; **`archive_timeout=300s` is the hard bound** (A1.3 ✓) | unarchived window measured at the moment of kill |
+| 11 | Restore to a NEW cluster (base backup + full WAL replay) | **`pitr_to_new_s=55.2`** | post-backup marker + all 1,320,000 rows verified restored; restore-never-in-place ✓ |
 
 **Branch-cost economics (from rows 2/6/8):** pd-balanced is $0.10/GB-mo; PD
-snapshots bill ~$0.026/GB-mo on *incremental* bytes. A Dev-shape branch's
-marginal cost ≈ snapshot delta × $0.026/GB-mo + (branch volume while awake at
-$0.10/GB-mo, 10 Gi ⇒ ~$0.033/day awake, $0 hibernated except the snapshot).
-The canon `$0.07/day` preview line holds with headroom for the storage
-component; compute-while-awake is the dominant term, governed by
-scale-to-zero (hibernation), not storage.
+snapshots bill ~$0.026/GB-mo on *incremental* bytes — row 8 measured a Dev-shape
+10%-divergence delta at ~62 MB ⇒ **~$0.0016/mo of snapshot storage per such
+branch**. A branch's dominant cost is its awake volume (10 Gi ⇒ ~$0.033/day) and
+compute — governed by hibernation (row 9: 8 s wake), not storage. The canon
+`$0.07/day` preview line holds with wide headroom on the storage component.
+
+### 2b · Operational findings that must shape T1.2 (each earned the hard way)
+
+- **F3 — WAL archiving alone is NOT restorable.** A recovery bootstrap needs a
+  **base backup** in the object store; with WALs only, restore fails
+  (`no target backup found`). A scheduled base backup (`Backup`/ScheduledBackup)
+  is **load-bearing from day one**, not an optimization. (An on-demand base
+  backup of the 331 MB cluster took seconds.)
+- **F4 — `targetTime` PITR has a sharp edge.** A target beyond the end of
+  archived WAL leaves recovery looping/waiting for future segments (observed
+  live). The reconciler must compute recovery targets from the **last archived
+  WAL position**, never wall-clock "now". Restore-to-latest is deterministic
+  (55.2 s); targeted PITR needs target validation first.
+- **F5 — Workload identity is a hard prerequisite** for barman→GCS: default GKE
+  node scopes are storage-read-only; the spike cluster needed WI retrofitted
+  (~15 min of cluster+nodepool updates). T1.1's Terraform already provisions WI
+  — never create a cluster without it.
+- **F6 — CNPG in-tree Barman is deprecated, removed in 1.31.** The 1.30 pin
+  (architecture §3) is now a **hard ceiling**: staying current past 1.30 requires
+  migrating to the Barman Cloud Plugin. A version-knob note becomes a tracked
+  migration item for T1.2.
 
 ## 3 · The ZFS-on-GKE operational-cost inventory (why it wasn't forced)
 
@@ -119,3 +139,18 @@ model is the replaceable part (ADR-039 language, applied to storage).
 - Re-evaluation trigger (explicit): when a cell's branch count × delta size
   makes PD snapshot economics worse than a storage-node's local-SSD cost — a
   *measured* trigger, per ADR-040 (implementation evidence, never speculation).
+
+## Verdict
+
+**CNPG branching mechanics: proven.** Snapshot 34.6 s → branch accepting
+connections in 52.4 s, byte-identical data; hibernation wake 8.0 s; restore to a
+new cluster in 55.2 s with full WAL replay verified; RPO bounded ≤ 300 s by
+construction (A1.3 holds). **Substrate for dev/alpha: PD-CSI, not ZFS-LocalPV**
+— the ZFS path failed at the provisioning layer before a single database ran
+(local-SSD capacity coupling, F1/F2) and carries a permanent operational tax
+(§3); every promised capability was delivered by the managed driver with
+numbers to spare. ZFS-LocalPV is re-scoped to a Cell-1 density optimization
+with an explicit measured trigger. No frozen-architecture delta: the semantic
+contract (branch/hibernate/restore/RPO) is unchanged; only the storage execution
+model — the replaceable part — moved. Spike total cost: well under $1 of free
+credits; all temporary resources destroyed (0 VMs, 0 disks, 0 snapshots).
