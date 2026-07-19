@@ -26,7 +26,21 @@ Two GCP projects, one shape. **Shape lives in `modules/`, capacity in `envs/`**
    `terraform -chdir=infra/envs/<env> init -backend-config="bucket=<id>-tfstate" -backend-config="prefix=<env>" -migrate-state`
 4. Full `apply`.
 
-Apply order thereafter: project_base → network → gke_cell → cnpg/observability.
+### Staged apply (REQUIRED on a fresh project — not optional)
+
+`kubernetes_manifest` resources plan against the **live cluster API** (schema
+fetch at plan time), and the CNPG custom resources additionally need the
+operator's CRDs to exist. A bare full `apply` on empty state therefore fails by
+provider design. The working sequence:
+
+1. `apply -target=module.project_base` (bootstrap, above)
+2. `apply -target=module.network -target=module.gke_cell` — the cluster exists
+3. `apply -target=module.cnpg.helm_release.cnpg_operator` — CRDs installed
+4. Full `apply` — storage classes, control-plane Cluster + ScheduledBackup, rest
+
+`terraform validate` never contacts a cluster, so CI validation is unaffected.
+Destroy note: the k8s providers are configured from `module.gke_cell` outputs —
+destroy the k8s resources (`-target=module.cnpg`) before destroying the cluster.
 
 ## CI
 
@@ -42,7 +56,9 @@ the founder applies.** Zero static keys anywhere (D5) — the repo must stay
 job identity federates through WIF (`ci-image-push` SA, writer on the one
 repo), cosign records the signature against the Fulcio cert for that
 identity, and the cluster's `ClusterImagePolicy`
-(`infra/k8s/policy/cluster-image-policy.yaml`, applied with T1.2) admits only
+(`infra/k8s/policy/cluster-image-policy.yaml` — authored; its apply + the
+sigstore policy-controller install + namespace labeling are a tracked follow-up
+that must land with the first real dev apply, see spec-change-proposals) admits only
 images whose subject matches this repo's `image.yml`. No cosign keys exist
 anywhere — keyless or nothing (D5). Unsigned-rejection evidence lands with
 the T1.2 apply (cluster-gated AC).

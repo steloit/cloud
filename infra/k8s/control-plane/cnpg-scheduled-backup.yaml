@@ -1,0 +1,15 @@
+# ADR-0007 F3: WAL archiving alone is NOT restorable — a recovery bootstrap
+# needs a base backup in the object store. This nightly ScheduledBackup is
+# load-bearing from day one, not an optimization.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: ${cluster_name}-nightly
+  namespace: ${namespace}
+spec:
+  cluster:
+    name: ${cluster_name}
+  method: barmanObjectStore
+  schedule: "0 0 2 * * *" # 02:00 UTC nightly (6-field cron: sec min hour)
+  backupOwnerReference: self
+  immediate: true # the FIRST backup lands at apply time — restorable from day one

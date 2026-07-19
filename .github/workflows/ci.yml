@@ -65,6 +65,9 @@ jobs:
           terraform -chdir=infra/envs/dev validate
           terraform -chdir=infra/envs/cell0 init -backend=false -input=false
           terraform -chdir=infra/envs/cell0 validate
+      - name: k8s manifests parse (always)
+        run: |
+          python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/k8s/**/*.yaml', recursive=True)]"
       - name: Spike scripts + manifests (when present)
         run: |
           if [ -d infra/spike ]; then

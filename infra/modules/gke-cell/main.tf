@@ -5,6 +5,29 @@ locals {
   }
 }
 
+# Dedicated node service account (review finding: default compute SA is
+# project-Editor-adjacent — a node compromise on the pool running customer code
+# must not yield broad project credentials). Least-privilege: logs, metrics,
+# and image pulls only (D5 posture at the node layer).
+resource "google_service_account" "node" {
+  project      = var.project_id
+  account_id   = "gke-node-${var.cell_id}"
+  display_name = "GKE node SA (${var.cell_id}) — least-privilege: logging/monitoring/AR-read"
+}
+
+resource "google_project_iam_member" "node_roles" {
+  for_each = toset([
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/monitoring.viewer",
+    "roles/stackdriver.resourceMetadata.writer",
+    "roles/artifactregistry.reader",
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.node.email}"
+}
+
 resource "google_container_cluster" "cell" {
   name     = var.cell_id
   project  = var.project_id
@@ -47,14 +70,19 @@ resource "google_container_node_pool" "core" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
 
-# ZFS storage pool: local SSD for OpenEBS ZFS-LocalPV (ADR-0003). Fixed count
-# (stateful — never autoscaled); tainted so only CNPG/storage pods land here.
-resource "google_container_node_pool" "zfs_storage" {
-  name       = "zfs-storage"
+# DB storage pool (ADR-0007 / INF-001 A6, ratified 2026-07-19): the canonical
+# dev/alpha driver is "pd" — plain PD-CSI-backed nodes, no local SSD, no node
+# bootstrap. "zfs" (OpenEBS ZFS-LocalPV on local SSD) is RETAINED as the Cell-1
+# branch-density option behind an explicit measured trigger — same pool shape,
+# one variable. Fixed count (stateful — never autoscaled); tainted so only
+# CNPG/storage pods land here.
+resource "google_container_node_pool" "db_storage" {
+  name       = "db-storage"
   project    = var.project_id
   location   = var.zone
   cluster    = google_container_cluster.cell.name
@@ -62,12 +90,12 @@ resource "google_container_node_pool" "zfs_storage" {
 
   node_config {
     machine_type    = var.storage_machine_type
-    local_ssd_count = var.storage_local_ssd_count
-    labels          = merge(local.labels, { pool = "zfs-storage" })
+    local_ssd_count = var.storage_driver == "zfs" ? var.storage_local_ssd_count : 0
+    labels          = merge(local.labels, { pool = "db-storage", storage_driver = var.storage_driver })
 
     taint {
       key    = "storage"
-      value  = "zfs"
+      value  = var.storage_driver
       effect = "NO_SCHEDULE"
     }
 
@@ -75,7 +103,8 @@ resource "google_container_node_pool" "zfs_storage" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
 
@@ -112,6 +141,7 @@ resource "google_container_node_pool" "workload" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
