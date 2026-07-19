@@ -707,7 +707,18 @@ func runEvents(inv *Invocation) int {
 	}
 	tab.Write(inv.Stdout)
 	if inv.Flags["f"] == "true" {
-		fmt.Fprintln(inv.Stderr, "· live tail (-f) arrives with T5.4")
+		// live tail (T5.4): resume-capable SSE from the last listed point
+		if err := inv.tailEvents(context.Background(), envID, inv.Flags["kind"], -1, func(f sseFrame) error {
+			if inv.JSON() {
+				fmt.Fprintln(inv.Stdout, f.Data)
+				return nil
+			}
+			renderEventFrame(inv.Stdout, f)
+			return nil
+		}); err != nil {
+			fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+			return ExitGeneric
+		}
 	}
 	return ExitOK
 }
