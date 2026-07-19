@@ -11,6 +11,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
+	"github.com/steloit/cloud/services/api/internal/github"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
@@ -159,6 +160,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+	github.NewHandler(queries, recorder, cfg.GithubWebhookSecret).Mount(mux)
 	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs)
 	// One strict server, module handler sets composed by embedding (§15).
 	idHandlers.Mount(mux, &apiServer{
