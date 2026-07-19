@@ -46,6 +46,28 @@ type tplBinding struct {
 	Scope  string `json:"scope"`
 }
 
+// allowedScalingKeys mirrors the typed gen.Scaling struct (ceiling/floor/
+// mode/signals) — the closed schema for the scaling map wherever it re-enters
+// from untyped json (the PATCH path; capture gets typed input but projects
+// anyway, defense in depth).
+var allowedScalingKeys = map[string]bool{"ceiling": true, "floor": true, "mode": true, "signals": true}
+
+func projectScaling(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range in {
+		if allowedScalingKeys[k] {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 type tplContents struct {
 	Services []tplService `json:"services"`
 	Bindings []tplBinding `json:"bindings,omitempty"`
@@ -133,6 +155,7 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 		// guarantees no unknown key from a stored shape rides into an
 		// org-shared artifact.
 		shape = estimates.ProjectShape(svc.Product, shape)
+		scaling = projectScaling(scaling)
 		contents.Services = append(contents.Services, tplService{
 			Name: svc.Name, Product: svc.Product, Intent: svc.Intent.String,
 			Shape: shape, Scaling: scaling,
@@ -166,6 +189,10 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 		// external provider or excluded service — a required input. The name
 		// carries the TARGET identity so two distinct dependencies never
 		// collapse onto one credential (review finding).
+		// NOTE: if the target lookup below fails, the label falls back to the
+		// bare target type and two distinct targets could dedupe together — an
+		// obscure read-failure mode accepted deliberately (better one credential
+		// prompt than a capture hard-fail on a transient read).
 		targetLabel := b.TargetType
 		if b.TargetType == "service" && b.TargetID.Valid {
 			if tgt, err := s.q.GetService(ctx, b.TargetID.String); err == nil {

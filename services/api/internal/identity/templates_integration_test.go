@@ -181,6 +181,19 @@ func TestTemplates(t *testing.T) {
 	if strings.Contains(patched, "hunter2") || strings.Contains(patched, "notes") || strings.Contains(patched, "smuggled_password") {
 		t.Fatalf("PATCH persisted non-whitelist material: %s", patched)
 	}
+	// … and the SCALING map is a closed schema too (QA re-review residual).
+	r, _ = w.patch(t, "/v1/templates/"+tpl.Id,
+		`{"contents":{"services":[{"name":"db","product":"postgres","shape":{"size":"dev"},"scaling":{"mode":"auto","db_password":"hunter3"}}]}}`, ownerCk)
+	if r.StatusCode != 200 {
+		t.Fatalf("patch scaling: %d", r.StatusCode)
+	}
+	_ = w.pool.QueryRow(ctx, "select contents::text from templates where id=$1", tpl.Id).Scan(&patched)
+	if strings.Contains(patched, "hunter3") || strings.Contains(patched, "db_password") {
+		t.Fatalf("PATCH persisted non-whitelist SCALING material: %s", patched)
+	}
+	if !strings.Contains(patched, `"auto"`) {
+		t.Fatalf("legit scaling key dropped: %s", patched)
+	}
 
 	// --- duplicate name -> clean 409, never a raw 500 -------------------------
 	r, db2 := w.post(t, "/v1/orgs/"+org.Id+"/templates",

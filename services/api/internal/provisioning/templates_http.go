@@ -122,6 +122,7 @@ func (h *Handlers) UpdateTemplate(ctx context.Context, req gen.UpdateTemplateReq
 			}
 			for i := range decoded.Services {
 				decoded.Services[i].Shape = estimates.ProjectShape(decoded.Services[i].Product, decoded.Services[i].Shape)
+				decoded.Services[i].Scaling = projectScaling(decoded.Services[i].Scaling)
 				shapes[i].Shape = decoded.Services[i].Shape
 			}
 			_, total, err := estimates.PriceAll(shapes)
