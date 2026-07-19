@@ -32,6 +32,10 @@ type Directory interface {
 	// the reset link built from the sealed token) for a reset event whose
 	// Subject is the reset-token id. Account-level: orgID is "".
 	PasswordResetEmail(ctx context.Context, resetID string) (recipient, orgID string, data map[string]string, err error)
+	// InviteRenewalEmail returns the INVITER's address and template data for an
+	// invite.renewal_requested event (Subject = invite id) — the expired
+	// invitee asked for a fresh link; the inviter is notified to re-send.
+	InviteRenewalEmail(ctx context.Context, inviteID string) (recipient, orgID string, data map[string]string, err error)
 }
 
 // Rule binds a spine Event action to the template it sends and how to resolve
@@ -80,6 +84,21 @@ var passwordResetTemplate = Template{
 	},
 }
 
+var inviteRenewalTemplate = Template{
+	Name:    "invite-renewal",
+	Version: 1,
+	render: func(d map[string]string) (string, string, string) {
+		invitee, org := d["invitee"], d["org"]
+		eInvitee, eOrg := html.EscapeString(invitee), html.EscapeString(org)
+		subject := "An invite to " + org + " expired — " + invitee + " asked for a new link"
+		text := invitee + " tried to accept their invitation to " + org +
+			", but the link had expired. Send them a fresh invite from your members page."
+		htmlBody := "<p><strong>" + eInvitee + "</strong> tried to accept their invitation to <strong>" + eOrg +
+			"</strong>, but the link had expired.</p><p>Send them a fresh invite from your members page.</p>"
+		return subject, htmlBody, text
+	},
+}
+
 // registry maps event actions to their email rule. Adding a mail-triggering
 // event = adding a rule here; nothing else can send mail.
 func registry() map[string]Rule {
@@ -88,6 +107,12 @@ func registry() map[string]Rule {
 			Template: inviteTemplate,
 			Resolve: func(ctx context.Context, dir Directory, evt store.Event) (string, string, map[string]string, error) {
 				return dir.InviteEmail(ctx, evt.Subject)
+			},
+		},
+		"invite.renewal_requested": {
+			Template: inviteRenewalTemplate,
+			Resolve: func(ctx context.Context, dir Directory, evt store.Event) (string, string, map[string]string, error) {
+				return dir.InviteRenewalEmail(ctx, evt.Subject)
 			},
 		},
 		"password.reset_requested": {
