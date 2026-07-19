@@ -166,6 +166,15 @@ func (s *testAPI) ListBindings(ctx context.Context, r gen.ListBindingsRequestObj
 func (s *testAPI) DeleteBinding(ctx context.Context, r gen.DeleteBindingRequestObject) (gen.DeleteBindingResponseObject, error) {
 	return s.Handlers2.DeleteBinding(ctx, r)
 }
+func (s *testAPI) CreateDeployment(ctx context.Context, r gen.CreateDeploymentRequestObject) (gen.CreateDeploymentResponseObject, error) {
+	return s.Handlers2.CreateDeployment(ctx, r)
+}
+func (s *testAPI) ListDeployments(ctx context.Context, r gen.ListDeploymentsRequestObject) (gen.ListDeploymentsResponseObject, error) {
+	return s.Handlers2.ListDeployments(ctx, r)
+}
+func (s *testAPI) RollbackDeployment(ctx context.Context, r gen.RollbackDeploymentRequestObject) (gen.RollbackDeploymentResponseObject, error) {
+	return s.Handlers2.RollbackDeployment(ctx, r)
+}
 
 func (w *world) post(t *testing.T, path, body, cookie string) (*http.Response, string) {
 	t.Helper()
