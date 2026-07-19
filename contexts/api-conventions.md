@@ -50,3 +50,15 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   strict server PANICS at mount, not build; this only trips CI (local skips the mount
   without Docker). Use a sub-resource (`/orgs/{org}/leave`) instead. Colons on LITERAL
   segments (`/me/notifications:read`, `/alert-rules:backtest`) are fine (caught on T7.6).
+- One-time codes (TOTP, magic links, OTP) with no single-use tracking — a valid code is
+  replayable for its whole validity window (TOTP: ±1 step ≈ 90s). Record the consumed
+  step/nonce and reject re-use ATOMICALLY (`UPDATE ... WHERE last_step < $step` :execrows,
+  0 rows = replay). RFC 6238 §5.2 requires it; rate-limiting doesn't stop replay of an
+  observed code (caught on T7.1 by the QA agent, not CI).
+- A fallback factor gated behind the primary factor's availability — recovery codes that
+  only work if the TOTP secret decrypts aren't a fallback (device loss / KEK rotation =
+  permanent lockout). Try the independent factor even when the primary is absent; consume
+  paths that need no KEK must not sit behind one (T7.1).
+- Multi-statement auth mutations on the pool instead of one tx — a partial failure
+  (enable set, secret row missing) can brick every future login. Wrap enable/disable/
+  rotate flows in `s.db.Begin` + `q.WithTx(tx)` like `orgs.go` (T7.1).
