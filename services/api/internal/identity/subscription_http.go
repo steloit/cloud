@@ -110,12 +110,18 @@ func subscriptionToAPI(sub store.Subscription, now time.Time) gen.Subscription {
 	}
 	if sub.DunningStartedAt.Valid {
 		day := int(now.Sub(sub.DunningStartedAt.Time).Hours()) / 24
-		state := gen.SubscriptionDunningState(sub.Status)
 		d := struct {
 			Day         *int                          `json:"day,omitempty"`
 			NextRetryAt *time.Time                    `json:"next_retry_at,omitempty"`
 			State       *gen.SubscriptionDunningState `json:"state,omitempty"`
-		}{Day: &day, State: &state}
+		}{Day: &day}
+		// state carries only the dunning vocabulary — a cancelled-while-dunning
+		// row keeps day/retry but no out-of-vocab state on the wire.
+		switch sub.Status {
+		case "current", "grace", "provisioning_paused", "suspended":
+			st := gen.SubscriptionDunningState(sub.Status)
+			d.State = &st
+		}
 		if sub.NextRetryAt.Valid {
 			r := sub.NextRetryAt.Time
 			d.NextRetryAt = &r

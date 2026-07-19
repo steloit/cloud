@@ -166,6 +166,8 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 		var nf notFoundError
 		errors.As(err, &nf)
 		problem.Write(w, r, problem.NotFound(nf.what))
+	case errors.Is(err, subscription.ErrNoSubscription):
+		problem.Write(w, r, problem.NotFound("subscription"))
 	case errors.Is(err, subscription.ErrBadTransition):
 		problem.Write(w, r, problem.Conflict([]string{"the subscription is not in a state that allows this change"},
 			"Check the current subscription status; a cancelled subscription owns its anchor until it completes."))

@@ -49,6 +49,7 @@ type Store interface {
 	SetPendingPlan(ctx context.Context, arg store.SetPendingPlanParams) (store.Subscription, error)
 	ClearPendingPlan(ctx context.Context, orgID string) error
 	SyncOrgPlan(ctx context.Context, arg store.SyncOrgPlanParams) error
+	ApplyPendingPlan(ctx context.Context, arg store.ApplyPendingPlanParams) (store.Subscription, error)
 }
 
 type Service struct {
@@ -133,7 +134,6 @@ func (s *Service) FailPayment(ctx context.Context, orgID string) (store.Subscrip
 // cancelled_at_anchor, plan_ends_at = the next anchor. Resources keep running
 // and metering (cancel ≠ delete).
 func (s *Service) Cancel(ctx context.Context, orgID, reasonCode string) (store.Subscription, error) {
-	s.RecordCancelReason(ctx, orgID, reasonCode)
 	sub, err := s.Get(ctx, orgID)
 	if err != nil {
 		return sub, err
@@ -146,6 +146,9 @@ func (s *Service) Cancel(ctx context.Context, orgID, reasonCode string) (store.S
 		return sub, ErrBadTransition
 	}
 	ends := nextAnchor(s.now(), int(sub.AnchorDay))
+	// the reason is recorded only for a cancel that actually proceeds (a refused
+	// cancel must not write audit noise implying one happened).
+	s.RecordCancelReason(ctx, orgID, reasonCode)
 	// A cancel SUPERSEDES any scheduled downgrade (review H1) and PRESERVES the
 	// dunning track (review H2: cancelling while suspended must not lift
 	// enforcement or reset the day-90 clock — those timestamps stay).
@@ -215,7 +218,9 @@ func (s *Service) ChangePlan(ctx context.Context, orgID, target string) (store.S
 		if err != nil {
 			return out, false, err
 		}
-		_ = s.q.ClearPendingPlan(ctx, orgID) // an upgrade supersedes any pending downgrade
+		if err := s.q.ClearPendingPlan(ctx, orgID); err != nil { // an upgrade supersedes any pending downgrade
+			slog.Error("subscription: clear pending after upgrade failed — a stale downgrade could re-apply at the anchor", "org", orgID, "err", err)
+		}
 		return out, false, nil
 	}
 	// downgrade: schedule at the anchor. Refused on a cancelled row (review
@@ -269,19 +274,27 @@ func (s *Service) AdvanceLifecycle(ctx context.Context, orgID string) (store.Sub
 		return s.commit(ctx, sub, "current", "free", txParams{}, "subscription.plan_ended")
 	}
 
-	// a scheduled clean downgrade applies at its anchor instant. EVERY timestamp
-	// is preserved (review H1: omitting planEnds here NULLed a scheduled cancel).
+	// a scheduled clean downgrade applies at its anchor instant — as ONE atomic
+	// conditional UPDATE (plan := pending_plan, pending cleared), so a stale
+	// sweep read can never revert a concurrent upgrade (the upgrade's clear
+	// makes this a no-row no-op) and no timestamp column is touched at all.
 	if sub.PendingPlan.Valid && sub.PendingPlanAt.Valid && !now.Before(sub.PendingPlanAt.Time) {
-		out, err := s.commit(ctx, sub, sub.Status, sub.PendingPlan.String, txParams{
-			dunningStarted: sub.DunningStartedAt, nextRetry: sub.NextRetryAt,
-			trialEnds: sub.TrialEndsAt, planEnds: sub.PlanEndsAt,
-		}, "subscription.plan_changed")
-		if err != nil {
-			return out, err
+		out, err := s.q.ApplyPendingPlan(ctx, store.ApplyPendingPlanParams{OrgID: orgID, PendingPlanAt: ts(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sub, nil // pending vanished mid-flight (upgrade superseded it) — nothing to do
 		}
-		if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
-			// review M5/Med2: a stale pending would re-apply every sweep — loud.
-			slog.Error("subscription: clear pending after apply failed", "org", orgID, "err", err)
+		if err != nil {
+			return sub, fmt.Errorf("subscription: apply pending plan: %w", err)
+		}
+		if err := s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: orgID, Plan: out.Plan}); err != nil {
+			slog.Error("subscription: orgs.plan sync failed — plan gates may diverge until next transition", "org", orgID, "plan", out.Plan, "err", err)
+		}
+		if s.rec != nil {
+			_, _ = s.rec.Append(ctx, events.Input{
+				OrgID: orgID, Kind: "billing", Via: "system", Actor: "system",
+				Action: "subscription.plan_changed", Subject: orgID,
+				Detail: []byte(fmt.Sprintf(`{"from":%q,"to":%q,"at_anchor":true}`, sub.Plan, out.Plan)),
+			})
 		}
 		return out, nil
 	}

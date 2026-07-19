@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyPendingPlan = `-- name: ApplyPendingPlan :one
+UPDATE subscriptions
+SET plan = pending_plan, pending_plan = NULL, pending_plan_at = NULL, updated_at = now()
+WHERE org_id = $1 AND pending_plan IS NOT NULL AND pending_plan_at IS NOT NULL AND pending_plan_at <= $2
+RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
+`
+
+type ApplyPendingPlanParams struct {
+	OrgID         string
+	PendingPlanAt pgtype.Timestamptz
+}
+
+// ATOMIC anchor apply (review: a status-only CAS let a stale sweep read revert
+// a just-committed upgrade): plan moves to pending_plan and pending clears in
+// ONE statement, conditional on the pending value still being the one that is
+// due — a concurrent upgrade's ClearPendingPlan makes this a no-row no-op.
+func (q *Queries) ApplyPendingPlan(ctx context.Context, arg ApplyPendingPlanParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, applyPendingPlan, arg.OrgID, arg.PendingPlanAt)
+	var i Subscription
+	err := row.Scan(
+		&i.OrgID,
+		&i.Plan,
+		&i.AnchorDay,
+		&i.Status,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.DunningStartedAt,
+		&i.NextRetryAt,
+		&i.PlanEndsAt,
+		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
+	)
+	return i, err
+}
+
 const clearPendingPlan = `-- name: ClearPendingPlan :exec
 UPDATE subscriptions SET pending_plan = NULL, pending_plan_at = NULL, updated_at = now()
 WHERE org_id = $1
