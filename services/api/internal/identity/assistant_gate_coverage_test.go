@@ -16,34 +16,45 @@ import (
 	"testing"
 )
 
-// assistantOpsFromSpec returns every operationId under a `tags: [assistant]`
-// block in the openapi contract.
+// assistantOpsFromSpec returns every operationId reachable under a `/assistant/`
+// PATH block in the openapi contract. Keying off the path — not a `tags:` window
+// — is both the actual Law-4 surface (the /assistant/* URLs) and robust to tag
+// formatting (inline `[assistant]`, multi-tag `[assistant, ai]`, or block YAML
+// all parse the same, because tags aren't consulted). Review-hardened: the old
+// ±160-char tag window could false-negative a multi-tag op and silently drop it
+// from the checked set, letting an ungated handler ship green.
 func assistantOpsFromSpec(t *testing.T) map[string]bool {
 	t.Helper()
 	spec, err := os.ReadFile("../../../../docs/product/08-api/openapi.yaml")
 	if err != nil {
 		t.Fatalf("read openapi: %v", err)
 	}
-	ops := map[string]bool{}
-	// scan each operationId and look at a small window for the assistant tag.
-	re := regexp.MustCompile(`operationId:\s*(\w+)`)
-	s := string(spec)
-	for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
-		op := s[m[2]:m[3]]
-		lo := m[0] - 160
-		if lo < 0 {
-			lo = 0
-		}
-		hi := m[1] + 160
-		if hi > len(s) {
-			hi = len(s)
-		}
-		if strings.Contains(s[lo:hi], "[assistant]") {
-			ops[op] = true
-		}
-	}
+	ops := opsUnderAssistantPaths(string(spec))
 	if len(ops) == 0 {
-		t.Fatal("no assistant-tagged operations found — spec path or parse broke")
+		t.Fatal("no /assistant/ operations found — spec path or parse broke")
+	}
+	return ops
+}
+
+// opsUnderAssistantPaths is the pure parser (unit-testable without the file):
+// under `paths:`, a path key sits at 2-space indent (`  /assistant/threads:`);
+// its operations run until the next 2-space path key. Collect every
+// operationId inside a path whose key begins with `/assistant/`.
+func opsUnderAssistantPaths(spec string) map[string]bool {
+	ops := map[string]bool{}
+	pathKey := regexp.MustCompile(`^  (/\S*):\s*$`)
+	opID := regexp.MustCompile(`^\s+operationId:\s*(\w+)`)
+	inAssistant := false
+	for _, line := range strings.Split(spec, "\n") {
+		if m := pathKey.FindStringSubmatch(line); m != nil {
+			inAssistant = strings.HasPrefix(m[1], "/assistant/")
+			continue
+		}
+		if inAssistant {
+			if m := opID.FindStringSubmatch(line); m != nil {
+				ops[m[1]] = true
+			}
+		}
 	}
 	return ops
 }
@@ -77,14 +88,49 @@ func pascal(op string) string {
 	return strings.ToUpper(op[:1]) + op[1:]
 }
 
-// TestEveryAssistantHandlerGatesOnPolicy: every IMPLEMENTED assistant operation
-// must have a handler whose body enforces AIAssistantEnabled (the Law-4 gate).
-func TestEveryAssistantHandlerGatesOnPolicy(t *testing.T) {
-	assistant := assistantOpsFromSpec(t)
-	implemented := implementedOps(t)
+// handlerBodies extracts each `(h *Handlers) Name` method body from Go source,
+// bounded by BRACE MATCHING (review-hardened: the old next-func/EOF bound let a
+// trailing package-level helper mentioning AIAssistantEnabled be miscredited to
+// the last handler in a file).
+func handlerBodies(src string) map[string]string {
+	out := map[string]string{}
+	fn := regexp.MustCompile(`func \(h \*Handlers\) (\w+)\([^)]*\)`)
+	for _, m := range fn.FindAllStringSubmatchIndex(src, -1) {
+		name := src[m[2]:m[3]]
+		// find the opening brace of the body after the signature/return types.
+		open := strings.IndexByte(src[m[1]:], '{')
+		if open < 0 {
+			continue
+		}
+		i := m[1] + open
+		depth := 0
+		for j := i; j < len(src); j++ {
+			switch src[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					out[name] = src[i : j+1]
+					goto next
+				}
+			}
+		}
+	next:
+	}
+	return out
+}
 
-	// gather handler source across the modules that can host assistant handlers.
-	bodies := map[string]string{} // MethodName → function body
+// gatesOnAIAssistant is the enforcement predicate, factored out so its RED state
+// is directly testable (review: a tripwire whose failure branch never runs can
+// silently rot to always-green).
+func gatesOnAIAssistant(body string) bool {
+	return strings.Contains(body, "AIAssistantEnabled")
+}
+
+func collectHandlerBodies(t *testing.T) map[string]string {
+	t.Helper()
+	bodies := map[string]string{}
 	for _, dir := range []string{".", "../provisioning"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -98,19 +144,20 @@ func TestEveryAssistantHandlerGatesOnPolicy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			src := string(b)
-			fn := regexp.MustCompile(`func \(h \*Handlers\) (\w+)\(`)
-			locs := fn.FindAllStringSubmatchIndex(src, -1)
-			for i, m := range locs {
-				name := src[m[2]:m[3]]
-				end := len(src)
-				if i+1 < len(locs) {
-					end = locs[i+1][0]
-				}
-				bodies[name] = src[m[1]:end]
+			for name, body := range handlerBodies(string(b)) {
+				bodies[name] = body
 			}
 		}
 	}
+	return bodies
+}
+
+// TestEveryAssistantHandlerGatesOnPolicy: every IMPLEMENTED assistant operation
+// must have a handler whose body enforces AIAssistantEnabled (the Law-4 gate).
+func TestEveryAssistantHandlerGatesOnPolicy(t *testing.T) {
+	assistant := assistantOpsFromSpec(t)
+	implemented := implementedOps(t)
+	bodies := collectHandlerBodies(t)
 
 	var covered int
 	for op := range assistant {
@@ -123,7 +170,7 @@ func TestEveryAssistantHandlerGatesOnPolicy(t *testing.T) {
 			t.Errorf("assistant op %q is in the include list but no (h *Handlers) %s handler was found", op, pascal(op))
 			continue
 		}
-		if !strings.Contains(body, "AIAssistantEnabled") {
+		if !gatesOnAIAssistant(body) {
 			t.Errorf("assistant handler %s does not enforce AIAssistantEnabled — AI Law 4 requires every /assistant/* surface to 404 when the policy is disabled", pascal(op))
 		}
 	}
@@ -131,4 +178,58 @@ func TestEveryAssistantHandlerGatesOnPolicy(t *testing.T) {
 		t.Fatal("no implemented assistant operations were checked — the tripwire is inert (did the include list or spec parse break?)")
 	}
 	t.Logf("verified %d implemented assistant operation(s) gate on AIAssistantEnabled", covered)
+}
+
+// TestGateDetectorHasARedState proves the tripwire's detector actually FAILS on
+// an ungated handler and PASSES a gated one — without this, a regression that
+// broke the detector (bad regex, inverted Contains, over-wide body) would leave
+// the whole tripwire silently always-green (QA finding, high).
+func TestGateDetectorHasARedState(t *testing.T) {
+	const src = `package x
+func (h *Handlers) Gated(ctx context.Context) error {
+	on, _ := h.svc.AIAssistantEnabled(ctx, org, "")
+	if !on { return aiDisabled() }
+	return nil
+}
+func (h *Handlers) Ungated(ctx context.Context) error {
+	return h.do(ctx)
+}
+// a trailing package-level helper that mentions AIAssistantEnabled must NOT be
+// miscredited to Ungated (the brace-bound extraction proves it).
+func requireAIAssistantEnabled() {}
+`
+	bodies := handlerBodies(src)
+	if b, ok := bodies["Gated"]; !ok || !gatesOnAIAssistant(b) {
+		t.Fatalf("detector failed to see the gate in Gated (ok=%v)", ok)
+	}
+	if b, ok := bodies["Ungated"]; !ok || gatesOnAIAssistant(b) {
+		t.Fatalf("detector FALSE-PASSED an ungated handler — the trailing helper leaked into its body (ok=%v body=%q)", ok, bodies["Ungated"])
+	}
+}
+
+// TestAssistantOpsSurviveTagFormats proves the /assistant/-path detector finds
+// operations regardless of tag formatting (the old tag-window would drop these).
+func TestAssistantOpsSurviveTagFormats(t *testing.T) {
+	const spec = `
+paths:
+  /assistant/threads:
+    post:
+      tags: [assistant, ai]
+      operationId: createThread
+    get:
+      tags:
+        - assistant
+      operationId: listThreads
+  /orgs/{org}/dashboards:
+    post:
+      tags: [observe]
+      operationId: createDashboard
+`
+	ops := opsUnderAssistantPaths(spec)
+	if !ops["createThread"] || !ops["listThreads"] {
+		t.Fatalf("multi-tag / block-tag assistant ops were dropped: %v", ops)
+	}
+	if ops["createDashboard"] {
+		t.Fatalf("a non-assistant path's op leaked into the assistant set: %v", ops)
+	}
 }
