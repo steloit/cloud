@@ -1,0 +1,10 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: spike-a, namespace: spike }
+spec:
+  instances: 1
+  storage: { storageClass: pd-spike, size: 10Gi }
+  bootstrap:
+    initdb: { database: app, owner: app }
+  postgresql:
+    parameters: { archive_timeout: "300s" }

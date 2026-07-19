@@ -26,8 +26,8 @@ maintained by agents as values arrive.
 | Primary domain (platform) | **`steloit.com`** (DNS at GoDaddy) | ✅ | founder 2026-07-19 |
 | Customer-content domain | a **separate eTLD+1** (never a platform subdomain) | ⏳ P2 | INF-001 A1.4 |
 | Branding (logo, palette, marks) | console design system (frames) | ✅ derived | design spec |
-| Support email | — | ❓ | not on record |
-| License (repo + distributed code) | — | ❓ | no `LICENSE` file exists |
+| Support email | **`support@steloit.com`** | ✅ | founder 2026-07-19 |
+| License (repo + distributed code) | **Apache License 2.0** (`/LICENSE`) | ✅ | founder 2026-07-19 |
 
 ## 2 · Cloud & infrastructure (P1 — landed 2026-07-19)
 
@@ -114,10 +114,13 @@ anywhere is a bug.
 
 ## 7 · Feature flags
 
-No runtime feature-flag system is defined yet. Staged API conformance is by
-`oapi-server.cfg.yaml` `include-operation-ids` (an op is served only when its
-handler exists). A product-facing flag system is ❓ **NEEDS FOUNDER INPUT** if/when
-gated rollouts are wanted.
+**Default: OFF.** A feature is enabled only when its implementation is complete
+and verified (founder 2026-07-19) — no half-built feature is exposed behind a
+flag that's on by default. This is already the operating discipline: staged API
+conformance via `oapi-server.cfg.yaml` `include-operation-ids` (an op is served
+only when its handler exists and is tested). A dedicated runtime flag system, if
+one is later wanted for gated rollouts, inherits this default (ship dark, flip on
+after verification).
 
 ---
 
