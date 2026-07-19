@@ -242,3 +242,48 @@ func isLastOwner(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23514" && strings.Contains(pgErr.Message, "last owner")
 }
+
+// ScheduleAccountDeletion schedules the caller's account for deletion in ONE
+// transaction: the sole-owner gate, the schedule write, and the immediate
+// revocation of every session + personal token all commit together (or not
+// at all). Returns the orgs the user remains a member of (for spine events)
+// and the sole-owned blockers (empty when it proceeds).
+func (s *Service) ScheduleAccountDeletion(ctx context.Context, userID string) (orgs []string, blockers []store.OwnedSoleOwnerOrgsRow, err error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identity: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	sole, err := q.OwnedSoleOwnerOrgs(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(sole) > 0 {
+		return nil, sole, nil // caller maps to 409; nothing written
+	}
+	n, err := q.ScheduleAccountDeletion(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if n == 0 {
+		return nil, nil, ErrOrgDeleting // reused sentinel: already scheduled
+	}
+	// Revocation is part of the SAME tx — if either fails, the schedule rolls
+	// back, so a retry re-runs cleanly (no "scheduled but not revoked" state).
+	if err := q.RevokeAllSessionsForUser(ctx, userID); err != nil {
+		return nil, nil, err
+	}
+	if err := q.RevokeAllPersonalTokensForUser(ctx, txt(userID)); err != nil {
+		return nil, nil, err
+	}
+	memberOrgs, err := q.OrgsForMember(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("identity: commit: %w", err)
+	}
+	return memberOrgs, nil, nil
+}

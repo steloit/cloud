@@ -139,6 +139,9 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 			"Check the email and password and try again."))
 	case errors.Is(err, ErrNoSession):
 		problem.Write(w, r, problem.AuthFailed("no active session", "Sign in first."))
+	case errors.Is(err, ErrAccountDeleting):
+		problem.Write(w, r, problem.AuthFailed("account scheduled for deletion",
+			"This account is being deleted and can no longer sign in."))
 	case errors.Is(err, ErrScopeDenied):
 		problem.Write(w, r, problem.PermissionDenied("read_only token",
 			"Use a full-scope token or a browser session for this operation."))

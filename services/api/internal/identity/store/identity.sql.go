@@ -376,10 +376,40 @@ func (q *Queries) ListPoliciesForOrg(ctx context.Context, orgID string) ([]Polic
 	return items, nil
 }
 
+const orgsForMember = `-- name: OrgsForMember :many
+SELECT org_id FROM members WHERE user_id = $1
+`
+
+func (q *Queries) OrgsForMember(ctx context.Context, userID string) ([]string, error) {
+	rows, err := q.db.Query(ctx, orgsForMember, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var org_id string
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const ownedSoleOwnerOrgs = `-- name: OwnedSoleOwnerOrgs :many
 SELECT o.id, o.name FROM orgs o
 JOIN members m ON m.org_id = o.id AND m.user_id = $1 AND m.role = 'owner'
-WHERE (SELECT count(*) FROM members m2 WHERE m2.org_id = o.id AND m2.role = 'owner') = 1
+WHERE NOT EXISTS (
+    SELECT 1 FROM members m2
+    JOIN users u2 ON u2.id = m2.user_id
+    WHERE m2.org_id = o.id AND m2.role = 'owner'
+      AND m2.user_id <> $1
+      AND u2.deletion_scheduled_at IS NULL
+)
 `
 
 type OwnedSoleOwnerOrgsRow struct {
@@ -387,7 +417,10 @@ type OwnedSoleOwnerOrgsRow struct {
 	Name string
 }
 
-// Orgs where this user is an owner AND the only owner (leave/delete blockers).
+// Orgs this user owns where removing them would leave ZERO live owners — i.e.
+// no OTHER owner whose account isn't itself scheduled for deletion. A
+// deletion-scheduled co-owner does not keep an org alive (their membership is
+// on its way out), so it can't unblock this user's deletion (orphan guard).
 func (q *Queries) OwnedSoleOwnerOrgs(ctx context.Context, userID string) ([]OwnedSoleOwnerOrgsRow, error) {
 	rows, err := q.db.Query(ctx, ownedSoleOwnerOrgs, userID)
 	if err != nil {

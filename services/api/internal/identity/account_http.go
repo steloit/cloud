@@ -7,7 +7,10 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strconv"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
@@ -24,33 +27,29 @@ func (h *Handlers) DeleteAccount(ctx context.Context, _ gen.DeleteAccountRequest
 	if err != nil {
 		return nil, err
 	}
-	sole, err := h.svc.q.OwnedSoleOwnerOrgs(ctx, p.UserID)
+	orgs, blockers, err := h.svc.ScheduleAccountDeletion(ctx, p.UserID)
 	if err != nil {
+		if errors.Is(err, ErrOrgDeleting) {
+			return nil, accountBlockedError{reasons: []string{"account deletion already scheduled"},
+				remediation: "Your account is already scheduled for deletion within the grace window."}
+		}
 		return nil, err
 	}
-	if len(sole) > 0 {
-		reasons := make([]string, 0, len(sole))
-		for _, o := range sole {
+	if len(blockers) > 0 {
+		reasons := make([]string, 0, len(blockers))
+		for _, o := range blockers {
 			reasons = append(reasons, "you are the sole owner of "+o.Name+" ("+o.ID+")")
 		}
 		return nil, accountBlockedError{reasons: reasons,
 			remediation: "Transfer ownership or delete these organizations first — deletion never orphans an org."}
 	}
-	n, err := h.svc.q.ScheduleAccountDeletion(ctx, p.UserID)
-	if err != nil {
-		return nil, err
-	}
-	if n == 0 {
-		return nil, accountBlockedError{reasons: []string{"account deletion already scheduled"},
-			remediation: "Your account is already scheduled for deletion within the grace window."}
-	}
-	// revoke every session immediately (the account is going away); personal
-	// tokens die with it too.
-	if err := h.svc.q.RevokeAllSessionsForUser(ctx, p.UserID); err != nil {
-		return nil, err
-	}
-	if err := h.svc.q.RevokeAllPersonalTokensForUser(ctx, txt(p.UserID)); err != nil {
-		return nil, err
+	// spine fact in every org the user still belongs to: their account is
+	// scheduled to vanish (visible to /audit, the bell, webhooks).
+	for _, orgID := range orgs {
+		h.svc.record(ctx, events.Input{
+			OrgID: orgID, Kind: "membership", Via: "user", Actor: p.UserID,
+			Action: "member.account_deletion_scheduled", Subject: p.UserID,
+		})
 	}
 	if c := session.CarrierFrom(ctx); c != nil {
 		c.Add(h.mgr.ClearCookie())
@@ -71,7 +70,10 @@ func (h *Handlers) LeaveOrg(ctx context.Context, req gen.LeaveOrgRequestObject) 
 		if isLastOwner(err) {
 			return nil, ErrLastOwner
 		}
-		return nil, notFoundError{what: "membership"}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, notFoundError{what: "membership"} // not a member of this org
+		}
+		return nil, err // infra error → 500, never a misleading 404
 	}
 	h.svc.record(ctx, events.Input{
 		OrgID: req.OrgPathParam, Kind: "membership", Via: "user", Actor: p.UserID,

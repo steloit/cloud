@@ -29,6 +29,7 @@ var (
 	ErrEmailTaken         = errors.New("identity: email already registered")
 	ErrInvalidCredentials = errors.New("identity: invalid credentials")
 	ErrNoSession          = errors.New("identity: no active session")
+	ErrAccountDeleting    = errors.New("identity: account scheduled for deletion")
 )
 
 type WeakPasswordError struct{ Detail string }
@@ -117,6 +118,12 @@ func (s *Service) Login(ctx context.Context, email, plaintext, device, rateKey s
 	ok, err := s.hasher.Verify(plaintext, u.PasswordHash)
 	if err != nil || !ok {
 		return Established{}, ErrInvalidCredentials
+	}
+	// A deletion-scheduled account cannot re-authenticate — otherwise DELETE
+	// /me's session revocation is bypassable in one login (there is no cancel
+	// flow; that would be an explicit future capability).
+	if u.DeletionScheduledAt.Valid {
+		return Established{}, ErrAccountDeleting
 	}
 	return s.establish(ctx, u, device)
 }
