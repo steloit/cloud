@@ -73,27 +73,46 @@ func Load() (*World, error) {
 		return nil, fmt.Errorf("canon: parse fixtures: %w", err)
 	}
 	w := &World{}
-	for key, v := range doc {
-		switch {
-		case strings.HasPrefix(key, "projects"):
-			if err := json.Unmarshal(v, &w.Projects); err != nil {
-				return nil, fmt.Errorf("canon: projects: %w", err)
-			}
-		case strings.HasPrefix(key, "environments"):
-			if err := json.Unmarshal(v, &w.Environments); err != nil {
-				return nil, fmt.Errorf("canon: environments: %w", err)
-			}
-		case strings.HasPrefix(key, "services"):
-			if err := json.Unmarshal(v, &w.Services); err != nil {
-				return nil, fmt.Errorf("canon: services: %w", err)
-			}
-		case strings.HasPrefix(key, "billing_overview"):
-			if err := json.Unmarshal(v, &w.Billing); err != nil {
-				return nil, fmt.Errorf("canon: billing: %w", err)
-			}
-		}
+	if err := section(doc, "projects", &w.Projects); err != nil {
+		return nil, err
+	}
+	if err := section(doc, "environments", &w.Environments); err != nil {
+		return nil, err
+	}
+	if err := section(doc, "services", &w.Services); err != nil {
+		return nil, err
+	}
+	if err := section(doc, "billing_overview", &w.Billing); err != nil {
+		return nil, err
 	}
 	return w, nil
+}
+
+// section decodes the ONE top-level section named `name` into dst. The keys are
+// annotated ("projects (Project, org_acme)"), so a section is the key that is
+// exactly the name or begins `name (` — never a broader prefix
+// ("projects_archived" won't match "projects"). Exactly one must match; zero or
+// several is refused, not resolved by nondeterministic map order, so Go and TS
+// bind the same section every time.
+func section(doc map[string]json.RawMessage, name string, dst any) error {
+	var match json.RawMessage
+	var matched []string
+	for key, v := range doc {
+		if key == name || strings.HasPrefix(key, name+" (") {
+			matched = append(matched, key)
+			match = v
+		}
+	}
+	if len(matched) == 0 {
+		return fmt.Errorf("canon: no fixtures section %q", name)
+	}
+	if len(matched) > 1 {
+		return fmt.Errorf("canon: ambiguous section %q: %s", name, strings.Join(matched, ", "))
+	}
+	if err := json.Unmarshal(match, dst); err != nil {
+		return fmt.Errorf("canon: %s: %w", name, err)
+	}
+	return nil
 }
 
 // EcommerceProjectCents is the ratified $208 project total (canon.md), read

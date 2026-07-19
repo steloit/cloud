@@ -33,12 +33,20 @@ interface Billing {
 }
 
 // The fixtures' top-level keys are annotated (e.g. "projects (Project,
-// org_acme)"), so sections are matched by prefix — never by a brittle exact key.
-function section<T>(prefix: string): T {
-  const doc = fixtures as Record<string, unknown>;
-  const key = Object.keys(doc).find((k) => k.startsWith(prefix));
-  if (!key) throw new Error(`canon: no fixtures section "${prefix}"`);
-  return doc[key] as T;
+// org_acme)"), so a section is the key that is exactly the name or begins
+// `name (` — never a broader prefix ("projects_archived" won't match
+// "projects"). Exactly one must match; zero or several is refused, not resolved
+// by nondeterministic key order, so Go and TS always bind the same section.
+export function sectionOf<T>(doc: Record<string, unknown>, name: string): T {
+  const keys = Object.keys(doc).filter((k) => k === name || k.startsWith(`${name} (`));
+  if (keys.length === 0) throw new Error(`canon: no fixtures section "${name}"`);
+  if (keys.length > 1) throw new Error(`canon: ambiguous section "${name}": ${keys.join(", ")}`);
+  const [key] = keys;
+  return doc[key as string] as T;
+}
+
+function section<T>(name: string): T {
+  return sectionOf<T>(fixtures as Record<string, unknown>, name);
 }
 
 export const projects = (): Project[] => section("projects");
@@ -67,19 +75,16 @@ const sum = (ns: number[]): number => ns.reduce((a, b) => a + b, 0);
 export function assertArithmetic(doc: unknown = fixtures): void {
   // Allow callers (e.g. the console over its own fixtures copy) to pass a
   // document; default to this package's synced copy.
-  const pick = <T>(prefix: string): T => {
-    const d = doc as Record<string, unknown>;
-    const key = Object.keys(d).find((k) => k.startsWith(prefix));
-    if (!key) throw new Error(`canon: no fixtures section "${prefix}"`);
-    return d[key] as T;
-  };
-  const prj = pick<Project[]>("projects");
-  const env = pick<Environment[]>("environments");
-  const svc = pick<Service[]>("services");
-  const bill = pick<Billing>("billing_overview");
+  const d = doc as Record<string, unknown>;
+  const prj = sectionOf<Project[]>(d, "projects");
+  const env = sectionOf<Environment[]>(d, "environments");
+  const svc = sectionOf<Service[]>(d, "services");
+  const bill = sectionOf<Billing>(d, "billing_overview");
 
   const proj = prj.find((p) => p.name === "ecommerce")?.monthly_cost_cents;
-  if (proj == null) throw new Error("canon: ecommerce project not found");
+  // guard rejects both missing (null) and a zeroed project — a zeroed world
+  // must NOT pass with 0 === 0 (matches Go's proj <= 0).
+  if (proj == null || proj <= 0) throw new Error("canon: ecommerce project missing or zero");
 
   const svcSum = sum(svc.map((s) => s.monthly_estimate_cents));
   if (svcSum !== proj) throw new Error(`Σ services ${svcSum} ≠ ecommerce project ${proj}`);

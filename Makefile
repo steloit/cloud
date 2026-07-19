@@ -3,7 +3,7 @@
 OAPI := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0
 SPEC := docs/product/08-api/openapi.yaml
 
-.PHONY: gen gen-go gen-ts
+.PHONY: gen gen-go gen-ts gen-canon
 
 gen: gen-go gen-ts
 
@@ -18,10 +18,15 @@ SQLC := go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
 gen-sql:
 	cd services/api && $(SQLC) generate
 
-gen-ts:
-	cp $(SPEC) apps/console/src/lib/api/openapi.yaml
+# gen-canon syncs the canon fixtures into every consumer copy. Pure shell (no
+# toolchain), so the go job can run it and git-diff the result — the same
+# drift-fails-CI contract as rbac-matrix.csv.
+gen-canon:
 	cp docs/product/19-canon/fixtures.json packages/canon/src/fixtures.json
 	cp docs/product/19-canon/fixtures.json apps/console/src/lib/canon/fixtures.json
+
+gen-ts: gen-canon
+	cp $(SPEC) apps/console/src/lib/api/openapi.yaml
 	pnpm --filter console gen:api
 	pnpm --filter @steloit/sdk gen:api
 

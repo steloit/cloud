@@ -25,6 +25,10 @@ jobs:
         run: |
           pnpm --filter @steloit/sdk typecheck
           pnpm --filter @steloit/sdk test
+      - name: Canon invariants (typecheck + tests)
+        run: |
+          pnpm --filter @steloit/canon typecheck
+          pnpm --filter @steloit/canon test
   go:
     runs-on: ubuntu-latest
     steps:
@@ -34,7 +38,8 @@ jobs:
       - name: Generate (drift fails the build — §16/§17)
         run: |
           make gen-go
-          git diff --exit-code -- services packages
+          make gen-canon
+          git diff --exit-code -- services packages apps
       - name: Build + vet + test
         run: |
           cd services/api && go build ./... && go vet ./... && go test ./...
