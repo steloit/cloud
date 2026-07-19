@@ -164,3 +164,19 @@ func (e downgradeBlockedError) Problem() problem.Problem {
 	return problem.ConflictReasons(e.reasons,
 		"Resolve every listed reason, then retry the downgrade — it takes effect at your billing anchor.")
 }
+
+// ReactivateSubscription is B12's one-click "Resume": before the anchor it
+// uncancels (cancelled_at_anchor → current, same plan) — nothing was
+// interrupted. After the anchor the plan already ended (org on free) and the
+// subscription is `current`/free, so Reactivate 409s (ErrBadTransition) and the
+// caller restarts via changePlan — the way back is as clean as the way out.
+func (h *Handlers) ReactivateSubscription(ctx context.Context, req gen.ReactivateSubscriptionRequestObject) (gen.ReactivateSubscriptionResponseObject, error) {
+	if _, err := h.requireOrg(ctx, req.OrgPathParam, "subscription.change", true); err != nil {
+		return nil, err
+	}
+	out, err := h.subs.Reactivate(ctx, req.OrgPathParam)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ReactivateSubscription200JSONResponse(subscriptionToAPI(out, h.svc.now())), nil
+}

@@ -3950,6 +3950,36 @@ export type ChangePlanResponses = {
 
 export type ChangePlanResponse = ChangePlanResponses[keyof ChangePlanResponses];
 
+export type ReactivateSubscriptionData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}/subscription/reactivate';
+};
+
+export type ReactivateSubscriptionErrors = {
+    /**
+     * Not in a cancellable-reactivatable state (e.g. already current, or the anchor passed — use changePlan to restart)
+     */
+    409: Problem;
+};
+
+export type ReactivateSubscriptionError = ReactivateSubscriptionErrors[keyof ReactivateSubscriptionErrors];
+
+export type ReactivateSubscriptionResponses = {
+    /**
+     * Reactivated; wind-down cleared
+     */
+    200: Subscription;
+};
+
+export type ReactivateSubscriptionResponse = ReactivateSubscriptionResponses[keyof ReactivateSubscriptionResponses];
+
 export type ListPaymentMethodsData = {
     body?: never;
     path: {

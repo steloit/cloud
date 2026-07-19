@@ -4324,6 +4324,11 @@ type ClientInterface interface {
 	// Corresponds with POST /orgs/{org}/subscription (the `ChangePlan` operationId).
 	ChangePlan(ctx context.Context, orgPathParam OrgPathParam, body ChangePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReactivateSubscription The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+	//
+	// Corresponds with POST /orgs/{org}/subscription/reactivate (the `ReactivateSubscription` operationId).
+	ReactivateSubscription(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListTemplates performs a GET /orgs/{org}/templates (the `ListTemplates` operationId) request.
 	ListTemplates(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -6573,6 +6578,21 @@ func (c *Client) ChangePlanWithBody(ctx context.Context, orgPathParam OrgPathPar
 // Corresponds with POST /orgs/{org}/subscription (the `ChangePlan` operationId).
 func (c *Client) ChangePlan(ctx context.Context, orgPathParam OrgPathParam, body ChangePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewChangePlanRequest(c.Server, orgPathParam, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReactivateSubscription The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+//
+// Corresponds with POST /orgs/{org}/subscription/reactivate (the `ReactivateSubscription` operationId).
+func (c *Client) ReactivateSubscription(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReactivateSubscriptionRequest(c.Server, orgPathParam)
 	if err != nil {
 		return nil, err
 	}
@@ -11272,6 +11292,40 @@ func NewChangePlanRequestWithBody(server string, orgPathParam OrgPathParam, cont
 	return req, nil
 }
 
+// NewReactivateSubscriptionRequest constructs an http.Request for the ReactivateSubscription method
+func NewReactivateSubscriptionRequest(server string, orgPathParam OrgPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s/subscription/reactivate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListTemplatesRequest constructs an http.Request for the ListTemplates method
 func NewListTemplatesRequest(server string, orgPathParam OrgPathParam) (*http.Request, error) {
 	var err error
@@ -13643,6 +13697,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /orgs/{org}/subscription (the `ChangePlan` operationId).
 	ChangePlanWithResponse(ctx context.Context, orgPathParam OrgPathParam, body ChangePlanJSONRequestBody, reqEditors ...RequestEditorFn) (*ChangePlanResponse, error)
+
+	// ReactivateSubscriptionWithResponse The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{org}/subscription/reactivate (the `ReactivateSubscription` operationId).
+	ReactivateSubscriptionWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*ReactivateSubscriptionResponse, error)
 
 	// ListTemplatesWithResponse performs a GET /orgs/{org}/templates (the `ListTemplates` operationId) request.
 	//
@@ -17791,6 +17852,54 @@ func (r ChangePlanResponse) ContentType() string {
 	return ""
 }
 
+type ReactivateSubscriptionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Subscription
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Problem
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ReactivateSubscriptionResponse) GetJSON200() *Subscription {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r ReactivateSubscriptionResponse) GetApplicationproblemJSON409() *Problem {
+	return r.ApplicationproblemJSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r ReactivateSubscriptionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReactivateSubscriptionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReactivateSubscriptionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReactivateSubscriptionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListTemplatesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -20904,6 +21013,19 @@ func (c *ClientWithResponses) ChangePlanWithResponse(ctx context.Context, orgPat
 	return ParseChangePlanResponse(rsp)
 }
 
+// ReactivateSubscriptionWithResponse The one-click way back (B12 'Resume'): before the anchor, uncancel — cancelled_at_anchor → current, same plan, nothing was interrupted. After the anchor the plan has already ended (org on free); re-subscribe via changePlan ('Restart'). The way back is as clean as the way out.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{org}/subscription/reactivate (the `ReactivateSubscription` operationId).
+func (c *ClientWithResponses) ReactivateSubscriptionWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*ReactivateSubscriptionResponse, error) {
+	rsp, err := c.ReactivateSubscription(ctx, orgPathParam, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReactivateSubscriptionResponse(rsp)
+}
+
 // ListTemplatesWithResponse performs a GET /orgs/{org}/templates (the `ListTemplates` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -23880,6 +24002,39 @@ func ParseChangePlanResponse(rsp *http.Response) (*ChangePlanResponse, error) {
 	}
 
 	response := &ChangePlanResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Subscription
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReactivateSubscriptionResponse parses an HTTP response from a ReactivateSubscriptionWithResponse call
+func ParseReactivateSubscriptionResponse(rsp *http.Response) (*ReactivateSubscriptionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReactivateSubscriptionResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
