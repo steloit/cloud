@@ -19,6 +19,12 @@ import (
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+
+	// (GET /assistant/threads)
+	ListThreads(w http.ResponseWriter, r *http.Request)
+	// CreateThread New conversation, scoped to current context; drawer and workspace share the thread (AI2/AI4)
+	// (POST /assistant/threads)
+	CreateThread(w http.ResponseWriter, r *http.Request)
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -272,6 +278,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListThreads operation middleware
+func (siw *ServerInterfaceWrapper) ListThreads(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListThreads(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateThread operation middleware
+func (siw *ServerInterfaceWrapper) CreateThread(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateThread(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -2630,11 +2664,67 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.CancelSubscription)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.GetSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.ChangePlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/assistant/threads", wrapper.ListThreads)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/assistant/threads", wrapper.CreateThread)
 
 	return m
 }
 
 type ConflictApplicationProblemPlusJSONResponse Problem
+
+type ListThreadsRequestObject struct {
+}
+
+type ListThreadsResponseObject interface {
+	VisitListThreadsResponse(w http.ResponseWriter) error
+}
+
+type ListThreads200JSONResponse struct {
+	Data       *[]Thread `json:"data,omitempty"`
+	NextCursor *string   `json:"next_cursor,omitempty"`
+}
+
+func (response ListThreads200JSONResponse) VisitListThreadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateThreadRequestObject struct {
+	Body *CreateThreadJSONRequestBody
+}
+
+type CreateThreadResponseObject interface {
+	VisitCreateThreadResponse(w http.ResponseWriter) error
+}
+
+type CreateThread201JSONResponse Thread
+
+func (response CreateThread201JSONResponse) VisitCreateThreadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateThread404Response struct {
+}
+
+func (response CreateThread404Response) VisitCreateThreadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
 
 type LoginRequestObject struct {
 	Body *LoginJSONRequestBody
@@ -4672,6 +4762,12 @@ func (response RefreshTemplate200JSONResponse) VisitRefreshTemplateResponse(w ht
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+
+	// (GET /assistant/threads)
+	ListThreads(ctx context.Context, request ListThreadsRequestObject) (ListThreadsResponseObject, error)
+	// CreateThread New conversation, scoped to current context; drawer and workspace share the thread (AI2/AI4)
+	// (POST /assistant/threads)
+	CreateThread(ctx context.Context, request CreateThreadRequestObject) (CreateThreadResponseObject, error)
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
 	// (POST /auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -4954,6 +5050,64 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListThreads operation middleware
+func (sh *strictHandler) ListThreads(w http.ResponseWriter, r *http.Request) {
+	var request ListThreadsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListThreads(ctx, request.(ListThreadsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListThreads")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListThreadsResponseObject); ok {
+		if err := validResponse.VisitListThreadsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateThread operation middleware
+func (sh *strictHandler) CreateThread(w http.ResponseWriter, r *http.Request) {
+	var request CreateThreadRequestObject
+
+	var body CreateThreadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateThread(ctx, request.(CreateThreadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateThread")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateThreadResponseObject); ok {
+		if err := validResponse.VisitCreateThreadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // Login operation middleware
