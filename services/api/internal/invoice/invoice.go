@@ -32,6 +32,7 @@ type Line struct {
 
 // Store is the persistence the generator needs (sqlc queries satisfy it).
 type Store interface {
+	GetOrg(ctx context.Context, id string) (store.Org, error)
 	GetQuotaUsage(ctx context.Context, arg store.GetQuotaUsageParams) ([]store.QuotaUsage, error)
 	UpsertInvoiceForPeriod(ctx context.Context, arg store.UpsertInvoiceForPeriodParams) (store.Invoice, error)
 	GetInvoiceForPeriod(ctx context.Context, arg store.GetInvoiceForPeriodParams) (store.Invoice, error)
@@ -50,10 +51,18 @@ func NewService(q Store, plans *billing.Table) *Service {
 func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return s }
 
 // Close freezes the org's meter for a period into an OPEN invoice: the plan fee
-// (from the one billing table) plus a line per metered accrual, each with a
+// (from the one billing table, priced by the org's OWN plan — never a
+// caller-supplied string) plus a line per metered accrual, each with a
 // usage_ref. Idempotent — a re-close returns the existing invoice unchanged
 // (the ON CONFLICT DO NOTHING gate), so a monthly close can be retried safely.
-func (s *Service) Close(ctx context.Context, orgID, plan, period string) (store.Invoice, error) {
+func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoice, error) {
+	// The plan fee is sourced from the org's own plan row — a wrong fee would be
+	// frozen permanently, so it is never trusted to a caller argument.
+	org, err := s.q.GetOrg(ctx, orgID)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	plan := org.Plan
 	usage, err := s.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
 	if err != nil {
 		return store.Invoice{}, err

@@ -49,7 +49,7 @@ func TestInvoiceGenerator(t *testing.T) {
 	gen := invoice.NewService(q, plans)
 
 	// --- close: plan fee + metered lines, integer cents ---------------------
-	inv, err := gen.Close(ctx, org.ID, "business", period)
+	inv, err := gen.Close(ctx, org.ID, period)
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestInvoiceGenerator(t *testing.T) {
 	}
 
 	// --- idempotent monthly close: re-close returns the SAME invoice --------
-	inv2, err := gen.Close(ctx, org.ID, "business", period)
+	inv2, err := gen.Close(ctx, org.ID, period)
 	if err != nil {
 		t.Fatalf("re-close: %v", err)
 	}
@@ -103,6 +103,18 @@ func TestInvoiceGenerator(t *testing.T) {
 	_ = w.pool.QueryRow(ctx, "select count(*) from invoices where org_id=$1 and period=$2", org.ID, period).Scan(&count)
 	if count != 1 {
 		t.Fatalf("monthly close not idempotent: %d invoices for the period", count)
+	}
+
+	// --- the freeze is real: usage changing after close does NOT re-price -----
+	if _, err := w.pool.Exec(ctx, "update quota_usage set rate_cents=999999 where org_id=$1 and meter='egress_bytes'", org.ID); err != nil {
+		t.Fatal(err)
+	}
+	inv3, err := gen.Close(ctx, org.ID, period)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv3.TotalCents != inv.TotalCents {
+		t.Fatalf("re-close after a usage change re-priced the frozen invoice: %d vs %d", inv3.TotalCents, inv.TotalCents)
 	}
 
 	// --- the B3 read surface lists it --------------------------------------
