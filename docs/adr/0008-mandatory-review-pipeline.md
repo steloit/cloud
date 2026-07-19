@@ -36,6 +36,16 @@ Merge
 
 - The **Implementation Agent** is the sole writer; the two reviewers are
   read-only and independent.
+- **Reviewer identity is fixed and repo-native.** The two reviewers are exactly
+  the Phase-2 support agents in this repo: the **Architecture Reviewer** is
+  `.claude/agents/reviewer.md` (`subagent_type: "reviewer"`) and the
+  **Security/QA Reviewer** is `.claude/agents/qa.md` (`subagent_type: "qa"`).
+  **No external, plugin, or machine-level reviewer may stand in for either.**
+  In particular, the Kernel/`kernel:*` agents were evaluated and **explicitly
+  rejected for this repo** (`docs/plan/kernel-workflow-review.md`: "Do not use
+  Kernel for steloit/cloud… the native Engineering OS is the standard workflow").
+  Invoking an external reviewer is the same class of process violation as
+  skipping a reviewer, and any review produced by one does not count.
 - Both reviewers run **before** the PR merges, on the branch diff. Findings are
   triaged; blocking findings are fixed by the Implementation Agent and
   re-verified. Non-blocking findings are recorded.
