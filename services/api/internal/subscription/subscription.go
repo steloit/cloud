@@ -46,6 +46,10 @@ type Store interface {
 	GetSubscription(ctx context.Context, orgID string) (store.Subscription, error)
 	SetSubscriptionState(ctx context.Context, arg store.SetSubscriptionStateParams) (store.Subscription, error)
 	ListSubscriptionsToAdvance(ctx context.Context) ([]string, error)
+	SetPendingPlan(ctx context.Context, arg store.SetPendingPlanParams) (store.Subscription, error)
+	ClearPendingPlan(ctx context.Context, orgID string) error
+	SyncOrgPlan(ctx context.Context, arg store.SyncOrgPlanParams) error
+	ApplyPendingPlan(ctx context.Context, arg store.ApplyPendingPlanParams) (store.Subscription, error)
 }
 
 type Service struct {
@@ -129,7 +133,7 @@ func (s *Service) FailPayment(ctx context.Context, orgID string) (store.Subscrip
 // Cancel schedules cancellation at the billing anchor: current/trial →
 // cancelled_at_anchor, plan_ends_at = the next anchor. Resources keep running
 // and metering (cancel ≠ delete).
-func (s *Service) Cancel(ctx context.Context, orgID string) (store.Subscription, error) {
+func (s *Service) Cancel(ctx context.Context, orgID, reasonCode string) (store.Subscription, error) {
 	sub, err := s.Get(ctx, orgID)
 	if err != nil {
 		return sub, err
@@ -142,7 +146,40 @@ func (s *Service) Cancel(ctx context.Context, orgID string) (store.Subscription,
 		return sub, ErrBadTransition
 	}
 	ends := nextAnchor(s.now(), int(sub.AnchorDay))
-	return s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{planEnds: ts(ends)}, "subscription.cancelled")
+	// the reason is recorded only for a cancel that actually proceeds (a refused
+	// cancel must not write audit noise implying one happened).
+	s.RecordCancelReason(ctx, orgID, reasonCode)
+	// A cancel SUPERSEDES any scheduled downgrade (review H1) and PRESERVES the
+	// dunning track (review H2: cancelling while suspended must not lift
+	// enforcement or reset the day-90 clock — those timestamps stay).
+	// ORDER MATTERS (review nit): commit the status FIRST so a racing
+	// SetPendingPlan hits the cancelled-row guard, THEN clear any pending that
+	// was already there — clear-before-commit left a window where a fresh
+	// pending survived the cancel and later applied a paid plan with no payment.
+	out, err := s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{
+		planEnds: ts(ends), dunningStarted: sub.DunningStartedAt,
+		nextRetry: sub.NextRetryAt, trialEnds: sub.TrialEndsAt,
+	}, "subscription.cancelled")
+	if err != nil {
+		return out, err
+	}
+	if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
+		slog.Error("subscription: clear pending on cancel failed — an orphan pending could apply at the anchor", "org", orgID, "err", err)
+	}
+	return out, nil
+}
+
+// cancelReason records the caller-supplied reason_code beside the cancel event
+// (the contract field must not be silently dropped).
+func (s *Service) RecordCancelReason(ctx context.Context, orgID, reasonCode string) {
+	if reasonCode == "" || s.rec == nil {
+		return
+	}
+	_, _ = s.rec.Append(ctx, events.Input{
+		OrgID: orgID, Kind: "billing", Via: "user", Actor: "user",
+		Action: "subscription.cancel_reason", Subject: orgID,
+		Detail: []byte(fmt.Sprintf(`{"reason_code":%q}`, reasonCode)),
+	})
 }
 
 // Reactivate undoes a pending cancel before the anchor: cancelled_at_anchor →
@@ -156,6 +193,68 @@ func (s *Service) Reactivate(ctx context.Context, orgID string) (store.Subscript
 		return sub, ErrBadTransition
 	}
 	return s.commit(ctx, sub, "current", sub.Plan, txParams{}, "subscription.reactivated")
+}
+
+// planRank orders tiers for the upgrade-vs-downgrade decision (B4).
+var planRank = map[string]int{"free": 0, "pro": 1, "business": 2, "enterprise": 3}
+
+// PlanRank is the one rank table (the HTTP layer reuses it — no duplicates).
+func PlanRank(plan string) int { return planRank[plan] }
+
+// ChangePlan (B4 / US-11.3 core): an UPGRADE applies immediately; a CLEAN
+// DOWNGRADE pends to the anchor (pending_plan/pending_plan_at, applied by the
+// lifecycle sweep). Allowance gating (members/projects vs the target plan) is
+// the CALLER's job — the 409-with-every-reason lives at the API layer; this is
+// the state write only. Returns (sub, pendingAtAnchor).
+func (s *Service) ChangePlan(ctx context.Context, orgID, target string) (store.Subscription, bool, error) {
+	sub, err := s.Get(ctx, orgID)
+	if err != nil {
+		return sub, false, err
+	}
+	if _, ok := planRank[target]; !ok {
+		return sub, false, fmt.Errorf("subscription: unknown plan %q", target)
+	}
+	if target == sub.Plan {
+		return sub, false, nil // no-op
+	}
+	if planRank[target] > planRank[sub.Plan] {
+		// upgrade: immediate (proration is a tracked ledger follow-up, T11.3).
+		out, err := s.commit(ctx, sub, sub.Status, target, txParams{
+			dunningStarted: sub.DunningStartedAt, nextRetry: sub.NextRetryAt,
+			planEnds: sub.PlanEndsAt, trialEnds: sub.TrialEndsAt,
+		}, "subscription.plan_changed")
+		if err != nil {
+			return out, false, err
+		}
+		if err := s.q.ClearPendingPlan(ctx, orgID); err != nil { // an upgrade supersedes any pending downgrade
+			slog.Error("subscription: clear pending after upgrade failed — a stale downgrade could re-apply at the anchor", "org", orgID, "err", err)
+		}
+		return out, false, nil
+	}
+	// downgrade: schedule at the anchor. Refused on a cancelled row (review
+	// H1/M1: the cancel wind-down owns the anchor; the guarded UPDATE below
+	// also excludes it, closing the read-then-write race).
+	if sub.Status == "cancelled_at_anchor" {
+		return sub, false, ErrBadTransition
+	}
+	at := nextAnchor(s.now(), int(sub.AnchorDay))
+	out, err := s.q.SetPendingPlan(ctx, store.SetPendingPlanParams{
+		OrgID: orgID, PendingPlan: pgtype.Text{String: target, Valid: true}, PendingPlanAt: ts(at),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sub, false, ErrConcurrentModification // row left the schedulable states mid-flight
+	}
+	if err != nil {
+		return sub, false, fmt.Errorf("subscription: schedule downgrade: %w", err)
+	}
+	if s.rec != nil {
+		_, _ = s.rec.Append(ctx, events.Input{
+			OrgID: orgID, Kind: "billing", Via: "user", Actor: "user",
+			Action: "subscription.downgrade_scheduled", Subject: orgID,
+			Detail: []byte(fmt.Sprintf(`{"to":%q,"at":%q}`, target, at.Format(time.RFC3339))),
+		})
+	}
+	return out, true, nil
 }
 
 // AdvanceLifecycle is the time-driven progression a daily worker runs (and tests
@@ -176,9 +275,36 @@ func (s *Service) AdvanceLifecycle(ctx context.Context, orgID string) (store.Sub
 		}, "subscription.trial_expired")
 	}
 
-	// cancel takes effect at the anchor: drop to free, back to current.
+	// cancel takes effect at the anchor: drop to free, back to current. This
+	// clause runs BEFORE the pending apply (review H1: a cancel always wins over
+	// a scheduled downgrade — and Cancel clears pending anyway).
 	if sub.Status == "cancelled_at_anchor" && sub.PlanEndsAt.Valid && !now.Before(sub.PlanEndsAt.Time) {
 		return s.commit(ctx, sub, "current", "free", txParams{}, "subscription.plan_ended")
+	}
+
+	// a scheduled clean downgrade applies at its anchor instant — as ONE atomic
+	// conditional UPDATE (plan := pending_plan, pending cleared), so a stale
+	// sweep read can never revert a concurrent upgrade (the upgrade's clear
+	// makes this a no-row no-op) and no timestamp column is touched at all.
+	if sub.PendingPlan.Valid && sub.PendingPlanAt.Valid && !now.Before(sub.PendingPlanAt.Time) {
+		out, err := s.q.ApplyPendingPlan(ctx, store.ApplyPendingPlanParams{OrgID: orgID, PendingPlanAt: ts(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sub, nil // pending vanished mid-flight (upgrade superseded it) — nothing to do
+		}
+		if err != nil {
+			return sub, fmt.Errorf("subscription: apply pending plan: %w", err)
+		}
+		if err := s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: orgID, Plan: out.Plan}); err != nil {
+			slog.Error("subscription: orgs.plan sync failed — plan gates may diverge until next transition", "org", orgID, "plan", out.Plan, "err", err)
+		}
+		if s.rec != nil {
+			_, _ = s.rec.Append(ctx, events.Input{
+				OrgID: orgID, Kind: "billing", Via: "system", Actor: "system",
+				Action: "subscription.plan_changed", Subject: orgID,
+				Detail: []byte(fmt.Sprintf(`{"from":%q,"to":%q,"at_anchor":true}`, sub.Plan, out.Plan)),
+			})
+		}
+		return out, nil
 	}
 
 	// dunning day progression.
@@ -254,6 +380,13 @@ func (s *Service) commit(ctx context.Context, cur store.Subscription, status, pl
 	}
 	if err != nil {
 		return store.Subscription{}, fmt.Errorf("subscription: set state: %w", err)
+	}
+	// Keep orgs.plan (what every plan gate reads) converged with the billing
+	// master (Q9 finding: cancel-at-anchor previously left orgs.plan paid).
+	// Non-transactional with the CAS above — a failure here is LOUD and the
+	// single-tx convergence is a tracked follow-up (ledger).
+	if err := s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: cur.OrgID, Plan: plan}); err != nil {
+		slog.Error("subscription: orgs.plan sync failed — plan gates may diverge until next transition", "org", cur.OrgID, "plan", plan, "err", err)
 	}
 	if s.rec != nil {
 		_, _ = s.rec.Append(ctx, events.Input{

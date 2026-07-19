@@ -13,6 +13,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/subscription"
 )
 
 // Handlers implements the generated strict interface for the operations this
@@ -26,10 +27,11 @@ type Handlers struct {
 	envs   events.EnvResolver
 	usage  usageRoller
 	notify *notify.Router
+	subs   *subscription.Service
 }
 
-func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver, usage usageRoller, router *notify.Router) *Handlers {
-	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs, usage: usage, notify: router}
+func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver, usage usageRoller, router *notify.Router, subs *subscription.Service) *Handlers {
+	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs, usage: usage, notify: router, subs: subs}
 }
 
 // Mount wires the strict server onto mux under /v1 with the module's
@@ -164,6 +166,14 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 		var nf notFoundError
 		errors.As(err, &nf)
 		problem.Write(w, r, problem.NotFound(nf.what))
+	case errors.Is(err, subscription.ErrNoSubscription):
+		problem.Write(w, r, problem.NotFound("subscription"))
+	case errors.Is(err, subscription.ErrBadTransition):
+		problem.Write(w, r, problem.Conflict([]string{"the subscription is not in a state that allows this change"},
+			"Check the current subscription status; a cancelled subscription owns its anchor until it completes."))
+	case errors.Is(err, subscription.ErrConcurrentModification):
+		problem.Write(w, r, problem.Conflict([]string{"the subscription changed while this request was in flight"},
+			"Re-read the subscription and retry."))
 	case errors.As(err, new(validationError)):
 		var ve validationError
 		errors.As(err, &ve)

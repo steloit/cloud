@@ -327,6 +327,8 @@ type Subscription struct {
 	NextRetryAt      pgtype.Timestamptz
 	PlanEndsAt       pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	PendingPlan      pgtype.Text
+	PendingPlanAt    pgtype.Timestamptz
 }
 
 type Template struct {

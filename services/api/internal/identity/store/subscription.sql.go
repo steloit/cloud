@@ -11,9 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyPendingPlan = `-- name: ApplyPendingPlan :one
+UPDATE subscriptions
+SET plan = pending_plan, pending_plan = NULL, pending_plan_at = NULL, updated_at = now()
+WHERE org_id = $1 AND pending_plan IS NOT NULL AND pending_plan_at IS NOT NULL AND pending_plan_at <= $2
+RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
+`
+
+type ApplyPendingPlanParams struct {
+	OrgID         string
+	PendingPlanAt pgtype.Timestamptz
+}
+
+// ATOMIC anchor apply (review: a status-only CAS let a stale sweep read revert
+// a just-committed upgrade): plan moves to pending_plan and pending clears in
+// ONE statement, conditional on the pending value still being the one that is
+// due — a concurrent upgrade's ClearPendingPlan makes this a no-row no-op.
+func (q *Queries) ApplyPendingPlan(ctx context.Context, arg ApplyPendingPlanParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, applyPendingPlan, arg.OrgID, arg.PendingPlanAt)
+	var i Subscription
+	err := row.Scan(
+		&i.OrgID,
+		&i.Plan,
+		&i.AnchorDay,
+		&i.Status,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.DunningStartedAt,
+		&i.NextRetryAt,
+		&i.PlanEndsAt,
+		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
+	)
+	return i, err
+}
+
+const clearPendingPlan = `-- name: ClearPendingPlan :exec
+UPDATE subscriptions SET pending_plan = NULL, pending_plan_at = NULL, updated_at = now()
+WHERE org_id = $1
+`
+
+func (q *Queries) ClearPendingPlan(ctx context.Context, orgID string) error {
+	_, err := q.db.Exec(ctx, clearPendingPlan, orgID)
+	return err
+}
+
 const getSubscription = `-- name: GetSubscription :one
 
-SELECT org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at FROM subscriptions WHERE org_id = $1
+SELECT org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at FROM subscriptions WHERE org_id = $1
 `
 
 // T11.2: subscription lifecycle state machine.
@@ -31,6 +77,8 @@ func (q *Queries) GetSubscription(ctx context.Context, orgID string) (Subscripti
 		&i.NextRetryAt,
 		&i.PlanEndsAt,
 		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
 	)
 	return i, err
 }
@@ -38,6 +86,7 @@ func (q *Queries) GetSubscription(ctx context.Context, orgID string) (Subscripti
 const listSubscriptionsToAdvance = `-- name: ListSubscriptionsToAdvance :many
 SELECT org_id FROM subscriptions
 WHERE (status = 'trial' AND trial_ends_at IS NOT NULL AND trial_ends_at <= now())
+   OR (pending_plan IS NOT NULL AND pending_plan_at IS NOT NULL AND pending_plan_at <= now())
    OR status IN ('grace', 'provisioning_paused')
    OR (status = 'cancelled_at_anchor' AND plan_ends_at IS NOT NULL AND plan_ends_at <= now())
 ORDER BY updated_at ASC
@@ -67,6 +116,41 @@ func (q *Queries) ListSubscriptionsToAdvance(ctx context.Context) ([]string, err
 	return items, nil
 }
 
+const setPendingPlan = `-- name: SetPendingPlan :one
+UPDATE subscriptions SET pending_plan = $2, pending_plan_at = $3, updated_at = now()
+WHERE org_id = $1 AND status <> 'cancelled_at_anchor'
+RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
+`
+
+type SetPendingPlanParams struct {
+	OrgID         string
+	PendingPlan   pgtype.Text
+	PendingPlanAt pgtype.Timestamptz
+}
+
+// A clean downgrade schedules at the anchor (B4) — never immediate. Guarded:
+// never onto a cancelled row (the wind-down owns the anchor — review H1/M1);
+// no row back = the row left the schedulable states mid-flight.
+func (q *Queries) SetPendingPlan(ctx context.Context, arg SetPendingPlanParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, setPendingPlan, arg.OrgID, arg.PendingPlan, arg.PendingPlanAt)
+	var i Subscription
+	err := row.Scan(
+		&i.OrgID,
+		&i.Plan,
+		&i.AnchorDay,
+		&i.Status,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.DunningStartedAt,
+		&i.NextRetryAt,
+		&i.PlanEndsAt,
+		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
+	)
+	return i, err
+}
+
 const setSubscriptionState = `-- name: SetSubscriptionState :one
 UPDATE subscriptions SET
     status = $2,
@@ -77,7 +161,7 @@ UPDATE subscriptions SET
     trial_ends_at = $7,
     updated_at = now()
 WHERE org_id = $1 AND status = $8
-RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at
+RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
 `
 
 type SetSubscriptionStateParams struct {
@@ -120,6 +204,25 @@ func (q *Queries) SetSubscriptionState(ctx context.Context, arg SetSubscriptionS
 		&i.NextRetryAt,
 		&i.PlanEndsAt,
 		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
 	)
 	return i, err
+}
+
+const syncOrgPlan = `-- name: SyncOrgPlan :exec
+UPDATE orgs SET plan = $2 WHERE id = $1
+`
+
+type SyncOrgPlanParams struct {
+	ID   string
+	Plan string
+}
+
+// subscriptions.plan is the billing master; orgs.plan is what every plan gate
+// reads — they must NEVER diverge (Q9 finding: cancel-at-anchor previously
+// dropped subscriptions.plan to free while orgs.plan stayed paid).
+func (q *Queries) SyncOrgPlan(ctx context.Context, arg SyncOrgPlanParams) error {
+	_, err := q.db.Exec(ctx, syncOrgPlan, arg.ID, arg.Plan)
+	return err
 }

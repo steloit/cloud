@@ -35,12 +35,14 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
+	"github.com/steloit/cloud/services/api/internal/subscription"
 )
 
 // testKEK is a fixed 32-byte key (base64) — test worlds only.
 const testKEK = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 type world struct {
+	subs  *subscription.Service
 	srv   *httptest.Server
 	pool  *pgxpool.Pool
 	svc   *identity.Service
@@ -105,7 +107,8 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	vault := secrets.NewVault(q, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q), plans)
 	mux := http.NewServeMux()
-	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q), notify.NewRouter(q, kek))
+	subs := subscription.NewService(q, recorder)
+	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q), notify.NewRouter(q, kek), subs)
 	idHandlers.Mount(mux, &testAPI{
 		Handlers:  idHandlers,
 		Handlers2: provisioning.NewHandlers(prov, authz, q, svc, estimates.NewService(q)),
@@ -117,7 +120,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	}
 	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
 	t.Cleanup(srv.Close)
-	return &world{srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, rec: recorder, prov: prov, vault: vault, kek: kek}
+	return &world{subs: subs, srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, rec: recorder, prov: prov, vault: vault, kek: kek}
 }
 
 // testAPI composes the module handler sets exactly like the composition root.

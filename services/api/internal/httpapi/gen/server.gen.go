@@ -193,6 +193,15 @@ type ServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CancelSubscription Cancel at anchor. Plan ≠ resources: services keep running and metering (B12). Response echoes the wind-down contract.
+	// (DELETE /orgs/{org}/subscription)
+	CancelSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
+	// (GET /orgs/{org}/subscription)
+	GetSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// ChangePlan Upgrades immediate + prorated; downgrades at anchor, 409 with ALL blocking reasons verbatim (B4: '12 members > Free's 3 — the button says why')
+	// (POST /orgs/{org}/subscription)
+	ChangePlan(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 
 	// (GET /orgs/{org}/templates)
 	ListTemplates(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
@@ -1798,6 +1807,84 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// CancelSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CancelSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelSubscription(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSubscription operation middleware
+func (siw *ServerInterfaceWrapper) GetSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSubscription(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangePlan operation middleware
+func (siw *ServerInterfaceWrapper) ChangePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePlan(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTemplates operation middleware
 func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.Request) {
 
@@ -2540,6 +2627,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/orgs/{org}/billing/budget", wrapper.SetBudget)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/usage", wrapper.GetUsage)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/invoices", wrapper.ListInvoices)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.CancelSubscription)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.GetSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/subscription", wrapper.ChangePlan)
 
 	return m
 }
@@ -3995,6 +4085,88 @@ func (response CreateProject402ApplicationProblemPlusJSONResponse) VisitCreatePr
 	return err
 }
 
+type CancelSubscriptionRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *CancelSubscriptionJSONRequestBody
+}
+
+type CancelSubscriptionResponseObject interface {
+	VisitCancelSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type CancelSubscription200JSONResponse Subscription
+
+func (response CancelSubscription200JSONResponse) VisitCancelSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSubscriptionRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type GetSubscriptionResponseObject interface {
+	VisitGetSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type GetSubscription200JSONResponse Subscription
+
+func (response GetSubscription200JSONResponse) VisitGetSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePlanRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *ChangePlanJSONRequestBody
+}
+
+type ChangePlanResponseObject interface {
+	VisitChangePlanResponse(w http.ResponseWriter) error
+}
+
+type ChangePlan200JSONResponse Subscription
+
+func (response ChangePlan200JSONResponse) VisitChangePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ChangePlan409ApplicationProblemPlusJSONResponse Problem
+
+func (response ChangePlan409ApplicationProblemPlusJSONResponse) VisitChangePlanResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTemplatesRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -4674,6 +4846,15 @@ type StrictServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+	// CancelSubscription Cancel at anchor. Plan ≠ resources: services keep running and metering (B12). Response echoes the wind-down contract.
+	// (DELETE /orgs/{org}/subscription)
+	CancelSubscription(ctx context.Context, request CancelSubscriptionRequestObject) (CancelSubscriptionResponseObject, error)
+
+	// (GET /orgs/{org}/subscription)
+	GetSubscription(ctx context.Context, request GetSubscriptionRequestObject) (GetSubscriptionResponseObject, error)
+	// ChangePlan Upgrades immediate + prorated; downgrades at anchor, 409 with ALL blocking reasons verbatim (B4: '12 members > Free's 3 — the button says why')
+	// (POST /orgs/{org}/subscription)
+	ChangePlan(ctx context.Context, request ChangePlanRequestObject) (ChangePlanResponseObject, error)
 
 	// (GET /orgs/{org}/templates)
 	ListTemplates(ctx context.Context, request ListTemplatesRequestObject) (ListTemplatesResponseObject, error)
@@ -6396,6 +6577,101 @@ func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
 		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelSubscription operation middleware
+func (sh *strictHandler) CancelSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request CancelSubscriptionRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body CancelSubscriptionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelSubscription(ctx, request.(CancelSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelSubscriptionResponseObject); ok {
+		if err := validResponse.VisitCancelSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSubscription operation middleware
+func (sh *strictHandler) GetSubscription(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request GetSubscriptionRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSubscription(ctx, request.(GetSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSubscriptionResponseObject); ok {
+		if err := validResponse.VisitGetSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ChangePlan operation middleware
+func (sh *strictHandler) ChangePlan(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ChangePlanRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body ChangePlanJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ChangePlan(ctx, request.(ChangePlanRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ChangePlan")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ChangePlanResponseObject); ok {
+		if err := validResponse.VisitChangePlanResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
