@@ -6,16 +6,19 @@ variable "cell_id" {
   type = string
 }
 
-variable "operator_version" {
-  type        = string
-  description = "CNPG operator — pinned <= 1.30 (architecture §3: in-tree Barman until the barman-cloud plugin issues close; version bumps are a reviewed knob)"
-  default     = "1.30.0"
-}
+# The operator version rides the chart pin (chart 0.29.0 -> operator 1.30.0;
+# the chart is the single source so CRDs + operator move atomically).
 
 variable "operator_chart_version" {
   type        = string
-  description = "cloudnative-pg helm chart version shipping operator 1.30.x (the <=1.30 ceiling — ADR-0007 F6; in-tree Barman removed in 1.31)"
-  default     = "0.26.0"
+  description = "cloudnative-pg chart version. 0.29.x ships operator 1.30.x — the HARD ceiling (architecture §3 v1.3 / ADR-0007 F6: in-tree Barman is REMOVED in 1.31). A bump past 0.29.x requires the barman-cloud plugin migration PR, never a drive-by."
+  default     = "0.29.0"
+  validation {
+    # chart 0.30+ ships operator 1.31+ (in-tree Barman gone) — enforce the
+    # ceiling in terraform, not just comments (review finding M1).
+    condition     = can(regex("^0\\.29\\.", var.operator_chart_version)) || can(regex("^0\\.2[0-8]\\.", var.operator_chart_version))
+    error_message = "operator_chart_version must stay <= 0.29.x (operator <= 1.30 — ADR-0007 F6 ceiling); the bump requires the barman-cloud plugin migration."
+  }
 }
 
 variable "control_plane" {
@@ -32,6 +35,6 @@ variable "wal_control_bucket" {
 
 variable "control_plane_storage_size" {
   type        = string
-  description = "Capacity, supplied by the env (shape never carries numbers)"
-  default     = "10Gi"
+  description = "Capacity, supplied by the env when control_plane = true (shape never carries numbers — no real default, review finding; null is 'not deploying a control plane here')"
+  default     = null
 }

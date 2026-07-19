@@ -8,6 +8,8 @@ provider "google-beta" {
   region  = var.region
 }
 
+# See infra/README.md staged-apply note: kubernetes_manifest plans against the
+# live cluster API — fresh projects apply in stages.
 data "google_client_config" "current" {}
 
 provider "kubernetes" {

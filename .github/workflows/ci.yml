@@ -69,7 +69,7 @@ jobs:
         run: |
           if [ -d infra/spike ]; then
             for f in infra/spike/*.sh; do bash -n "$f"; done
-            python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/spike/manifests/*.yaml')]"
+            python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/spike/manifests/*.yaml') + glob.glob('infra/k8s/**/*.yaml', recursive=True)]"
           else
             echo "no infra/spike on this ref (T1.0 branch not merged) — skipping"
           fi

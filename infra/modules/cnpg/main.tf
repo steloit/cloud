@@ -10,6 +10,11 @@ locals {
     cell_id    = var.cell_id
     managed_by = "steloit-terraform"
   }
+  # ONE identity source for the control-plane DB: templated into the Cluster +
+  # ScheduledBackup yaml AND the WI member string (review finding: cross-file
+  # identity coupling fails only at runtime).
+  cp_namespace = "control-plane"
+  cp_cluster   = "control-plane"
 }
 
 # --- CNPG operator -----------------------------------------------------------
@@ -20,14 +25,10 @@ resource "helm_release" "cnpg_operator" {
   name             = "cnpg"
   repository       = "https://cloudnative-pg.github.io/charts"
   chart            = "cloudnative-pg"
-  version          = var.operator_chart_version
+  version          = var.operator_chart_version # 0.29.0 ships operator 1.30.0 (charts index appVersion — verified 2026-07-19); the chart pins operator + CRDs ATOMICALLY, so no image override (review finding: an image.tag override risks CRD/operator skew)
   namespace        = "cnpg-system"
   create_namespace = true
-
-  set {
-    name  = "image.tag" # operator 1.30.0 — architecture §3 pin (<= 1.30)
-    value = var.operator_version
-  }
+  # NOTE: `set {}` block syntax is helm provider 2.x — a 3.x bump changes this.
 }
 
 # --- storage: the T1.0-proven classes, VERBATIM ------------------------------
@@ -61,25 +62,34 @@ resource "google_storage_bucket_iam_member" "cnpg_control_wal" {
 }
 
 # CNPG runs the cluster under KSA <cluster-name> in its namespace (F5:
-# workload identity is a hard prerequisite for barman→GCS).
+# workload identity is a hard prerequisite for barman→GCS). The member string
+# derives from the SAME locals templated into the yaml — one identity source.
 resource "google_service_account_iam_member" "cnpg_control_wif" {
   count              = var.control_plane ? 1 : 0
   service_account_id = google_service_account.cnpg_control[0].name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[control-plane/control-plane]"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[${local.cp_namespace}/${local.cp_cluster}]"
 }
 
 resource "kubernetes_namespace" "control_plane" {
   count = var.control_plane ? 1 : 0
   metadata {
-    name   = "control-plane"
+    name   = local.cp_namespace
     labels = local.labels
   }
 }
 
 resource "kubernetes_manifest" "control_plane_cluster" {
   count = var.control_plane ? 1 : 0
+  lifecycle {
+    precondition {
+      condition     = var.control_plane_storage_size != null
+      error_message = "control_plane = true requires control_plane_storage_size from the env (capacity lives in envs)."
+    }
+  }
   manifest = yamldecode(templatefile("${path.module}/../../k8s/control-plane/cnpg-cluster.yaml", {
+    namespace          = local.cp_namespace
+    cluster_name       = local.cp_cluster
     wal_control_bucket = var.wal_control_bucket
     gsa_email          = google_service_account.cnpg_control[0].email
     storage_size       = var.control_plane_storage_size
@@ -92,7 +102,10 @@ resource "kubernetes_manifest" "control_plane_cluster" {
 }
 
 resource "kubernetes_manifest" "control_plane_backup_schedule" {
-  count      = var.control_plane ? 1 : 0
-  manifest   = yamldecode(file("${path.module}/../../k8s/control-plane/cnpg-scheduled-backup.yaml"))
+  count = var.control_plane ? 1 : 0
+  manifest = yamldecode(templatefile("${path.module}/../../k8s/control-plane/cnpg-scheduled-backup.yaml", {
+    namespace    = local.cp_namespace
+    cluster_name = local.cp_cluster
+  }))
   depends_on = [kubernetes_manifest.control_plane_cluster]
 }

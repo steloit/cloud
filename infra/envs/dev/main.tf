@@ -8,9 +8,11 @@ provider "google-beta" {
   region  = var.region
 }
 
-# k8s providers ride the gke-cell outputs (T1.2): configured lazily — resources
-# using them only exist once the cluster does; auth via the caller's gcloud
-# token (zero static keys, D5).
+# k8s providers ride the gke-cell outputs (T1.2). IMPORTANT: kubernetes_manifest
+# plans against the LIVE cluster API (schema fetch at plan time), so a fresh
+# project needs the STAGED apply documented in infra/README.md — a bare full
+# apply on empty state fails by design of the provider, not of this config.
+# Auth via the caller's gcloud token (zero static keys, D5).
 data "google_client_config" "current" {}
 
 provider "kubernetes" {
@@ -64,11 +66,12 @@ module "gke_cell" {
 }
 
 module "cnpg" {
-  source             = "../../modules/cnpg"
-  project_id         = var.project_id
-  cell_id            = var.cell_id
-  control_plane      = true # the control-plane DB lives in dev (invariant 10 bucket below)
-  wal_control_bucket = module.project_base.wal_control_bucket
+  source                     = "../../modules/cnpg"
+  project_id                 = var.project_id
+  cell_id                    = var.cell_id
+  control_plane              = true # the control-plane DB lives in dev (invariant 10 bucket below)
+  wal_control_bucket         = module.project_base.wal_control_bucket
+  control_plane_storage_size = "10Gi" # capacity lives HERE, not in the module
 }
 
 module "cost_guardrails" {

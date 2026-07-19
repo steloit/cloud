@@ -4,11 +4,11 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
-  name: control-plane-nightly
-  namespace: control-plane
+  name: ${cluster_name}-nightly
+  namespace: ${namespace}
 spec:
   cluster:
-    name: control-plane
+    name: ${cluster_name}
   method: barmanObjectStore
   schedule: "0 0 2 * * *" # 02:00 UTC nightly (6-field cron: sec min hour)
   backupOwnerReference: self

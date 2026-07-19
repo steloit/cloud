@@ -5,6 +5,29 @@ locals {
   }
 }
 
+# Dedicated node service account (review finding: default compute SA is
+# project-Editor-adjacent — a node compromise on the pool running customer code
+# must not yield broad project credentials). Least-privilege: logs, metrics,
+# and image pulls only (D5 posture at the node layer).
+resource "google_service_account" "node" {
+  project      = var.project_id
+  account_id   = "gke-node-${var.cell_id}"
+  display_name = "GKE node SA (${var.cell_id}) — least-privilege: logging/monitoring/AR-read"
+}
+
+resource "google_project_iam_member" "node_roles" {
+  for_each = toset([
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/monitoring.viewer",
+    "roles/stackdriver.resourceMetadata.writer",
+    "roles/artifactregistry.reader",
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.node.email}"
+}
+
 resource "google_container_cluster" "cell" {
   name     = var.cell_id
   project  = var.project_id
@@ -47,7 +70,8 @@ resource "google_container_node_pool" "core" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
 
@@ -79,7 +103,8 @@ resource "google_container_node_pool" "db_storage" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
 
@@ -116,6 +141,7 @@ resource "google_container_node_pool" "workload" {
       mode = "GKE_METADATA"
     }
 
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    service_account = google_service_account.node.email
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
 }
