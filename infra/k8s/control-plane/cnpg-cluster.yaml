@@ -1,0 +1,32 @@
+# T1.2/T1.4 substrate: the control-plane database (architecture §3 v1.3 —
+# "also a CNPG cluster; one operator to know everywhere"). Single instance;
+# PITR to its OWN bucket (INF-001 invariant 10); archive_timeout=300s is the
+# measured RPO bound (ADR-0007, A1.3). Recovery targets must derive from the
+# last archived WAL, never wall-clock (ADR-0007 F4).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: control-plane
+  namespace: control-plane
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: ${storage_size}
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: "${gsa_email}"
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+  postgresql:
+    parameters:
+      archive_timeout: "300s" # RPO <= 300s by construction (ADR-0007 / A1.3)
+  backup:
+    barmanObjectStore:
+      destinationPath: gs://${wal_control_bucket}/control-plane
+      googleCredentials:
+        gkeEnvironment: true # workload identity — zero static keys (D5; ADR-0007 F5)
+    retentionPolicy: 30d

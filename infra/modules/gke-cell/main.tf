@@ -51,10 +51,14 @@ resource "google_container_node_pool" "core" {
   }
 }
 
-# ZFS storage pool: local SSD for OpenEBS ZFS-LocalPV (ADR-0003). Fixed count
-# (stateful — never autoscaled); tainted so only CNPG/storage pods land here.
-resource "google_container_node_pool" "zfs_storage" {
-  name       = "zfs-storage"
+# DB storage pool (ADR-0007 / INF-001 A6, ratified 2026-07-19): the canonical
+# dev/alpha driver is "pd" — plain PD-CSI-backed nodes, no local SSD, no node
+# bootstrap. "zfs" (OpenEBS ZFS-LocalPV on local SSD) is RETAINED as the Cell-1
+# branch-density option behind an explicit measured trigger — same pool shape,
+# one variable. Fixed count (stateful — never autoscaled); tainted so only
+# CNPG/storage pods land here.
+resource "google_container_node_pool" "db_storage" {
+  name       = "db-storage"
   project    = var.project_id
   location   = var.zone
   cluster    = google_container_cluster.cell.name
@@ -62,12 +66,12 @@ resource "google_container_node_pool" "zfs_storage" {
 
   node_config {
     machine_type    = var.storage_machine_type
-    local_ssd_count = var.storage_local_ssd_count
-    labels          = merge(local.labels, { pool = "zfs-storage" })
+    local_ssd_count = var.storage_driver == "zfs" ? var.storage_local_ssd_count : 0
+    labels          = merge(local.labels, { pool = "db-storage", storage_driver = var.storage_driver })
 
     taint {
       key    = "storage"
-      value  = "zfs"
+      value  = var.storage_driver
       effect = "NO_SCHEDULE"
     }
 

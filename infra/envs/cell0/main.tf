@@ -8,6 +8,22 @@ provider "google-beta" {
   region  = var.region
 }
 
+data "google_client_config" "current" {}
+
+provider "kubernetes" {
+  host                   = "https://${module.gke_cell.cluster_endpoint}"
+  token                  = data.google_client_config.current.access_token
+  cluster_ca_certificate = base64decode(module.gke_cell.cluster_ca_certificate)
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = "https://${module.gke_cell.cluster_endpoint}"
+    token                  = data.google_client_config.current.access_token
+    cluster_ca_certificate = base64decode(module.gke_cell.cluster_ca_certificate)
+  }
+}
+
 module "project_base" {
   source     = "../../modules/project-base"
   project_id = var.project_id
@@ -34,14 +50,16 @@ module "gke_cell" {
   deletion_protection = true
 
   # capacity (this file is the ONLY place numbers live)
-  core_machine_type       = "e2-medium"
-  core_min_nodes          = 1 # A1.6 floor
-  core_max_nodes          = 3
-  storage_machine_type    = "n2-standard-8"
-  storage_node_count      = 1
-  storage_local_ssd_count = 2
-  workload_machine_type   = "e2-standard-4"
-  workload_max_nodes      = 5
+  core_machine_type    = "e2-medium"
+  core_min_nodes       = 1 # A1.6 floor
+  core_max_nodes       = 3
+  storage_machine_type = "n2-standard-8"
+  storage_node_count   = 1
+  # ADR-0007/A6: pd is canonical; flipping to "zfs" (+ storage_local_ssd_count)
+  # is the Cell-1 density decision — requires the measured trigger, never default.
+  storage_driver        = "pd"
+  workload_machine_type = "e2-standard-4"
+  workload_max_nodes    = 5
 }
 
 module "cnpg" {

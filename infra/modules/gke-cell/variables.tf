@@ -43,12 +43,24 @@ variable "storage_machine_type" {
   type = string
 }
 
+variable "storage_driver" {
+  type        = string
+  description = "pd (canonical dev/alpha — ADR-0007/A6) | zfs (Cell-1 density option: local SSD + OpenEBS ZFS-LocalPV, measured trigger required)"
+  default     = "pd"
+  validation {
+    condition     = contains(["pd", "zfs"], var.storage_driver)
+    error_message = "storage_driver must be pd or zfs."
+  }
+}
+
 variable "storage_node_count" {
   type = number
 }
 
 variable "storage_local_ssd_count" {
-  type = number
+  type        = number
+  description = "Only consumed when storage_driver = zfs (Cell-1 knob)"
+  default     = 0
 }
 
 variable "workload_machine_type" {
