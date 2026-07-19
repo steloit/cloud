@@ -31,6 +31,7 @@ var enforcedPermissions = []rbac.Permission{
 	"binding.manage", "deploy.promote", "deploy.rollback",
 	"project.create", "project.delete", "env.manage",
 	"service.create", "service.scale", "service.delete",
+	"dashboard.create", "dashboard.share_org",
 }
 
 // permLiteral matches the permission string argument of a Require/requireOrg

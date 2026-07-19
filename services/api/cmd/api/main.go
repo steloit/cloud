@@ -105,6 +105,25 @@ func (s *apiServer) DeleteEnvironment(ctx context.Context, r gen.DeleteEnvironme
 	return s.Handlers2.DeleteEnvironment(ctx, r)
 }
 
+func (s *apiServer) CreateDashboard(ctx context.Context, r gen.CreateDashboardRequestObject) (gen.CreateDashboardResponseObject, error) {
+	return s.Handlers2.CreateDashboard(ctx, r)
+}
+func (s *apiServer) ListDashboards(ctx context.Context, r gen.ListDashboardsRequestObject) (gen.ListDashboardsResponseObject, error) {
+	return s.Handlers2.ListDashboards(ctx, r)
+}
+func (s *apiServer) GetDashboard(ctx context.Context, r gen.GetDashboardRequestObject) (gen.GetDashboardResponseObject, error) {
+	return s.Handlers2.GetDashboard(ctx, r)
+}
+func (s *apiServer) UpdateDashboard(ctx context.Context, r gen.UpdateDashboardRequestObject) (gen.UpdateDashboardResponseObject, error) {
+	return s.Handlers2.UpdateDashboard(ctx, r)
+}
+func (s *apiServer) DeleteDashboard(ctx context.Context, r gen.DeleteDashboardRequestObject) (gen.DeleteDashboardResponseObject, error) {
+	return s.Handlers2.DeleteDashboard(ctx, r)
+}
+func (s *apiServer) AddWidget(ctx context.Context, r gen.AddWidgetRequestObject) (gen.AddWidgetResponseObject, error) {
+	return s.Handlers2.AddWidget(ctx, r)
+}
+
 func (s *apiServer) CaptureTemplate(ctx context.Context, r gen.CaptureTemplateRequestObject) (gen.CaptureTemplateResponseObject, error) {
 	return s.Handlers2.CaptureTemplate(ctx, r)
 }

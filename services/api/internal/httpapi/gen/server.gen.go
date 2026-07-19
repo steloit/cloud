@@ -58,6 +58,18 @@ type ServerInterface interface {
 	// DeleteBinding Unbind — rotates credentials immediately
 	// (DELETE /bindings/{binding})
 	DeleteBinding(w http.ResponseWriter, r *http.Request, binding string)
+
+	// (DELETE /dashboards/{dash})
+	DeleteDashboard(w http.ResponseWriter, r *http.Request, dash string)
+
+	// (GET /dashboards/{dash})
+	GetDashboard(w http.ResponseWriter, r *http.Request, dash string)
+	// UpdateDashboard Layout, rename, visibility. Editing a shared dashboard is live for all viewers and audited (F7).
+	// (PATCH /dashboards/{dash})
+	UpdateDashboard(w http.ResponseWriter, r *http.Request, dash string)
+	// AddWidget Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
+	// (POST /dashboards/{dash}/widgets)
+	AddWidget(w http.ResponseWriter, r *http.Request, dash string)
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(w http.ResponseWriter, r *http.Request, dep string)
@@ -166,6 +178,12 @@ type ServerInterface interface {
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params GetUsageParams)
+	// ListDashboards Pre-built are generated views, never files; org-wide dashboards render only viewer-accessible projects and say so
+	// (GET /orgs/{org}/dashboards)
+	ListDashboards(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListDashboardsParams)
+	// CreateDashboard Create (DB8): scope (org|project) ⊥ visibility (personal|org|restricted); project-scoped = born filtered + project permissions
+	// (POST /orgs/{org}/dashboards)
+	CreateDashboard(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 
 	// (GET /orgs/{org}/invites)
 	ListInvites(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
@@ -491,6 +509,110 @@ func (siw *ServerInterfaceWrapper) DeleteBinding(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteBinding(w, r, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDashboard operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDashboard(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDashboard(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateDashboard operation middleware
+func (siw *ServerInterfaceWrapper) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateDashboard(w, r, dash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddWidget operation middleware
+func (siw *ServerInterfaceWrapper) AddWidget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dash" -------------
+	var dash string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dash", r.PathValue("dash"), &dash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddWidget(w, r, dash)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1487,6 +1609,74 @@ func (siw *ServerInterfaceWrapper) GetUsage(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetUsage(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDashboards operation middleware
+func (siw *ServerInterfaceWrapper) ListDashboards(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDashboardsParams
+
+	// ------------- Optional query parameter "scope" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scope", r.URL.Query(), &params.Scope, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "scope"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDashboards(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDashboard operation middleware
+func (siw *ServerInterfaceWrapper) CreateDashboard(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDashboard(w, r, orgPathParam)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2620,6 +2810,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/envs/{env}/deployments", wrapper.CreateDeployment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/deployments/{dep}/rollback", wrapper.RollbackDeployment)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/dashboards", wrapper.ListDashboards)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/dashboards", wrapper.CreateDashboard)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/dashboards/{dash}", wrapper.DeleteDashboard)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/dashboards/{dash}", wrapper.GetDashboard)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/dashboards/{dash}", wrapper.UpdateDashboard)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/dashboards/{dash}/widgets", wrapper.AddWidget)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.ListTemplates)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.CaptureTemplate)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/templates/{tpl}", wrapper.DeleteTemplate)
@@ -2979,6 +3175,90 @@ type DeleteBinding204Response struct {
 func (response DeleteBinding204Response) VisitDeleteBindingResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
 	return nil
+}
+
+type DeleteDashboardRequestObject struct {
+	Dash string `json:"dash"`
+}
+
+type DeleteDashboardResponseObject interface {
+	VisitDeleteDashboardResponse(w http.ResponseWriter) error
+}
+
+type DeleteDashboard204Response struct {
+}
+
+func (response DeleteDashboard204Response) VisitDeleteDashboardResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type GetDashboardRequestObject struct {
+	Dash string `json:"dash"`
+}
+
+type GetDashboardResponseObject interface {
+	VisitGetDashboardResponse(w http.ResponseWriter) error
+}
+
+type GetDashboard200JSONResponse Dashboard
+
+func (response GetDashboard200JSONResponse) VisitGetDashboardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateDashboardRequestObject struct {
+	Dash string `json:"dash"`
+	Body *UpdateDashboardJSONRequestBody
+}
+
+type UpdateDashboardResponseObject interface {
+	VisitUpdateDashboardResponse(w http.ResponseWriter) error
+}
+
+type UpdateDashboard200JSONResponse Dashboard
+
+func (response UpdateDashboard200JSONResponse) VisitUpdateDashboardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWidgetRequestObject struct {
+	Dash string `json:"dash"`
+	Body *AddWidgetJSONRequestBody
+}
+
+type AddWidgetResponseObject interface {
+	VisitAddWidgetResponse(w http.ResponseWriter) error
+}
+
+type AddWidget201JSONResponse Widget
+
+func (response AddWidget201JSONResponse) VisitAddWidgetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type RollbackDeploymentRequestObject struct {
@@ -3826,6 +4106,52 @@ func (response GetUsage200JSONResponse) VisitGetUsageResponse(w http.ResponseWri
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDashboardsRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       ListDashboardsParams
+}
+
+type ListDashboardsResponseObject interface {
+	VisitListDashboardsResponse(w http.ResponseWriter) error
+}
+
+type ListDashboards200JSONResponse DashboardList
+
+func (response ListDashboards200JSONResponse) VisitListDashboardsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDashboardRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *CreateDashboardJSONRequestBody
+}
+
+type CreateDashboardResponseObject interface {
+	VisitCreateDashboardResponse(w http.ResponseWriter) error
+}
+
+type CreateDashboard201JSONResponse Dashboard
+
+func (response CreateDashboard201JSONResponse) VisitCreateDashboardResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4801,6 +5127,18 @@ type StrictServerInterface interface {
 	// DeleteBinding Unbind — rotates credentials immediately
 	// (DELETE /bindings/{binding})
 	DeleteBinding(ctx context.Context, request DeleteBindingRequestObject) (DeleteBindingResponseObject, error)
+
+	// (DELETE /dashboards/{dash})
+	DeleteDashboard(ctx context.Context, request DeleteDashboardRequestObject) (DeleteDashboardResponseObject, error)
+
+	// (GET /dashboards/{dash})
+	GetDashboard(ctx context.Context, request GetDashboardRequestObject) (GetDashboardResponseObject, error)
+	// UpdateDashboard Layout, rename, visibility. Editing a shared dashboard is live for all viewers and audited (F7).
+	// (PATCH /dashboards/{dash})
+	UpdateDashboard(ctx context.Context, request UpdateDashboardRequestObject) (UpdateDashboardResponseObject, error)
+	// AddWidget Sources across planes: metrics|logs|cost|deploys|ai|alerts (DB7 drawer; ⚑ lands here pre-filled)
+	// (POST /dashboards/{dash}/widgets)
+	AddWidget(ctx context.Context, request AddWidgetRequestObject) (AddWidgetResponseObject, error)
 	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
 	// (POST /deployments/{dep}/rollback)
 	RollbackDeployment(ctx context.Context, request RollbackDeploymentRequestObject) (RollbackDeploymentResponseObject, error)
@@ -4909,6 +5247,12 @@ type StrictServerInterface interface {
 	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
 	// (GET /orgs/{org}/billing/usage)
 	GetUsage(ctx context.Context, request GetUsageRequestObject) (GetUsageResponseObject, error)
+	// ListDashboards Pre-built are generated views, never files; org-wide dashboards render only viewer-accessible projects and say so
+	// (GET /orgs/{org}/dashboards)
+	ListDashboards(ctx context.Context, request ListDashboardsRequestObject) (ListDashboardsResponseObject, error)
+	// CreateDashboard Create (DB8): scope (org|project) ⊥ visibility (personal|org|restricted); project-scoped = born filtered + project permissions
+	// (POST /orgs/{org}/dashboards)
+	CreateDashboard(ctx context.Context, request CreateDashboardRequestObject) (CreateDashboardResponseObject, error)
 
 	// (GET /orgs/{org}/invites)
 	ListInvites(ctx context.Context, request ListInvitesRequestObject) (ListInvitesResponseObject, error)
@@ -5406,6 +5750,127 @@ func (sh *strictHandler) DeleteBinding(w http.ResponseWriter, r *http.Request, b
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteBindingResponseObject); ok {
 		if err := validResponse.VisitDeleteBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteDashboard operation middleware
+func (sh *strictHandler) DeleteDashboard(w http.ResponseWriter, r *http.Request, dash string) {
+	var request DeleteDashboardRequestObject
+
+	request.Dash = dash
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteDashboard(ctx, request.(DeleteDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteDashboardResponseObject); ok {
+		if err := validResponse.VisitDeleteDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDashboard operation middleware
+func (sh *strictHandler) GetDashboard(w http.ResponseWriter, r *http.Request, dash string) {
+	var request GetDashboardRequestObject
+
+	request.Dash = dash
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDashboard(ctx, request.(GetDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDashboardResponseObject); ok {
+		if err := validResponse.VisitGetDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateDashboard operation middleware
+func (sh *strictHandler) UpdateDashboard(w http.ResponseWriter, r *http.Request, dash string) {
+	var request UpdateDashboardRequestObject
+
+	request.Dash = dash
+
+	var body UpdateDashboardJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateDashboard(ctx, request.(UpdateDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateDashboardResponseObject); ok {
+		if err := validResponse.VisitUpdateDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddWidget operation middleware
+func (sh *strictHandler) AddWidget(w http.ResponseWriter, r *http.Request, dash string) {
+	var request AddWidgetRequestObject
+
+	request.Dash = dash
+
+	var body AddWidgetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddWidget(ctx, request.(AddWidgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddWidget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddWidgetResponseObject); ok {
+		if err := validResponse.VisitAddWidgetResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -6412,6 +6877,66 @@ func (sh *strictHandler) GetUsage(w http.ResponseWriter, r *http.Request, orgPat
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetUsageResponseObject); ok {
 		if err := validResponse.VisitGetUsageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDashboards operation middleware
+func (sh *strictHandler) ListDashboards(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListDashboardsParams) {
+	var request ListDashboardsRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDashboards(ctx, request.(ListDashboardsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDashboards")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDashboardsResponseObject); ok {
+		if err := validResponse.VisitListDashboardsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDashboard operation middleware
+func (sh *strictHandler) CreateDashboard(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request CreateDashboardRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body CreateDashboardJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDashboard(ctx, request.(CreateDashboardRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDashboard")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDashboardResponseObject); ok {
+		if err := validResponse.VisitCreateDashboardResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
