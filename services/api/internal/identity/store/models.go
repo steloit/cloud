@@ -40,6 +40,22 @@ type Deployment struct {
 	CreatedAt     pgtype.Timestamptz
 }
 
+type EmailDelivery struct {
+	ID              string
+	EventID         string
+	OrgID           pgtype.Text
+	Recipient       string
+	Template        string
+	TemplateVersion int32
+	Status          string
+	Attempts        int32
+	Provider        string
+	ProviderID      pgtype.Text
+	Error           pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type Environment struct {
 	ID                  string
 	ProjectID           string
