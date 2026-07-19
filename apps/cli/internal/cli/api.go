@@ -5,9 +5,12 @@ package cli
 // context echo. Commands render operations — behavior lives in the API.
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/steloit/cloud/apps/cli/internal/output"
 	contracts "github.com/steloit/cloud/packages/contracts/go"
@@ -56,9 +59,12 @@ func (inv *Invocation) needProject() (string, int) {
 }
 
 // resolveEnvID turns the worn context into an env id: explicit env_… ids
-// pass through; names resolve via listEnvironments on the context project;
-// omitted = production forever (ADR-037).
-func (inv *Invocation) resolveEnvID(c *contracts.ClientWithResponses) (string, int) {
+// pass through; names resolve via listEnvironments on the context project.
+// Implicit-env rules (ADR-037 / US-5.1): at n=1 the env is never asked for;
+// at n≥2 READ commands default to production (the echo says so) while
+// STATE-CHANGING commands never guess — TTY prompts with the env list,
+// non-TTY exits 2 with `pass --env`.
+func (inv *Invocation) resolveEnvID(c *contracts.ClientWithResponses, mutating bool) (string, int) {
 	env := inv.Context.Env
 	if len(env) > 4 && env[:4] == "env_" {
 		return env, ExitOK
@@ -66,10 +72,6 @@ func (inv *Invocation) resolveEnvID(c *contracts.ClientWithResponses) (string, i
 	project, code := inv.needProject()
 	if code != ExitOK {
 		return "", code
-	}
-	name := env
-	if name == "" {
-		name = "production"
 	}
 	resp, err := c.ListEnvironmentsWithResponse(context.Background(), project)
 	if err != nil {
@@ -79,16 +81,77 @@ func (inv *Invocation) resolveEnvID(c *contracts.ClientWithResponses) (string, i
 	if resp.JSON200 == nil {
 		return "", inv.fail(resp.Body, resp.HTTPResponse)
 	}
+	var envs []struct{ ID, Name string }
 	if resp.JSON200.Data != nil {
 		for _, e := range *resp.JSON200.Data {
-			if e.Name == name || e.Id == env {
-				return e.Id, ExitOK
-			}
+			envs = append(envs, struct{ ID, Name string }{e.Id, e.Name})
 		}
 	}
-	fmt.Fprintf(inv.Stderr, "✕ environment %q not found in project %s\n", name, project)
-	return "", ExitNotFound
+	if env != "" { // explicitly worn (flag, repo link, or profile)
+		for _, e := range envs {
+			if e.Name == env || e.ID == env {
+				return e.ID, ExitOK
+			}
+		}
+		fmt.Fprintf(inv.Stderr, "✕ environment %q not found in project %s\n", env, project)
+		return "", ExitNotFound
+	}
+	// implicit: n=1 → the one env, never asked (ADR-037)
+	if len(envs) == 1 {
+		return envs[0].ID, ExitOK
+	}
+	if len(envs) == 0 {
+		fmt.Fprintf(inv.Stderr, "✕ project %s has no environments\n", project)
+		return "", ExitNotFound
+	}
+	// n≥2: reads default to production; mutations never guess
+	if !mutating {
+		for _, e := range envs {
+			if e.Name == "production" {
+				return e.ID, ExitOK
+			}
+		}
+		return envs[0].ID, ExitOK
+	}
+	if isTTY() {
+		fmt.Fprintln(inv.Stderr, "This project has several environments:")
+		for i, e := range envs {
+			fmt.Fprintf(inv.Stderr, "  %d) %s\n", i+1, e.Name)
+		}
+		fmt.Fprint(inv.Stderr, "Which environment? ")
+		sc := bufio.NewScanner(stdinReader)
+		if sc.Scan() {
+			pick := strings.TrimSpace(sc.Text())
+			for i, e := range envs {
+				if pick == fmt.Sprint(i+1) || pick == e.Name {
+					return e.ID, ExitOK
+				}
+			}
+		}
+		fmt.Fprintln(inv.Stderr, "✕ no environment chosen")
+		return "", ExitUsage
+	}
+	names := make([]string, len(envs))
+	for i, e := range envs {
+		names[i] = e.Name
+	}
+	fmt.Fprintf(inv.Stderr, "✕ several environments exist (%s) and this command changes state\n", strings.Join(names, ", "))
+	fmt.Fprintln(inv.Stderr, "  → pass --env <name> — state-changing commands never guess (ADR-037)")
+	return "", ExitUsage
 }
+
+// isTTY reports whether stdin is an interactive terminal. The test seam
+// (stdinReader) counts as interactive only when it is not os.Stdin-backed.
+func isTTY() bool {
+	if stdinReader != os.Stdin {
+		return ttyForTests
+	}
+	fi, err := os.Stdin.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// ttyForTests lets tests exercise the prompt path.
+var ttyForTests = false
 
 // echo prints the worn context before state-changing output (cli.md §1).
 func (inv *Invocation) echo() {

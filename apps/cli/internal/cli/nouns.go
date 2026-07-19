@@ -236,7 +236,7 @@ func runDBCreate(inv *Invocation) int {
 		fmt.Fprintln(inv.Stderr, "✕ usage: steloit db create <name> [--size dev|standard|performance] [--storage <GB>] [--ha]")
 		return ExitUsage
 	}
-	envID, code := inv.resolveEnvID(c)
+	envID, code := inv.resolveEnvID(c, true)
 	if code != ExitOK {
 		return code
 	}
@@ -322,7 +322,7 @@ func runServiceList(inv *Invocation, product string) int {
 	if code != ExitOK {
 		return code
 	}
-	envID, code := inv.resolveEnvID(c)
+	envID, code := inv.resolveEnvID(c, false)
 	if code != ExitOK {
 		return code
 	}
@@ -471,7 +471,7 @@ func runDeployCreate(inv *Invocation) int {
 	if code != ExitOK {
 		return code
 	}
-	envID, code := inv.resolveEnvID(c)
+	envID, code := inv.resolveEnvID(c, true)
 	if code != ExitOK {
 		return code
 	}
@@ -515,7 +515,7 @@ func runDeployList(inv *Invocation) int {
 	if code != ExitOK {
 		return code
 	}
-	envID, code := inv.resolveEnvID(c)
+	envID, code := inv.resolveEnvID(c, false)
 	if code != ExitOK {
 		return code
 	}
@@ -675,7 +675,7 @@ func runEvents(inv *Invocation) int {
 	if code != ExitOK {
 		return code
 	}
-	envID, code := inv.resolveEnvID(c)
+	envID, code := inv.resolveEnvID(c, false)
 	if code != ExitOK {
 		return code
 	}
