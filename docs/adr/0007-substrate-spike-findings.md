@@ -1,6 +1,6 @@
 # ADR-0007 — T1.0 substrate spike findings (measured evidence)
 
-**Status:** Proposed · 2026-07-19 · Closes T1.0 · **proposes Architecture v1.3 (supersedes §3's storage sentences) + INF-001 Amendment A6 (founder ratification required — 00-sources is human-only)**
+**Status:** **Accepted** · ratified by founder 2026-07-19 · Closes T1.0 · Architecture v1.3 applied (§3) · INF-001 Amendment A6 + decisions.md ADR-042 via stamped-copy handoff · unblocks T1.2
 **Context:** ADR-0003 chose CNPG + ZFS-LocalPV on architectural evidence; INF-001
 A4 redefined the week-1 spike (snapshot → clone → recovery e2e). The founder's
 spike directive (2026-07-19): *validate assumptions; if evidence shows another

@@ -53,7 +53,7 @@ The **dev** foundation is bootstrapped; identifiers below are live.
 | GKE cluster / compute | **none yet** (~$0 running) — stood up by the T1.0 spike / T1.2 | ⏳ next |
 | DNS provider | **GoDaddy** (`steloit.com`) — records generated for founder to apply | ✅ |
 | GitHub repo WIF binding | pool/provider created; repo attribute condition set in `project-base` | ✅ |
-| Substrate | CNPG on **GKE PD-CSI** at dev/alpha (ADR-0007, **proposed — awaiting founder ratification of Arch v1.3 + INF-001 A6**); ZFS-LocalPV re-scoped to a Cell-1 density option; object storage **proxied** | ⏳ ratification | ADR-0007 |
+| Substrate | CNPG on **GKE PD-CSI** at dev/alpha (**ADR-0007 ratified 2026-07-19**; Arch v1.3 + INF-001 A6); ZFS-LocalPV re-scoped to a Cell-1 density option; object storage **proxied** | ✅ | ADR-0007 |
 
 **Bootstrap procedure used** (repeatable for `cell0`): create project → link billing
 → `gcloud services enable` the 14 APIs → `terraform -chdir=infra/envs/dev apply
