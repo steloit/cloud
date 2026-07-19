@@ -18,7 +18,8 @@ jobs:
       - name: Client regeneration drift (type drift fails the build — Q3/§17)
         run: |
           make gen-ts
-          git diff --exit-code -- apps packages docs
+          git add -A -- apps packages docs
+          git diff --cached --exit-code -- apps packages docs
       - name: Console lint + typecheck + tests + build
         run: |
           pnpm --filter console lint
@@ -43,7 +44,8 @@ jobs:
         run: |
           make gen-go
           make gen-canon
-          git diff --exit-code -- services packages apps
+          git add -A -- services packages apps
+          git diff --cached --exit-code -- services packages apps
       - name: Build + vet + test
         run: |
           cd services/api && go build ./... && go vet ./... && go test ./...
