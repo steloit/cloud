@@ -23,31 +23,43 @@ maintained by agents as values arrive.
 | Key | Value | Status | Source |
 |---|---|---|---|
 | Organization name | **Steloit** (product: *Steloit Cloud*) | ✅ | product spec |
-| Primary domain (platform) | `steloit.app` (email `noreply@steloit.app`) | ✅ | T10.4 / mailer config |
+| Primary domain (platform) | **`steloit.com`** (DNS at GoDaddy) | ✅ | founder 2026-07-19 |
 | Customer-content domain | a **separate eTLD+1** (never a platform subdomain) | ⏳ P2 | INF-001 A1.4 |
 | Branding (logo, palette, marks) | console design system (frames) | ✅ derived | design spec |
 | Support email | — | ❓ | not on record |
 | License (repo + distributed code) | — | ❓ | no `LICENSE` file exists |
 
-## 2 · Cloud & infrastructure (P1)
+## 2 · Cloud & infrastructure (P1 — landed 2026-07-19)
 
-GCP-first is ratified (ADR-029 / INF-001 — *hyperscaler primitives, never
-resold-managed-services; GCP first*). The concrete identifiers below are the P1
-dependency the founder is providing; **fill each as it arrives, then proceed with
-T1.0 → T1.2 → T3.4 and remaining P1-gated work** (no re-approval needed).
+GCP-first is ratified (ADR-029 / INF-001). The founder authorized autonomous
+gcloud discovery + provisioning (least-privilege IAM, stay in the free trial).
+The **dev** foundation is bootstrapped; identifiers below are live.
 
 | Key | Value | Status |
 |---|---|---|
 | Cloud provider | **GCP** | ✅ (ADR-029) |
-| GCP Project ID | — | ⏳ P1 |
-| Billing account | — | ⏳ P1 |
-| Primary region | **Mumbai / `asia-south1`** (partner-touchable envs born in Mumbai) | ✅ INF-001 A1.7 *(confirm exact region string on P1)* |
-| Artifact Registry name | — | ⏳ P1 |
-| Required GCP APIs to enable | — | ⏳ P1 |
-| Service account / Workload Identity | — | ⏳ P1 |
-| GitHub repo variables & secrets | — | ⏳ P1 |
-| DNS provider | — | ❓ |
-| Substrate | CNPG + ZFS storage pool; object storage **proxied, never self-hosted** | ✅ | architecture.md / INF-001 |
+| GCP account | `hashir@humanetechnologies.in` | ✅ |
+| GCP organization | `humanetechnologies.in` / `665960555130` | ✅ discovered |
+| Billing account | `016006-61AFB9-0DD7E7` ("My Billing Account", **Free Trial $300**) | ✅ discovered |
+| **Dev project** | **`steloit-dev`** (# `850447601666`, us-central1) — billing linked | ✅ **created** |
+| Cell-0 project (partner) | `steloit-cell0` (asia-south1) — not yet created (cost: create at Cell-1) | ⏳ later |
+| Primary region (dev) | `us-central1` (dev default); partner cell `asia-south1` (A1.7) | ✅ |
+| Terraform state | `gs://steloit-dev-tfstate` (prefix `dev`) — versioned, migrated | ✅ **created** |
+| Artifact Registry | repo `steloit-dev-artifacts` bucket + AR `images` repo (keyless cosign, T1.3) | ✅ **created** |
+| WAL/backup buckets | `steloit-dev-wal-customer`, `steloit-dev-wal-control` (separate, INF-001 #10) | ✅ **created** |
+| KMS | key ring `core` + `secrets` crypto key (envelope KEK substrate) | ✅ **created** |
+| Workload Identity Federation | pool `github-ci` + provider `github-oidc`; SAs `ci-terraform-plan`, `ci-image-push` (least-priv) — **zero static keys (D5)** | ✅ **created** |
+| APIs enabled | compute, container, storage, secretmanager, cloudkms, iam(+creds), sts, dns, artifactregistry, cloudscheduler, billingbudgets, monitoring, logging | ✅ **enabled** |
+| GKE cluster / compute | **none yet** (~$0 running) — stood up by the T1.0 spike / T1.2 | ⏳ next |
+| DNS provider | **GoDaddy** (`steloit.com`) — records generated for founder to apply | ✅ |
+| GitHub repo WIF binding | pool/provider created; repo attribute condition set in `project-base` | ✅ |
+| Substrate | CNPG + ZFS (OpenEBS ZFS-LocalPV); object storage **proxied** | ✅ | architecture.md / INF-001 |
+
+**Bootstrap procedure used** (repeatable for `cell0`): create project → link billing
+→ `gcloud services enable` the 14 APIs → `terraform -chdir=infra/envs/dev apply
+-target=module.project_base` (local state) → migrate state to `gs://<id>-tfstate`.
+Terraform auth uses the founder's gcloud user token (`GOOGLE_OAUTH_ACCESS_TOKEN`)
+— no ADC/service-account key needed.
 
 ## 3 · Providers (all behind a provider interface — never a platform dependency)
 
