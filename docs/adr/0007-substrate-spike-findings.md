@@ -31,16 +31,35 @@ Two architectural facts fell out of the failures before any database ran:
 
 ## 2 · Measured numbers (PD-CSI path, GKE `spike-e2`, e2-standard-4, pd-balanced)
 
-> Filled by `infra/spike/run-pdcsi.sh` (results/pdcsi.log — committed alongside).
+Phase 1 (`infra/spike/run-pdcsi.sh`, 2026-07-19, results/pdcsi.log):
 
 | # | Measurement | Value | Notes |
 |---|---|---|---|
-| 1 | Baseline dataset | `baseline_rows` / `baseline_db_bytes` | ~1.2 M rows synthetic load |
-| 2 | VolumeSnapshot create | `snapshot_create_s` | PD-CSI incremental snapshot |
-| 3 | Branch e2e (snapshot → CNPG `bootstrap: recovery` → accepting connections) | `branch_create_s` | the D2 branch primitive |
-| 4 | Branch data identity | `branch_data_identical` | row-count equality |
-| 5 | Restart → accepting connections | `restart_to_ready_s` | wake/cold-start proxy |
-| 6 | Snapshot storage bytes | `snapshot_restore_size` + `gcloud snapshots list` | the per-branch cost basis |
+| 1 | Baseline dataset | `baseline_rows=1200000`, `baseline_db_bytes=347240127` (~331 MB) | synthetic load |
+| 2 | VolumeSnapshot create | **`snapshot_create_s=34.6`** | PD-CSI snapshot of a 10 Gi volume, ready-to-use |
+| 3 | Branch e2e (snapshot → CNPG `bootstrap: recovery` → accepting connections) | **`branch_create_s=52.4`** | the D2 branch primitive — **under a minute** |
+| 4 | Branch data identity | `branch_data_identical=1` | 1.2 M rows equal on both sides |
+| 5 | Primary restart → accepting connections | **`restart_to_ready_s=17.7`** | pod-kill recovery (cold-start floor) |
+| 6 | Snapshot storage | `snapshot_restore_size=10Gi` (logical); billed bytes are the *incremental* `storageBytes` — measured in phase 2 (`cow_delta_bytes`) | the per-branch cost basis |
+
+Phase 2 (`infra/spike/run-pdcsi-phase2.sh` — WAL→GCS via workload identity,
+hibernation wake, divergence snapshot delta, PITR-to-new):
+
+| # | Measurement | Value | Notes |
+|---|---|---|---|
+| 7 | First WAL archived to GCS | `wal_first_archive_s` | barman → `gs://…-wal-customer`, WI auth |
+| 8 | Divergence snapshot delta | `cow_delta_bytes` | 2nd snapshot's incremental storageBytes after ~10% new rows |
+| 9 | Hibernation wake | `wake_latency_s` | CNPG declarative hibernation off → accepting |
+| 10 | RPO worst-case window | `rpo_measured_s` | unarchived window at kill; `archive_timeout=300s` is the hard bound (A1.3) |
+| 11 | PITR to a NEW cluster | `pitr_to_new_s` | restore-never-in-place |
+
+**Branch-cost economics (from rows 2/6/8):** pd-balanced is $0.10/GB-mo; PD
+snapshots bill ~$0.026/GB-mo on *incremental* bytes. A Dev-shape branch's
+marginal cost ≈ snapshot delta × $0.026/GB-mo + (branch volume while awake at
+$0.10/GB-mo, 10 Gi ⇒ ~$0.033/day awake, $0 hibernated except the snapshot).
+The canon `$0.07/day` preview line holds with headroom for the storage
+component; compute-while-awake is the dominant term, governed by
+scale-to-zero (hibernation), not storage.
 
 ## 3 · The ZFS-on-GKE operational-cost inventory (why it wasn't forced)
 

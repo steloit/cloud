@@ -1,0 +1,23 @@
+2026-07-19T15:51:24Z === step 1: CNPG operator + PD-CSI storage/snapshot classes ===
+2026-07-19T15:51:58Z operator ready
+2026-07-19T15:51:58Z === step 2: spike-a (Dev-shape CNPG on PD) + load ~300MB ===
+MEASURE baseline_rows=1200000 unit=rows
+MEASURE baseline_db_bytes=347240127 unit=bytes
+2026-07-19T15:53:06Z === step 3: VolumeSnapshot (PD-CSI, timed) ===
+MEASURE snapshot_create_s=34.6 unit=seconds
+MEASURE snapshot_restore_size=10Gi unit=bytes
+2026-07-19T15:53:43Z === step 4: branch spike-b via bootstrap:recovery (timed) ===
+MEASURE branch_create_s=52.4 unit=seconds
+MEASURE branch_data_identical=1 unit=bool
+2026-07-19T15:54:42Z branch verified: 1200000 rows == baseline
+2026-07-19T15:54:42Z === step 5: restart/wake latency (delete primary pod -> accepting) ===
+MEASURE restart_to_ready_s=17.7 unit=seconds
+2026-07-19T15:55:00Z === step 6: PD sizes (cost basis: base disk vs branch disk vs snapshot) ===
+snapshot-c91ad401-85e4-47a4-8416-cdf4893bfdd9	10	68182464
+gke-spike-e2-default-pool-cf3d8751-7vt2	60	pd-balanced
+pvc-37975e4a-1bd6-4d66-84d8-fce1c29e38ba	10	pd-balanced
+pvc-4aed46e0-3505-4243-a76b-5f0601523872	10	pd-balanced
+2026-07-19T15:55:02Z === RESULTS ===
+2026-07-19T15:55:02Z spike measurement complete
+2026-07-19T15:55:02Z === TEARDOWN (in-cluster) ===
+2026-07-19T15:55:05Z namespace + snapshot deletion requested (cluster teardown is the separate final step)
