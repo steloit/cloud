@@ -232,7 +232,9 @@ func (h *Handlers) UpdateDashboard(ctx context.Context, req gen.UpdateDashboardR
 			// Any transition into OR out of the shared (org) state is a
 			// governance change → needs the share-org grant (review: a share_org
 			// re-check that only fired on personal→X let restricted→org and
-			// org→personal slip through).
+			// org→personal slip through). personal↔restricted is ungated while
+			// restricted is owner-only; add the gate when a restricted-share
+			// surface lands (review F8, recorded).
 			if v != d.Visibility && (v == "org" || d.Visibility == "org") {
 				if _, err := h.requireOrg(ctx, d.OrgID, "dashboard.share_org", true); err != nil {
 					return nil, err
@@ -249,10 +251,12 @@ func (h *Handlers) UpdateDashboard(ctx context.Context, req gen.UpdateDashboardR
 	if err != nil {
 		return nil, err
 	}
-	// F7: an edit to a shared dashboard is live for all viewers and AUDITED.
-	if out.Visibility == "org" {
+	// F7: an edit to a shared dashboard is live for all viewers and AUDITED —
+	// including an UN-share (org→personal), the most governance-sensitive edit,
+	// so audit on either the pre- OR post-state being shared (review F6).
+	if d.Visibility == "org" || out.Visibility == "org" {
 		h.svc.record(ctx, events.Input{
-			OrgID: out.OrgID, Kind: "policy_trigger", Via: "user", Actor: actor,
+			OrgID: out.OrgID, Kind: "lifecycle", Via: "user", Actor: actor,
 			Action: "dashboard.updated", Subject: out.ID,
 		})
 	}
@@ -269,7 +273,7 @@ func (h *Handlers) DeleteDashboard(ctx context.Context, req gen.DeleteDashboardR
 	}
 	if d.Visibility == "org" {
 		h.svc.record(ctx, events.Input{
-			OrgID: d.OrgID, Kind: "policy_trigger", Via: "user", Actor: actor,
+			OrgID: d.OrgID, Kind: "lifecycle", Via: "user", Actor: actor,
 			Action: "dashboard.deleted", Subject: d.ID,
 		})
 	}

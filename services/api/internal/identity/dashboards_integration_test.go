@@ -130,6 +130,18 @@ func TestDashboardCRUDAndWidgets(t *testing.T) {
 	if r.StatusCode != 200 || !strings.Contains(b, "ops v2") {
 		t.Fatalf("patch rename: %d %s", r.StatusCode, b)
 	}
+	// F7/F6: un-sharing (org→personal) — the most governance-sensitive edit —
+	// must still be audited (audit gates on pre- OR post-state shared).
+	r, b = w.patch(t, "/v1/dashboards/"+dsh.Id, `{"visibility":"personal"}`, ownerCk)
+	if r.StatusCode != 200 {
+		t.Fatalf("un-share PATCH: %d %s", r.StatusCode, b)
+	}
+	var audited int
+	_ = w.pool.QueryRow(context.Background(),
+		"select count(*) from events where subject=$1 and action='dashboard.updated'", dsh.Id).Scan(&audited)
+	if audited < 1 {
+		t.Fatalf("un-share (org→personal) must be audited, found %d dashboard.updated events", audited)
+	}
 	// delete
 	r, _ = w.del(t, "/v1/dashboards/"+dsh.Id, ownerCk)
 	if r.StatusCode != 204 {
