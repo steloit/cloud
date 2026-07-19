@@ -27,7 +27,6 @@ type Store interface {
 	ListOrgMemberRecipients(ctx context.Context, orgID string) ([]store.ListOrgMemberRecipientsRow, error)
 	GetNotificationPrefs(ctx context.Context, userID string) (store.NotificationPref, error)
 	InsertNotification(ctx context.Context, arg store.InsertNotificationParams) (store.Notification, error)
-	ListActiveWebhooksForOrg(ctx context.Context, arg store.ListActiveWebhooksForOrgParams) ([]store.Webhook, error)
 	ListPendingWebhookEvents(ctx context.Context) ([]store.ListPendingWebhookEventsRow, error)
 	GetWebhook(ctx context.Context, id string) (store.Webhook, error)
 	ClaimWebhookDelivery(ctx context.Context, arg store.ClaimWebhookDeliveryParams) (string, error)
@@ -55,7 +54,7 @@ type Router struct {
 }
 
 func NewRouter(q Store, kek secrets.KEK) *Router {
-	return &Router{q: q, kek: kek, http: &http.Client{Timeout: deliverTimeout}, now: time.Now}
+	return &Router{q: q, kek: kek, http: guardedClient(), now: time.Now}
 }
 
 func (r *Router) WithClock(now func() time.Time) *Router { r.now = now; return r }
@@ -209,8 +208,10 @@ type quietHours struct {
 	start, end, tz string
 }
 
-// quietNow reports whether now falls in the user's quiet window (email defers;
-// bell + webhook are unaffected). A malformed window is never quiet.
+// quietNow reports whether now falls in the user's quiet window. During it the
+// email route is SKIPPED (notification email is best-effort — the bell is the
+// durable record; there is no deferral queue); bell + webhook are unaffected.
+// A malformed window is never quiet.
 func (p prefs) quietNow(now time.Time) bool {
 	if p.quiet == nil || p.quiet.start == "" || p.quiet.end == "" {
 		return false

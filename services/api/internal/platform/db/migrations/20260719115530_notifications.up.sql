@@ -21,6 +21,9 @@ CREATE TABLE notifications (
 );
 -- the bell reads newest-first per user; keyset pages on (created_at, id).
 CREATE INDEX notifications_user_idx ON notifications (user_id, created_at DESC, id DESC);
+-- one bell row per (user, spine event): makes InsertNotification's ON CONFLICT
+-- DO NOTHING actually dedupe, so an at-least-once router never double-rings.
+CREATE UNIQUE INDEX notifications_user_event_uk ON notifications (user_id, event_id) WHERE event_id IS NOT NULL;
 
 CREATE TABLE notification_prefs (
     user_id     text PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,

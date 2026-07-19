@@ -104,25 +104,33 @@ func (h *Handlers) UpdateNotificationPrefs(ctx context.Context, req gen.UpdateNo
 	if err != nil {
 		return nil, err
 	}
-	if req.Body == nil {
-		return gen.UpdateNotificationPrefs200JSONResponse(defaultPrefs()), nil
+	// PATCH merge: load the STORED prefs once (zero row ⇒ defaults) and overlay
+	// only the fields the caller actually sent — an unmentioned channel is never
+	// silently flipped. A nil sub-field means "leave as-is", not "reset to on".
+	cur, err := h.svc.q.GetNotificationPrefs(ctx, p.UserID)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, err
 	}
-	// channels: default a missing sub-field to on (a partial update never
-	// silently flips a channel the caller didn't mention).
-	email, inapp := true, true
-	if req.Body.Channels != nil {
-		if req.Body.Channels.Email != nil {
-			email = *req.Body.Channels.Email
+	api := prefsToAPI(cur) // defaults when the row is absent
+	email, inapp := *api.Channels.Email, *api.Channels.Inapp
+	quiet := cur.QuietHours // the stored raw jsonb (nil if none)
+	if req.Body != nil {
+		if req.Body.Channels != nil {
+			if req.Body.Channels.Email != nil {
+				email = *req.Body.Channels.Email
+			}
+			if req.Body.Channels.Inapp != nil {
+				inapp = *req.Body.Channels.Inapp
+			}
 		}
-		if req.Body.Channels.Inapp != nil {
-			inapp = *req.Body.Channels.Inapp
+		// a present quiet_hours object replaces; absent leaves the stored value
+		// (an explicit null to CLEAR is indistinguishable from absent in the
+		// generated pointer type — recorded as a follow-up).
+		if req.Body.QuietHours != nil {
+			quiet, _ = json.Marshal(req.Body.QuietHours)
 		}
 	}
 	channels, _ := json.Marshal(map[string]bool{"email": email, "inapp": inapp})
-	var quiet []byte
-	if req.Body.QuietHours != nil {
-		quiet, _ = json.Marshal(req.Body.QuietHours)
-	}
 	row, err := h.svc.q.UpsertNotificationPrefs(ctx, store.UpsertNotificationPrefsParams{
 		UserID: p.UserID, Channels: channels, QuietHours: quiet,
 	})

@@ -18,6 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
@@ -32,7 +33,6 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
-	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
 )

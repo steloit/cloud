@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,6 +25,44 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 )
+
+// blockedIP reports whether a concrete address is one a webhook must never
+// reach — loopback, RFC1918/ULA private, link-local (incl. 169.254.169.254
+// cloud metadata), or unspecified.
+func blockedIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+// guardedClient is the production webhook client: it pins SSRF safety to the
+// ACTUAL dialed IP (closing the DNS-rebinding TOCTOU between validation and
+// connect) and refuses redirects (a public target must not 302 to an internal
+// host). Tests replace it via WithHTTPClient with an unguarded loopback client.
+func guardedClient() *http.Client {
+	d := &net.Dialer{
+		Timeout: deliverTimeout,
+		// Control runs with the resolved address about to be connected — the
+		// real dial IP, not a separate lookup that DNS can race.
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip == nil || blockedIP(ip) {
+				return fmt.Errorf("webhook target resolved to a blocked address: %s", host)
+			}
+			return nil
+		},
+	}
+	return &http.Client{
+		Timeout:   deliverTimeout,
+		Transport: &http.Transport{DialContext: d.DialContext},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return fmt.Errorf("webhook target must not redirect")
+		},
+	}
+}
 
 // signatureHeader carries the HMAC-SHA256 of the raw body so a receiver can
 // verify authenticity without the platform ever sending the secret itself.
@@ -89,8 +128,7 @@ func safeURL(raw string, insecure bool) error {
 		return fmt.Errorf("webhook host does not resolve")
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
-			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		if blockedIP(ip) {
 			return fmt.Errorf("webhook url resolves to a non-routable address")
 		}
 	}

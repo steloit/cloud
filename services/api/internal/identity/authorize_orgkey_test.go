@@ -156,8 +156,8 @@ func TestOrgKeyGrantMatchIsExact(t *testing.T) {
 func TestPrincipalKindIsNotOrgKey(t *testing.T) {
 	cases := []session.Principal{
 		{Kind: "token", UserID: "usr_1", OrgID: "org_k", Permissions: []string{"org.delete"}}, // has a user
-		{Kind: "token", UserID: "", OrgID: "", Permissions: []string{"org.delete"}},            // no org
-		{Kind: "session", UserID: "usr_1", OrgID: "org_k"},                                     // a live session
+		{Kind: "token", UserID: "", OrgID: "", Permissions: []string{"org.delete"}},           // no org
+		{Kind: "session", UserID: "usr_1", OrgID: "org_k"},                                    // a live session
 	}
 	for i, p := range cases {
 		if p.IsOrgKey() {

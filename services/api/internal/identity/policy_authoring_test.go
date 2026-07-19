@@ -13,12 +13,12 @@ func TestValidatePolicyEnforcement(t *testing.T) {
 		{"ai-assistant", "", "opt_in", true},
 		{"ai-assistant", "disabled", "disabled", true},
 		{"ai-assistant", "enabled", "enabled", true},
-		{"ai-assistant", "warn", "", false},    // rule vocab rejected for ai
+		{"ai-assistant", "warn", "", false}, // rule vocab rejected for ai
 		{"ai-assistant", "enforce", "", false},
-		{"allowed-regions", "", "warn", true},  // warn-first default
+		{"allowed-regions", "", "warn", true}, // warn-first default
 		{"allowed-regions", "warn", "warn", true},
 		{"allowed-regions", "enforce", "enforce", true},
-		{"allowed-regions", "enabled", "", false},  // ai vocab rejected for rule
+		{"allowed-regions", "enabled", "", false}, // ai vocab rejected for rule
 		{"allowed-regions", "disabled", "", false},
 		{"allowed-regions", "bogus", "", false},
 	}

@@ -40,6 +40,13 @@ func TestNotifyRouting(t *testing.T) {
 	if r, b := w.patch(t, "/v1/me/notification-prefs", `{"channels":{"email":false,"inapp":true}}`, ownerCk); r.StatusCode != 200 {
 		t.Fatalf("set prefs: %d %s", r.StatusCode, b)
 	}
+	// PATCH merge: a quiet-hours-only update must NOT silently re-enable email.
+	if r, _ := w.patch(t, "/v1/me/notification-prefs", `{"quiet_hours":{"start":"22:00","end":"07:00","timezone":"UTC"}}`, ownerCk); r.StatusCode != 200 {
+		t.Fatal("patch quiet hours")
+	}
+	if _, pb := w.get(t, "/v1/me/notification-prefs", ownerCk); !strings.Contains(pb, `"email":false`) {
+		t.Fatalf("quiet-hours PATCH silently flipped email back on: %s", pb)
+	}
 
 	// a recording EmailSender proves the email route is GATED by the pref.
 	fake := &recordingSender{}
@@ -175,6 +182,22 @@ func TestWebhookDelivery(t *testing.T) {
 	mu.Unlock()
 	if h2 != 1 {
 		t.Fatalf("outbox re-delivered a sent event: %d", h2)
+	}
+
+	// --- no backfill: an event predating the webhook is never delivered -------
+	if _, err := w.pool.Exec(ctx,
+		`insert into events (id, org_id, kind, via, actor, action, subject, at) values ('evt_old',$1,'lifecycle','system','system','old.thing','x', now() - interval '1 hour')`,
+		orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.ProcessWebhooks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	hBackfill := hits
+	mu.Unlock()
+	if hBackfill != 1 {
+		t.Fatalf("webhook backfilled an event predating it: %d deliveries", hBackfill)
 	}
 
 	// --- testWebhook: synchronous, inline result, does NOT consume the slot ---

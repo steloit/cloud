@@ -168,59 +168,14 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 	return i, err
 }
 
-const listActiveWebhooksForOrg = `-- name: ListActiveWebhooksForOrg :many
-SELECT id, org_id, url, events, status, ciphertext, nonce, wrapped_dek, dek_nonce, kek_id, created_at FROM webhooks
-WHERE org_id = $1 AND status = 'active'
-  AND (cardinality(events) = 0 OR $2::text = ANY(events))
-`
-
-type ListActiveWebhooksForOrgParams struct {
-	OrgID string
-	Kind  string
-}
-
-// The webhook route: active webhooks in the org whose filter matches the event
-// kind (an empty filter matches every kind).
-func (q *Queries) ListActiveWebhooksForOrg(ctx context.Context, arg ListActiveWebhooksForOrgParams) ([]Webhook, error) {
-	rows, err := q.db.Query(ctx, listActiveWebhooksForOrg, arg.OrgID, arg.Kind)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Webhook
-	for rows.Next() {
-		var i Webhook
-		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.Url,
-			&i.Events,
-			&i.Status,
-			&i.Ciphertext,
-			&i.Nonce,
-			&i.WrappedDek,
-			&i.DekNonce,
-			&i.KekID,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listNotifications = `-- name: ListNotifications :many
 SELECT n.id, n.user_id, n.event_id, n.kind, n.title, n.body, n.link, n.read, n.created_at FROM notifications n
 WHERE n.user_id = $1
   AND ($3::bool IS NOT TRUE OR n.read = false)
   AND (
     $4::text IS NULL
-    OR n.created_at < (SELECT c.created_at FROM notifications c WHERE c.id = $4)
-    OR (n.created_at = (SELECT c.created_at FROM notifications c WHERE c.id = $4) AND n.id < $4)
+    OR n.created_at < (SELECT c.created_at FROM notifications c WHERE c.id = $4 AND c.user_id = $1)
+    OR (n.created_at = (SELECT c.created_at FROM notifications c WHERE c.id = $4 AND c.user_id = $1) AND n.id < $4)
   )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $2

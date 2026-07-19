@@ -24,8 +24,8 @@ WHERE n.user_id = $1
   AND (sqlc.narg('unread')::bool IS NOT TRUE OR n.read = false)
   AND (
     sqlc.narg('cursor')::text IS NULL
-    OR n.created_at < (SELECT c.created_at FROM notifications c WHERE c.id = sqlc.narg('cursor'))
-    OR (n.created_at = (SELECT c.created_at FROM notifications c WHERE c.id = sqlc.narg('cursor')) AND n.id < sqlc.narg('cursor'))
+    OR n.created_at < (SELECT c.created_at FROM notifications c WHERE c.id = sqlc.narg('cursor') AND c.user_id = $1)
+    OR (n.created_at = (SELECT c.created_at FROM notifications c WHERE c.id = sqlc.narg('cursor') AND c.user_id = $1) AND n.id < sqlc.narg('cursor'))
   )
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $2;
@@ -56,13 +56,6 @@ SELECT * FROM webhooks WHERE org_id = $1 ORDER BY created_at DESC;
 
 -- name: GetWebhook :one
 SELECT * FROM webhooks WHERE id = $1;
-
--- name: ListActiveWebhooksForOrg :many
--- The webhook route: active webhooks in the org whose filter matches the event
--- kind (an empty filter matches every kind).
-SELECT * FROM webhooks
-WHERE org_id = $1 AND status = 'active'
-  AND (cardinality(events) = 0 OR @kind::text = ANY(events));
 
 -- name: ClaimWebhookDelivery :one
 -- Claim the (webhook, event) as `pending` BEFORE POSTing — written first so a
