@@ -141,6 +141,63 @@ describe("realtime channel (state.md contract)", () => {
     expect(h.clock.pending()).toBeGreaterThan(0); // never a dead channel
   });
 
+  it("a degrade() while a poll fetch is in flight spawns no orphan loop", async () => {
+    // gate the fetch so a second degrade() lands mid-flight — the exact window
+    // where pollTimer===null used to lie about "not polling".
+    const gate: { release: () => void } = { release: () => {} };
+    let fetchCount = 0;
+    const clock = makeClock();
+    const sources: FakeSource[] = [];
+    const channel = createRealtimeChannel({
+      env: "env_race",
+      onEvent: () => {},
+      eventSource: (url) => {
+        const src = new FakeSource(url);
+        sources.push(src);
+        return src as unknown as EventSource;
+      },
+      setTimer: clock.set,
+      clearTimer: clock.clear,
+      fetchPage: async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) {
+          await new Promise<void>((r) => {
+            gate.release = r;
+          }); // only the FIRST fetch is held open
+        }
+        return { events: [] };
+      },
+    });
+    sources[0]?.onerror?.(); // → poll
+    const inflight = clock.tick(); // start the first poll; it blocks on the gate
+    await Promise.resolve();
+    // fire the 30s SSE-retry timer → a recovery source is created; error it,
+    // which calls degrade() again WHILE the first poll fetch is still in flight.
+    await clock.tick();
+    sources[1]?.onerror?.();
+    // release the gated fetch; only the ONE original loop should continue.
+    gate.release();
+    await inflight;
+    const countAfterRelease = fetchCount;
+    // advance time: a single poll loop fetches once more; an orphan would double.
+    await clock.tick();
+    expect(fetchCount).toBe(countAfterRelease + 1);
+    channel.close();
+  });
+
+  it("does not prime (swallow) a poll page that follows SSE delivery", async () => {
+    const h = harness([[{ id: "evt_after", kind: "deploy" }]]);
+    // SSE opens and delivers first — cursor is now set
+    h.sources[0]?.onopen?.();
+    h.sources[0]?.onmessage?.({ data: JSON.stringify({ id: "evt_sse", kind: "deploy" }) });
+    expect(h.events.map((e) => e.id)).toEqual(["evt_sse"]);
+    // stream drops → poll fallback; its first page is GENUINELY NEW (cursor set)
+    h.sources[0]?.onerror?.();
+    await h.clock.tick();
+    // the post-SSE poll page must be delivered, not primed away
+    expect(h.events.map((e) => e.id)).toEqual(["evt_sse", "evt_after"]);
+  });
+
   it("recovers to SSE when the retry attempt succeeds, and stops polling", async () => {
     const h = harness([[], [], [], [], [], [], []]);
     h.sources[0]?.onerror?.();

@@ -127,9 +127,16 @@ export function BellPanel({
 }) {
   const readIds = useNotificationsStore((s) => s.readIds);
   const markAllRead = useNotificationsStore((s) => s.markAllRead);
+  const clearLive = useNotificationsStore((s) => s.clearLive);
   const unread = NOTIFICATIONS.filter((n) => isUnread(n, readIds)).length;
   const panel = useRef<HTMLDivElement>(null);
   useOverlay(panel, open ? onClose : undefined, { trap: false });
+
+  // T8.2: opening the bell clears the live badge bumps (data.ts contract) — the
+  // dot must not strand when only realtime events (not fixture rows) are unread.
+  useEffect(() => {
+    if (open) clearLive();
+  }, [open, clearLive]);
 
   if (!open) return null;
 
