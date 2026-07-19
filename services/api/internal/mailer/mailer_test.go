@@ -41,11 +41,28 @@ func TestInviteTemplateEscapesHTML(t *testing.T) {
 	}
 }
 
+// The renewal template also escapes user-controlled data (org name is
+// renamable to arbitrary text) — no HTML injection into the inviter's email.
+func TestInviteRenewalTemplateEscapesHTML(t *testing.T) {
+	_, htmlBody, _ := inviteRenewalTemplate.Render(map[string]string{
+		"invitee": "x@y.z",
+		"org":     `<a href="https://evil.example">Verify</a>`,
+	})
+	if strings.Contains(htmlBody, `<a href="https://evil.example"`) {
+		t.Fatalf("HTML injection not escaped: %q", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "&lt;") {
+		t.Fatalf("expected escaped entities: %q", htmlBody)
+	}
+}
+
 // The registry IS the event→template map: only listed actions send mail.
 func TestRegistryIsTheEventMap(t *testing.T) {
 	reg := registry()
-	if _, ok := reg["invite.created"]; !ok {
-		t.Fatal("invite.created should trigger an email")
+	for _, action := range []string{"invite.created", "invite.renewal_requested", "password.reset_requested"} {
+		if _, ok := reg[action]; !ok {
+			t.Errorf("%s should trigger an email", action)
+		}
 	}
 	for _, action := range []string{"member.added", "org.created", "policy.updated", "authz.denied"} {
 		if _, ok := reg[action]; ok {

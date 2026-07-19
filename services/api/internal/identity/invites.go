@@ -273,7 +273,13 @@ func (s *Service) DeclineInvite(ctx context.Context, inviteID string) error {
 
 // RenewInvite — A7's "one click fixes it": only meaningful for an EXPIRED
 // invite; the inviter is notified via the spine (bell/email routing later).
-func (s *Service) RenewInvite(ctx context.Context, inviteID string) error {
+func (s *Service) RenewInvite(ctx context.Context, inviteID, rateKey string) error {
+	// A leaked (expired) invite id must not be loopable to flood the inviter:
+	// this endpoint is public and stateless (renewal is a request, not a state
+	// change), so rate-limit by requester before doing any work.
+	if ok, retry := s.limiter.Allow("invrenew|" + rateKey); !ok {
+		return RateLimitedError{RetryAfterS: retry}
+	}
 	inv, err := s.q.GetInvite(ctx, inviteID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return notFoundError{what: "invite"}
