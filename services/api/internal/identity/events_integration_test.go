@@ -250,6 +250,40 @@ func TestEventsSSE(t *testing.T) {
 		t.Fatalf("resume from cursor: %v", datas)
 	}
 
+	// T6.4 hardening: the browser's native Last-Event-ID header resumes
+	// identically (EventSource sends it, not ?cursor=), and the stream opens
+	// with a `retry:` hint so a dropped connection reconnects in 2s.
+	req4, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+env.ID+"/events", nil)
+	req4.Header.Set("Accept", "text/event-stream")
+	req4.Header.Set("Cookie", ck)
+	req4.Header.Set("Last-Event-ID", f3.id)
+	ctx4, cancel4 := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel4()
+	res4, err := http.DefaultClient.Do(req4.WithContext(ctx4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res4.Body.Close()
+	sc4 := bufio.NewScanner(res4.Body)
+	var sawRetry bool
+	var replayed []string
+	for sc4.Scan() {
+		line := sc4.Text()
+		if strings.HasPrefix(line, "retry: ") {
+			sawRetry = true
+		}
+		if strings.HasPrefix(line, "data: ") {
+			replayed = append(replayed, strings.TrimPrefix(line, "data: "))
+			break
+		}
+	}
+	if !sawRetry {
+		t.Fatal("stream did not emit a retry: hint")
+	}
+	if len(replayed) != 1 || !strings.Contains(replayed[0], u2) {
+		t.Fatalf("Last-Event-ID resume: %v", replayed)
+	}
+
 	// no credentials → 401 before any stream starts
 	req3, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+env.ID+"/events", nil)
 	req3.Header.Set("Accept", "text/event-stream")

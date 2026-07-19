@@ -87,8 +87,16 @@ func (s *Streamer) serve(w http.ResponseWriter, r *http.Request, envID string) {
 		return
 	}
 
+	// Resume point precedence: explicit ?cursor= wins (the CLI's channel),
+	// then the browser's automatic Last-Event-ID header (EventSource sends it
+	// verbatim from the last `id:` on reconnect) — both are opaque cursors, so
+	// the same decoder serves both and native EventSource resumes losslessly.
 	var cur Cursor
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
+	raw := r.URL.Query().Get("cursor")
+	if raw == "" {
+		raw = r.Header.Get("Last-Event-ID")
+	}
+	if raw != "" {
 		if cur, err = DecodeCursor(raw); err != nil {
 			problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{{Field: "cursor", Detail: "malformed"}}))
 			return
@@ -100,6 +108,9 @@ func (s *Streamer) serve(w http.ResponseWriter, r *http.Request, envID string) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	// `retry:` tells EventSource how long to wait before reconnecting — the
+	// state.md SSE-primary posture (2s), so a dropped stream comes back fast.
+	_, _ = fmt.Fprint(w, "retry: 2000\n\n")
 	flusher.Flush()
 
 	// Subscribe BEFORE replaying so nothing appended mid-replay is missed;
