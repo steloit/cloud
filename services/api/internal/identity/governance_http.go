@@ -310,7 +310,10 @@ func (h *Handlers) DeclineInvite(ctx context.Context, req gen.DeclineInviteReque
 }
 
 func (h *Handlers) RenewInvite(ctx context.Context, req gen.RenewInviteRequestObject) (gen.RenewInviteResponseObject, error) {
-	if err := h.svc.RenewInvite(ctx, req.Invite); err != nil {
+	// Public, unauthenticated, and it sends an email to the inviter — rate-limit
+	// by requester IP so a leaked invite id can't be looped to flood the inviter
+	// (same posture as the public password-reset endpoint).
+	if err := h.svc.RenewInvite(ctx, req.Invite, session.MetaFrom(ctx).IP); err != nil {
 		return nil, err
 	}
 	return gen.RenewInvite202Response{}, nil

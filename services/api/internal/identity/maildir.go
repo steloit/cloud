@@ -52,6 +52,35 @@ func (m *MailDirectory) InviteEmail(ctx context.Context, inviteID string) (recip
 	return inv.Email, inv.OrgID, data, nil
 }
 
+// InviteRenewalEmail resolves an invite.renewal_requested event (Subject =
+// invite id) to the INVITER's address and template data (the invitee + org), so
+// the person who sent the invite is notified the link expired and can re-send.
+func (m *MailDirectory) InviteRenewalEmail(ctx context.Context, inviteID string) (recipient, orgID string, data map[string]string, err error) {
+	inv, err := m.q.GetInvite(ctx, inviteID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil, nil
+		}
+		return "", "", nil, err
+	}
+	inviter, err := m.q.GetUserByID(ctx, inv.InviterID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil, nil // inviter gone → skip
+		}
+		return "", "", nil, err
+	}
+	org, err := m.q.GetOrg(ctx, inv.OrgID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", nil, nil
+		}
+		return "", "", nil, err
+	}
+	data = map[string]string{"invitee": inv.Email, "org": org.Name}
+	return inviter.Email, inv.OrgID, data, nil
+}
+
 // PasswordResetEmail resolves a password.reset_requested event (Subject = reset
 // token id) to the account's address and the reset link, unsealing the token's
 // plaintext from the row (KEK-protected, AAD-bound). A vanished token yields an

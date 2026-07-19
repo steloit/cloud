@@ -109,4 +109,8 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   events spine (`events.org_id NOT NULL`) — it silently fails the FK and the email never sends.
   Account emails dispatch from their own durable fact via `mailer.AccountSource`, reusing the
   same idempotent Dispatch + email_deliveries ledger; don't fan a personal action into the
-  user's org audits (T7.2).
+  user's org audits (T7.2). Future: a principal-scoped spine (ADR-0011, post-MVP).
+- Wiring an email onto a PUBLIC (`security: []`), stateless endpoint without a rate limit — a
+  leaked/guessable id can be looped to flood the recipient's inbox and burn provider quota
+  (email bombing). Every public email-triggering endpoint must rate-limit by requester IP, like
+  password-reset and invite-renew do (`s.limiter.Allow("<ns>|"+ip)`) (T7.5).
