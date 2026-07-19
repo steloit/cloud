@@ -116,19 +116,28 @@ export const NOTIFICATIONS: NotificationRow[] = [
 
 interface NotificationsState {
   readIds: Record<string, true>;
+  /** Realtime badge bumps from the event spine (T8.2). */
+  liveUnread: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
+  bumpLive: () => void;
+  clearLive: () => void;
 }
 
 export const useNotificationsStore = create<NotificationsState>()((set) => ({
   readIds: {},
+  liveUnread: 0,
   markRead: (id) => set((s) => ({ readIds: { ...s.readIds, [id]: true } })),
   markAllRead: () =>
     set(() => ({
+      liveUnread: 0,
       readIds: Object.fromEntries(
         NOTIFICATIONS.filter((n) => n.unread).map((n) => [n.id, true as const]),
       ),
     })),
+  /** T8.2: the spine stream bumps the badge live; opening the bell clears it. */
+  bumpLive: () => set((s) => ({ liveUnread: s.liveUnread + 1 })),
+  clearLive: () => set({ liveUnread: 0 }),
 }));
 
 export function isUnread(row: NotificationRow, readIds: Record<string, true>): boolean {

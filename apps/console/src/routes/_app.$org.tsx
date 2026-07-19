@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { Ctx } from "@/app/shell/ctx";
 import { Rail, type RailActive } from "@/app/shell/rail";
+import { RealtimeMount } from "@/app/shell/realtime-mount";
 import { Btn } from "@/design-system/btn";
 import { Card } from "@/design-system/card";
 import { Skeleton, SkeletonLines } from "@/design-system/skeleton";
@@ -136,6 +137,10 @@ function OrgShell() {
           childParams.service ? "Search or jump…" : "Search projects, services, docs…"
         }
         showAssistant
+      />
+      <RealtimeMount
+        project={activeProject?.name}
+        env={childParams.project ? envName : undefined}
       />
       <div className="fbody">
         <Rail
