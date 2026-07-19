@@ -31,6 +31,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
 )
@@ -86,7 +87,11 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := identity.NewService(pool, hasher, mgr, ratelimit.New(100, time.Minute), recorder, kek)
+	plans, err := billing.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := identity.NewService(pool, hasher, mgr, ratelimit.New(100, time.Minute), recorder, kek, plans)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +102,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	policies := policy.NewEngine(identity.NewPolicySource(q))
 	authz := identity.NewAuthorizer(q, rbac.NewEvaluator(matrix, policies), recorder)
 	vault := secrets.NewVault(q, kek)
-	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q))
+	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q), plans)
 	mux := http.NewServeMux()
 	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q))
 	idHandlers.Mount(mux, &testAPI{

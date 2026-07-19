@@ -16,13 +16,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
-	"github.com/steloit/cloud/services/api/internal/secrets"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
 
 // Typed domain errors — the handler layer maps these onto the problem catalog.
@@ -56,7 +57,8 @@ type Service struct {
 	mgr     *session.Manager
 	limiter *ratelimit.Limiter
 	rec     *events.Recorder
-	kek     secrets.KEK // MFA TOTP secret envelope (nil = MFA unavailable)
+	kek     secrets.KEK    // MFA TOTP secret envelope (nil = MFA unavailable)
+	plans   *billing.Table // T11.1: the ONE pricing/quota table (seat allowance, etc.)
 	now     func() time.Time
 	dummy   string
 	// knownPolicyKind reports whether a policy key has a registered evaluator
@@ -73,12 +75,12 @@ func (s *Service) policyKindKnown(key string) bool {
 	return s.knownPolicyKind != nil && s.knownPolicyKind(key)
 }
 
-func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder, kek secrets.KEK) (*Service, error) {
+func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limiter *ratelimit.Limiter, rec *events.Recorder, kek secrets.KEK, plans *billing.Table) (*Service, error) {
 	dummy, err := h.Hash(dummyPassword)
 	if err != nil {
 		return nil, fmt.Errorf("identity: dummy hash: %w", err)
 	}
-	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, kek: kek, now: time.Now, dummy: dummy}, nil
+	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, kek: kek, plans: plans, now: time.Now, dummy: dummy}, nil
 }
 
 // txt wraps a string for a nullable text column.

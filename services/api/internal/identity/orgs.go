@@ -43,10 +43,6 @@ func Slugify(name string) (string, error) {
 
 // SeatAllowance is BR canon (feature-specs F1): seats per plan, then $7/seat
 // prorated. Data, not policy — the numbers live in one place.
-var seatAllowance = map[string]int{"free": 3, "pro": 5, "business": 20, "enterprise": 1000}
-
-const seatOveragePriceCents = 700
-
 // CreateOrgWithOwner creates org + inert subscription row + owner membership
 // in ONE transaction (closing T2.3's recorded promise), then records the
 // spine events after commit.
@@ -164,9 +160,9 @@ func (s *Service) Seats(ctx context.Context, org store.Org) (SeatInfo, error) {
 		return SeatInfo{}, err
 	}
 	return SeatInfo{
-		Included:          seatAllowance[org.Plan],
+		Included:          s.plans.IncludedSeats(org.Plan),
 		Used:              int(used),
-		OveragePriceCents: seatOveragePriceCents,
+		OveragePriceCents: s.plans.Overage.SeatCents,
 	}, nil
 }
 

@@ -51,3 +51,10 @@ the regression numbers ($208-family, 87/100GB → ~$1.62). See `canon-testing`.
 - Floats in money math, anywhere, including tests (integer cents only).
 - Gating a safety feature behind a plan check (the never-gated list is law).
 - Deleting anything before day 90, or pausing anything before day 7 (the timeline is exact).
+- Inventing plausible-looking pricing/quota numbers instead of SOURCING each from the cited
+  authority (F9, canon fixtures, the shipped gate). A "reproduce canon" data task shipped wrong
+  seat allowances (Free 1 vs F9's 3) because the numbers were guessed; grep the authority + the
+  existing code for every value, and don't include a dimension you can't source (T11.1).
+- Adding a pricing/quota table that DUPLICATES a constant already in code (T11.1 had a fresh
+  `included_seats` while `identity/orgs.go` still held a `seatAllowance` map) — grep the value
+  first and unify onto the one table, or you've re-created the exact "second pricing constant" bug.

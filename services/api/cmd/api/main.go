@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/github"
@@ -140,7 +141,12 @@ func main() {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
 	}
-	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder, kek)
+	plans, err := billing.Load()
+	if err != nil {
+		logger.Error("boot failed", "err", err)
+		os.Exit(1)
+	}
+	svc, err := identity.NewService(pool, hasher, sessions, loginLimiter, recorder, kek, plans)
 	if err != nil {
 		logger.Error("boot failed", "err", err)
 		os.Exit(1)
@@ -154,7 +160,7 @@ func main() {
 	svc.SetPolicyKinds(policies.Knows) // T12.1: authoring refuses enforce on an unimplemented kind
 	authz := identity.NewAuthorizer(queries, rbac.NewEvaluator(matrix, policies), recorder)
 	vault := secrets.NewVault(queries, kek)
-	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries))
+	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(queries), plans)
 	envs := prov // T3.2 closed the env→org seam: environments are real rows
 
 	// T10.4: email is Event-driven (nothing else sends mail). Resend if a key is
