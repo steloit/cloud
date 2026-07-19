@@ -45,3 +45,8 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
 - Untagged test structs decoding snake_case API JSON — Go's case-insensitive match does
   NOT fold underscores (`OveragePriceCents` ≠ `overage_price_cents` silently reads zero);
   always write explicit `json:` tags in assertions (caught by CI on T2.7).
+- Action-style op paths with a colon AFTER a wildcard (`/orgs/{org}:leave`) — Go 1.22+
+  `net/http.ServeMux` rejects them (a `{wildcard}` must be the whole segment) and the
+  strict server PANICS at mount, not build; this only trips CI (local skips the mount
+  without Docker). Use a sub-resource (`/orgs/{org}/leave`) instead. Colons on LITERAL
+  segments (`/me/notifications:read`, `/alert-rules:backtest`) are fine (caught on T7.6).
