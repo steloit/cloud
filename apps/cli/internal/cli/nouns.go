@@ -38,6 +38,58 @@ func init() {
 	register("events", "", "the env's event spine (deploy markers included)", runEvents)
 	register("logs", "", "query logs (shared query grammar)", runLogs)
 	register("dev", "", "local dev with injected config (arrives with E4)", runDevStub)
+	register("usage", "export", "the org's monthly meter report (B2)", runUsageExport)
+}
+
+func runUsageExport(inv *Invocation) int {
+	c, code := inv.client()
+	if code != ExitOK {
+		return code
+	}
+	org, code := inv.needOrg()
+	if code != ExitOK {
+		return code
+	}
+	params := &contracts.GetUsageParams{}
+	if m := inv.Flags["month"]; m != "" {
+		params.Month = &m
+	}
+	resp, err := c.GetUsageWithResponse(context.Background(), org, params)
+	if err != nil {
+		fmt.Fprintf(inv.Stderr, "steloit: %v\n", err)
+		return ExitGeneric
+	}
+	if resp.JSON200 == nil {
+		return inv.fail(resp.Body, resp.HTTPResponse)
+	}
+	if inv.JSON() {
+		output.RawJSON(inv.Stdout, resp.Body)
+		return ExitOK
+	}
+	rep := resp.JSON200
+	month := ""
+	if rep.Month != nil {
+		month = *rep.Month
+	}
+	fmt.Fprintf(inv.Stdout, "usage · %s\n", month)
+	tab := output.NewTable("METER", "USED", "OVERAGE")
+	if rep.Meters != nil {
+		for _, m := range *rep.Meters {
+			name, used, over := "", "0", "$0"
+			if m.Meter != nil {
+				name = *m.Meter
+			}
+			if m.Used != nil {
+				used = strconv.FormatFloat(float64(*m.Used), 'f', -1, 32)
+			}
+			if m.OverageCents != nil {
+				over = output.MoneyMonthly(int64(*m.OverageCents))
+			}
+			tab.Row(name, used, over)
+		}
+	}
+	tab.Write(inv.Stdout)
+	return ExitOK
 }
 
 // ---- project ----------------------------------------------------------------

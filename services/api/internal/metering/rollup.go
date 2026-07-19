@@ -100,3 +100,8 @@ func (e *Emitter) Rollup(ctx context.Context, orgID, period string, now time.Tim
 		Used: totalSeconds, RateCents: weighted,
 	})
 }
+
+// Usage returns the stored rollup rows for an org+period (billing/report reads).
+func (e *Emitter) Usage(ctx context.Context, orgID, period string) ([]store.QuotaUsage, error) {
+	return e.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
+}

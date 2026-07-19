@@ -112,6 +112,9 @@ type ServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params ListAuditEventsParams)
+	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
+	// (GET /orgs/{org}/billing/usage)
+	GetUsage(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params GetUsageParams)
 
 	// (GET /orgs/{org}/invites)
 	ListInvites(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
@@ -1012,6 +1015,61 @@ func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUsageParams
+
+	// ------------- Optional query parameter "month" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "month", r.URL.Query(), &params.Month, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "month"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "month", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "project" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "project", r.URL.Query(), &params.Project, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "project"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUsage(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListInvites operation middleware
 func (siw *ServerInterfaceWrapper) ListInvites(w http.ResponseWriter, r *http.Request) {
 
@@ -1692,6 +1750,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/tokens/{tok}", wrapper.RevokePersonalToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.ListApiKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/billing/usage", wrapper.GetUsage)
 
 	return m
 }
@@ -2473,6 +2532,29 @@ func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w ht
 	return err
 }
 
+type GetUsageRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       GetUsageParams
+}
+
+type GetUsageResponseObject interface {
+	VisitGetUsageResponse(w http.ResponseWriter) error
+}
+
+type GetUsage200JSONResponse UsageReport
+
+func (response GetUsage200JSONResponse) VisitGetUsageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListInvitesRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -3063,6 +3145,9 @@ type StrictServerInterface interface {
 	// ListAuditEvents Append-only compliance ledger (W12). Actor column distinguishes humans, tokens, and `user via assistant`.
 	// (GET /orgs/{org}/audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// GetUsage The meter behind the invoice (B2). Included drawn down first; overage prices printed here, not discovered on the invoice. Meters update within ~5 min; the invoice is this table frozen on the 1st. CLI parity: `steloit usage export`.
+	// (GET /orgs/{org}/billing/usage)
+	GetUsage(ctx context.Context, request GetUsageRequestObject) (GetUsageResponseObject, error)
 
 	// (GET /orgs/{org}/invites)
 	ListInvites(ctx context.Context, request ListInvitesRequestObject) (ListInvitesResponseObject, error)
@@ -4020,6 +4105,33 @@ func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
 		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUsage operation middleware
+func (sh *strictHandler) GetUsage(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params GetUsageParams) {
+	var request GetUsageRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUsage(ctx, request.(GetUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUsageResponseObject); ok {
+		if err := validResponse.VisitGetUsageResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
