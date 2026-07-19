@@ -329,6 +329,23 @@ type Subscription struct {
 	UpdatedAt        pgtype.Timestamptz
 }
 
+type Template struct {
+	ID                   string
+	OrgID                string
+	Name                 string
+	Visibility           string
+	Version              int32
+	SourceProject        string
+	SourceEnv            string
+	Contents             []byte
+	RequiredInputs       []byte
+	MonthlyEstimateCents int64
+	UsedByCount          int32
+	UpdatedBy            string
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+}
+
 type Token struct {
 	ID          string
 	Kind        string

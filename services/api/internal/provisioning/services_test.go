@@ -19,11 +19,11 @@ func TestStatusMachine(t *testing.T) {
 	illegal := [][2]string{
 		{"provisioning", "suspended"}, {"provisioning", "degraded"},
 		{"ready", "provisioning"}, {"ready", "failed"}, // failure is observed via degraded, never direct from ready
-		{"failed", "ready"},     // a failed provision re-provisions, it never becomes ready by fiat
+		{"failed", "ready"}, // a failed provision re-provisions, it never becomes ready by fiat
 		{"suspended", "degraded"},
 		{"deleting", "ready"}, {"deleting", "provisioning"}, // deleting is terminal
-		{"ready", "running"},  // ADR-024: the word does not exist
-		{"running", "ready"},  // unknown FROM states have no edges
+		{"ready", "running"}, // ADR-024: the word does not exist
+		{"running", "ready"}, // unknown FROM states have no edges
 	}
 	for _, e := range illegal {
 		if CanTransition(e[0], e[1]) {

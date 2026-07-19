@@ -126,6 +126,24 @@ type testAPI struct {
 	Handlers2 *provisioning.Handlers
 }
 
+func (s *testAPI) CaptureTemplate(ctx context.Context, r gen.CaptureTemplateRequestObject) (gen.CaptureTemplateResponseObject, error) {
+	return s.Handlers2.CaptureTemplate(ctx, r)
+}
+func (s *testAPI) ListTemplates(ctx context.Context, r gen.ListTemplatesRequestObject) (gen.ListTemplatesResponseObject, error) {
+	return s.Handlers2.ListTemplates(ctx, r)
+}
+func (s *testAPI) GetTemplate(ctx context.Context, r gen.GetTemplateRequestObject) (gen.GetTemplateResponseObject, error) {
+	return s.Handlers2.GetTemplate(ctx, r)
+}
+func (s *testAPI) UpdateTemplate(ctx context.Context, r gen.UpdateTemplateRequestObject) (gen.UpdateTemplateResponseObject, error) {
+	return s.Handlers2.UpdateTemplate(ctx, r)
+}
+func (s *testAPI) DeleteTemplate(ctx context.Context, r gen.DeleteTemplateRequestObject) (gen.DeleteTemplateResponseObject, error) {
+	return s.Handlers2.DeleteTemplate(ctx, r)
+}
+func (s *testAPI) RefreshTemplate(ctx context.Context, r gen.RefreshTemplateRequestObject) (gen.RefreshTemplateResponseObject, error) {
+	return s.Handlers2.RefreshTemplate(ctx, r)
+}
 func (s *testAPI) CreateProject(ctx context.Context, r gen.CreateProjectRequestObject) (gen.CreateProjectResponseObject, error) {
 	return s.Handlers2.CreateProject(ctx, r)
 }

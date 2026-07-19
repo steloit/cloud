@@ -89,8 +89,8 @@ func (s *Service) CreateBinding(ctx context.Context, source store.Service, targe
 	}
 	row, err := s.q.InsertBinding(ctx, store.InsertBindingParams{
 		ID: bindingID, SourceID: source.ID,
-		TargetID:  pgtype.Text{String: target.ID, Valid: true},
-		Intent:    intent, Scope: scope,
+		TargetID: pgtype.Text{String: target.ID, Valid: true},
+		Intent:   intent, Scope: scope,
 		SecretRef: pgtype.Text{String: secretName, Valid: true},
 	})
 	if err != nil {
