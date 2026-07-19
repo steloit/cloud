@@ -57,10 +57,6 @@ function OrgShell() {
           <span className="flex-1" />
           <Skeleton className="h-5 w-64" />
         </header>
-        <RealtimeMount
-          project={activeProject?.name}
-          env={childParams.project ? envName : undefined}
-        />
         <div className="fbody">
           <nav className="rail" aria-label="Products">
             {[0, 1, 2, 3].map((i) => (

@@ -91,10 +91,13 @@ function harness(pages: SpineEvent[][]) {
 }
 
 describe("realtime channel (state.md contract)", () => {
-  it("degrades to polling on SSE failure, backs off 2s→10s, and resumes cursor", async () => {
+  it("degrades to polling on SSE failure, primes the backlog, backs off 2s→10s, and resumes cursor", async () => {
     const h = harness([
-      [{ id: "evt_1", kind: "deploy" }],
-      [{ id: "evt_2", kind: "lifecycle" }],
+      [{ id: "evt_1", kind: "deploy" }], // backlog — primes, NEVER delivered
+      [
+        { id: "evt_1", kind: "deploy" }, // replay (cursor-ignoring server) — deduped
+        { id: "evt_2", kind: "lifecycle" }, // genuinely new — delivered
+      ],
       [],
       [],
       [],
@@ -103,21 +106,39 @@ describe("realtime channel (state.md contract)", () => {
     h.sources[0]?.onerror?.();
     expect(h.channel.mode()).toBe("poll");
 
-    // first poll at 2s
+    // first poll at 2s PRIMES: history is not live traffic (no toast replay)
     const d1 = await h.clock.tick();
     expect(d1).toBe(POLL_START_MS);
-    expect(h.events.map((e) => e.id)).toEqual(["evt_1"]);
-    // second poll passes the resume cursor from the delivered event
+    expect(h.events).toEqual([]);
+    // second poll passes the primed cursor, dedups the replay, delivers the new
     const d2 = await h.clock.tick();
     expect(d2).toBe(POLL_START_MS * 2);
     expect(h.cursorsSeen[1]).toBe("evt_1");
+    expect(h.events.map((e) => e.id)).toEqual(["evt_2"]);
     // backoff caps at 10s (2 → 4 → 8 → 10); the NEXT event in virtual time is
-    // the 30s SSE recovery attempt — correct per the contract, asserted in the
-    // recovery test below.
+    // the 30s SSE recovery attempt — asserted in the recovery tests below.
     const d3 = await h.clock.tick(); // 8s
     const d4 = await h.clock.tick(); // 10s (cap)
     expect(d3).toBe(8_000);
     expect(d4).toBe(POLL_MAX_MS);
+  });
+
+  it("a FAILED SSE recovery attempt re-enters polling (the canon steady state, review blocker)", async () => {
+    const h = harness([[], [], [], [], [], [], [], [], []]);
+    h.sources[0]?.onerror?.();
+    expect(h.channel.mode()).toBe("poll");
+    // drain to the 30s retry (a second source appears)
+    for (let i = 0; i < 10 && h.sources.length < 2; i++) {
+      await h.clock.tick();
+    }
+    expect(h.sources.length).toBe(2);
+    // the retry FAILS (canon: MSW cannot stream)
+    h.sources[1]?.onerror?.();
+    expect(h.channel.mode()).toBe("poll");
+    // polling MUST still be alive: further ticks keep scheduling
+    const d = await h.clock.tick();
+    expect(d).toBeDefined();
+    expect(h.clock.pending()).toBeGreaterThan(0); // never a dead channel
   });
 
   it("recovers to SSE when the retry attempt succeeds, and stops polling", async () => {

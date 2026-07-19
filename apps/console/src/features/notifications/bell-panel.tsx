@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Btn } from "@/design-system/btn";
 import { Icon } from "@/design-system/icon";
 import { Kbd } from "@/design-system/kbd";

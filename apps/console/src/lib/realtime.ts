@@ -79,6 +79,11 @@ export function createRealtimeChannel(opts: ChannelOptions): RealtimeChannel {
   let pollDelay = POLL_START_MS;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let sseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** the poll path PRIMES on its first page (backlog is history, not live) */
+  let primed = false;
+  /** bounded dedup — the canon MSW handler ignores cursors and replays */
+  const seen = new Set<string>();
+  const SEEN_CAP = 500;
 
   const setMode = (m: RealtimeMode) => {
     if (mode !== m) {
@@ -88,7 +93,15 @@ export function createRealtimeChannel(opts: ChannelOptions): RealtimeChannel {
   };
 
   const deliver = (e: SpineEvent) => {
-    if (e.id) cursor = e.id; // both paths advance the resume cursor
+    if (e.id) {
+      if (seen.has(e.id)) return; // replayed page (cursor-ignoring server) — drop
+      seen.add(e.id);
+      if (seen.size > SEEN_CAP) {
+        const first = seen.values().next().value;
+        if (first) seen.delete(first);
+      }
+      cursor = e.id; // both paths advance the resume cursor
+    }
     opts.onEvent(e);
   };
 
@@ -101,7 +114,10 @@ export function createRealtimeChannel(opts: ChannelOptions): RealtimeChannel {
       degrade();
       return;
     }
-    source.onopen = () => setMode("sse");
+    source.onopen = () => {
+      stopPolling(); // recovered — SSE carries the channel again
+      setMode("sse");
+    };
     source.onmessage = (msg) => {
       try {
         deliver(JSON.parse(msg.data) as SpineEvent);
@@ -118,17 +134,22 @@ export function createRealtimeChannel(opts: ChannelOptions): RealtimeChannel {
     };
   };
 
+  // degrade is safe to call from ANY state — including a failed recovery
+  // attempt (review blocker: an early-return on mode==="poll" left the channel
+  // permanently dead after one failed retry, which is canon mode's steady
+  // state). An explicit pollTimer check makes it idempotent instead.
   const degrade = () => {
-    if (closed || mode === "poll") return;
+    if (closed) return;
     setMode("poll");
-    pollDelay = POLL_START_MS;
-    schedulePoll();
+    if (pollTimer === null) {
+      pollDelay = POLL_START_MS;
+      schedulePoll();
+    }
     // keep trying to climb back to SSE (recovery, not a hot loop)
+    if (sseRetryTimer) clearTimer(sseRetryTimer);
     sseRetryTimer = setTimer(() => {
       if (closed || mode === "sse") return;
-      stopPolling();
-      startSSE();
-      // if SSE fails again, onerror re-degrades immediately.
+      startSSE(); // polling KEEPS RUNNING during the attempt; onopen stops it
     }, SSE_RETRY_MS);
   };
 
@@ -142,13 +163,28 @@ export function createRealtimeChannel(opts: ChannelOptions): RealtimeChannel {
   const schedulePoll = () => {
     if (closed) return;
     pollTimer = setTimer(async () => {
+      pollTimer = null;
       try {
         const page = await fetchPage(opts.env, cursor);
-        for (const e of page.events) deliver(e);
+        if (closed) return; // unmount/env-switch mid-flight: deliver nothing stale
+        if (!primed) {
+          // FIRST page is backlog, not live traffic: prime the cursor + dedup
+          // set silently (review: replaying history as toasts is a defect).
+          primed = true;
+          for (const e of page.events) {
+            if (e.id) {
+              seen.add(e.id);
+              cursor = e.id;
+            }
+          }
+        } else {
+          for (const e of page.events) deliver(e);
+        }
         if (page.cursor) cursor = page.cursor;
       } catch {
         /* a failed poll just backs off — never throws out of the channel */
       }
+      if (closed) return;
       // state.md backoff: 2s → 10s (and stay there)
       pollDelay = Math.min(pollDelay * 2, POLL_MAX_MS);
       schedulePoll();

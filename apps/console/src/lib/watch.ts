@@ -6,7 +6,7 @@
  */
 
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { getServiceOptions } from "@/lib/api";
@@ -39,26 +39,29 @@ export function ProvisioningWatcher() {
   const watched = useWatchStore((s) => s.watched);
   const unwatch = useWatchStore((s) => s.unwatch);
   const qc = useQueryClient();
-  const started = useRef<Map<string, number>>(new Map());
 
   const results = useQueries({
     queries: watched.map((id) => ({
       ...getServiceOptions({ path: { service: id } }),
-      refetchInterval: () => {
-        // 2s doubling to 10s, per entity, from when watching began.
-        const t0 = started.current.get(id) ?? Date.now();
-        if (!started.current.has(id)) started.current.set(id, t0);
-        const elapsed = Date.now() - t0;
-        const delay = Math.min(POLL_START_MS * 2 ** Math.floor(elapsed / 10_000), POLL_MAX_MS);
-        return delay;
-      },
+      // the SAME 2s→10s attempt-doubling the realtime channel uses (one
+      // derivation, review nit): dataUpdateCount doubles per completed fetch.
+      refetchInterval: (query: { state: { dataUpdateCount: number } }) =>
+        Math.min(POLL_START_MS * 2 ** Math.max(0, query.state.dataUpdateCount - 1), POLL_MAX_MS),
+      retry: 2,
     })),
   });
 
   useEffect(() => {
     results.forEach((r, i) => {
       const id = watched[i];
-      if (!id || !r.data) return;
+      if (!id) return;
+      // terminal on hard error (review: a deleted-mid-provision service must
+      // not poll forever): after retries exhaust, drop the watch quietly.
+      if (r.status === "error") {
+        unwatch(id);
+        return;
+      }
+      if (!r.data) return;
       const svc = r.data as { name?: string; status?: string };
       if (svc.status && svc.status !== "provisioning") {
         // server truth arrived — flip the pills everywhere and say so.
@@ -75,7 +78,6 @@ export function ProvisioningWatcher() {
             return head?._id === "listServices" || head?._id === "listDeployments";
           },
         });
-        started.current.delete(id);
         unwatch(id);
       }
     });
