@@ -65,3 +65,12 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - A test placed outside the runner's include glob (console vitest is `tests/**`, not `src/**`) never
   runs and never fails — a green suite that silently skips your new test. Confirm the file is actually
   collected (the test count goes up) before trusting it (Q2).
+- A conformance/coverage test that checks a HANDFUL of cases and reads as "covered" — Q3 first shipped
+  checking 5 of 18 canon response sections, so drift in the other 13 passed green. Drive coverage off a
+  registry with a completeness tripwire (every fixtures section must have a check, or fail), so the
+  gap is visible, not silent.
+- Detecting a MISSING required field by zero-ness of the decoded value — `used: 0` is a legitimate
+  required value, not a missing one. Check key PRESENCE in the raw JSON instead; strict decode
+  (`DisallowUnknownFields`) catches extra fields, presence catches dropped/renamed required ones.
+- `git diff --exit-code` as a drift gate misses newly-generated UNTRACKED files (returns clean). Stage
+  first: `git add -A -- <paths> && git diff --cached --exit-code -- <paths>` (Q3).
