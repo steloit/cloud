@@ -123,6 +123,19 @@ type Invite struct {
 	ExpiresAt pgtype.Timestamptz
 }
 
+type Invoice struct {
+	ID         string
+	OrgID      string
+	Period     string
+	Status     string
+	TotalCents int64
+	Lines      []byte
+	Tax        []byte
+	ClosedAt   pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type Member struct {
 	ID        string
 	OrgID     string
