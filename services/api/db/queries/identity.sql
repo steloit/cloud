@@ -58,3 +58,14 @@ SELECT role FROM members WHERE org_id = $1 AND user_id = $2;
 
 -- name: ListPoliciesForOrg :many
 SELECT * FROM policies WHERE org_id = $1;
+
+-- name: ListActiveSessionsForUser :many
+SELECT * FROM sessions
+WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY last_seen_at DESC;
+
+-- name: RevokeSessionOwned :execrows
+-- Owner-scoped: revoking another user's session id is indistinguishable
+-- from a missing one (404).
+UPDATE sessions SET revoked_at = now()
+WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL;
