@@ -203,7 +203,7 @@ paths:
                 name: {type: string}
                 template_id: {type: string, description: "tpl_…; instantiation copies, never links; required_inputs must be supplied"}
                 region: {type: string, description: "defaults to org home_region"}
-                required_inputs: {type: object, additionalProperties: {type: string}, description: "wiring for bindings the template captured as inputs (T3)"}
+                required_inputs: {type: object, additionalProperties: {type: string}, description: "credential VALUES for the template's required inputs (T3/ADR-021: credentials re-mint per consumer) — each lands as a sealed secret in the new env, never a live link to the excluded service"}
       responses:
         "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/Project"}}}}
         "402": {description: "Plan project-limit gate, with reason (F2)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}

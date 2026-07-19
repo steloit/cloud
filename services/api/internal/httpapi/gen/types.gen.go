@@ -3263,7 +3263,7 @@ type CreateProjectJSONBody struct {
 	// Region defaults to org home_region
 	Region *string `json:"region,omitempty"`
 
-	// RequiredInputs wiring for bindings the template captured as inputs (T3)
+	// RequiredInputs credential VALUES for the template's required inputs (T3/ADR-021: credentials re-mint per consumer) — each lands as a sealed secret in the new env, never a live link to the excluded service
 	RequiredInputs *map[string]string `json:"required_inputs,omitempty"`
 
 	// TemplateId tpl_…; instantiation copies, never links; required_inputs must be supplied

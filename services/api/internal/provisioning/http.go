@@ -98,20 +98,49 @@ func (h *Handlers) CreateProject(ctx context.Context, req gen.CreateProjectReque
 	if req.Body == nil {
 		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "body", Detail: "required"}})}
 	}
-	if req.Body.TemplateId != nil {
-		return nil, notFound("template") // templates arrive with E9
-	}
 	org, err := h.idsvc.GetOrg(ctx, req.OrgPathParam)
 	if err != nil {
 		return nil, err
+	}
+	// T12.4 consume: resolve + gate the template BEFORE creating anything.
+	var tpl store.Template
+	instantiate := req.Body.TemplateId != nil && *req.Body.TemplateId != ""
+	if instantiate {
+		tpl, err = h.q.GetTemplate(ctx, *req.Body.TemplateId)
+		if err != nil || tpl.OrgID != org.ID {
+			return nil, notFound("template")
+		}
+		if _, err := h.requireOrg(ctx, org.ID, "template.consume", true); err != nil {
+			return nil, notFound("template")
+		}
+		if tpl.Visibility == "restricted" && !h.canManageTemplates(ctx, org.ID) {
+			return nil, notFound("template")
+		}
 	}
 	region := ""
 	if req.Body.Region != nil {
 		region = *req.Body.Region
 	}
-	prj, _, err := h.svc.CreateProject(ctx, org, req.Body.Name, region, actor)
+	prj, env, err := h.svc.CreateProject(ctx, org, req.Body.Name, region, actor)
 	if err != nil {
 		return nil, err
+	}
+	if instantiate {
+		// copies, never links: services + internal bindings re-minted into the
+		// NEW env; required_inputs wired from the caller (all-or-nothing).
+		inputs := map[string]string{}
+		if req.Body.RequiredInputs != nil {
+			inputs = *req.Body.RequiredInputs
+		}
+		if err := h.svc.InstantiateTemplate(ctx, h.est, org, env, tpl, inputs, actor); err != nil {
+			// COMPENSATION (review finding: non-atomic instantiation must not
+			// strand a half-built, name-squatting project): tear the freshly
+			// created project down — bindings first (they RESTRICT service
+			// deletion), then the project cascade. All-or-nothing semantics.
+			_ = h.q.DeleteBindingsForProject(ctx, prj.ID)
+			_ = h.q.HardDeleteProject(ctx, prj.ID)
+			return nil, err
+		}
 	}
 	return gen.CreateProject201JSONResponse(projectToAPI(prj, 1)), nil
 }

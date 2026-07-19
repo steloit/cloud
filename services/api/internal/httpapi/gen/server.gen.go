@@ -194,6 +194,12 @@ type ServerInterface interface {
 	// (POST /orgs/{org}/projects)
 	CreateProject(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 
+	// (GET /orgs/{org}/templates)
+	ListTemplates(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CaptureTemplate Save-as-template (T3). Server strips ALL secret material (checked at write); bindings to excluded services become required_inputs[]; instantiation estimate carried from birth.
+	// (POST /orgs/{org}/templates)
+	CaptureTemplate(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
 	// (GET /orgs/{org}/webhooks)
 	ListWebhooks(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// CreateWebhook Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
@@ -235,6 +241,18 @@ type ServerInterface interface {
 	// CreateBinding Bindings are wiring — $0; credentials minted at bind, rotated at unbind; effective next deploy; edge appears `pending` on topology immediately (U2/F3)
 	// (POST /services/{service}/bindings)
 	CreateBinding(w http.ResponseWriter, r *http.Request, servicePathParam ServicePathParam)
+	// DeleteTemplate "A template instantiates copies, never links; deleting the recipe doesn't touch the meals" (T1)
+	// (DELETE /templates/{tpl})
+	DeleteTemplate(w http.ResponseWriter, r *http.Request, tpl string)
+
+	// (GET /templates/{tpl})
+	GetTemplate(w http.ResponseWriter, r *http.Request, tpl string)
+	// UpdateTemplate Edit contents/visibility — never touches anything created from it (frozen-copy semantics)
+	// (PATCH /templates/{tpl})
+	UpdateTemplate(w http.ResponseWriter, r *http.Request, tpl string)
+	// RefreshTemplate Refresh-from-source → new version (T2)
+	// (POST /templates/{tpl}/refresh)
+	RefreshTemplate(w http.ResponseWriter, r *http.Request, tpl string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1780,6 +1798,58 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListTemplates operation middleware
+func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTemplates(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CaptureTemplate operation middleware
+func (siw *ServerInterfaceWrapper) CaptureTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CaptureTemplate(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWebhooks operation middleware
 func (siw *ServerInterfaceWrapper) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 
@@ -2168,6 +2238,110 @@ func (siw *ServerInterfaceWrapper) CreateBinding(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteTemplate operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tpl" -------------
+	var tpl string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tpl", r.PathValue("tpl"), &tpl, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tpl", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTemplate(w, r, tpl)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTemplate operation middleware
+func (siw *ServerInterfaceWrapper) GetTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tpl" -------------
+	var tpl string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tpl", r.PathValue("tpl"), &tpl, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tpl", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTemplate(w, r, tpl)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTemplate operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tpl" -------------
+	var tpl string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tpl", r.PathValue("tpl"), &tpl, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tpl", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTemplate(w, r, tpl)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshTemplate operation middleware
+func (siw *ServerInterfaceWrapper) RefreshTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tpl" -------------
+	var tpl string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tpl", r.PathValue("tpl"), &tpl, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tpl", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshTemplate(w, r, tpl)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -2325,6 +2499,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/envs/{env}/deployments", wrapper.CreateDeployment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/deployments/{dep}/rollback", wrapper.RollbackDeployment)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.ListTemplates)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/templates", wrapper.CaptureTemplate)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/templates/{tpl}", wrapper.DeleteTemplate)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/templates/{tpl}", wrapper.GetTemplate)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/templates/{tpl}", wrapper.UpdateTemplate)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/templates/{tpl}/refresh", wrapper.RefreshTemplate)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/policies", wrapper.ListPolicies)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/policies", wrapper.CreatePolicy)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/policies/{policy}", wrapper.GetPolicy)
@@ -3815,6 +3995,51 @@ func (response CreateProject402ApplicationProblemPlusJSONResponse) VisitCreatePr
 	return err
 }
 
+type ListTemplatesRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListTemplatesResponseObject interface {
+	VisitListTemplatesResponse(w http.ResponseWriter) error
+}
+
+type ListTemplates200JSONResponse TemplateList
+
+func (response ListTemplates200JSONResponse) VisitListTemplatesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CaptureTemplateRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Body         *CaptureTemplateJSONRequestBody
+}
+
+type CaptureTemplateResponseObject interface {
+	VisitCaptureTemplateResponse(w http.ResponseWriter) error
+}
+
+type CaptureTemplate201JSONResponse Template
+
+func (response CaptureTemplate201JSONResponse) VisitCaptureTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWebhooksRequestObject struct {
 	OrgPathParam OrgPathParam `json:"org"`
 }
@@ -4190,6 +4415,89 @@ func (response CreateBinding409ApplicationProblemPlusJSONResponse) VisitCreateBi
 	return err
 }
 
+type DeleteTemplateRequestObject struct {
+	Tpl string `json:"tpl"`
+}
+
+type DeleteTemplateResponseObject interface {
+	VisitDeleteTemplateResponse(w http.ResponseWriter) error
+}
+
+type DeleteTemplate204Response struct {
+}
+
+func (response DeleteTemplate204Response) VisitDeleteTemplateResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type GetTemplateRequestObject struct {
+	Tpl string `json:"tpl"`
+}
+
+type GetTemplateResponseObject interface {
+	VisitGetTemplateResponse(w http.ResponseWriter) error
+}
+
+type GetTemplate200JSONResponse Template
+
+func (response GetTemplate200JSONResponse) VisitGetTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateTemplateRequestObject struct {
+	Tpl  string `json:"tpl"`
+	Body *UpdateTemplateJSONRequestBody
+}
+
+type UpdateTemplateResponseObject interface {
+	VisitUpdateTemplateResponse(w http.ResponseWriter) error
+}
+
+type UpdateTemplate200JSONResponse Template
+
+func (response UpdateTemplate200JSONResponse) VisitUpdateTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshTemplateRequestObject struct {
+	Tpl string `json:"tpl"`
+}
+
+type RefreshTemplateResponseObject interface {
+	VisitRefreshTemplateResponse(w http.ResponseWriter) error
+}
+
+type RefreshTemplate200JSONResponse Template
+
+func (response RefreshTemplate200JSONResponse) VisitRefreshTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Login Password login → server-side session (cookie). MFA-enrolled users receive mfa_required and complete via WebAuthn (passkeys-first, ADR-0006) or TOTP. Failures never disclose account existence.
@@ -4367,6 +4675,12 @@ type StrictServerInterface interface {
 	// (POST /orgs/{org}/projects)
 	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
 
+	// (GET /orgs/{org}/templates)
+	ListTemplates(ctx context.Context, request ListTemplatesRequestObject) (ListTemplatesResponseObject, error)
+	// CaptureTemplate Save-as-template (T3). Server strips ALL secret material (checked at write); bindings to excluded services become required_inputs[]; instantiation estimate carried from birth.
+	// (POST /orgs/{org}/templates)
+	CaptureTemplate(ctx context.Context, request CaptureTemplateRequestObject) (CaptureTemplateResponseObject, error)
+
 	// (GET /orgs/{org}/webhooks)
 	ListWebhooks(ctx context.Context, request ListWebhooksRequestObject) (ListWebhooksResponseObject, error)
 	// CreateWebhook Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
@@ -4408,6 +4722,18 @@ type StrictServerInterface interface {
 	// CreateBinding Bindings are wiring — $0; credentials minted at bind, rotated at unbind; effective next deploy; edge appears `pending` on topology immediately (U2/F3)
 	// (POST /services/{service}/bindings)
 	CreateBinding(ctx context.Context, request CreateBindingRequestObject) (CreateBindingResponseObject, error)
+	// DeleteTemplate "A template instantiates copies, never links; deleting the recipe doesn't touch the meals" (T1)
+	// (DELETE /templates/{tpl})
+	DeleteTemplate(ctx context.Context, request DeleteTemplateRequestObject) (DeleteTemplateResponseObject, error)
+
+	// (GET /templates/{tpl})
+	GetTemplate(ctx context.Context, request GetTemplateRequestObject) (GetTemplateResponseObject, error)
+	// UpdateTemplate Edit contents/visibility — never touches anything created from it (frozen-copy semantics)
+	// (PATCH /templates/{tpl})
+	UpdateTemplate(ctx context.Context, request UpdateTemplateRequestObject) (UpdateTemplateResponseObject, error)
+	// RefreshTemplate Refresh-from-source → new version (T2)
+	// (POST /templates/{tpl}/refresh)
+	RefreshTemplate(ctx context.Context, request RefreshTemplateRequestObject) (RefreshTemplateResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -6077,6 +6403,65 @@ func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
+// ListTemplates operation middleware
+func (sh *strictHandler) ListTemplates(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListTemplatesRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTemplates(ctx, request.(ListTemplatesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTemplates")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTemplatesResponseObject); ok {
+		if err := validResponse.VisitListTemplatesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CaptureTemplate operation middleware
+func (sh *strictHandler) CaptureTemplate(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request CaptureTemplateRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	var body CaptureTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CaptureTemplate(ctx, request.(CaptureTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CaptureTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CaptureTemplateResponseObject); ok {
+		if err := validResponse.VisitCaptureTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListWebhooks operation middleware
 func (sh *strictHandler) ListWebhooks(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
 	var request ListWebhooksRequestObject
@@ -6486,6 +6871,120 @@ func (sh *strictHandler) CreateBinding(w http.ResponseWriter, r *http.Request, s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateBindingResponseObject); ok {
 		if err := validResponse.VisitCreateBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTemplate operation middleware
+func (sh *strictHandler) DeleteTemplate(w http.ResponseWriter, r *http.Request, tpl string) {
+	var request DeleteTemplateRequestObject
+
+	request.Tpl = tpl
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTemplate(ctx, request.(DeleteTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTemplateResponseObject); ok {
+		if err := validResponse.VisitDeleteTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTemplate operation middleware
+func (sh *strictHandler) GetTemplate(w http.ResponseWriter, r *http.Request, tpl string) {
+	var request GetTemplateRequestObject
+
+	request.Tpl = tpl
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTemplate(ctx, request.(GetTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTemplateResponseObject); ok {
+		if err := validResponse.VisitGetTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateTemplate operation middleware
+func (sh *strictHandler) UpdateTemplate(w http.ResponseWriter, r *http.Request, tpl string) {
+	var request UpdateTemplateRequestObject
+
+	request.Tpl = tpl
+
+	var body UpdateTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateTemplate(ctx, request.(UpdateTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateTemplateResponseObject); ok {
+		if err := validResponse.VisitUpdateTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RefreshTemplate operation middleware
+func (sh *strictHandler) RefreshTemplate(w http.ResponseWriter, r *http.Request, tpl string) {
+	var request RefreshTemplateRequestObject
+
+	request.Tpl = tpl
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RefreshTemplate(ctx, request.(RefreshTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RefreshTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RefreshTemplateResponseObject); ok {
+		if err := validResponse.VisitRefreshTemplateResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -89,7 +89,42 @@ func defaultIntent(product string) string {
 }
 
 // Price one shape. Deterministic, integer cents end-to-end (ADR-025).
+// allowedShapeKeys is the CLOSED shape schema per product (T12.4 review
+// blocker): a shape is not an open bag — an unknown key is rejected, never
+// silently accepted, so nothing secret-shaped can ride a shape into storage,
+// capture, or an org-shared template.
+// The vocabulary is the CANON's shape vocabulary (19-canon fixtures) — priced
+// keys plus the declared non-priced configuration keys. Growing it is a
+// reviewed change citing the canon, never a convenience.
+var allowedShapeKeys = map[string]map[string]bool{
+	"postgres": {"size": true, "storage_gb": true, "ha": true, "connections": true, "pgmq": true, "version": true},
+	"valkey":   {"memory_mb": true, "eviction": true, "mode": true},
+	"web":      {"size": true, "instances": true, "health_check": true},
+	"worker":   {"size": true, "instances": true, "health_check": true},
+}
+
+// ProjectShape filters a shape to the product's closed schema — the
+// defense-in-depth projection template capture applies on top of Price's
+// rejection (a pre-schema stored shape can never leak unknown keys onward).
+func ProjectShape(product string, shape map[string]any) map[string]any {
+	allowed := allowedShapeKeys[product]
+	out := map[string]any{}
+	for k, v := range shape {
+		if allowed[k] {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func Price(in ShapeInput) (Line, error) {
+	if allowed, ok := allowedShapeKeys[in.Product]; ok {
+		for k := range in.Shape {
+			if !allowed[k] {
+				return Line{}, ShapeError{Field: "shape." + k, Detail: "unknown shape field — shapes are a closed schema, allowed: " + boolKeys(allowed)}
+			}
+		}
+	}
 	intent := in.Intent
 	if intent == "" {
 		intent = defaultIntent(in.Product)
@@ -146,6 +181,17 @@ func Price(in ShapeInput) (Line, error) {
 		return Line{}, ShapeError{Field: "product", Detail: "unknown product " + in.Product + " — the surface is [postgres, valkey, web, worker] (ADR-0004)"}
 	}
 	return line, nil
+}
+
+func boolKeys(m map[string]bool) string {
+	out := ""
+	for k := range m {
+		if out != "" {
+			out += ", "
+		}
+		out += k
+	}
+	return out
 }
 
 // PriceAll prices a set of shapes; the total is the exact sum of lines —

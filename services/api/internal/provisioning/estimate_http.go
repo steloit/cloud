@@ -23,10 +23,6 @@ func (h *Handlers) CreateEstimate(ctx context.Context, req gen.CreateEstimateReq
 	if req.Body == nil {
 		return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{{Field: "body", Detail: "required"}})}
 	}
-	if req.Body.TemplateId != nil {
-		return nil, notFound("template") // templates arrive with E9
-	}
-
 	// env context: resolve → org, membership-gated (404 — no id probing)
 	orgID, envID := "", ""
 	if req.Body.Env != nil && *req.Body.Env != "" {
@@ -42,7 +38,32 @@ func (h *Handlers) CreateEstimate(ctx context.Context, req gen.CreateEstimateReq
 	}
 
 	var shapes []estimates.ShapeInput
-	if req.Body.Services != nil {
+	if req.Body.TemplateId != nil && *req.Body.TemplateId != "" {
+		// T12.4 estimate-at-consume: price the template's FROZEN contents — the
+		// same integer cents shown at save and in list (ADR-021).
+		tpl, err := h.q.GetTemplate(ctx, *req.Body.TemplateId)
+		if err != nil {
+			return nil, notFound("template")
+		}
+		tplOrg := tpl.OrgID
+		if orgID != "" && orgID != tplOrg {
+			return nil, notFound("template") // cross-org: indistinguishable from missing
+		}
+		if _, err := h.requireOrg(ctx, tplOrg, "template.consume", false); err != nil {
+			return nil, notFound("template")
+		}
+		if tpl.Visibility == "restricted" && !h.canManageTemplates(ctx, tplOrg) {
+			return nil, notFound("template")
+		}
+		tplShapes, _, err := TemplateShapes(tpl)
+		if err != nil {
+			return nil, err
+		}
+		shapes = tplShapes
+		if orgID == "" {
+			orgID = tplOrg
+		}
+	} else if req.Body.Services != nil {
 		for _, s := range *req.Body.Services {
 			in := estimates.ShapeInput{Product: string(s.Product)}
 			if s.Intent != nil {
