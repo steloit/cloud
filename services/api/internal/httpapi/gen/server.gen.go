@@ -73,6 +73,9 @@ type ServerInterface interface {
 	// RenewInvite Request a new link for an expired invite — notifies the inviter (A7)
 	// (POST /invites/{invite}/renew)
 	RenewInvite(w http.ResponseWriter, r *http.Request, invite string)
+	// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+	// (DELETE /me)
+	DeleteAccount(w http.ResponseWriter, r *http.Request)
 	// ListSessions P-series security page: device, last-seen, current flag
 	// (GET /me/sessions)
 	ListSessions(w http.ResponseWriter, r *http.Request)
@@ -139,6 +142,9 @@ type ServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// LeaveOrg Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+	// (POST /orgs/{org}:leave)
+	LeaveOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
 	// DeleteProject Typed-name confirm client-side; blocked while services/envs exist unless cascade acknowledged; final backups taken (U6)
 	// (DELETE /projects/{project})
 	DeleteProject(w http.ResponseWriter, r *http.Request, projectPathParam ProjectPathParam)
@@ -686,6 +692,20 @@ func (siw *ServerInterfaceWrapper) RenewInvite(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenewInvite(w, r, invite)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAccount(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1321,6 +1341,32 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// LeaveOrg operation middleware
+func (siw *ServerInterfaceWrapper) LeaveOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LeaveOrg(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteProject operation middleware
 func (siw *ServerInterfaceWrapper) DeleteProject(w http.ResponseWriter, r *http.Request) {
 
@@ -1743,6 +1789,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/session", wrapper.GetSession)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me", wrapper.DeleteAccount)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}:leave", wrapper.LeaveOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/sessions", wrapper.ListSessions)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/sessions/{ses}", wrapper.RevokeSession)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tokens", wrapper.ListPersonalTokens)
@@ -2230,6 +2278,37 @@ type RenewInvite202Response struct {
 func (response RenewInvite202Response) VisitRenewInviteResponse(w http.ResponseWriter) error {
 	w.WriteHeader(202)
 	return nil
+}
+
+type DeleteAccountRequestObject struct {
+}
+
+type DeleteAccountResponseObject interface {
+	VisitDeleteAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteAccount202Response struct {
+}
+
+func (response DeleteAccount202Response) VisitDeleteAccountResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type DeleteAccount409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteAccount409ApplicationProblemPlusJSONResponse) VisitDeleteAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListSessionsRequestObject struct {
@@ -2794,6 +2873,38 @@ func (response CreateProject402ApplicationProblemPlusJSONResponse) VisitCreatePr
 	return err
 }
 
+type LeaveOrgRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type LeaveOrgResponseObject interface {
+	VisitLeaveOrgResponse(w http.ResponseWriter) error
+}
+
+type LeaveOrg204Response struct {
+}
+
+func (response LeaveOrg204Response) VisitLeaveOrgResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type LeaveOrg409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response LeaveOrg409ApplicationProblemPlusJSONResponse) VisitLeaveOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeleteProjectRequestObject struct {
 	ProjectPathParam ProjectPathParam `json:"project"`
 }
@@ -3106,6 +3217,9 @@ type StrictServerInterface interface {
 	// RenewInvite Request a new link for an expired invite — notifies the inviter (A7)
 	// (POST /invites/{invite}/renew)
 	RenewInvite(ctx context.Context, request RenewInviteRequestObject) (RenewInviteResponseObject, error)
+	// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+	// (DELETE /me)
+	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
 	// ListSessions P-series security page: device, last-seen, current flag
 	// (GET /me/sessions)
 	ListSessions(ctx context.Context, request ListSessionsRequestObject) (ListSessionsResponseObject, error)
@@ -3172,6 +3286,9 @@ type StrictServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+	// LeaveOrg Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+	// (POST /orgs/{org}:leave)
+	LeaveOrg(ctx context.Context, request LeaveOrgRequestObject) (LeaveOrgResponseObject, error)
 	// DeleteProject Typed-name confirm client-side; blocked while services/envs exist unless cascade acknowledged; final backups taken (U6)
 	// (DELETE /projects/{project})
 	DeleteProject(ctx context.Context, request DeleteProjectRequestObject) (DeleteProjectResponseObject, error)
@@ -3745,6 +3862,30 @@ func (sh *strictHandler) RenewInvite(w http.ResponseWriter, r *http.Request, inv
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenewInviteResponseObject); ok {
 		if err := validResponse.VisitRenewInviteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteAccount operation middleware
+func (sh *strictHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
+	var request DeleteAccountRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAccount(ctx, request.(DeleteAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteAccountResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4365,6 +4506,32 @@ func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
 		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// LeaveOrg operation middleware
+func (sh *strictHandler) LeaveOrg(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request LeaveOrgRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LeaveOrg(ctx, request.(LeaveOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LeaveOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LeaveOrgResponseObject); ok {
+		if err := validResponse.VisitLeaveOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

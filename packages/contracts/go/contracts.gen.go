@@ -3915,6 +3915,11 @@ type ClientInterface interface {
 	// Corresponds with POST /invites/{invite}/renew (the `RenewInvite` operationId).
 	RenewInvite(ctx context.Context, invite string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+	//
+	// Corresponds with DELETE /me (the `DeleteAccount` operationId).
+	DeleteAccount(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetNotificationPrefs performs a GET /me/notification-prefs (the `GetNotificationPrefs` operationId) request.
 	GetNotificationPrefs(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -4263,6 +4268,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /orgs/{org}/webhooks (the `CreateWebhook` operationId).
 	CreateWebhook(ctx context.Context, orgPathParam OrgPathParam, params *CreateWebhookParams, body CreateWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// LeaveOrg Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+	//
+	// Corresponds with POST /orgs/{org}:leave (the `LeaveOrg` operationId).
+	LeaveOrg(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPolicy performs a GET /policies/{policy} (the `GetPolicy` operationId) request.
 	GetPolicy(ctx context.Context, policy string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5455,6 +5465,21 @@ func (c *Client) RenewInvite(ctx context.Context, invite string, reqEditors ...R
 	return c.Client.Do(req)
 }
 
+// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+//
+// Corresponds with DELETE /me (the `DeleteAccount` operationId).
+func (c *Client) DeleteAccount(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteAccountRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetNotificationPrefs performs a GET /me/notification-prefs (the `GetNotificationPrefs` operationId) request.
 func (c *Client) GetNotificationPrefs(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetNotificationPrefsRequest(c.Server)
@@ -6404,6 +6429,21 @@ func (c *Client) CreateWebhookWithBody(ctx context.Context, orgPathParam OrgPath
 // Corresponds with POST /orgs/{org}/webhooks (the `CreateWebhook` operationId).
 func (c *Client) CreateWebhook(ctx context.Context, orgPathParam OrgPathParam, params *CreateWebhookParams, body CreateWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateWebhookRequest(c.Server, orgPathParam, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// LeaveOrg Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+//
+// Corresponds with POST /orgs/{org}:leave (the `LeaveOrg` operationId).
+func (c *Client) LeaveOrg(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLeaveOrgRequest(c.Server, orgPathParam)
 	if err != nil {
 		return nil, err
 	}
@@ -8906,6 +8946,33 @@ func NewRenewInviteRequest(server string, invite string) (*http.Request, error) 
 	return req, nil
 }
 
+// NewDeleteAccountRequest constructs an http.Request for the DeleteAccount method
+func NewDeleteAccountRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetNotificationPrefsRequest constructs an http.Request for the GetNotificationPrefs method
 func NewGetNotificationPrefsRequest(server string) (*http.Request, error) {
 	var err error
@@ -10806,6 +10873,40 @@ func NewCreateWebhookRequestWithBody(server string, orgPathParam OrgPathParam, p
 	return req, nil
 }
 
+// NewLeaveOrgRequest constructs an http.Request for the LeaveOrg method
+func NewLeaveOrgRequest(server string, orgPathParam OrgPathParam) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "org", orgPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/orgs/%s:leave", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetPolicyRequest constructs an http.Request for the GetPolicy method
 func NewGetPolicyRequest(server string, policy string) (*http.Request, error) {
 	var err error
@@ -12559,6 +12660,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /invites/{invite}/renew (the `RenewInvite` operationId).
 	RenewInviteWithResponse(ctx context.Context, invite string, reqEditors ...RequestEditorFn) (*RenewInviteResponse, error)
 
+	// DeleteAccountWithResponse Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /me (the `DeleteAccount` operationId).
+	DeleteAccountWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteAccountResponse, error)
+
 	// GetNotificationPrefsWithResponse performs a GET /me/notification-prefs (the `GetNotificationPrefs` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -12961,6 +13069,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /orgs/{org}/webhooks (the `CreateWebhook` operationId).
 	CreateWebhookWithResponse(ctx context.Context, orgPathParam OrgPathParam, params *CreateWebhookParams, body CreateWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateWebhookResponse, error)
+
+	// LeaveOrgWithResponse Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /orgs/{org}:leave (the `LeaveOrg` operationId).
+	LeaveOrgWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*LeaveOrgResponse, error)
 
 	// GetPolicyWithResponse performs a GET /policies/{policy} (the `GetPolicy` operationId) request.
 	//
@@ -15001,6 +15116,47 @@ func (r RenewInviteResponse) ContentType() string {
 	return ""
 }
 
+type DeleteAccountResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r DeleteAccountResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteAccountResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteAccountResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteAccountResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteAccountResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetNotificationPrefsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -16854,6 +17010,47 @@ func (r CreateWebhookResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreateWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type LeaveOrgResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r LeaveOrgResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r LeaveOrgResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r LeaveOrgResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r LeaveOrgResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r LeaveOrgResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -18957,6 +19154,19 @@ func (c *ClientWithResponses) RenewInviteWithResponse(ctx context.Context, invit
 	return ParseRenewInviteResponse(rsp)
 }
 
+// DeleteAccountWithResponse Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /me (the `DeleteAccount` operationId).
+func (c *ClientWithResponses) DeleteAccountWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*DeleteAccountResponse, error) {
+	rsp, err := c.DeleteAccount(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteAccountResponse(rsp)
+}
+
 // GetNotificationPrefsWithResponse performs a GET /me/notification-prefs (the `GetNotificationPrefs` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -19724,6 +19934,19 @@ func (c *ClientWithResponses) CreateWebhookWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseCreateWebhookResponse(rsp)
+}
+
+// LeaveOrgWithResponse Leave an org you're a member of (T7.6): the last owner cannot leave (409 — F1); your account and other memberships are untouched; owned resources flagged never reassigned (G6).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /orgs/{org}:leave (the `LeaveOrg` operationId).
+func (c *ClientWithResponses) LeaveOrgWithResponse(ctx context.Context, orgPathParam OrgPathParam, reqEditors ...RequestEditorFn) (*LeaveOrgResponse, error) {
+	rsp, err := c.LeaveOrg(ctx, orgPathParam, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLeaveOrgResponse(rsp)
 }
 
 // GetPolicyWithResponse performs a GET /policies/{policy} (the `GetPolicy` operationId) request.
@@ -21360,6 +21583,35 @@ func ParseRenewInviteResponse(rsp *http.Response) (*RenewInviteResponse, error) 
 	return response, nil
 }
 
+// ParseDeleteAccountResponse parses an HTTP response from a DeleteAccountWithResponse call
+func ParseDeleteAccountResponse(rsp *http.Response) (*DeleteAccountResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteAccountResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 202:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetNotificationPrefsResponse parses an HTTP response from a GetNotificationPrefsWithResponse call
 func ParseGetNotificationPrefsResponse(rsp *http.Response) (*GetNotificationPrefsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -22534,6 +22786,35 @@ func ParseCreateWebhookResponse(rsp *http.Response) (*CreateWebhookResponse, err
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseLeaveOrgResponse parses an HTTP response from a LeaveOrgWithResponse call
+func ParseLeaveOrgResponse(rsp *http.Response) (*LeaveOrgResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &LeaveOrgResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	}
 

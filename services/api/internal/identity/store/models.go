@@ -246,10 +246,11 @@ type UsageEvent struct {
 }
 
 type User struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	Name         string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID                  string
+	Email               string
+	PasswordHash        string
+	Name                string
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	DeletionScheduledAt pgtype.Timestamptz
 }

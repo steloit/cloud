@@ -69,3 +69,16 @@ ORDER BY last_seen_at DESC;
 -- from a missing one (404).
 UPDATE sessions SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL;
+
+-- name: OwnedSoleOwnerOrgs :many
+-- Orgs where this user is an owner AND the only owner (leave/delete blockers).
+SELECT o.id, o.name FROM orgs o
+JOIN members m ON m.org_id = o.id AND m.user_id = $1 AND m.role = 'owner'
+WHERE (SELECT count(*) FROM members m2 WHERE m2.org_id = o.id AND m2.role = 'owner') = 1;
+
+-- name: ScheduleAccountDeletion :execrows
+UPDATE users SET deletion_scheduled_at = now()
+WHERE id = $1 AND deletion_scheduled_at IS NULL;
+
+-- name: RemoveOwnMembership :one
+DELETE FROM members WHERE org_id = $1 AND user_id = $2 RETURNING *;

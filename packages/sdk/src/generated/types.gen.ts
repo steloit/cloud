@@ -3253,6 +3253,59 @@ export type RegenerateRecoveryCodesResponses = {
 
 export type RegenerateRecoveryCodesResponse = RegenerateRecoveryCodesResponses[keyof RegenerateRecoveryCodesResponses];
 
+export type DeleteAccountData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/me';
+};
+
+export type DeleteAccountErrors = {
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+};
+
+export type DeleteAccountError = DeleteAccountErrors[keyof DeleteAccountErrors];
+
+export type DeleteAccountResponses = {
+    /**
+     * Deletion scheduled; grace window before purge
+     */
+    202: unknown;
+};
+
+export type LeaveOrgData = {
+    body?: never;
+    path: {
+        /**
+         * org_… or slug
+         */
+        org: string;
+    };
+    query?: never;
+    url: '/orgs/{org}:leave';
+};
+
+export type LeaveOrgErrors = {
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+};
+
+export type LeaveOrgError = LeaveOrgErrors[keyof LeaveOrgErrors];
+
+export type LeaveOrgResponses = {
+    /**
+     * Left the organization
+     */
+    204: void;
+};
+
+export type LeaveOrgResponse = LeaveOrgResponses[keyof LeaveOrgResponses];
+
 export type ListSessionsData = {
     body?: never;
     path?: never;

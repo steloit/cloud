@@ -139,7 +139,7 @@ func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (Token
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, password_hash, name)
 VALUES ($1, $2, $3, $4)
-RETURNING id, email, password_hash, name, created_at, updated_at
+RETURNING id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at
 `
 
 type CreateUserParams struct {
@@ -164,6 +164,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionScheduledAt,
 	)
 	return i, err
 }
@@ -232,7 +233,7 @@ func (q *Queries) GetMemberRole(ctx context.Context, arg GetMemberRoleParams) (s
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, name, created_at, updated_at FROM users WHERE lower(email) = lower($1)
+SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at FROM users WHERE lower(email) = lower($1)
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error) {
@@ -245,12 +246,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionScheduledAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, name, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, password_hash, name, created_at, updated_at, deletion_scheduled_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -263,6 +265,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionScheduledAt,
 	)
 	return i, err
 }
@@ -373,6 +376,60 @@ func (q *Queries) ListPoliciesForOrg(ctx context.Context, orgID string) ([]Polic
 	return items, nil
 }
 
+const ownedSoleOwnerOrgs = `-- name: OwnedSoleOwnerOrgs :many
+SELECT o.id, o.name FROM orgs o
+JOIN members m ON m.org_id = o.id AND m.user_id = $1 AND m.role = 'owner'
+WHERE (SELECT count(*) FROM members m2 WHERE m2.org_id = o.id AND m2.role = 'owner') = 1
+`
+
+type OwnedSoleOwnerOrgsRow struct {
+	ID   string
+	Name string
+}
+
+// Orgs where this user is an owner AND the only owner (leave/delete blockers).
+func (q *Queries) OwnedSoleOwnerOrgs(ctx context.Context, userID string) ([]OwnedSoleOwnerOrgsRow, error) {
+	rows, err := q.db.Query(ctx, ownedSoleOwnerOrgs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OwnedSoleOwnerOrgsRow
+	for rows.Next() {
+		var i OwnedSoleOwnerOrgsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const removeOwnMembership = `-- name: RemoveOwnMembership :one
+DELETE FROM members WHERE org_id = $1 AND user_id = $2 RETURNING id, org_id, user_id, role, created_at
+`
+
+type RemoveOwnMembershipParams struct {
+	OrgID  string
+	UserID string
+}
+
+func (q *Queries) RemoveOwnMembership(ctx context.Context, arg RemoveOwnMembershipParams) (Member, error) {
+	row := q.db.QueryRow(ctx, removeOwnMembership, arg.OrgID, arg.UserID)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const revokePersonalToken = `-- name: RevokePersonalToken :execrows
 UPDATE tokens SET revoked_at = now()
 WHERE id = $1 AND user_id = $2 AND kind = 'personal' AND revoked_at IS NULL
@@ -414,6 +471,19 @@ type RevokeSessionOwnedParams struct {
 // from a missing one (404).
 func (q *Queries) RevokeSessionOwned(ctx context.Context, arg RevokeSessionOwnedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeSessionOwned, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const scheduleAccountDeletion = `-- name: ScheduleAccountDeletion :execrows
+UPDATE users SET deletion_scheduled_at = now()
+WHERE id = $1 AND deletion_scheduled_at IS NULL
+`
+
+func (q *Queries) ScheduleAccountDeletion(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, scheduleAccountDeletion, id)
 	if err != nil {
 		return 0, err
 	}
