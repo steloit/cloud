@@ -53,13 +53,13 @@ func TestUsageReport(t *testing.T) {
 	}
 	var svc struct{ Id string }
 	_ = json.Unmarshal([]byte(bodyE), &svc)
-	row, orgID, _ := w.prov.ServiceOrg(ctx, svc.Id)
-	if _, err := w.prov.Transition(ctx, row, "ready", "system", "system", orgID); err != nil {
-		t.Fatal(err)
-	}
-	// backdate the open edge so the span has measurable seconds this month
+	// Plant an open span edge backdated 1h (append-only INSERT — the raw
+	// store forbids UPDATE, which is exactly the T3.7 guarantee); the span is
+	// still running, so the rollup accrues seconds up to now.
 	if _, err := w.pool.Exec(ctx,
-		"update usage_events set at = now() - interval '1 hour' where org_id=$1 and edge='open'", org.Id); err != nil {
+		`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+		 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', 'open', 'worker', 1100, now() - interval '1 hour')`,
+		org.Id, prj.ID, env.ID, svc.Id); err != nil {
 		t.Fatal(err)
 	}
 
