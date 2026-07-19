@@ -152,13 +152,21 @@ func (s *Service) Cancel(ctx context.Context, orgID, reasonCode string) (store.S
 	// A cancel SUPERSEDES any scheduled downgrade (review H1) and PRESERVES the
 	// dunning track (review H2: cancelling while suspended must not lift
 	// enforcement or reset the day-90 clock — those timestamps stay).
-	if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
-		return sub, fmt.Errorf("subscription: clear pending on cancel: %w", err)
-	}
-	return s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{
+	// ORDER MATTERS (review nit): commit the status FIRST so a racing
+	// SetPendingPlan hits the cancelled-row guard, THEN clear any pending that
+	// was already there — clear-before-commit left a window where a fresh
+	// pending survived the cancel and later applied a paid plan with no payment.
+	out, err := s.commit(ctx, sub, "cancelled_at_anchor", sub.Plan, txParams{
 		planEnds: ts(ends), dunningStarted: sub.DunningStartedAt,
 		nextRetry: sub.NextRetryAt, trialEnds: sub.TrialEndsAt,
 	}, "subscription.cancelled")
+	if err != nil {
+		return out, err
+	}
+	if err := s.q.ClearPendingPlan(ctx, orgID); err != nil {
+		slog.Error("subscription: clear pending on cancel failed — an orphan pending could apply at the anchor", "org", orgID, "err", err)
+	}
+	return out, nil
 }
 
 // cancelReason records the caller-supplied reason_code beside the cancel event
