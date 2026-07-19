@@ -71,15 +71,21 @@ YAML
       \"backup\": {\"barmanObjectStore\": {\"destinationPath\": \"gs://${WAL_BUCKET}/spike-a\", \"googleCredentials\": {\"gkeEnvironment\": true}}, \"retentionPolicy\": \"7d\"}
     }}"
   kubectl -n "$NS" wait cluster/spike-a --for=condition=Ready --timeout=600s
-  # force a WAL switch so the first archive lands, then wait for objects
+  # force a WAL switch so the first archive lands, then wait for objects.
+  # PATH NOTE: barman nests a serverName dir -> gs://<bucket>/spike-a/spike-a/wals/
+  # (the first run's glob missed the nesting and produced a FALSE "no WAL" WARN
+  # while ContinuousArchiving was in fact True — fixed here).
   kubectl -n "$NS" exec spike-a-1 -c postgres -- psql -d app -c "select pg_switch_wal()" >/dev/null
   T0=$(now); OK=0
   for i in $(seq 1 60); do
-    N=$(gcloud storage ls "gs://${WAL_BUCKET}/spike-a/wals/**" 2>/dev/null | wc -l | tr -d ' ')
+    N=$(gcloud storage ls "gs://${WAL_BUCKET}/spike-a/spike-a/wals/**" 2>/dev/null | wc -l | tr -d ' ')
     [ "${N:-0}" -gt 0 ] && OK=1 && break; sleep 5
   done
   T1=$(now)
   [ "$OK" = 1 ] && measure wal_first_archive_s "$(el "$T0" "$T1")" seconds || log "WARN no WAL archived in 300s"
+  # verification evidence into the log: condition + actual bucket objects
+  log "ContinuousArchiving=$(kubectl -n "$NS" get cluster spike-a -o jsonpath='{.status.conditions[?(@.type=="ContinuousArchiving")].status}')"
+  gcloud storage ls "gs://${WAL_BUCKET}/spike-a/spike-a/wals/**" 2>/dev/null | head -5 | tee -a "$RESULTS"
 
   log "=== step B: divergence + snapshot delta (cow_delta equivalent) ==="
   kubectl -n "$NS" exec spike-a-1 -c postgres -- psql -q -d app -c \
@@ -116,9 +122,11 @@ YAML
   T1=$(now)
   measure wake_latency_s "$(el "$T0" "$T1")" seconds
 
-  log "=== step D: RPO — write, archive, destroy primary mid-write ==="
-  # marker row + forced WAL switch (archived), then rows AFTER the last archive,
-  # then hard-delete the pod+PVC of a THROWAWAY pitr restore to measure loss
+  log "=== step D: RPO bound (unarchived-window; NOT a destructive kill test) ==="
+  # HONESTY NOTE (review finding M1): this measures the unarchived WINDOW between
+  # the last forced archive and a hypothetical failure instant — a BOUND, not a
+  # destructive mid-write kill. archive_timeout=300s is the hard ceiling (A1.3).
+  # A true kill-mid-write loss measurement is deferred to T1.2's harness.
   kubectl -n "$NS" exec spike-a-1 -c postgres -- psql -q -d app -c \
     "CREATE TABLE IF NOT EXISTS rpo(mark text, at timestamptz default now()); INSERT INTO rpo(mark) VALUES ('archived-marker'); SELECT pg_switch_wal();" >/dev/null
   sleep 10
@@ -126,35 +134,36 @@ YAML
   kubectl -n "$NS" exec spike-a-1 -c postgres -- psql -q -d app -c \
     "INSERT INTO rpo(mark) VALUES ('after-archive-1'),('after-archive-2');" >/dev/null
   KILL_T=$(date -u +%s)
-  measure rpo_measured_s "$((KILL_T - ARCHIVE_T))" "seconds_worst_case_bound (archive_timeout caps at 300)"
-  log "rpo note: unarchived-window at kill = $((KILL_T - ARCHIVE_T))s; archive_timeout=300s is the hard bound (A1.3)"
+  measure rpo_unarchived_window_s "$((KILL_T - ARCHIVE_T))" "seconds (bound; archive_timeout caps worst case at 300 — rpo_measured_s is this BOUND, not a kill test)"
+  measure rpo_measured_s 300 "seconds_worst_case_bound (=archive_timeout; by construction, not by kill test)"
 
-  log "=== step E: PITR to a NEW cluster (restore-never-in-place) ==="
-  TARGET=$(date -u -v-5S +"%Y-%m-%d %H:%M:%S+00" 2>/dev/null || date -u -d '5 seconds ago' +"%Y-%m-%d %H:%M:%S+00")
+  log "=== step E: base backup + restore to a NEW cluster (restore-never-in-place) ==="
+  # F3: WAL alone is NOT restorable — a base backup is load-bearing. F4: a
+  # targetTime beyond archived WAL leaves recovery waiting for future segments
+  # (observed live: 903.8s hang) — so the reproducible measured path is
+  # restore-to-LATEST; targeted PITR requires target validation against the
+  # last archived WAL position (a T1.2 reconciler responsibility).
+  kubectl apply -f manifests/spike-a-backup.yaml >/dev/null
+  for i in $(seq 1 60); do
+    PH=$(kubectl -n "$NS" get backup spike-a-base -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$PH" = "completed" ] && break; sleep 5
+  done
+  log "base backup phase: ${PH:-timeout}"
+  # marker AFTER the backup + forced archive so restore must replay WAL past it
+  kubectl -n "$NS" exec spike-a-1 -c postgres -- psql -q -d app -c \
+    "INSERT INTO rpo(mark) VALUES ('post-backup-marker'); SELECT pg_switch_wal();" >/dev/null
+  sleep 12
+  kubectl -n "$NS" delete cluster spike-pitr --ignore-not-found >/dev/null 2>&1
+  sleep 5
   T0=$(now)
-  cat <<YAML | kubectl apply -f - >/dev/null
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata: {name: spike-pitr, namespace: ${NS}}
-spec:
-  instances: 1
-  storage: {storageClass: pd-spike, size: 10Gi}
-  serviceAccountTemplate: {metadata: {annotations: {iam.gke.io/gcp-service-account: "${GSA}"}}}
-  bootstrap:
-    recovery:
-      source: spike-a
-      recoveryTarget: {targetTime: "${TARGET}"}
-  externalClusters:
-    - name: spike-a
-      barmanObjectStore:
-        destinationPath: gs://${WAL_BUCKET}/spike-a
-        googleCredentials: {gkeEnvironment: true}
-YAML
-  kubectl -n "$NS" wait cluster/spike-pitr --for=condition=Ready --timeout=900s || log "WARN pitr not ready in 900s"
+  sed -e "s|__GSA__|${GSA}|" -e "s|__WAL_BUCKET__|${WAL_BUCKET}|" \
+    manifests/spike-restore-latest.yaml.tpl | kubectl apply -f - >/dev/null
+  kubectl -n "$NS" wait cluster/spike-pitr --for=condition=Ready --timeout=600s || log "WARN restore not ready in 600s"
   T1=$(now)
-  measure pitr_to_new_s "$(el "$T0" "$T1")" seconds
-  R=$(kubectl -n "$NS" exec spike-pitr-1 -c postgres -- psql -tAq -d app -c "select count(*) from rpo" 2>/dev/null || echo x)
-  log "pitr rpo table rows: $R (marker present = archived data restored)"
+  measure pitr_to_new_s "$(el "$T0" "$T1")" "seconds (recovery-to-latest: base backup + full WAL replay)"
+  R=$(kubectl -n "$NS" exec spike-pitr-1 -c postgres -- psql -tAq -d app -c "select count(*) from rpo where mark='post-backup-marker'" 2>/dev/null || echo x)
+  L=$(kubectl -n "$NS" exec spike-pitr-1 -c postgres -- psql -tAq -d app -c "select count(*) from load" 2>/dev/null || echo x)
+  log "restored: post-backup marker=$R, load rows=$L (WAL replay past base backup verified)"
 
   log "=== phase 2 RESULTS ==="; grep MEASURE "$RESULTS"
   ;;

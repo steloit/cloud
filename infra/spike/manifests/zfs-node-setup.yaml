@@ -17,6 +17,11 @@ spec:
     metadata:
       labels: { app: zfs-node-setup }
     spec:
+      # CELL-1 RE-EVALUATION KIT — never apply to a production cell. The
+      # nodeSelector is an explicit opt-in: a stray apply schedules NOTHING
+      # unless a node is deliberately labeled steloit.io/zfs-node=true.
+      nodeSelector:
+        steloit.io/zfs-node: "true"
       hostPID: true
       hostNetwork: true
       tolerations:
