@@ -269,6 +269,9 @@ AI is governed as an **AI Binding** to an external provider: allow-policy, crede
 ### A5.5 — Bindings extend to external providers
 The Binding primitive (GOV-002 #6) may target an external provider (type + provider + region + secret-ref), not only an internal service — the shared mechanism for A5.3 and A5.4. Grammar isolation (D8) holds: no substrate/provider concept leaks into a customer surface beyond the provider name the customer chose. The managed `Product` surface is now exactly `[postgres, valkey, web, worker]`; `gpu-worker` is removed, `storage`/`ai-gateway`/`queue` are not managed products.
 
+### A6 — dev/alpha branching substrate on GKE PD-CSI; ZFS-LocalPV re-scoped to Cell-1 (2026-07-19, ADR-0007)
+A4 is amended on measured evidence (T1.0 spike, ADR-0007): at dev/alpha scale the CNPG branching substrate runs on **GKE PD-CSI (`pd-balanced`) volumes with PD incremental VolumeSnapshots**, not OpenEBS ZFS-LocalPV. The designed ZFS node failed to provision (`ZONE_RESOURCE_POOL_EXHAUSTED`, local-SSD+n2 coupling; transcript committed) and carries a permanent operational tax (Ubuntu-only nodes, privileged zpool bootstrap, kernel/image coupling, local-SSD ephemerality). Every A4 promise was met on PD-CSI with measured numbers: branch e2e 52.4 s, hibernation wake 8.0 s, restore-to-new 55.2 s, RPO ≤ 300 s by construction, delta-priced incremental snapshots (~62 MB per 10%-divergence Dev branch). **ZFS-LocalPV is re-scoped, not rejected**: it is the Cell-1 branch-density optimization, with an explicit measured trigger (branch count × delta economics vs a local-SSD storage node) and the spike kit retained as the runnable re-evaluation harness. D3's branching requirement, D8 grammar isolation, and A1.3's RPO bound are unchanged.
+
 ---
 
 *Amendments: append-only, dated, with rationale (mechanical stamps per A2.1/A3.2 excepted). The governing principle in §0 may not be amended, only superseded by a new constitution.*
