@@ -23,10 +23,11 @@ type Handlers struct {
 	authz  *Authorizer
 	reader *events.Reader
 	envs   events.EnvResolver
+	usage  usageRoller
 }
 
-func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver) *Handlers {
-	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs}
+func NewHandlers(svc *Service, mgr *session.Manager, authz *Authorizer, reader *events.Reader, envs events.EnvResolver, usage usageRoller) *Handlers {
+	return &Handlers{svc: svc, mgr: mgr, authz: authz, reader: reader, envs: envs, usage: usage}
 }
 
 // Mount wires the strict server onto mux under /v1 with the module's

@@ -98,7 +98,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	vault := secrets.NewVault(q, kek)
 	prov := provisioning.NewService(pool, recorder, vault, metering.NewEmitter(q))
 	mux := http.NewServeMux()
-	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov)
+	idHandlers := identity.NewHandlers(svc, mgr, authz, events.NewReader(q), prov, metering.NewEmitter(q))
 	idHandlers.Mount(mux, &testAPI{
 		Handlers:  idHandlers,
 		Handlers2: provisioning.NewHandlers(prov, authz, q, svc, estimates.NewService(q)),

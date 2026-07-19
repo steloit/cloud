@@ -161,7 +161,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	github.NewHandler(queries, recorder, cfg.GithubWebhookSecret).Mount(mux)
-	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs)
+	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs, metering.NewEmitter(queries))
 	// One strict server, module handler sets composed by embedding (§15).
 	idHandlers.Mount(mux, &apiServer{
 		Handlers:  idHandlers,
