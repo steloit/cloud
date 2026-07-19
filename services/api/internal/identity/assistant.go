@@ -18,19 +18,34 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
 )
 
-// AIAssistantEnabled reports whether the AI layer is on for an org. Disabled
-// is the ONLY off state (AI Law 4); `enabled`/`opt_in`/absent all permit
-// (opt-in is a presentation concern, not a denial). Closest-wins is not needed
-// here — the ai-assistant policy is org-wide by contract (no project scope).
-func (s *Service) AIAssistantEnabled(ctx context.Context, orgID string) (bool, error) {
+// AIAssistantEnabled reports whether the AI layer is on for an org, at an
+// optional project scope. Disabled is the ONLY off state (AI Law 4);
+// `enabled`/`opt_in`/absent all permit (opt-in is a presentation concern, not
+// a denial). Resolution is CLOSEST-WINS, exactly like the RBAC narrowing layer
+// (policy.go): a project-scoped ai-assistant row overrides the org-scoped one —
+// AI3 supports per-project overrides, so an org-level disable can be re-enabled
+// for one project and vice-versa. projectID "" evaluates org scope only.
+func (s *Service) AIAssistantEnabled(ctx context.Context, orgID, projectID string) (bool, error) {
 	rows, err := s.q.ListPoliciesForOrg(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
-	for _, p := range rows {
-		if p.Key == "ai-assistant" && p.Enforcement == "disabled" {
-			return false, nil
+	var effective *store.Policy
+	for i := range rows {
+		r := rows[i]
+		if r.Key != "ai-assistant" {
+			continue
 		}
+		if r.ProjectID.Valid && r.ProjectID.String != projectID {
+			continue // attached to a different project
+		}
+		// closest-wins: a project-scoped row supersedes an org-scoped one.
+		if effective == nil || (!effective.ProjectID.Valid && r.ProjectID.Valid) {
+			effective = &r
+		}
+	}
+	if effective != nil && effective.Enforcement == "disabled" {
+		return false, nil
 	}
 	return true, nil
 }

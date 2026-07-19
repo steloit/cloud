@@ -157,6 +157,9 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrScopeDenied):
 		problem.Write(w, r, problem.PermissionDenied("read_only token",
 			"Use a full-scope token or a browser session for this operation."))
+	case errors.Is(err, ErrAssistantUserScoped):
+		problem.Write(w, r, problem.PermissionDenied("org-key principal",
+			"The assistant is a user surface — sign in as a user (browser session or personal token)."))
 	case errors.As(err, new(AccessDeniedError)):
 		var ad AccessDeniedError
 		errors.As(err, &ad)
