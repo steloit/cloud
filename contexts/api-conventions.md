@@ -85,3 +85,15 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   path: an org-key foreign-scope denial is `key:…`, so it leaks existence via 403. Treat both
   `membership:` and `key:` (no-standing) denials as 404; only a `role:` (member-lacks-perm)
   denial is an honest 403 (T12.1).
+- A delivery/side-effect ledger that writes the terminal SUCCESS state before the effect runs —
+  a claim inserted as `sent` before the provider call means a crash mid-send leaves a phantom
+  `sent` the scan never reclaims (silent loss + false audit). Write a `pending` claim FIRST,
+  flip to `sent`/`failed` after the effect; the scan reclaims pending (crash) + failed
+  (transient) with an attempts cap; terminal states (`sent`/`skipped`) drop out (T10.4).
+- An HTML email/notification template that concatenates user-controlled data (org name, which
+  can be renamed to arbitrary text) into the HTML body without escaping — a crafted name injects
+  a phishing link into mail from your trusted, SPF/DKIM-valid domain. `html.EscapeString` every
+  interpolated value in the HTML body (plain-text body is inert) (T10.4).
+- A scan-based outbox where an unresolvable item leaves NO row — it is re-scanned every poll
+  (hot loop) and enough at the head starve newer work. Record a terminal `skipped` row so poison
+  items drop out; treat a genuinely-gone dependency as skip, not a propagated error (T10.4).
