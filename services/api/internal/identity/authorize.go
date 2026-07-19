@@ -75,7 +75,8 @@ func (a *Authorizer) Require(ctx context.Context, p session.Principal, perm rbac
 // unknown or delegated perms, exactly as for roles); then policies narrow.
 func (a *Authorizer) requireOrgKey(ctx context.Context, p session.Principal, perm rbac.Permission, scope rbac.Scope) error {
 	if scope.OrgID == "" || scope.OrgID != p.OrgID {
-		return a.deny(ctx, p, perm, scope, "key:scoped to a different organization")
+		// audit into the KEY's own org (the requested target may not exist)
+		return a.deny(ctx, p, perm, rbac.Scope{OrgID: p.OrgID}, "key:scoped to a different organization")
 	}
 	if a.evaluator.Delegated(perm) {
 		return a.deny(ctx, p, perm, scope,
