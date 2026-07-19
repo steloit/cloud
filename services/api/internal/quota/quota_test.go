@@ -58,6 +58,31 @@ func TestUnlimited(t *testing.T) {
 	}
 }
 
+// Degenerate/adversarial inputs: a negative delta can't fake being under; a
+// zero-included free tier bills the first unit; delta=0 is a no-op.
+func TestEvaluateEdgeCases(t *testing.T) {
+	rate := int64(700)
+	// negative delta (a reduction) never incurs overage even when already over
+	if d := Evaluate(Soft, 5, 7, -3, rate, false); !d.Allowed || d.SoftBlocked {
+		t.Fatalf("negative delta faked/blocked: %+v", d)
+	}
+	// free tier with 0 included: the first unit is overage
+	if d := Evaluate(Soft, 0, 0, 1, rate, false); !d.SoftBlocked || d.OveragePriceCents != rate {
+		t.Fatalf("zero-included first unit: %+v", d)
+	}
+	// delta=0 while under → allowed, no overage
+	if d := Evaluate(Soft, 5, 3, 0, rate, false); !d.Allowed {
+		t.Fatalf("zero delta under: %+v", d)
+	}
+	// WarnLevel of a 0 allowance with usage → saturated
+	if WarnLevel(0, 1) != 1 || !ShouldWarn(0, 1) {
+		t.Fatal("0-allowance with usage should warn")
+	}
+	if WarnLevel(0, 0) != 0 {
+		t.Fatal("0-allowance, 0-usage is 0")
+	}
+}
+
 func TestWarnAt80(t *testing.T) {
 	// 87/100 (the canon egress warn) → warns
 	if !ShouldWarn(100, 87) {

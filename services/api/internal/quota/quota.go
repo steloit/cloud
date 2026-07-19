@@ -35,16 +35,16 @@ type Decision struct {
 //	soft over + confirm=true   → Allowed + OverageConfirmed (billed)
 //	hard over                  → HardBlocked
 func Evaluate(kind Kind, allowance, used, delta, overageRateCents int64, confirm bool) Decision {
+	if delta < 0 {
+		delta = 0 // a reduction never incurs overage — and never fakes being under
+	}
 	if allowance < 0 || used+delta <= allowance {
 		return Decision{Allowed: true}
 	}
 	if kind == Hard {
 		return Decision{HardBlocked: true}
 	}
-	if confirm {
-		return Decision{Allowed: true, OverageConfirmed: true}
-	}
-	// Only the newly-crossed units are charged now (existing overage was already
+	// Only the NEWLY-crossed units are charged now (existing overage was already
 	// consented to). newOver − existingOver, floored at 0.
 	newOver := (used + delta) - allowance
 	existingOver := used - allowance
@@ -52,8 +52,13 @@ func Evaluate(kind Kind, allowance, used, delta, overageRateCents int64, confirm
 		existingOver = 0
 	}
 	incremental := newOver - existingOver
-	if incremental < 0 {
-		incremental = 0
+	if incremental <= 0 {
+		// no new overage (a no-op, or already over and not adding) — nothing to
+		// confirm, so it proceeds; the existing overage bills on its own.
+		return Decision{Allowed: true}
+	}
+	if confirm {
+		return Decision{Allowed: true, OverageConfirmed: true}
 	}
 	return Decision{SoftBlocked: true, OveragePriceCents: incremental * overageRateCents}
 }
