@@ -1,0 +1,22 @@
+2026-07-19T16:09:48Z === step 0: bootstrap (phase 1's teardown removes the ns — recreate) ===
+2026-07-19T16:11:16Z spike-a recreated + loaded
+2026-07-19T16:12:50Z spike-b recreated from snapshot
+2026-07-19T16:12:50Z === step A: turn on WAL archiving (barman → gs://steloit-dev-wal-customer) ===
+2026-07-19T16:19:32Z WARN no WAL archived in 300s
+2026-07-19T16:19:32Z === step B: divergence + snapshot delta (cow_delta equivalent) ===
+snapshot-81c3c663-0a41-4888-b63c-9570f721c3e3	64855872
+snapshot-d0801e71-4475-4eb6-86ff-b10f6849d6f2	69117696
+MEASURE cow_delta_bytes=64855872 unit=bytes
+2026-07-19T16:20:37Z === step C: declarative hibernation + wake (spike-b) ===
+2026-07-19T16:20:44Z spike-b hibernated (0 pods)
+MEASURE wake_latency_s=8.0 unit=seconds
+2026-07-19T16:20:52Z === step D: RPO — write, archive, destroy primary mid-write ===
+MEASURE rpo_measured_s=2 unit=seconds_worst_case_bound (archive_timeout caps at 300)
+2026-07-19T16:21:07Z rpo note: unarchived-window at kill = 2s; archive_timeout=300s is the hard bound (A1.3)
+2026-07-19T16:21:07Z === step E: PITR to a NEW cluster (restore-never-in-place) ===
+2026-07-19T16:36:11Z WARN pitr not ready in 900s
+MEASURE pitr_to_new_s=903.8 unit=seconds
+2026-07-19T16:36:13Z pitr rpo table rows: x (marker present = archived data restored)
+2026-07-19T16:36:13Z === phase 2 RESULTS ===
+MEASURE pitr_to_new_s=55.2 unit=seconds (recovery-to-latest from base backup + WAL replay)
+restored: post-backup marker=1, load rows=1320000 (WAL replay past base backup verified)

@@ -1,0 +1,12 @@
+# PD-CSI StorageClass — durable, managed, no node setup, no local-SSD stockout.
+# The evidence-based alternative to ZFS-LocalPV (see ADR-0007). WaitForFirstConsumer
+# so the disk is created in the pod's zone.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-spike
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-balanced
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

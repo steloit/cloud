@@ -26,8 +26,8 @@ maintained by agents as values arrive.
 | Primary domain (platform) | **`steloit.com`** (DNS at GoDaddy) | ✅ | founder 2026-07-19 |
 | Customer-content domain | a **separate eTLD+1** (never a platform subdomain) | ⏳ P2 | INF-001 A1.4 |
 | Branding (logo, palette, marks) | console design system (frames) | ✅ derived | design spec |
-| Support email | — | ❓ | not on record |
-| License (repo + distributed code) | — | ❓ | no `LICENSE` file exists |
+| Support email | **`support@steloit.com`** | ✅ | founder 2026-07-19 |
+| License (repo + distributed code) | **Apache License 2.0** (`/LICENSE`) | ✅ | founder 2026-07-19 |
 
 ## 2 · Cloud & infrastructure (P1 — landed 2026-07-19)
 
@@ -53,7 +53,7 @@ The **dev** foundation is bootstrapped; identifiers below are live.
 | GKE cluster / compute | **none yet** (~$0 running) — stood up by the T1.0 spike / T1.2 | ⏳ next |
 | DNS provider | **GoDaddy** (`steloit.com`) — records generated for founder to apply | ✅ |
 | GitHub repo WIF binding | pool/provider created; repo attribute condition set in `project-base` | ✅ |
-| Substrate | CNPG + ZFS (OpenEBS ZFS-LocalPV); object storage **proxied** | ✅ | architecture.md / INF-001 |
+| Substrate | CNPG on **GKE PD-CSI** at dev/alpha (ADR-0007, **proposed — awaiting founder ratification of Arch v1.3 + INF-001 A6**); ZFS-LocalPV re-scoped to a Cell-1 density option; object storage **proxied** | ⏳ ratification | ADR-0007 |
 
 **Bootstrap procedure used** (repeatable for `cell0`): create project → link billing
 → `gcloud services enable` the 14 APIs → `terraform -chdir=infra/envs/dev apply
@@ -114,10 +114,13 @@ anywhere is a bug.
 
 ## 7 · Feature flags
 
-No runtime feature-flag system is defined yet. Staged API conformance is by
-`oapi-server.cfg.yaml` `include-operation-ids` (an op is served only when its
-handler exists). A product-facing flag system is ❓ **NEEDS FOUNDER INPUT** if/when
-gated rollouts are wanted.
+**Default: OFF.** A feature is enabled only when its implementation is complete
+and verified (founder 2026-07-19) — no half-built feature is exposed behind a
+flag that's on by default. This is already the operating discipline: staged API
+conformance via `oapi-server.cfg.yaml` `include-operation-ids` (an op is served
+only when its handler exists and is tested). A dedicated runtime flag system, if
+one is later wanted for gated rollouts, inherits this default (ship dark, flip on
+after verification).
 
 ---
 

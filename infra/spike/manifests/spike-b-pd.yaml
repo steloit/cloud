@@ -1,0 +1,15 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: spike-b, namespace: spike }
+spec:
+  instances: 1
+  storage: { storageClass: pd-spike, size: 10Gi }
+  bootstrap:
+    recovery:
+      volumeSnapshots:
+        storage:
+          name: spike-a-snap
+          kind: VolumeSnapshot
+          apiGroup: snapshot.storage.k8s.io
+  postgresql:
+    parameters: { archive_timeout: "300s" }

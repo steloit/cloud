@@ -1,0 +1,13 @@
+# ZFS-LocalPV StorageClass — the spike PROVES these parameters; T1.2
+# productionizes the proven values verbatim.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: zfs-spike
+provisioner: zfs.csi.openebs.io
+allowVolumeExpansion: true
+parameters:
+  poolname: "zfspv-pool"
+  fstype: "zfs"
+  compression: "on"
+  recordsize: "8k"

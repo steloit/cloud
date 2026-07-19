@@ -1,0 +1,28 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: spike-a
+  namespace: spike
+spec:
+  instances: 1
+  storage:
+    storageClass: zfs-spike
+    size: 10Gi
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+  postgresql:
+    parameters:
+      archive_timeout: "300s" # A1.3: RPO <= 5 min by construction
+  backup:
+    barmanObjectStore:
+      destinationPath: gs://__WAL_BUCKET__/spike-a
+      googleCredentials:
+        gkeEnvironment: true # workload identity — zero static keys (D5)
+    retentionPolicy: 7d
+  affinity:
+    tolerations:
+      - {key: storage, operator: Equal, value: zfs, effect: NoSchedule}
+    nodeSelector:
+      pool: zfs-storage

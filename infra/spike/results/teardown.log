@@ -1,0 +1,16 @@
+2026-07-19T17:17:32Z === teardown: in-cluster (best-effort; clusters may already be gone) ===
+2026-07-19T17:17:36Z cluster spike-e2: already gone
+2026-07-19T17:17:39Z cluster spike-db: already gone
+2026-07-19T17:17:42Z cluster spike-cnpg: already gone
+2026-07-19T17:17:42Z === teardown: WAL/backup objects ===
+2026-07-19T17:17:48Z WAL objects: already gone
+2026-07-19T17:17:48Z === teardown: bucket IAM binding (live or tombstoned) ===
+2026-07-19T17:17:53Z bindings referencing spike-wal remaining: 0
+2026-07-19T17:17:53Z === teardown: temp GSA ===
+2026-07-19T17:17:55Z GSA: already gone
+2026-07-19T17:17:55Z === teardown: orphan sweep (must all be empty) ===
+2026-07-19T17:17:55Z clusters:
+2026-07-19T17:17:56Z instances:
+2026-07-19T17:17:57Z disks:
+2026-07-19T17:17:59Z snapshots:
+2026-07-19T17:18:00Z teardown complete — the four listings above must be empty
