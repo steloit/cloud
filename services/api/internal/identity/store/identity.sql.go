@@ -267,6 +267,41 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	return i, err
 }
 
+const listActiveSessionsForUser = `-- name: ListActiveSessionsForUser :many
+SELECT id, user_id, token_hash, device, created_at, last_seen_at, expires_at, revoked_at FROM sessions
+WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
+ORDER BY last_seen_at DESC
+`
+
+func (q *Queries) ListActiveSessionsForUser(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := q.db.Query(ctx, listActiveSessionsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Session
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TokenHash,
+			&i.Device,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPersonalTokens = `-- name: ListPersonalTokens :many
 SELECT id, kind, user_id, org_id, name, scope, prefix, token_hash, expires_at, last_used_at, created_at, revoked_at FROM tokens
 WHERE kind = 'personal' AND user_id = $1 AND revoked_at IS NULL
@@ -363,6 +398,26 @@ UPDATE sessions SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL
 func (q *Queries) RevokeSession(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, revokeSession, id)
 	return err
+}
+
+const revokeSessionOwned = `-- name: RevokeSessionOwned :execrows
+UPDATE sessions SET revoked_at = now()
+WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeSessionOwnedParams struct {
+	ID     string
+	UserID string
+}
+
+// Owner-scoped: revoking another user's session id is indistinguishable
+// from a missing one (404).
+func (q *Queries) RevokeSessionOwned(ctx context.Context, arg RevokeSessionOwnedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSessionOwned, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchSession = `-- name: TouchSession :exec
