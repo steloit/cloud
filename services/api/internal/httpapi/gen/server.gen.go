@@ -34,6 +34,15 @@ type ServerInterface interface {
 	// DeleteBinding Unbind — rotates credentials immediately
 	// (DELETE /bindings/{binding})
 	DeleteBinding(w http.ResponseWriter, r *http.Request, binding string)
+	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
+	// (POST /deployments/{dep}/rollback)
+	RollbackDeployment(w http.ResponseWriter, r *http.Request, dep string)
+	// ListDeployments Immutable history — id, git sha, actor, state, annotations (DP1)
+	// (GET /envs/{env}/deployments)
+	ListDeployments(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam)
+	// CreateDeployment Deploy / promote (DP1-2). Production promotion runs progressively behind health gates; auto-abort contract: error rate > 2× baseline for 2 min → traffic back in <10 s, migration stays.
+	// (POST /envs/{env}/deployments)
+	CreateDeployment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam)
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam, params ListEventsParams)
@@ -256,6 +265,84 @@ func (siw *ServerInterfaceWrapper) DeleteBinding(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteBinding(w, r, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackDeployment operation middleware
+func (siw *ServerInterfaceWrapper) RollbackDeployment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dep" -------------
+	var dep string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dep", r.PathValue("dep"), &dep, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dep", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackDeployment(w, r, dep)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDeployments operation middleware
+func (siw *ServerInterfaceWrapper) ListDeployments(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "env" -------------
+	var envPathParam EnvPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "env", r.PathValue("env"), &envPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "env", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDeployments(w, r, envPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDeployment operation middleware
+func (siw *ServerInterfaceWrapper) CreateDeployment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "env" -------------
+	var envPathParam EnvPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "env", r.PathValue("env"), &envPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "env", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDeployment(w, r, envPathParam)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1483,6 +1570,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/services/{service}/bindings", wrapper.ListBindings)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/services/{service}/bindings", wrapper.CreateBinding)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/bindings/{binding}", wrapper.DeleteBinding)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/deployments", wrapper.ListDeployments)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/envs/{env}/deployments", wrapper.CreateDeployment)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/deployments/{dep}/rollback", wrapper.RollbackDeployment)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/envs/{env}/events", wrapper.ListEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/audit", wrapper.ListAuditEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/signup", wrapper.Signup)
@@ -1643,6 +1733,73 @@ type DeleteBinding204Response struct {
 func (response DeleteBinding204Response) VisitDeleteBindingResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
 	return nil
+}
+
+type RollbackDeploymentRequestObject struct {
+	Dep string `json:"dep"`
+}
+
+type RollbackDeploymentResponseObject interface {
+	VisitRollbackDeploymentResponse(w http.ResponseWriter) error
+}
+
+type RollbackDeployment201JSONResponse Deployment
+
+func (response RollbackDeployment201JSONResponse) VisitRollbackDeploymentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListDeploymentsRequestObject struct {
+	EnvPathParam EnvPathParam `json:"env"`
+}
+
+type ListDeploymentsResponseObject interface {
+	VisitListDeploymentsResponse(w http.ResponseWriter) error
+}
+
+type ListDeployments200JSONResponse DeploymentList
+
+func (response ListDeployments200JSONResponse) VisitListDeploymentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateDeploymentRequestObject struct {
+	EnvPathParam EnvPathParam `json:"env"`
+	Body         *CreateDeploymentJSONRequestBody
+}
+
+type CreateDeploymentResponseObject interface {
+	VisitCreateDeploymentResponse(w http.ResponseWriter) error
+}
+
+type CreateDeployment201JSONResponse Deployment
+
+func (response CreateDeployment201JSONResponse) VisitCreateDeploymentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListEventsRequestObject struct {
@@ -2612,6 +2769,15 @@ type StrictServerInterface interface {
 	// DeleteBinding Unbind — rotates credentials immediately
 	// (DELETE /bindings/{binding})
 	DeleteBinding(ctx context.Context, request DeleteBindingRequestObject) (DeleteBindingResponseObject, error)
+	// RollbackDeployment Rollback = redeploy of the previous image in <60 s; migrations don't auto-revert (expand-contract; each migration states its reverse)
+	// (POST /deployments/{dep}/rollback)
+	RollbackDeployment(ctx context.Context, request RollbackDeploymentRequestObject) (RollbackDeploymentResponseObject, error)
+	// ListDeployments Immutable history — id, git sha, actor, state, annotations (DP1)
+	// (GET /envs/{env}/deployments)
+	ListDeployments(ctx context.Context, request ListDeploymentsRequestObject) (ListDeploymentsResponseObject, error)
+	// CreateDeployment Deploy / promote (DP1-2). Production promotion runs progressively behind health gates; auto-abort contract: error rate > 2× baseline for 2 min → traffic back in <10 s, migration stays.
+	// (POST /envs/{env}/deployments)
+	CreateDeployment(ctx context.Context, request CreateDeploymentRequestObject) (CreateDeploymentResponseObject, error)
 	// ListEvents The spine (O4): deploys, scaling, alert state changes, policy triggers, lifecycle. Every chart marker is one of these rows. Ops question → here; compliance question → /orgs/{org}/audit.
 	// (GET /envs/{env}/events)
 	ListEvents(ctx context.Context, request ListEventsRequestObject) (ListEventsResponseObject, error)
@@ -2895,6 +3061,94 @@ func (sh *strictHandler) DeleteBinding(w http.ResponseWriter, r *http.Request, b
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteBindingResponseObject); ok {
 		if err := validResponse.VisitDeleteBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackDeployment operation middleware
+func (sh *strictHandler) RollbackDeployment(w http.ResponseWriter, r *http.Request, dep string) {
+	var request RollbackDeploymentRequestObject
+
+	request.Dep = dep
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackDeployment(ctx, request.(RollbackDeploymentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackDeployment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RollbackDeploymentResponseObject); ok {
+		if err := validResponse.VisitRollbackDeploymentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDeployments operation middleware
+func (sh *strictHandler) ListDeployments(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam) {
+	var request ListDeploymentsRequestObject
+
+	request.EnvPathParam = envPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDeployments(ctx, request.(ListDeploymentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDeployments")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDeploymentsResponseObject); ok {
+		if err := validResponse.VisitListDeploymentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDeployment operation middleware
+func (sh *strictHandler) CreateDeployment(w http.ResponseWriter, r *http.Request, envPathParam EnvPathParam) {
+	var request CreateDeploymentRequestObject
+
+	request.EnvPathParam = envPathParam
+
+	var body CreateDeploymentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDeployment(ctx, request.(CreateDeploymentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDeployment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDeploymentResponseObject); ok {
+		if err := validResponse.VisitCreateDeploymentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

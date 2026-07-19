@@ -23,6 +23,23 @@ type Binding struct {
 	CreatedAt      pgtype.Timestamptz
 }
 
+type Deployment struct {
+	ID            string
+	Number        int32
+	EnvID         string
+	ServiceID     string
+	GitSha        string
+	State         string
+	Actor         string
+	CanaryPercent pgtype.Int4
+	Gates         []byte
+	Migrations    []byte
+	Annotation    pgtype.Text
+	PromotedFrom  pgtype.Text
+	RollbackOf    pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+}
+
 type Environment struct {
 	ID             string
 	ProjectID      string
