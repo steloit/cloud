@@ -51,3 +51,17 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - A "drift guard" that checks a hand-maintained list instead of DERIVING from source — it can't catch
   the drift it's named for (a new call site the list forgot). Scan the actual call sites and assert
   set-equality both directions (Q4: enforced-permission set regex'd from the handler source).
+- Claiming "drift fails CI" via a `make gen` + `git diff` gate WITHOUT checking the gate actually runs
+  that gen step and diffs that path. The go job runs `gen-go` (not `gen-ts`); the diff was scoped
+  `-- services packages` (excluding `apps/`). A synced COPY is only protected if some CI step
+  regenerates it AND the diff covers its path. Prefer an in-process test that reads the canonical
+  source (fs, via import.meta.url / runtime.Caller) and asserts the copy equals it — it fails wherever
+  it runs, independent of CI plumbing (Q2).
+- A copy-vs-copy identity test (`consoleCopy.toEqual(packagesCopy)`) proves nothing when both copies
+  can be equally stale — compare each copy to the CANONICAL source, not to a sibling (Q2).
+- A guard that passes on a zeroed world: `proj == null` is false for `0`, so `0 === 0` sails through.
+  Reject empty/zero explicitly, and keep Go and TS guards symmetric or one language passes what the
+  other rejects (Q2).
+- A test placed outside the runner's include glob (console vitest is `tests/**`, not `src/**`) never
+  runs and never fails — a green suite that silently skips your new test. Confirm the file is actually
+  collected (the test count goes up) before trusting it (Q2).
