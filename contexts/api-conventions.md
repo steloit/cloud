@@ -114,3 +114,17 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   leaked/guessable id can be looped to flood the recipient's inbox and burn provider quota
   (email bombing). Every public email-triggering endpoint must rate-limit by requester IP, like
   password-reset and invite-renew do (`s.limiter.Allow("<ns>|"+ip)`) (T7.5).
+- **Reveal-once secret stored as a HASH when you must re-sign with it.** A token is only ever
+  *verified*, so `session.HashToken` (sha256, one-way) is right. A webhook signing secret must
+  sign *every* outbound POST, so it must be RECOVERABLE — envelope-encrypt it (`secrets.Seal`,
+  AAD-bound to the row), never hash it. Reveal-once still holds: return the plaintext once, store
+  ciphertext, never return it again (T10.3).
+- **A `{param}:verb` custom-method path breaks the stdlib `ServeMux`** — `"/webhooks/{wbh}:test"`
+  panics at registration ("wildcard segment must end with }"). `:verb` on a *literal* segment
+  (`/x:read`) is fine; on a wildcard it is not. Register such routes pre-strict on a subtree
+  pattern (`POST /v1/webhooks/`) and parse the id yourself, reusing `h.responseError` for the
+  error→problem mapping — the SSE streamer established this pre-strict pattern (T10.3).
+- **Random-hex `ids.New` values are NOT time-sortable** — cursor-paginating on `id` gives a
+  stable but chronologically meaningless order (newest-first is violated). Keyset on
+  `(created_at, id)`: the cursor resolves the last row's `created_at` and pages strictly older,
+  with `id` as the tiebreak (T10.3).

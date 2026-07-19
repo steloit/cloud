@@ -156,6 +156,25 @@ type MfaTotp struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type Notification struct {
+	ID        string
+	UserID    string
+	EventID   pgtype.Text
+	Kind      string
+	Title     string
+	Body      string
+	Link      string
+	Read      bool
+	CreatedAt pgtype.Timestamptz
+}
+
+type NotificationPref struct {
+	UserID     string
+	Channels   []byte
+	QuietHours []byte
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type Org struct {
 	ID                  string
 	Name                string
@@ -343,4 +362,30 @@ type User struct {
 	UpdatedAt           pgtype.Timestamptz
 	DeletionScheduledAt pgtype.Timestamptz
 	MfaEnabled          bool
+}
+
+type Webhook struct {
+	ID         string
+	OrgID      string
+	Url        string
+	Events     []string
+	Status     string
+	Ciphertext []byte
+	Nonce      []byte
+	WrappedDek []byte
+	DekNonce   []byte
+	KekID      string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type WebhookDelivery struct {
+	ID         string
+	WebhookID  string
+	EventID    string
+	Status     string
+	StatusCode pgtype.Int4
+	Attempts   int32
+	Error      pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
 }

@@ -94,6 +94,18 @@ type ServerInterface interface {
 	// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
 	// (DELETE /me)
 	DeleteAccount(w http.ResponseWriter, r *http.Request)
+
+	// (GET /me/notification-prefs)
+	GetNotificationPrefs(w http.ResponseWriter, r *http.Request)
+	// UpdateNotificationPrefs Channels + quiet hours. Quiet hours affect ROUTING, never recording, and never gate escalation paging (glossary law).
+	// (PATCH /me/notification-prefs)
+	UpdateNotificationPrefs(w http.ResponseWriter, r *http.Request)
+	// ListNotifications The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery
+	// (GET /me/notifications)
+	ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams)
+	// MarkNotificationsRead Bulk mark-read
+	// (POST /me/notifications:read)
+	MarkNotificationsRead(w http.ResponseWriter, r *http.Request)
 	// ListSessions P-series security page: device, last-seen, current flag
 	// (GET /me/sessions)
 	ListSessions(w http.ResponseWriter, r *http.Request)
@@ -175,6 +187,12 @@ type ServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+
+	// (GET /orgs/{org}/webhooks)
+	ListWebhooks(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam)
+	// CreateWebhook Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
+	// (POST /orgs/{org}/webhooks)
+	CreateWebhook(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreateWebhookParams)
 
 	// (GET /policies/{policy})
 	GetPolicy(w http.ResponseWriter, r *http.Request, policy string)
@@ -826,6 +844,94 @@ func (siw *ServerInterfaceWrapper) DeleteAccount(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteAccount(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNotificationPrefs operation middleware
+func (siw *ServerInterfaceWrapper) GetNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNotificationPrefs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateNotificationPrefs operation middleware
+func (siw *ServerInterfaceWrapper) UpdateNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateNotificationPrefs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListNotifications operation middleware
+func (siw *ServerInterfaceWrapper) ListNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotificationsParams
+
+	// ------------- Optional query parameter "unread" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "unread", r.URL.Query(), &params.Unread, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "unread"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "unread", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNotifications(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MarkNotificationsRead operation middleware
+func (siw *ServerInterfaceWrapper) MarkNotificationsRead(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkNotificationsRead(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1616,6 +1722,82 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListWebhooks operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhooks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhooks(w, r, orgPathParam)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWebhook operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var orgPathParam OrgPathParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", r.PathValue("org"), &orgPathParam, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateWebhookParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKeyHeader IdempotencyKeyHeader
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKeyHeader, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKeyHeader = &IdempotencyKeyHeader
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWebhook(w, r, orgPathParam, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPolicy operation middleware
 func (siw *ServerInterfaceWrapper) GetPolicy(w http.ResponseWriter, r *http.Request) {
 
@@ -2107,6 +2289,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/tokens", wrapper.ListPersonalTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/tokens", wrapper.CreatePersonalToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/tokens/{tok}", wrapper.RevokePersonalToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/notifications", wrapper.ListNotifications)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/notifications:read", wrapper.MarkNotificationsRead)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/notification-prefs", wrapper.GetNotificationPrefs)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/me/notification-prefs", wrapper.UpdateNotificationPrefs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/webhooks", wrapper.ListWebhooks)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/webhooks", wrapper.CreateWebhook)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.ListApiKeys)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/orgs/{org}/api-keys", wrapper.CreateApiKey)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/orgs/{org}/api-keys/{key}", wrapper.RevokeApiKey)
@@ -2732,6 +2920,87 @@ func (response DeleteAccount409ApplicationProblemPlusJSONResponse) VisitDeleteAc
 	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type GetNotificationPrefsRequestObject struct {
+}
+
+type GetNotificationPrefsResponseObject interface {
+	VisitGetNotificationPrefsResponse(w http.ResponseWriter) error
+}
+
+type GetNotificationPrefs200JSONResponse NotificationPrefs
+
+func (response GetNotificationPrefs200JSONResponse) VisitGetNotificationPrefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateNotificationPrefsRequestObject struct {
+	Body *UpdateNotificationPrefsJSONRequestBody
+}
+
+type UpdateNotificationPrefsResponseObject interface {
+	VisitUpdateNotificationPrefsResponse(w http.ResponseWriter) error
+}
+
+type UpdateNotificationPrefs200JSONResponse NotificationPrefs
+
+func (response UpdateNotificationPrefs200JSONResponse) VisitUpdateNotificationPrefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListNotificationsRequestObject struct {
+	Params ListNotificationsParams
+}
+
+type ListNotificationsResponseObject interface {
+	VisitListNotificationsResponse(w http.ResponseWriter) error
+}
+
+type ListNotifications200JSONResponse NotificationList
+
+func (response ListNotifications200JSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MarkNotificationsReadRequestObject struct {
+	Body *MarkNotificationsReadJSONRequestBody
+}
+
+type MarkNotificationsReadResponseObject interface {
+	VisitMarkNotificationsReadResponse(w http.ResponseWriter) error
+}
+
+type MarkNotificationsRead204Response struct {
+}
+
+func (response MarkNotificationsRead204Response) VisitMarkNotificationsReadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
 }
 
 type ListSessionsRequestObject struct {
@@ -3441,6 +3710,52 @@ func (response CreateProject402ApplicationProblemPlusJSONResponse) VisitCreatePr
 	return err
 }
 
+type ListWebhooksRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+}
+
+type ListWebhooksResponseObject interface {
+	VisitListWebhooksResponse(w http.ResponseWriter) error
+}
+
+type ListWebhooks200JSONResponse WebhookList
+
+func (response ListWebhooks200JSONResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWebhookRequestObject struct {
+	OrgPathParam OrgPathParam `json:"org"`
+	Params       CreateWebhookParams
+	Body         *CreateWebhookJSONRequestBody
+}
+
+type CreateWebhookResponseObject interface {
+	VisitCreateWebhookResponse(w http.ResponseWriter) error
+}
+
+type CreateWebhook201JSONResponse WebhookCreated
+
+func (response CreateWebhook201JSONResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetPolicyRequestObject struct {
 	Policy string `json:"policy"`
 }
@@ -3847,6 +4162,18 @@ type StrictServerInterface interface {
 	// DeleteAccount Self-service account deletion (T7.6): NEVER plan-gated; scheduled with a grace window (not immediate); 409 if you are the sole owner of any org (each named — transfer ownership or delete the org first). Sessions revoked at schedule time.
 	// (DELETE /me)
 	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
+
+	// (GET /me/notification-prefs)
+	GetNotificationPrefs(ctx context.Context, request GetNotificationPrefsRequestObject) (GetNotificationPrefsResponseObject, error)
+	// UpdateNotificationPrefs Channels + quiet hours. Quiet hours affect ROUTING, never recording, and never gate escalation paging (glossary law).
+	// (PATCH /me/notification-prefs)
+	UpdateNotificationPrefs(ctx context.Context, request UpdateNotificationPrefsRequestObject) (UpdateNotificationPrefsResponseObject, error)
+	// ListNotifications The bell (S4 ruling): cursor + unread filter; SSE-streamable for live delivery
+	// (GET /me/notifications)
+	ListNotifications(ctx context.Context, request ListNotificationsRequestObject) (ListNotificationsResponseObject, error)
+	// MarkNotificationsRead Bulk mark-read
+	// (POST /me/notifications:read)
+	MarkNotificationsRead(ctx context.Context, request MarkNotificationsReadRequestObject) (MarkNotificationsReadResponseObject, error)
 	// ListSessions P-series security page: device, last-seen, current flag
 	// (GET /me/sessions)
 	ListSessions(ctx context.Context, request ListSessionsRequestObject) (ListSessionsResponseObject, error)
@@ -3928,6 +4255,12 @@ type StrictServerInterface interface {
 	// CreateProject Create project (W2/A8), optionally from template; production env created by default
 	// (POST /orgs/{org}/projects)
 	CreateProject(ctx context.Context, request CreateProjectRequestObject) (CreateProjectResponseObject, error)
+
+	// (GET /orgs/{org}/webhooks)
+	ListWebhooks(ctx context.Context, request ListWebhooksRequestObject) (ListWebhooksResponseObject, error)
+	// CreateWebhook Org webhook: event filter + URL; signing secret reveal-once (same contract as tokens)
+	// (POST /orgs/{org}/webhooks)
+	CreateWebhook(ctx context.Context, request CreateWebhookRequestObject) (CreateWebhookResponseObject, error)
 
 	// (GET /policies/{policy})
 	GetPolicy(ctx context.Context, request GetPolicyRequestObject) (GetPolicyResponseObject, error)
@@ -4703,6 +5036,118 @@ func (sh *strictHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// GetNotificationPrefs operation middleware
+func (sh *strictHandler) GetNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+	var request GetNotificationPrefsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNotificationPrefs(ctx, request.(GetNotificationPrefsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNotificationPrefs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetNotificationPrefsResponseObject); ok {
+		if err := validResponse.VisitGetNotificationPrefsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateNotificationPrefs operation middleware
+func (sh *strictHandler) UpdateNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+	var request UpdateNotificationPrefsRequestObject
+
+	var body UpdateNotificationPrefsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateNotificationPrefs(ctx, request.(UpdateNotificationPrefsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateNotificationPrefs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateNotificationPrefsResponseObject); ok {
+		if err := validResponse.VisitUpdateNotificationPrefsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListNotifications operation middleware
+func (sh *strictHandler) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	var request ListNotificationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNotifications(ctx, request.(ListNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListNotificationsResponseObject); ok {
+		if err := validResponse.VisitListNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MarkNotificationsRead operation middleware
+func (sh *strictHandler) MarkNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	var request MarkNotificationsReadRequestObject
+
+	var body MarkNotificationsReadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MarkNotificationsRead(ctx, request.(MarkNotificationsReadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MarkNotificationsRead")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MarkNotificationsReadResponseObject); ok {
+		if err := validResponse.VisitMarkNotificationsReadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListSessions operation middleware
 func (sh *strictHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	var request ListSessionsRequestObject
@@ -5455,6 +5900,66 @@ func (sh *strictHandler) CreateProject(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateProjectResponseObject); ok {
 		if err := validResponse.VisitCreateProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWebhooks operation middleware
+func (sh *strictHandler) ListWebhooks(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam) {
+	var request ListWebhooksRequestObject
+
+	request.OrgPathParam = orgPathParam
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWebhooks(ctx, request.(ListWebhooksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWebhooks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWebhooksResponseObject); ok {
+		if err := validResponse.VisitListWebhooksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWebhook operation middleware
+func (sh *strictHandler) CreateWebhook(w http.ResponseWriter, r *http.Request, orgPathParam OrgPathParam, params CreateWebhookParams) {
+	var request CreateWebhookRequestObject
+
+	request.OrgPathParam = orgPathParam
+	request.Params = params
+
+	var body CreateWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWebhook(ctx, request.(CreateWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWebhookResponseObject); ok {
+		if err := validResponse.VisitCreateWebhookResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -32,3 +32,8 @@ one events table; `/orgs/{org}/audit` and `/envs/{env}/events` are views over it
 - Emails or bell counts computed from anything but the spine (banner/email number mismatch = defect).
 - SSE without cursor resume (reconnects silently drop events).
 - Forgetting `via` provenance — assistant-applied changes must be distinguishable forever.
+- A webhook that BACKFILLS events predating its creation — a scan-based fan-out (`events ⋈
+  webhooks`) with no `e.at >= w.created_at` guard floods a brand-new webhook with the org's entire
+  history. A webhook receives events from creation onward, never a backfill (T10.3).
+- Letting a routing pref gag a RECORDING — email-off suppresses the *email route*; the bell row
+  and the spine event still happen (prefs route, they never gag the audit; glossary law) (T10.3).
