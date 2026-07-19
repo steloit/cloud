@@ -434,3 +434,155 @@ func TestDashboardDuplicateAndDeleteWidget(t *testing.T) {
 		t.Fatalf("deleting a widget not on this dashboard must 404, got %d", r.StatusCode)
 	}
 }
+
+// TestDashboardForkAuthzFencing — fork/duplicate are WRITES: a read_only token
+// is refused, a non-member/foreign source 404s BEFORE any copy, and a fork by a
+// member (not the owner) is owned by that member (review + QA gaps).
+func TestDashboardForkAuthzFencing(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "dsh-fa-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"faco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	memberCk, memberID := w.signupUser(t, "dsh-fa-member@example.com")
+	if _, err := w.pool.Exec(ctx,
+		"insert into members (id,org_id,user_id,role) values ('mbr_fa',$1,$2,'developer')", org.Id, memberID); err != nil {
+		t.Fatal(err)
+	}
+	// an org-visible dashboard + a personal one, both owned by ownerA
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards", `{"name":"shared","scope":"org","visibility":"org"}`, ownerCk)
+	var shared struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &shared)
+	r, b = w.post(t, "/v1/orgs/"+org.Id+"/dashboards", `{"name":"mine","scope":"org","visibility":"personal"}`, ownerCk)
+	var personal struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &personal)
+
+	// read_only token (owner's) cannot fork — it's a write.
+	r, tb := w.post(t, "/v1/me/tokens", `{"name":"ro","scope":"read_only"}`, ownerCk)
+	var tk struct{ Token string }
+	_ = json.Unmarshal([]byte(tb), &tk)
+	req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/dashboards/"+shared.Id+"/fork", nil)
+	req.Header.Set("Authorization", "Bearer "+tk.Token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Fatalf("read_only token fork must 403, got %d", res.StatusCode)
+	}
+
+	// a member CANNOT fork the owner's PERSONAL dashboard (invisible → 404, no copy)
+	before := 0
+	_ = w.pool.QueryRow(ctx, "select count(*) from dashboards where owner_id=$1", memberID).Scan(&before)
+	r, _ = w.post(t, "/v1/dashboards/"+personal.Id+"/fork", ``, memberCk)
+	if r.StatusCode != 404 {
+		t.Fatalf("member fork of owner's personal dashboard must 404, got %d", r.StatusCode)
+	}
+	after := 0
+	_ = w.pool.QueryRow(ctx, "select count(*) from dashboards where owner_id=$1", memberID).Scan(&after)
+	if after != before {
+		t.Fatal("a forbidden fork created a copy anyway")
+	}
+
+	// a member CAN fork the ORG-visible dashboard → the copy is owned by the MEMBER
+	r, b = w.post(t, "/v1/dashboards/"+shared.Id+"/fork", ``, memberCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("member fork of org dashboard: %d %s", r.StatusCode, b)
+	}
+	var fork struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &fork)
+	var forkOwner string
+	_ = w.pool.QueryRow(ctx, "select owner_id from dashboards where id=$1", fork.Id).Scan(&forkOwner)
+	if forkOwner != memberID {
+		t.Fatalf("fork must be owned by the forking member, got owner=%s (ownerA=%s)", forkOwner, ownerID)
+	}
+}
+
+// TestForkPreservesProjectScope — a project-scoped source forks to a
+// project-scoped personal copy; the born-filter travels (a member without that
+// project access can't read the copy).
+func TestForkPreservesProjectScope(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ownerCk, _ := w.signupUser(t, "dsh-ps-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"psco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	r, pb := w.post(t, "/v1/orgs/"+org.Id+"/projects", `{"name":"papp"}`, ownerCk)
+	var proj struct{ Id string }
+	_ = json.Unmarshal([]byte(pb), &proj)
+	// a project-scoped, org-visible dashboard
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards",
+		`{"name":"proj view","scope":"project:`+proj.Id+`","visibility":"org"}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("create project-scoped: %d %s", r.StatusCode, b)
+	}
+	var src struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &src)
+	// fork it → the copy keeps the project scope
+	r, b = w.post(t, "/v1/dashboards/"+src.Id+"/fork", ``, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("fork: %d %s", r.StatusCode, b)
+	}
+	var fork struct{ Id, Scope string }
+	_ = json.Unmarshal([]byte(b), &fork)
+	if fork.Scope != "project:"+proj.Id {
+		t.Fatalf("fork must preserve the project scope (born-filter travels), got scope=%q", fork.Scope)
+	}
+}
+
+// TestDeleteWidgetOnPrebuiltAndAudit — the 4th mutation (deleteWidget) is also
+// blocked on a prebuilt; and a shared-dashboard widget delete is audited (F7).
+func TestDeleteWidgetOnPrebuiltAndAudit(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "dsh-dwp-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"dwpco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	// prebuilt with a widget: deleteWidget must 409, widget survives.
+	if _, err := w.pool.Exec(ctx,
+		`insert into dashboards (id,org_id,name,scope,visibility,owner_id,prebuilt) values ('dsh_dwp',$1,'PG','org','org',$2,true)`, org.Id, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`insert into dashboard_widgets (id,dashboard_id,source,query,viz) values ('wdg_dwp','dsh_dwp','metrics','x','stat')`); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := w.del(t, "/v1/dashboards/dsh_dwp/widgets/wdg_dwp", ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("deleteWidget on a prebuilt must 409, got %d", r.StatusCode)
+	}
+	var stillThere int
+	_ = w.pool.QueryRow(ctx, "select count(*) from dashboard_widgets where id='wdg_dwp'").Scan(&stillThere)
+	if stillThere != 1 {
+		t.Fatal("prebuilt widget was deleted despite the 409")
+	}
+
+	// a real shared dashboard: deleteWidget audits (F7).
+	r, b := w.post(t, "/v1/orgs/"+org.Id+"/dashboards", `{"name":"ops","scope":"org","visibility":"org"}`, ownerCk)
+	var dsh struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &dsh)
+	r, b = w.post(t, "/v1/dashboards/"+dsh.Id+"/widgets", `{"source":"metrics","query":"y","viz":"line"}`, ownerCk)
+	var wdg struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &wdg)
+	r, _ = w.del(t, "/v1/dashboards/"+dsh.Id+"/widgets/"+wdg.Id, ownerCk)
+	if r.StatusCode != 204 {
+		t.Fatalf("deleteWidget: %d", r.StatusCode)
+	}
+	var audited int
+	_ = w.pool.QueryRow(ctx, "select count(*) from events where subject=$1 and action='dashboard.updated'", dsh.Id).Scan(&audited)
+	if audited < 1 {
+		t.Fatalf("shared-dashboard widget delete must be audited (F7), found %d", audited)
+	}
+}

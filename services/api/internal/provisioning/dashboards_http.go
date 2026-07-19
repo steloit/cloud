@@ -391,11 +391,19 @@ func (h *Handlers) copyToPersonal(ctx context.Context, dashID, nameSuffix string
 	if err != nil {
 		return gen.Dashboard{}, err
 	}
+	// fork/duplicate WRITE (they mint a dashboard + widgets) — a limited-scope
+	// token must be refused here exactly as on every other mutating dashboard
+	// path (review: dashboardReadable only proves read access, so this write
+	// path skipped the read_only-token guard that Create/Update/Delete enforce).
+	if p.Kind == "token" && p.Scope != "full" {
+		return gen.Dashboard{}, identity.ErrScopeDenied
+	}
 	// A project-scoped source stays project-scoped in the copy — the born-filter
 	// travels with it (the caller already proved project access via readable).
-	copyName := src.Name
-	if nameSuffix != "" {
-		copyName = src.Name + nameSuffix
+	// Cap the copy name at the same 200-char bound the create path enforces.
+	copyName := src.Name + nameSuffix
+	if len(copyName) > 200 {
+		copyName = copyName[:200]
 	}
 	dsh, err := h.q.CreateDashboard(ctx, store.CreateDashboardParams{
 		ID: ids.New("dsh"), OrgID: src.OrgID, Name: copyName,
