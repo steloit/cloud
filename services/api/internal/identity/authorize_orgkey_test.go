@@ -55,7 +55,7 @@ func TestOrgKeySweep(t *testing.T) {
 	key := orgKey("org_k", granted...)
 	scope := rbac.Scope{OrgID: "org_k"}
 
-	swept := 0
+	swept, allowed := 0, 0
 	for _, perm := range m.Permissions() {
 		ps := string(perm)
 		err := az.Require(ctx, key, perm, scope)
@@ -66,13 +66,108 @@ func TestOrgKeySweep(t *testing.T) {
 		if !wantAllow && err == nil {
 			t.Errorf("ungranted/ineligible %s allowed", ps)
 		}
+		if err == nil {
+			allowed++
+		}
 		// Holds must agree with Require (both are the same ceiling, audit aside)
 		if got := az.Holds(ctx, key, perm, scope); got != (err == nil) {
 			t.Errorf("Holds(%s)=%v disagrees with Require err==nil=%v", ps, got, err == nil)
 		}
 		swept++
 	}
-	t.Logf("org-key path swept over %d permissions", swept)
+	// vacuity guard: the grant path must actually have exercised some allows,
+	// else the whole sweep proved nothing (e.g. a mistyped grant list).
+	if allowed != len(granted) {
+		t.Fatalf("expected %d allowed permissions, got %d — sweep may be vacuous", len(granted), allowed)
+	}
+	t.Logf("org-key path swept over %d permissions, %d allowed", swept, allowed)
+}
+
+// TestOrgKeyMinterDelegationCeiling is the store-free half of the escalation
+// guard (ADR-0007: you cannot grant what you do not hold). An org-key MINTER's
+// Holds — the ceiling MintOrgKey checks per requested permission — is true only
+// for permissions actually on the minter's own key. The user-minter half needs
+// membership and stays in the Docker-gated integration test; this covers the
+// service-principal path with no DB, so the ceiling is never masked green.
+func TestOrgKeyMinterDelegationCeiling(t *testing.T) {
+	az := newOrgKeyAuthorizer(t, nil)
+	ctx := context.Background()
+	scope := rbac.Scope{OrgID: "org_k"}
+	minter := orgKey("org_k", "api_keys.manage", "observe.read")
+
+	// holds what it was granted
+	if !az.Holds(ctx, minter, "observe.read", scope) {
+		t.Fatal("minter does not hold a permission on its own key")
+	}
+	// cannot delegate a permission it never held (would be admin→owner escalation)
+	if az.Holds(ctx, minter, "org.delete", scope) {
+		t.Fatal("minter Holds a permission it was never granted — delegation ceiling breached")
+	}
+	// nor a delegated one, even if somehow listed
+	if az.Holds(ctx, minter, "ai.apply_proposal", scope) {
+		t.Fatal("minter Holds a delegated permission — never grantable")
+	}
+	// nor anything in a foreign org
+	if az.Holds(ctx, minter, "observe.read", rbac.Scope{OrgID: "org_other"}) {
+		t.Fatal("minter Holds across a foreign org scope")
+	}
+}
+
+// TestOrgKeyEmptyScopeDenied covers the `scope.OrgID == ""` half of the guard
+// (foreign-scope test only hit the mismatch half).
+func TestOrgKeyEmptyScopeDenied(t *testing.T) {
+	az := newOrgKeyAuthorizer(t, nil)
+	ctx := context.Background()
+	key := orgKey("org_k", "observe.read")
+	if err := az.Require(ctx, key, "observe.read", rbac.Scope{OrgID: ""}); err == nil {
+		t.Fatal("empty-scope org not denied")
+	}
+	if az.Holds(ctx, key, "observe.read", rbac.Scope{OrgID: ""}) {
+		t.Fatal("Holds allowed an empty-scope org")
+	}
+}
+
+// TestOrgKeyGrantMatchIsExact: a granted permission is matched byte-for-byte —
+// case, whitespace, and near-misses do not authorize (fails closed).
+func TestOrgKeyGrantMatchIsExact(t *testing.T) {
+	az := newOrgKeyAuthorizer(t, nil)
+	ctx := context.Background()
+	scope := rbac.Scope{OrgID: "org_k"}
+	// the key literally grants "observe.read"; a request for a mangled form
+	// (which isn't even a known matrix perm) must deny.
+	key := orgKey("org_k", "observe.read")
+	for _, bad := range []rbac.Permission{"Observe.Read", " observe.read", "observe.read ", "observe.write"} {
+		if err := az.Require(ctx, key, bad, scope); err == nil {
+			t.Errorf("mangled/near-miss permission %q authorized", bad)
+		}
+	}
+	// and a key whose GRANTED entry is non-canonical does not authorize the
+	// canonical permission (exact-match both directions).
+	sloppy := orgKey("org_k", " observe.read ")
+	if err := az.Require(ctx, sloppy, "observe.read", scope); err == nil {
+		t.Fatal("a non-canonical granted entry authorized the canonical permission")
+	}
+}
+
+// TestPrincipalKindIsNotOrgKey: only a token with no user and an org is an org
+// key. A user token (even one carrying OrgID/Permissions) must NOT take the
+// org-key branch — otherwise its Permissions would grant authority the role
+// model never gave it.
+func TestPrincipalKindIsNotOrgKey(t *testing.T) {
+	cases := []session.Principal{
+		{Kind: "token", UserID: "usr_1", OrgID: "org_k", Permissions: []string{"org.delete"}}, // has a user
+		{Kind: "token", UserID: "", OrgID: "", Permissions: []string{"org.delete"}},            // no org
+		{Kind: "session", UserID: "usr_1", OrgID: "org_k"},                                     // a live session
+	}
+	for i, p := range cases {
+		if p.IsOrgKey() {
+			t.Errorf("case %d wrongly classified as an org key: %+v", i, p)
+		}
+	}
+	// the positive control
+	if !orgKey("org_k", "observe.read").IsOrgKey() {
+		t.Fatal("a real org key was not recognized")
+	}
 }
 
 // A granted permission is denied when the scope org differs from the key's org.

@@ -63,13 +63,16 @@ func TestTightenOnlyProperty(t *testing.T) {
 	}
 	base := NewEvaluator(m, nil)
 	fam := policyFamily(m.Permissions())
-	checks := 0
+	checks, allows := 0, 0
 	for _, pol := range fam {
 		e := NewEvaluator(m, pol)
 		for _, perm := range m.Permissions() {
 			for _, role := range roles {
 				for _, sc := range scopes {
 					got := e.Check(context.Background(), role, perm, sc)
+					if got.Allowed {
+						allows++
+					}
 					if !got.Allowed {
 						// a denial must always name its cause (E3 grammar)
 						if got.DeniedBy == "" {
@@ -98,7 +101,37 @@ func TestTightenOnlyProperty(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("tighten-only verified over %d (policy×role×perm×scope) checks", checks)
+	if allows == 0 {
+		t.Fatal("no Allowed result across the whole sweep — the widening assertions never ran (vacuous)")
+	}
+	t.Logf("tighten-only verified over %d checks (%d allowed) — widening assertions exercised", checks, allows)
+}
+
+// TestDenyByDefaultFuzz: inputs that must never authorize — an empty
+// permission, an event-vocabulary name that is not a matrix row, and a garbage
+// role. Deny-by-default is the whole safety net; prove it holds at the edges.
+func TestDenyByDefaultFuzz(t *testing.T) {
+	m, _ := Load()
+	e := NewEvaluator(m, nil)
+	ctx := context.Background()
+	// permissions that are NOT matrix rows (empty, event names, typos)
+	for _, perm := range []Permission{"", "authz.denied", "member.added", "org.created", "project.create.extra", "OBSERVE.READ"} {
+		if m.Known(perm) {
+			t.Errorf("%q unexpectedly Known — matrix row leaked into the event vocabulary?", perm)
+		}
+		for _, role := range []Role{RoleOwner, RoleAdmin, RoleDeveloper, RoleBilling} {
+			d := e.Check(ctx, role, perm, Scope{OrgID: "org_x"})
+			if d.Allowed {
+				t.Errorf("deny-by-default breached: %q×%s allowed", perm, role)
+			}
+		}
+	}
+	// a role the matrix never defines must fail closed on a real permission
+	for _, bad := range []Role{"", "Owner", "superuser", "root"} {
+		if d := e.Check(ctx, bad, "project.create", Scope{OrgID: "org_x"}); d.Allowed {
+			t.Errorf("unknown role %q authorized project.create", bad)
+		}
+	}
 }
 
 // TestDelegatedNeverAnswerable: every delegated permission denies for every
