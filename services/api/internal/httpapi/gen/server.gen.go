@@ -5170,6 +5170,20 @@ func (response UpdateService200JSONResponse) VisitUpdateServiceResponse(w http.R
 	return err
 }
 
+type UpdateService402ApplicationProblemPlusJSONResponse Problem
+
+func (response UpdateService402ApplicationProblemPlusJSONResponse) VisitUpdateServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(402)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListBindingsRequestObject struct {
 	ServicePathParam ServicePathParam `json:"service"`
 }

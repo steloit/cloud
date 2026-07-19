@@ -18586,11 +18586,18 @@ type UpdateServiceResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *Service
+	// ApplicationproblemJSON402 the response for an HTTP 402 `application/problem+json` response
+	ApplicationproblemJSON402 *Problem
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r UpdateServiceResponse) GetJSON200() *Service {
 	return r.JSON200
+}
+
+// GetApplicationproblemJSON402 returns the response for an HTTP 402 `application/problem+json` response
+func (r UpdateServiceResponse) GetApplicationproblemJSON402() *Problem {
+	return r.ApplicationproblemJSON402
 }
 
 // GetBody returns the raw response body bytes
@@ -24524,6 +24531,13 @@ func ParseUpdateServiceResponse(rsp *http.Response) (*UpdateServiceResponse, err
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 402:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON402 = &dest
 
 	}
 

@@ -351,6 +351,7 @@ paths:
                 override: {type: object, properties: {instances: {type: integer}, reason: {type: string}}, required: [instances, reason], description: "manual pin: warn-bordered, banner while active, 24h auto-expiry"}
       responses:
         "200": {description: OK, content: {application/json: {schema: {$ref: "#/components/schemas/Service"}}}}
+        "402": {description: "Hard spend cap / quota: a scale-up that crosses the org cap is refused with the math (x-error-catalog quota_exceeded)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
     delete:
       tags: [services]
       operationId: deleteService
