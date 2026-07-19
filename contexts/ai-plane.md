@@ -20,6 +20,11 @@ permanent). They are enforced by *shape*, not by prompt:
 4. **Whole without AI** — the `ai-assistant` org policy (`enabled|opt_in|disabled`) hides every AI
    surface instantly, deletes nothing (threads retained-but-hidden), re-enables instantly.
    `/assistant/*` reads return the 404 empty-equivalent when disabled (per the yaml).
+   ENFORCEMENT (T12.3): `identity.Service.AIAssistantEnabled(ctx, org, project)` is the ONE
+   enablement predicate (closest-wins, project-override aware); EVERY `/assistant/*` handler MUST
+   call it and 404 when off — the `TestEveryAssistantHandlerGatesOnPolicy` tripwire fails any
+   implemented assistant op that skips the gate. The RBAC layer (`aiAssistantKind`) additionally
+   narrows `ai.*` to 403; the 404-invisible surface gate is the Law-4 expression, checked first.
 
 ## Mechanics
 
@@ -57,3 +62,5 @@ suggests are proposals like any other: visible, priced, consented.
 - Insights/threads deleted on disable (retain-and-hide; QA scenario 7 checks byte-identity).
 - Evidence-free assertions in assistant output (Law 2: cite or say you can't verify).
 - Violet used for anything non-AI in UI, or AI surfaces that survive the disable policy.
+- A new `/assistant/*` handler that authorizes `ai.use` (→403 when disabled) WITHOUT first calling
+  AIAssistantEnabled (→404 invisible) — Law 4 wants the surface INVISIBLE, not permission-denied.
