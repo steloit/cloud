@@ -123,6 +123,7 @@ type MfaTotp struct {
 	DekNonce    []byte
 	KekID       string
 	ConfirmedAt pgtype.Timestamptz
+	LastStep    pgtype.Int8
 	CreatedAt   pgtype.Timestamptz
 }
 

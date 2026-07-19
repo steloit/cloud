@@ -12,7 +12,15 @@ ON CONFLICT (user_id) DO UPDATE SET
 SELECT * FROM mfa_totp WHERE user_id = $1;
 
 -- name: ConfirmTotp :exec
-UPDATE mfa_totp SET confirmed_at = now() WHERE user_id = $1;
+-- Confirms enrollment and records the step used to confirm, so that same code
+-- can't be replayed at the first login (single-use within the window).
+UPDATE mfa_totp SET confirmed_at = now(), last_step = $2 WHERE user_id = $1;
+
+-- name: AdvanceTotpStep :execrows
+-- Consumes a TOTP step atomically: succeeds (1 row) only if this step is newer
+-- than the last consumed one. 0 rows = the code was already used (replay).
+UPDATE mfa_totp SET last_step = $2
+WHERE user_id = $1 AND (last_step IS NULL OR last_step < $2);
 
 -- name: SetMfaEnabled :exec
 UPDATE users SET mfa_enabled = $2 WHERE id = $1;

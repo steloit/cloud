@@ -53,20 +53,30 @@ func Code(secret string, t time.Time) (string, error) {
 // Verify checks a code against the secret with a ±1 step window (clock skew).
 // `now` is injectable for tests.
 func Verify(secret, code string, now time.Time) bool {
+	_, ok := VerifyStep(secret, code, now)
+	return ok
+}
+
+// VerifyStep is Verify but also returns the matched RFC 6238 step counter, so
+// the caller can enforce single-use within the validity window (reject a code
+// whose step has already been consumed — RFC 6238 §5.2). Comparison across the
+// ±1 skew window uses hmac.Equal for constant time.
+func VerifyStep(secret, code string, now time.Time) (int64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != digits {
-		return false
+		return 0, false
 	}
 	for _, skew := range []time.Duration{0, -period * time.Second, period * time.Second} {
-		want, err := Code(secret, now.Add(skew))
+		t := now.Add(skew)
+		want, err := Code(secret, t)
 		if err != nil {
-			return false
+			return 0, false
 		}
 		if hmac.Equal([]byte(want), []byte(code)) {
-			return true
+			return int64(uint64(t.Unix()) / period), true
 		}
 	}
-	return false
+	return 0, false
 }
 
 // OtpauthURI builds the otpauth:// provisioning URI for an authenticator app.

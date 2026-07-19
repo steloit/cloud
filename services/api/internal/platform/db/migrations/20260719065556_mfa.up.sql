@@ -11,6 +11,7 @@ CREATE TABLE mfa_totp (
     dek_nonce    bytea NOT NULL,
     kek_id       text NOT NULL,
     confirmed_at timestamptz,          -- NULL = enrolled but not yet verified
+    last_step    bigint,               -- last consumed RFC 6238 step (replay guard)
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 

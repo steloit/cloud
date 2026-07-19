@@ -113,6 +113,17 @@ func TestMFATotpLifecycle(t *testing.T) {
 		t.Fatalf("login with TOTP: %d %s", resp.StatusCode, body)
 	}
 
+	// --- a TOTP code is single-use within its window (no replay) -----------
+	replay, _ := totp.Code(enr.Secret, time.Now())
+	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+replay+`"}`, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("first use of code: %d", resp.StatusCode)
+	}
+	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+replay+`"}`, "")
+	if resp.StatusCode != 401 {
+		t.Fatalf("TOTP code replayed within window: %d", resp.StatusCode)
+	}
+
 	// --- a recovery code logs in ONCE (single-use) -------------------------
 	rcode := rec.Codes[3]
 	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+rcode+`"}`, "")
@@ -122,6 +133,34 @@ func TestMFATotpLifecycle(t *testing.T) {
 	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+rcode+`"}`, "")
 	if resp.StatusCode != 401 {
 		t.Fatalf("recovery code reused: %d", resp.StatusCode)
+	}
+
+	// --- recovery still works when the TOTP secret is gone (device loss) ----
+	// Drop the mfa_totp row directly (simulating a lost/undecryptable secret)
+	// while mfa_enabled stays true; a recovery code must still authenticate.
+	if _, err := w.pool.Exec(ctx, "delete from mfa_totp where user_id=$1", uid); err != nil {
+		t.Fatal(err)
+	}
+	rcode2 := rec.Codes[7]
+	resp, body = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+rcode2+`"}`, "")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"status":"session"`) {
+		t.Fatalf("recovery fallback without TOTP secret: %d %s", resp.StatusCode, body)
+	}
+	// re-enroll for the disable leg below
+	resp, body = w.post(t, "/v1/auth/mfa/totp:enroll", "", ck)
+	if resp.StatusCode != 200 {
+		t.Fatalf("re-enroll: %d %s", resp.StatusCode, body)
+	}
+	_ = json.Unmarshal([]byte(body), &enr)
+	// an UNCONFIRMED re-enrolled secret is NOT accepted at login (confirmed_at gate)
+	pending, _ := totp.Code(enr.Secret, time.Now())
+	resp, _ = w.post(t, "/v1/auth/login", `{"email":"mfa@example.com","password":"orbit-magnet-11","mfa_code":"`+pending+`"}`, "")
+	if resp.StatusCode != 401 {
+		t.Fatalf("unconfirmed secret accepted at login: %d", resp.StatusCode)
+	}
+	good, _ = totp.Code(enr.Secret, time.Now())
+	if resp, _ = w.post(t, "/v1/auth/mfa/totp:verify", `{"code":"`+good+`"}`, ck); resp.StatusCode != 204 {
+		t.Fatalf("re-verify: %d", resp.StatusCode)
 	}
 
 	// --- disable: MFA off; login no longer challenges ----------------------

@@ -7,14 +7,43 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const confirmTotp = `-- name: ConfirmTotp :exec
-UPDATE mfa_totp SET confirmed_at = now() WHERE user_id = $1
+const advanceTotpStep = `-- name: AdvanceTotpStep :execrows
+UPDATE mfa_totp SET last_step = $2
+WHERE user_id = $1 AND (last_step IS NULL OR last_step < $2)
 `
 
-func (q *Queries) ConfirmTotp(ctx context.Context, userID string) error {
-	_, err := q.db.Exec(ctx, confirmTotp, userID)
+type AdvanceTotpStepParams struct {
+	UserID   string
+	LastStep pgtype.Int8
+}
+
+// Consumes a TOTP step atomically: succeeds (1 row) only if this step is newer
+// than the last consumed one. 0 rows = the code was already used (replay).
+func (q *Queries) AdvanceTotpStep(ctx context.Context, arg AdvanceTotpStepParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceTotpStep, arg.UserID, arg.LastStep)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const confirmTotp = `-- name: ConfirmTotp :exec
+UPDATE mfa_totp SET confirmed_at = now(), last_step = $2 WHERE user_id = $1
+`
+
+type ConfirmTotpParams struct {
+	UserID   string
+	LastStep pgtype.Int8
+}
+
+// Confirms enrollment and records the step used to confirm, so that same code
+// can't be replayed at the first login (single-use within the window).
+func (q *Queries) ConfirmTotp(ctx context.Context, arg ConfirmTotpParams) error {
+	_, err := q.db.Exec(ctx, confirmTotp, arg.UserID, arg.LastStep)
 	return err
 }
 
@@ -55,7 +84,7 @@ func (q *Queries) DeleteTotp(ctx context.Context, userID string) error {
 }
 
 const getTotp = `-- name: GetTotp :one
-SELECT user_id, ciphertext, nonce, wrapped_dek, dek_nonce, kek_id, confirmed_at, created_at FROM mfa_totp WHERE user_id = $1
+SELECT user_id, ciphertext, nonce, wrapped_dek, dek_nonce, kek_id, confirmed_at, last_step, created_at FROM mfa_totp WHERE user_id = $1
 `
 
 func (q *Queries) GetTotp(ctx context.Context, userID string) (MfaTotp, error) {
@@ -69,6 +98,7 @@ func (q *Queries) GetTotp(ctx context.Context, userID string) (MfaTotp, error) {
 		&i.DekNonce,
 		&i.KekID,
 		&i.ConfirmedAt,
+		&i.LastStep,
 		&i.CreatedAt,
 	)
 	return i, err
