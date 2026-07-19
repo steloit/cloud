@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/metering"
@@ -34,9 +35,9 @@ func (e problemError) Problem() problem.Problem { return e.p }
 // NotFound is exported so handlers can 404 without probing semantics leaks.
 func notFound(what string) error { return problemError{p: problem.NotFound(what)} }
 
-// projectAllowance is the B5 plan matrix row "Projects": Free 1 / Pro 3 /
-// Business+ unlimited. Data, one place.
-var projectAllowance = map[string]int{"free": 1, "pro": 3, "business": -1, "enterprise": -1}
+// The B5 "Projects" allowance (Free 1 / Pro 3 / Business+ unlimited) is now a
+// row in the ONE billing table (T11.1), read via s.plans.ProjectLimit — no
+// second pricing constant here.
 
 // nextPlanFor names the upgrade that lifts the project limit (F2 "gate with
 // reason").
@@ -53,10 +54,11 @@ type Service struct {
 	rec   *events.Recorder
 	vault *secrets.Vault    // consumed by bindings (T3.6); credentials never at rest in plaintext
 	meter *metering.Emitter // D10: span edges emitted on billing transitions
+	plans *billing.Table    // T11.1: the ONE pricing/quota table (project allowance, etc.)
 }
 
-func NewService(db *pgxpool.Pool, rec *events.Recorder, vault *secrets.Vault, meter *metering.Emitter) *Service {
-	return &Service{db: db, q: store.New(db), rec: rec, vault: vault, meter: meter}
+func NewService(db *pgxpool.Pool, rec *events.Recorder, vault *secrets.Vault, meter *metering.Emitter, plans *billing.Table) *Service {
+	return &Service{db: db, q: store.New(db), rec: rec, vault: vault, meter: meter, plans: plans}
 }
 
 func (s *Service) record(ctx context.Context, in events.Input) {
@@ -89,7 +91,7 @@ func (s *Service) CreateProject(ctx context.Context, org store.Org, name, region
 			[]string{"organization is scheduled for deletion"},
 			"Creation is blocked while deletion is scheduled.")}
 	}
-	if allowance := projectAllowance[org.Plan]; allowance >= 0 {
+	if allowance := s.plans.ProjectLimit(org.Plan); allowance >= 0 {
 		n, err := s.q.CountProjects(ctx, org.ID)
 		if err != nil {
 			return store.Project{}, store.Environment{}, err

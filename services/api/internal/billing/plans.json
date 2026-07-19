@@ -1,0 +1,21 @@
+{
+  "$note": "Pricing + quota as DATA (T11.1) — the ONE table consumed by the estimate engine, the quota evaluator (T11.5), and the invoice generator (T11.3). A second pricing constant anywhere is a bug (billing pack). Money is integer cents (ADR-025). Sources: billing pack (F9) + ADR-041 (Pro $29 canonical; Jobs/Search/Vector are included DB capabilities within allowances). Plan fees reproduce canon (Business $99 = 9900). project_limit: -1 = unlimited. Enterprise fee is custom (null = negotiated, never a hard-coded number).",
+  "plans": {
+    "free":       {"fee_cents": 0,    "project_limit": 1,  "included_egress_gb": 10,  "included_seats": 1},
+    "pro":        {"fee_cents": 2900, "project_limit": 3,  "included_egress_gb": 100, "included_seats": 5},
+    "business":   {"fee_cents": 9900, "project_limit": -1, "included_egress_gb": 500, "included_seats": 25},
+    "enterprise": {"fee_cents": null, "project_limit": -1, "included_egress_gb": -1,  "included_seats": -1}
+  },
+  "overage": {
+    "$note": "Soft-quota unit prices (billing pack). Plan-independent; charged beyond the plan's included allowance, only with confirm=true + shown price.",
+    "egress_cents_per_gb": 9,
+    "seat_cents": 700,
+    "build_cents_per_min": 1,
+    "event_cents_per_million": 120,
+    "ai_cents_per_1k": 200
+  },
+  "never_gated": {
+    "$note": "Plans gate capabilities, never safety (billing pack / F9). This list is law — a table-driven test asserts none of these is ever plan-checked.",
+    "capabilities": ["tls", "backups", "mfa", "policies", "alerts", "dunning_protections", "self_deletion"]
+  }
+}
