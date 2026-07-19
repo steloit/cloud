@@ -27,7 +27,24 @@ RETURNING *;
 -- idempotent (CAS-guarded), so re-scanning across replicas is safe.
 SELECT org_id FROM subscriptions
 WHERE (status = 'trial' AND trial_ends_at IS NOT NULL AND trial_ends_at <= now())
+   OR (pending_plan IS NOT NULL AND pending_plan_at IS NOT NULL AND pending_plan_at <= now())
    OR status IN ('grace', 'provisioning_paused')
    OR (status = 'cancelled_at_anchor' AND plan_ends_at IS NOT NULL AND plan_ends_at <= now())
 ORDER BY updated_at ASC
 LIMIT 500;
+
+-- name: SetPendingPlan :one
+-- A clean downgrade schedules at the anchor (B4) — never immediate.
+UPDATE subscriptions SET pending_plan = $2, pending_plan_at = $3, updated_at = now()
+WHERE org_id = $1
+RETURNING *;
+
+-- name: ClearPendingPlan :exec
+UPDATE subscriptions SET pending_plan = NULL, pending_plan_at = NULL, updated_at = now()
+WHERE org_id = $1;
+
+-- name: SyncOrgPlan :exec
+-- subscriptions.plan is the billing master; orgs.plan is what every plan gate
+-- reads — they must NEVER diverge (Q9 finding: cancel-at-anchor previously
+-- dropped subscriptions.plan to free while orgs.plan stayed paid).
+UPDATE orgs SET plan = $2 WHERE id = $1;

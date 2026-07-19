@@ -97,7 +97,7 @@ func (q *Queries) CreateOrgFull(ctx context.Context, arg CreateOrgFullParams) (O
 }
 
 const createSubscription = `-- name: CreateSubscription :one
-INSERT INTO subscriptions (org_id) VALUES ($1) RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at
+INSERT INTO subscriptions (org_id) VALUES ($1) RETURNING org_id, plan, anchor_day, status, trial_ends_at, created_at, dunning_started_at, next_retry_at, plan_ends_at, updated_at, pending_plan, pending_plan_at
 `
 
 func (q *Queries) CreateSubscription(ctx context.Context, orgID string) (Subscription, error) {
@@ -114,6 +114,8 @@ func (q *Queries) CreateSubscription(ctx context.Context, orgID string) (Subscri
 		&i.NextRetryAt,
 		&i.PlanEndsAt,
 		&i.UpdatedAt,
+		&i.PendingPlan,
+		&i.PendingPlanAt,
 	)
 	return i, err
 }

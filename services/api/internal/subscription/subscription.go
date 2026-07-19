@@ -46,6 +46,9 @@ type Store interface {
 	GetSubscription(ctx context.Context, orgID string) (store.Subscription, error)
 	SetSubscriptionState(ctx context.Context, arg store.SetSubscriptionStateParams) (store.Subscription, error)
 	ListSubscriptionsToAdvance(ctx context.Context) ([]string, error)
+	SetPendingPlan(ctx context.Context, arg store.SetPendingPlanParams) (store.Subscription, error)
+	ClearPendingPlan(ctx context.Context, orgID string) error
+	SyncOrgPlan(ctx context.Context, arg store.SyncOrgPlanParams) error
 }
 
 type Service struct {
@@ -158,6 +161,55 @@ func (s *Service) Reactivate(ctx context.Context, orgID string) (store.Subscript
 	return s.commit(ctx, sub, "current", sub.Plan, txParams{}, "subscription.reactivated")
 }
 
+// planRank orders tiers for the upgrade-vs-downgrade decision (B4).
+var planRank = map[string]int{"free": 0, "pro": 1, "business": 2, "enterprise": 3}
+
+// ChangePlan (B4 / US-11.3 core): an UPGRADE applies immediately; a CLEAN
+// DOWNGRADE pends to the anchor (pending_plan/pending_plan_at, applied by the
+// lifecycle sweep). Allowance gating (members/projects vs the target plan) is
+// the CALLER's job — the 409-with-every-reason lives at the API layer; this is
+// the state write only. Returns (sub, pendingAtAnchor).
+func (s *Service) ChangePlan(ctx context.Context, orgID, target string) (store.Subscription, bool, error) {
+	sub, err := s.Get(ctx, orgID)
+	if err != nil {
+		return sub, false, err
+	}
+	if _, ok := planRank[target]; !ok {
+		return sub, false, fmt.Errorf("subscription: unknown plan %q", target)
+	}
+	if target == sub.Plan {
+		return sub, false, nil // no-op
+	}
+	if planRank[target] > planRank[sub.Plan] {
+		// upgrade: immediate (proration is a tracked ledger follow-up, T11.3).
+		out, err := s.commit(ctx, sub, sub.Status, target, txParams{
+			dunningStarted: sub.DunningStartedAt, nextRetry: sub.NextRetryAt,
+			planEnds: sub.PlanEndsAt, trialEnds: sub.TrialEndsAt,
+		}, "subscription.plan_changed")
+		if err != nil {
+			return out, false, err
+		}
+		_ = s.q.ClearPendingPlan(ctx, orgID) // an upgrade supersedes any pending downgrade
+		return out, false, nil
+	}
+	// downgrade: schedule at the anchor.
+	at := nextAnchor(s.now(), int(sub.AnchorDay))
+	out, err := s.q.SetPendingPlan(ctx, store.SetPendingPlanParams{
+		OrgID: orgID, PendingPlan: pgtype.Text{String: target, Valid: true}, PendingPlanAt: ts(at),
+	})
+	if err != nil {
+		return sub, false, fmt.Errorf("subscription: schedule downgrade: %w", err)
+	}
+	if s.rec != nil {
+		_, _ = s.rec.Append(ctx, events.Input{
+			OrgID: orgID, Kind: "billing", Via: "user", Actor: "user",
+			Action: "subscription.downgrade_scheduled", Subject: orgID,
+			Detail: []byte(fmt.Sprintf(`{"to":%q,"at":%q}`, target, at.Format(time.RFC3339))),
+		})
+	}
+	return out, true, nil
+}
+
 // AdvanceLifecycle is the time-driven progression a daily worker runs (and tests
 // clock-warp): it advances dunning by elapsed days and applies a due cancel.
 // Idempotent — safe to call repeatedly.
@@ -174,6 +226,19 @@ func (s *Service) AdvanceLifecycle(ctx context.Context, orgID string) (store.Sub
 		return s.commit(ctx, sub, "grace", sub.Plan, txParams{
 			dunningStarted: ts(now), nextRetry: ts(now.Add(retryIntervalHours * time.Hour)),
 		}, "subscription.trial_expired")
+	}
+
+	// a scheduled clean downgrade applies at its anchor instant.
+	if sub.PendingPlan.Valid && sub.PendingPlanAt.Valid && !now.Before(sub.PendingPlanAt.Time) {
+		out, err := s.commit(ctx, sub, sub.Status, sub.PendingPlan.String, txParams{
+			dunningStarted: sub.DunningStartedAt, nextRetry: sub.NextRetryAt,
+			trialEnds: sub.TrialEndsAt,
+		}, "subscription.plan_changed")
+		if err != nil {
+			return out, err
+		}
+		_ = s.q.ClearPendingPlan(ctx, orgID)
+		return out, nil
 	}
 
 	// cancel takes effect at the anchor: drop to free, back to current.
@@ -255,6 +320,9 @@ func (s *Service) commit(ctx context.Context, cur store.Subscription, status, pl
 	if err != nil {
 		return store.Subscription{}, fmt.Errorf("subscription: set state: %w", err)
 	}
+	// Keep orgs.plan (what every plan gate reads) converged with the billing
+	// master (Q9 finding: cancel-at-anchor previously left orgs.plan paid).
+	_ = s.q.SyncOrgPlan(ctx, store.SyncOrgPlanParams{ID: cur.OrgID, Plan: plan})
 	if s.rec != nil {
 		_, _ = s.rec.Append(ctx, events.Input{
 			OrgID: cur.OrgID, Kind: "billing", Via: "system", Actor: "system",

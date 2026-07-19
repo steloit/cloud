@@ -83,6 +83,10 @@ func NewService(db *pgxpool.Pool, h *password.Hasher, mgr *session.Manager, limi
 	return &Service{db: db, q: store.New(db), hasher: h, mgr: mgr, limiter: limiter, rec: rec, kek: kek, plans: plans, now: time.Now, dummy: dummy}, nil
 }
 
+// WithClock injects a clock (the Q9 time-travel harness; tests never wait real
+// time). Production always runs time.Now.
+func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return s }
+
 // txt wraps a string for a nullable text column.
 func txt(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 
