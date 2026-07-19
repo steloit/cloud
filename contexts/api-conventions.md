@@ -62,3 +62,26 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
 - Multi-statement auth mutations on the pool instead of one tx — a partial failure
   (enable set, secret row missing) can brick every future login. Wrap enable/disable/
   rotate flows in `s.db.Begin` + `q.WithTx(tx)` like `orgs.go` (T7.1).
+- **Integration tests silently SKIP locally without a container runtime** — `newWorld`
+  calls `t.Skipf` and the suite still prints `ok`, so a runtime bug (org-brick, wrong
+  status) passes local review and only surfaces in CI. Start a runtime and RUN them before
+  claiming done: `colima start`, then `DOCKER_HOST=unix://~/.colima/default/docker.sock
+  TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock TESTCONTAINERS_RYUK_DISABLED=true
+  go test ./internal/...` (T12.1 — the reviewers found the bug by tracing, not running).
+- An AUTHORING surface that writes rows a separate EVAL layer consumes must agree with it on
+  the key vocabulary AND the enforcement semantics. T12.1's authoring accepted arbitrary
+  keys the eval Engine fail-closed on (self-brick), and spelled the ai key `ai-assistant`
+  while eval registered `ai_assistant`. Reconcile spelling verbatim (the DB key must equal
+  the registered kind), make warn-first mean warn-never-denies, and refuse promote-to-enforce
+  for a kind with no evaluator.
+- Attaching a child resource by a client-supplied parent id (policy.project_id, etc.) WITHOUT
+  checking the parent belongs to the caller's org — an FK validates existence, not ownership.
+  A cross-org id passes FK + unique and creates a cross-tenant row (+ CASCADE coupling +
+  existence oracle). Validate parent.org_id == the resource's org (T12.1).
+- Appending the audit event BEFORE the state tx orphans it on failure, and a unique-violation
+  race then surfaces as 500. Insert first (map 23505→409, 23503→422 like `invites.go`), then
+  append + link the event AFTER commit — the spine never records a change that didn't commit (T12.1).
+- Hiding a foreign resource as 404 by matching only `membership:` denials misses the org-key
+  path: an org-key foreign-scope denial is `key:…`, so it leaks existence via 403. Treat both
+  `membership:` and `key:` (no-standing) denials as 404; only a `role:` (member-lacks-perm)
+  denial is an honest 403 (T12.1).
