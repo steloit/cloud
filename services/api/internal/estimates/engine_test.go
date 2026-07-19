@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/steloit/cloud/services/api/internal/canon"
 )
 
 type canonService struct {
@@ -54,10 +56,19 @@ func TestCanonArithmetic(t *testing.T) {
 		}
 		total += line.MonthlyCents
 	}
-	if total != 20800 {
-		t.Fatalf("the $208 invariant broke: Σ=%d", total)
+	// The $208 anchor is IMPORTED from the shared canon package (Q2), not
+	// retyped — the same number the console/invoice layers assert.
+	w, err := canon.Load()
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("canon reproduced: %d services, Σ=%d cents", len(svcs), total)
+	if want := w.EcommerceProjectCents(); total != want {
+		t.Fatalf("the $208 invariant broke: priced Σ=%d, canon project total=%d", total, want)
+	}
+	if err := w.CheckArithmetic(); err != nil {
+		t.Fatalf("canon arithmetic invariant broke: %v", err)
+	}
+	t.Logf("canon reproduced: %d services, Σ=%d cents (canon-verified)", len(svcs), total)
 }
 
 // checkout-stack (canon T3 capture example): api + worker + jobs + cache = $126.
