@@ -50,6 +50,28 @@ type Budget struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type Dashboard struct {
+	ID         string
+	OrgID      string
+	Name       string
+	Scope      string
+	Visibility string
+	OwnerID    string
+	Prebuilt   bool
+	Layout     []byte
+	CreatedAt  pgtype.Timestamptz
+}
+
+type DashboardWidget struct {
+	ID          string
+	DashboardID string
+	Source      string
+	Query       string
+	Viz         string
+	Pos         []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Deployment struct {
 	ID            string
 	Number        int32
