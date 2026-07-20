@@ -29,6 +29,7 @@ type Store interface {
 	InsertNotification(ctx context.Context, arg store.InsertNotificationParams) (store.Notification, error)
 	ListPendingBellEvents(ctx context.Context) ([]store.Event, error)
 	ClaimBellEvent(ctx context.Context, eventID string) (string, error)
+	MarkBellEventUnrenderable(ctx context.Context, eventID string) error
 	GetDeployNotificationContext(ctx context.Context, arg store.GetDeployNotificationContextParams) (store.GetDeployNotificationContextRow, error)
 	ListPendingWebhookEvents(ctx context.Context) ([]store.ListPendingWebhookEventsRow, error)
 	GetWebhook(ctx context.Context, id string) (store.Webhook, error)

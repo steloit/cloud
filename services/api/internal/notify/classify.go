@@ -79,6 +79,7 @@ func renderDeployCreated(ctx context.Context, s Store, ev store.Event) (string, 
 	row, err := s.GetDeployNotificationContext(ctx, store.GetDeployNotificationContextParams{
 		DeploymentID: ev.Subject,
 		ActorID:      ev.Actor,
+		OrgID:        ev.OrgID, // org-fenced: never render another tenant's env name
 	})
 	if err != nil {
 		// A deployment deleted before projection is not an error worth failing
@@ -116,19 +117,24 @@ func renderDeployCreated(ctx context.Context, s Store, ev store.Event) (string, 
 var classifications = map[string]classification{
 	// N1 "Today": `Deploy #142 to production by priya`.
 	"deploy.created": {
-		kind:     KindDeploy,
-		title:    deployCreatedTitle,
-		fragment: "Deploy #",
+		kind:  KindDeploy,
+		title: deployCreatedTitle,
+		// The FULL static shape, not just a prefix: this pins the verb order
+		// ("to <env> by <actor>") to the frame, so swapping the format args fails.
+		fragment: "Deploy #142 to production by ",
 		render:   renderDeployCreated,
 	},
 }
 
 // Classify reports whether a spine action is notification-worthy and, if so,
-// the kind and title template the bell row carries.
+// the kind and the title FORMAT STRING (e.g. "Deploy #%d to %s by %s") — not
+// display copy. It is unexported deliberately: a caller that persisted the
+// returned title verbatim would ship "Deploy #%!d(MISSING)" to a user. Render
+// through a classification's renderer instead.
 //
 // When ok is false both kind and title are empty — never a half-populated
 // result a caller could mistake for a usable title.
-func Classify(action string) (kind, title string, ok bool) {
+func classifyAction(action string) (kind, title string, ok bool) {
 	c, found := classifications[action]
 	if !found {
 		return "", "", false

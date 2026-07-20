@@ -78,11 +78,16 @@ func (r *Router) ProcessBell(ctx context.Context) (int, error) {
 				return fmt.Errorf("render %s: %w", ev.Action, err)
 			}
 			if !ok {
-				// Renderable data missing. Stay silent rather than invent copy;
-				// the event stays marked so the scan still drains.
-				slog.WarnContext(ctx, "bell: worthy event is unrenderable, skipping",
+				// Presentation data missing. Stay silent rather than invent copy
+				// — but FLAG it, so this is distinguishable from an event that
+				// was merely uninteresting. Without the flag, a later ruling on
+				// the missing copy (an org-key deploy has no human actor, and N1
+				// supplies no frame for one) could never be applied
+				// retroactively. The event stays claimed so the scan still
+				// drains; re-projecting is a targeted DELETE over flagged rows.
+				slog.WarnContext(ctx, "bell: worthy event is unrenderable, withholding bell row",
 					"event", ev.ID, "action", ev.Action)
-				return nil
+				return s.MarkBellEventUnrenderable(ctx, ev.ID)
 			}
 			if err := r.fanOut(ctx, s, ev, c.kind, title); err != nil {
 				return err

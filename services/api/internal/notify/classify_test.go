@@ -36,7 +36,7 @@ func TestClassify(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			kind, title, ok := Classify(tc.action)
+			kind, title, ok := classifyAction(tc.action)
 			if ok != tc.wantOK {
 				t.Fatalf("Classify(%q) ok = %v, want %v", tc.action, ok, tc.wantOK)
 			}
@@ -58,6 +58,36 @@ func TestClassify(t *testing.T) {
 				t.Fatalf("Classify(%q) kind = %q, which is not one of the seven ruled kinds", tc.action, kind)
 			}
 		})
+	}
+}
+
+// TestClassifyTitleIsGolden pins the exact title format per action.
+//
+// TestClassify asserts only the KIND, and the frame fragment is a prefix — so
+// reordering deployCreatedTitle's verbs ("Deploy #%d by %s to %s") would pass
+// both without this. The only other exact-title assertion lives in a
+// container-gated integration test, so without this the golden pin disappears
+// on any machine lacking Docker.
+func TestClassifyTitleIsGolden(t *testing.T) {
+	golden := map[string]struct{ kind, title string }{
+		"deploy.created": {KindDeploy, "Deploy #%d to %s by %s"},
+	}
+	if len(golden) != len(classifications) {
+		t.Fatalf("golden table has %d entries, classifications has %d — every classification "+
+			"must be pinned", len(golden), len(classifications))
+	}
+	for action, want := range golden {
+		kind, title, ok := classifyAction(action)
+		if !ok {
+			t.Errorf("%s: not classified", action)
+			continue
+		}
+		if kind != want.kind {
+			t.Errorf("%s: kind = %q, want %q", action, kind, want.kind)
+		}
+		if title != want.title {
+			t.Errorf("%s: title = %q, want %q (verb ORDER is part of the frame)", action, title, want.title)
+		}
 	}
 }
 
@@ -111,14 +141,20 @@ func TestClassifyTitlesMatchFrameSource(t *testing.T) {
 		}
 	}
 
-	// Negative control: copy that exists only OUTSIDE N1/N2 must not be found
-	// inside it. This is what fails if the region ever silently widens.
-	const outside = "Your connect command is ready"
-	if !strings.Contains(gallery, outside) {
-		t.Fatalf("negative control %q no longer exists in the gallery; pick another", outside)
-	}
-	if strings.Contains(region, outside) {
-		t.Fatalf("negative control %q found inside the N1/N2 region — the region is too wide, "+
-			"so fragment matches prove nothing", outside)
+	// Negative controls, one on EACH side. A single control only guards the
+	// direction it sits in: widening n1 backwards is caught by the first,
+	// widening n3 forwards (a frame inserted between N2 and N3) is caught only
+	// by the second.
+	for _, outside := range []string{
+		"Your connect command is ready", // before N1
+		"Nothing needs you.",            // inside N3, after the region ends
+	} {
+		if !strings.Contains(gallery, outside) {
+			t.Fatalf("negative control %q no longer exists in the gallery; pick another", outside)
+		}
+		if strings.Contains(region, outside) {
+			t.Fatalf("negative control %q found inside the N1/N2 region — the region is too wide, "+
+				"so fragment matches prove nothing", outside)
+		}
 	}
 }

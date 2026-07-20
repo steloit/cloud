@@ -115,12 +115,14 @@ SELECT d.number,
        COALESCE((SELECT u.name FROM users u WHERE u.id = $1), '')::text AS actor_name
 FROM deployments d
 JOIN environments env ON env.id = d.env_id
-WHERE d.id = $2
+JOIN projects p ON p.id = env.project_id
+WHERE d.id = $2 AND p.org_id = $3
 `
 
 type GetDeployNotificationContextParams struct {
 	ActorID      string
 	DeploymentID string
+	OrgID        string
 }
 
 type GetDeployNotificationContextRow struct {
@@ -137,8 +139,12 @@ type GetDeployNotificationContextRow struct {
 // Local reads only, inside the fan-out tx. actor_name is COALESCEd to ” rather
 // than substituted: an absent name makes the frame UNRENDERABLE, and the
 // projection skips it instead of inventing copy.
+// Org-fenced: the deployment must belong to the event's org. The subject always
+// does today, but an unfenced lookup would render another tenant's environment
+// name into a title fanned to this org's members. Fencing is architectural, not
+// conditional on the current call path being safe.
 func (q *Queries) GetDeployNotificationContext(ctx context.Context, arg GetDeployNotificationContextParams) (GetDeployNotificationContextRow, error) {
-	row := q.db.QueryRow(ctx, getDeployNotificationContext, arg.ActorID, arg.DeploymentID)
+	row := q.db.QueryRow(ctx, getDeployNotificationContext, arg.ActorID, arg.DeploymentID, arg.OrgID)
 	var i GetDeployNotificationContextRow
 	err := row.Scan(&i.Number, &i.EnvName, &i.ActorName)
 	return i, err
@@ -464,6 +470,17 @@ func (q *Queries) ListWebhooks(ctx context.Context, orgID string) ([]Webhook, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const markBellEventUnrenderable = `-- name: MarkBellEventUnrenderable :exec
+UPDATE bell_scanned SET unrenderable = true WHERE event_id = $1
+`
+
+// Flag a worthy-but-unrenderable event so a later ruling on its copy can be
+// applied retroactively (a targeted DELETE re-queues exactly these rows).
+func (q *Queries) MarkBellEventUnrenderable(ctx context.Context, eventID string) error {
+	_, err := q.db.Exec(ctx, markBellEventUnrenderable, eventID)
+	return err
 }
 
 const markNotificationsRead = `-- name: MarkNotificationsRead :exec

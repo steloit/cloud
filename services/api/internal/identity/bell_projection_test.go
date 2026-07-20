@@ -407,3 +407,149 @@ func TestPreExistingSpineIsNotBackfilled(t *testing.T) {
 		t.Fatalf("history was fanned onto the bell: %d rows, want 0", got)
 	}
 }
+
+func (b *bellWorld) unrenderableFlag(t *testing.T, eventID string) bool {
+	t.Helper()
+	var f bool
+	if err := b.pool.QueryRow(context.Background(),
+		`select unrenderable from bell_scanned where event_id=$1`, eventID).Scan(&f); err != nil {
+		t.Fatalf("no ledger row for %s: %v", eventID, err)
+	}
+	return f
+}
+
+// TestUnrenderableWorthyEventIsSilentAndFlagged pins the "never invent copy"
+// rule and — just as important — that the decision stays applicable later.
+//
+// The org-key case is not hypothetical: ADR-0007 org keys carry user_id NULL, so
+// an automation deploy writes an empty actor to the spine and N1 supplies no
+// frame for a non-human actor. Without the flag those events are
+// indistinguishable from uninteresting ones and could never be re-projected once
+// the copy is decided.
+func TestUnrenderableWorthyEventIsSilentAndFlagged(t *testing.T) {
+	cases := []struct {
+		name    string
+		eventID string
+		slug    string
+		arrange func(t *testing.T, b *bellWorld)
+		actor   string
+	}{
+		{
+			name: "actor has no name (org key / automation deploy)", eventID: "evt_unrend_actor", slug: "urnoactor",
+			arrange: func(t *testing.T, b *bellWorld) {
+				mustExec(t, b.world, `update users set name='' where id=$1`, b.ownerID)
+			},
+		},
+		{
+			name: "environment has no name", eventID: "evt_unrend_env", slug: "urnoenv",
+			arrange: func(t *testing.T, b *bellWorld) {
+				mustExec(t, b.world, `update environments set name='' where id='env_bell'`)
+			},
+		},
+		{
+			name: "deployment no longer exists", eventID: "evt_unrend_gone", slug: "urnodep",
+			arrange: func(t *testing.T, b *bellWorld) {},
+			actor:   "dep_does_not_exist",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := newBellWorld(t, "unrend-"+tc.eventID+"@example.com", tc.slug)
+			ctx := context.Background()
+			tc.arrange(t, b)
+
+			subject := b.depID
+			if tc.actor != "" {
+				subject = tc.actor
+			}
+			b.appendEvent(t, tc.eventID, "deploy.created", subject)
+
+			n, err := b.router.ProcessBell(ctx)
+			if err != nil {
+				t.Fatalf("ProcessBell: %v", err)
+			}
+			if n != 0 {
+				t.Fatalf("projected %d, want 0 — an unrenderable frame must not ring", n)
+			}
+			if got := b.bellCount(t, b.ownerID); got != 0 {
+				t.Fatalf("bell rows = %d, want 0 — no copy may be invented", got)
+			}
+			if !b.scannedHas(t, tc.eventID) {
+				t.Fatal("unrenderable event was not marked scanned — the scan would refill with it")
+			}
+			if !b.unrenderableFlag(t, tc.eventID) {
+				t.Fatal("event marked scanned but NOT flagged unrenderable — it is now " +
+					"indistinguishable from an uninteresting event and can never be re-projected")
+			}
+		})
+	}
+}
+
+// TestPreExistingBellRowIsBenignDedupe — pgx.ErrNoRows from InsertNotification is
+// the partial unique index deduping, not a failure. Inverting that check leaves
+// every other test green, so this is the only guard on it.
+func TestPreExistingBellRowIsBenignDedupe(t *testing.T) {
+	b, ownerCk := newBellWorld(t, "bell-dedupe@example.com", "belldedupe")
+	ctx := context.Background()
+	_, m2 := b.addMember(t, "bell-dedupe-2@example.com", b.orgID, ownerCk)
+
+	b.appendEvent(t, "evt_dedupe", "deploy.created", b.depID)
+	// Pre-existing row for ONE member: their insert will conflict.
+	mustExec(t, b.world,
+		`insert into notifications (id, user_id, event_id, kind, title) values ('ntf_pre',$1,'evt_dedupe','deploy','pre-existing')`,
+		b.ownerID)
+
+	n, err := b.router.ProcessBell(ctx)
+	if err != nil {
+		t.Fatalf("ProcessBell: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("projected %d, want 1 — a benign dedupe must not abort the fan-out", n)
+	}
+	if got := b.bellCount(t, b.ownerID); got != 1 {
+		t.Fatalf("owner rows = %d, want 1 (the pre-existing one, not a duplicate)", got)
+	}
+	if got := b.bellCount(t, m2); got != 1 {
+		t.Fatalf("second member rows = %d, want 1 — one member's dedupe aborted the whole fan-out", got)
+	}
+}
+
+// TestBellDoesNotCrossOrgs — the render context is org-fenced, so an event can
+// never render another tenant's environment name into a title.
+func TestBellDoesNotCrossOrgs(t *testing.T) {
+	b, _ := newBellWorld(t, "bell-orgA@example.com", "bellorga")
+	ctx := context.Background()
+
+	// A second org with its own project/env/deployment.
+	otherCk, otherID := b.signupUser(t, "bell-orgB@example.com")
+	if r, body := b.post(t, "/v1/orgs", `{"name":"bellorgb"}`, otherCk); r.StatusCode != 201 {
+		t.Fatalf("createOrg B: %d %s", r.StatusCode, body)
+	}
+	var orgB string
+	if err := b.pool.QueryRow(ctx, "select id from orgs where slug='bellorgb'").Scan(&orgB); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, b.world, `insert into projects (id, org_id, name) values ('prj_b',$1,'shopb')`, orgB)
+	mustExec(t, b.world, `insert into environments (id, project_id, name) values ('env_b','prj_b','staging')`)
+	mustExec(t, b.world, `insert into services (id, env_id, name, product) values ('svc_b','env_b','api','web')`)
+	mustExec(t, b.world, `insert into deployments (id, number, env_id, service_id, actor) values ('dep_b',7,'env_b','svc_b',$1)`, otherID)
+
+	// Org A's event pointing at org B's deployment must NOT render.
+	b.appendEvent(t, "evt_cross", "deploy.created", "dep_b")
+	if _, err := b.router.ProcessBell(ctx); err != nil {
+		t.Fatalf("ProcessBell: %v", err)
+	}
+	if got := b.bellCount(t, b.ownerID); got != 0 {
+		t.Fatalf("org A got %d bell rows from org B's deployment — the render context is not fenced", got)
+	}
+	if got := b.bellCount(t, otherID); got != 0 {
+		t.Fatalf("org B member received %d rows from org A's event", got)
+	}
+	var leaked int
+	if err := b.pool.QueryRow(ctx, `select count(*) from notifications where title like '%staging%'`).Scan(&leaked); err != nil {
+		t.Fatal(err)
+	}
+	if leaked != 0 {
+		t.Fatalf("org B's environment name leaked into %d notification titles", leaked)
+	}
+}

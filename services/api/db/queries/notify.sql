@@ -103,6 +103,16 @@ LIMIT 100;
 --
 -- Ordered by (at, id) because ids.New is random hex and `at` collides freely
 -- under batch insert; the pair is total. Served by events_at_id_idx.
+--
+-- COST, stated honestly: this is O(total spine), not O(unscanned). With no floor
+-- the plan walks events in (at, id) order from the OLDEST row and probes
+-- bell_scanned for each, discarding already-scanned rows until it can emit 100.
+-- Since nearly every row is scanned, that work grows without bound on the append
+-- path's own table. Accepted for now because correctness comes first — an `at`
+-- floor silently drops late-committing transactions — but it is a real growth
+-- problem, filed in the ledger. The durable fix is a monotonic min-unscanned
+-- cursor or pruning scanned rows behind a watermark; both derive from the LEDGER
+-- rather than from time, so neither reintroduces the dropped-transaction bug.
 SELECT e.*
 FROM events e
 LEFT JOIN bell_scanned bs ON bs.event_id = e.id
@@ -126,6 +136,11 @@ VALUES ($1)
 ON CONFLICT (event_id) DO NOTHING
 RETURNING event_id;
 
+-- name: MarkBellEventUnrenderable :exec
+-- Flag a worthy-but-unrenderable event so a later ruling on its copy can be
+-- applied retroactively (a targeted DELETE re-queues exactly these rows).
+UPDATE bell_scanned SET unrenderable = true WHERE event_id = $1;
+
 -- name: GetDeployNotificationContext :one
 -- US-10.3: the presentation data N1's deploy title needs, resolved during
 -- projection (founder ruling 2026-07-20, Option A: render once, persist the
@@ -135,9 +150,14 @@ RETURNING event_id;
 -- Local reads only, inside the fan-out tx. actor_name is COALESCEd to '' rather
 -- than substituted: an absent name makes the frame UNRENDERABLE, and the
 -- projection skips it instead of inventing copy.
+-- Org-fenced: the deployment must belong to the event's org. The subject always
+-- does today, but an unfenced lookup would render another tenant's environment
+-- name into a title fanned to this org's members. Fencing is architectural, not
+-- conditional on the current call path being safe.
 SELECT d.number,
        env.name AS env_name,
        COALESCE((SELECT u.name FROM users u WHERE u.id = @actor_id), '')::text AS actor_name
 FROM deployments d
 JOIN environments env ON env.id = d.env_id
-WHERE d.id = @deployment_id;
+JOIN projects p ON p.id = env.project_id
+WHERE d.id = @deployment_id AND p.org_id = @org_id;

@@ -19,7 +19,18 @@
 
 CREATE TABLE bell_scanned (
     event_id   text PRIMARY KEY REFERENCES events (id),
-    scanned_at timestamptz NOT NULL DEFAULT now()
+    scanned_at timestamptz NOT NULL DEFAULT now(),
+    -- Set when an event WAS notification-worthy but could not be rendered from
+    -- the data available (e.g. an org-key/automation deploy: ADR-0007 org keys
+    -- have user_id NULL, so the spine records an empty actor and N1 supplies no
+    -- frame for a non-human actor).
+    --
+    -- Without this flag such an event is indistinguishable from one that was
+    -- merely uninteresting, and a later product decision about that copy could
+    -- never be applied retroactively. With it, re-projecting is a targeted
+    -- DELETE over the flagged rows. The event itself is never lost — the spine
+    -- is append-only; only the bell row is withheld.
+    unrenderable boolean NOT NULL DEFAULT false
 );
 
 -- The anti-join scans events ordered by (at, id) across ALL orgs. The only

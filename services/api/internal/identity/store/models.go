@@ -29,8 +29,9 @@ type AssistantThread struct {
 }
 
 type BellScanned struct {
-	EventID   string
-	ScannedAt pgtype.Timestamptz
+	EventID      string
+	ScannedAt    pgtype.Timestamptz
+	Unrenderable bool
 }
 
 type Binding struct {
