@@ -66,8 +66,14 @@ flip `status: ready`. Target a **~250-line body**; the enforced gate is
 the next wave); distant specs rot.
 
 So the real cadence for each §3 item is: **enrich → review → merge → implement →
-review → merge.** Budget for both. Critical-path specs need **founder approval**
-before implementation — every §3 item qualifies.
+review → merge.** Budget for both.
+
+**Founder approval on critical-path specs happens *at the PR*, never before it**
+(`spec-author` step 5). Draft the enrichment, run both §6 reviews, open the PR,
+and request sign-off there — every §3 item is critical-path, so this applies from
+your first PR. It is **not** an interrupt: you keep working while it is pending.
+Interrupting is reserved for the triggers in §14 and for a `❓ NEEDS FOUNDER
+INPUT` row (§8).
 
 **The three skills in `.claude/skills/`:** `spec-author` (stub → `ready`),
 `task-pickup` (claim + load order), `verify` (run a task's `verify:` block).
@@ -86,17 +92,19 @@ complete**, E10 Observe in progress. Re-derive with the §1 commands rather than
 trusting this line; `validate.mjs` checks the *graph* (deps, caps, frontmatter)
 and prints ready-unblocked, **not** a done total.
 
-**Two live locks.** `origin` carries exactly two `task/*` branches — `task/O2`
-(cost guardrails) and `task/T1.3` (image pipeline) — each one unmerged *authored*
-commit, and both task files say `in-progress`. That is real work: inspect the
-branch, then either finish and PR it, or deliberately park it (reset `status:`,
-note why). **Never silently restart a task that holds a lock.**
+**Locks — re-derive them, don't trust this paragraph's count.** A `task/*` branch
+is a lock **only if it is on `origin` AND its task file says `in-progress`**.
+Everything else you will see is noise:
 
-Rules for reading branches: **a branch is a lock only if it is on `origin` AND its
-task file says `in-progress`.** Any `task/*` branch whose task is `done` is
-squash-merge residue (it still shows as "ahead" of `main`) and is safe to ignore
-or delete. A working copy may also hold local-only branches from past sessions —
-those are machine-specific noise, never locks.
+- **`done` task** → squash-merge residue (still shows "ahead" of `main`); ignore.
+- **No matching file under `tasks/`** → docs or tooling work, not a task lock;
+  ignore. (`task/start-here-manual` is one.)
+- **Local-only branch** → machine-specific leftover; never a lock.
+
+At the last update the live locks were `task/O2` (cost guardrails) and
+`task/T1.3` (image pipeline), each holding one unmerged *authored* commit. That
+is real work: inspect the branch, then either finish and PR it or deliberately
+park it (reset `status:`, note why). **Never silently restart a locked task.**
 
 **5 `blocked` tasks** (`US-3.3`–`US-3.6`, `CK-M3`, all E3 provisioning) await the
 runtime plane. Leave them blocked.
@@ -114,7 +122,7 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
 
 **Runtime-blocked despite `deps: []`** — do not start these until E1/T1.5 land:
 `T14.1`, `T14.6`, `US-10.5` (traces need trace data), `O3` (needs a live workload),
-`US-1.x`, `T3.4`. Prefer control-plane work.
+`US-1.1`–`US-1.3`, `T3.4`. Prefer control-plane work.
 
 ---
 
@@ -132,6 +140,10 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
   (`notify.go:202`). (b) **`deleteWebhook` does not exist in the contract at
   all.** (c) AC: unread count consistent with the events spine.
   Note (a) and (b) take **different** routes through T2's spec-change rule.
+- **Scope:** ship (a) plus the unread-count invariant; file (b) as a §8 ledger
+  proposal in the same PR and defer it to a follow-up task. **Do not hold
+  US-10.3 waiting on (b)** — that is §5 rule 12, made explicit here because it
+  sits on the critical path.
 - **Deliverables:** endpoint(s) + a self-verifying unread-count invariant +
   webhook delivery verification — against an `httptest` server via the
   `notify.Router` post seam, **never** a real network call (§4).
@@ -178,9 +190,8 @@ section filled · nothing with an owner pasted in verbatim · `files:` globs are
 honest touch-set · `verify:` commands are **executable and demonstrably fail
 before the work** (prose is not a `verify:` entry — `validate.mjs` only checks the
 block is non-empty, so this is on you) · `validate.mjs` passes · **founder
-approval obtained if the task is critical-path** (the `spec-author` skill requires
-it; every item in §3 is critical-path by construction). It takes the full review
-pipeline.
+sign-off requested in the PR** if the task is critical-path (§1a — at the PR, not
+before it). It takes the full review pipeline.
 
 - [ ] **Behavior exists.** The user-visible behavior or enforcement path is
       implemented and reachable — not merely an available primitive with no caller.
@@ -333,6 +344,14 @@ fail-fast remain unverified — see §3 before picking it up.
 ## 8. Decision Ledger — unresolved, founder-gated (do **not** invent)
 
 Ledger file: `docs/product/claudedocs/spec-change-proposals.md`.
+
+**This table covers spec-change proposals only.** `docs/founder-config.md` holds
+a *separate* set of founder-gated values, and a **`❓ NEEDS FOUNDER INPUT` row
+there is the one thing that justifies interrupting** for a value in its space
+(providers, identifiers, pricing, secrets). Two are open today: **KEK rotation
+procedure** (L85) and **founder-org default budget** (L101). Consume that file
+directly and check it before assuming any provider, id, price, or secret; a
+`⏳ PENDING` row means do the unblocked work and switch when the value lands.
 
 | Item | Status | Why blocked | Implementation impact |
 |---|---|---|---|
