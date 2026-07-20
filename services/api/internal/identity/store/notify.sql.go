@@ -346,6 +346,16 @@ LIMIT 100
 //
 // Ordered by (at, id) because ids.New is random hex and `at` collides freely
 // under batch insert; the pair is total. Served by events_at_id_idx.
+//
+// COST, stated honestly: this is O(total spine), not O(unscanned). With no floor
+// the plan walks events in (at, id) order from the OLDEST row and probes
+// bell_scanned for each, discarding already-scanned rows until it can emit 100.
+// Since nearly every row is scanned, that work grows without bound on the append
+// path's own table. Accepted for now because correctness comes first — an `at`
+// floor silently drops late-committing transactions — but it is a real growth
+// problem, filed in the ledger. The durable fix is a monotonic min-unscanned
+// cursor or pruning scanned rows behind a watermark; both derive from the LEDGER
+// rather than from time, so neither reintroduces the dropped-transaction bug.
 func (q *Queries) ListPendingBellEvents(ctx context.Context) ([]Event, error) {
 	rows, err := q.db.Query(ctx, listPendingBellEvents)
 	if err != nil {
