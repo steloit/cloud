@@ -76,6 +76,17 @@ func TestInvoiceGenerator(t *testing.T) {
 		if l.UsageRef == "" {
 			t.Fatalf("line missing usage_ref: %+v", l)
 		}
+		// The unified line rule (taxonomy §74, US-11.6): EVERY line is either a
+		// stated plan allowance (plan:*) or a metered quantity (meter:*) — nothing
+		// else exists. A line that is neither is an ungrammatical charge.
+		if !strings.HasPrefix(l.UsageRef, "plan:") && !strings.HasPrefix(l.UsageRef, "meter:") {
+			t.Fatalf("line %q violates the §74 grammar (not plan:* or meter:*): usage_ref=%q", l.Description, l.UsageRef)
+		}
+		// non-negative line (int64 is already integer per ADR-025; a negative meter
+		// rate would be a pricing bug, never a valid line).
+		if l.Cents < 0 {
+			t.Fatalf("negative line cents: %+v", l)
+		}
 		if strings.Contains(l.Description, "business plan") {
 			planLine = true
 			if l.Cents != 9900 {

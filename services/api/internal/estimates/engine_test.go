@@ -132,3 +132,38 @@ func TestEngineRules(t *testing.T) {
 		t.Fatalf("standard+60GB: %d", stdSixty.MonthlyCents)
 	}
 }
+
+// TestEstimateLineGrammar — US-11.6: the estimate side of the unified §74 line
+// rule. Every estimate line is a stated allowance ("fixed") or a metered
+// projection ("usage_projection") — nothing else — with integer cents, and the
+// lines sum to the total. This is the estimate-layer mirror of the invoice
+// grammar test so "quoted == billed" holds the SAME grammar at both layers.
+func TestEstimateLineGrammar(t *testing.T) {
+	svcs := loadCanonServices(t)
+	shapes := make([]ShapeInput, 0, len(svcs))
+	for _, s := range svcs {
+		shapes = append(shapes, ShapeInput{Product: s.Product, Name: s.Name, Shape: s.Shape})
+	}
+	lines, total, err := PriceAll(shapes)
+	if err != nil {
+		t.Fatalf("PriceAll: %v", err)
+	}
+	var sum int64
+	for _, l := range lines {
+		// the closed §74 basis vocabulary — the estimate's plan-vs-metered split,
+		// mapping to the invoice's plan:*/meter:* usage_ref (same rule, two encodings).
+		if l.Basis != "fixed" && l.Basis != "usage_projection" {
+			t.Fatalf("estimate line %q violates the §74 grammar: basis=%q (want fixed|usage_projection)", l.Name, l.Basis)
+		}
+		if l.MonthlyCents < 0 { // integer cents (int64) end-to-end (ADR-025)
+			t.Fatalf("estimate line %q has negative cents: %d", l.Name, l.MonthlyCents)
+		}
+		sum += l.MonthlyCents
+	}
+	if sum != total {
+		t.Fatalf("estimate lines do not sum to the total: Σ %d ≠ %d", sum, total)
+	}
+	if len(lines) == 0 {
+		t.Fatal("no estimate lines checked — the grammar assertion is inert")
+	}
+}
