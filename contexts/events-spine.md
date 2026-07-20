@@ -37,3 +37,15 @@ one events table; `/orgs/{org}/audit` and `/envs/{env}/events` are views over it
   history. A webhook receives events from creation onward, never a backfill (T10.3).
 - Letting a routing pref gag a RECORDING — email-off suppresses the *email route*; the bell row
   and the spine event still happen (prefs route, they never gag the audit; glossary law) (T10.3).
+- A spine-scan projection whose "already handled" evidence is **the row it would have written**.
+  `ListPendingWebhookEvents` gets away with it because its deliverability filter is IN SQL
+  (`e.kind = ANY(w.events)`) and `webhook_deliveries` records a terminal row for the rest — so
+  undeliverable events never occupy the window. A projection that decides worthiness in **Go**
+  leaves no row for the events it skips, which then permanently satisfy `WHERE n.id IS NULL` and
+  fill every later `LIMIT` batch: after one batch of silence the projection starves forever.
+  Advance a durable cursor for every *scanned* event, worthy or not, in the same transaction as
+  the fan-out (US-10.3 enrichment review).
+- Pairing a per-EVENT skip predicate with a per-(user,event) `ON CONFLICT DO NOTHING` and calling
+  the result idempotent. They are mutually exclusive — if the scan excludes handled events the
+  conflict never fires — and a non-transactional per-member fan-out that crashes halfway leaves
+  the event looking handled while most members were never notified (US-10.3 enrichment review).

@@ -138,7 +138,7 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
   `spec-change-proposals.md:225`, which names this slice as its owner. Serving a
   count would create a second truth that can drift.
 - **`testWebhook` was never unimplemented** (this section previously said it was):
-  it ships as a pre-strict mux shim (`webhooks_http.go:95`), deliberately outside
+  it ships as a pre-strict mux shim (`webhooks_http.go:94`), deliberately outside
   `include-operation-ids` because of Trap T1. Only `deleteWebhook` is genuinely
   absent from the contract → §8 proposal, deferred (§5 rule 12).
 - **Design:** bell = spine projection reusing `ListPendingWebhookEvents`' scan
