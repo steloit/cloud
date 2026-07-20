@@ -4,6 +4,11 @@ The Steloit developer cloud: the console (built), the control plane, data plane,
 **This repository is the single source of truth.** GitHub Issues and the Project board are *generated
 views* — never edit them; edit the files here and run sync.
 
+> **Resuming autonomous implementation? Read [`START-HERE.md`](START-HERE.md) first** — the canonical
+> session handoff: current roadmap position, next work in execution order, standing engineering rules,
+> the mandatory review process, the founder decision ledger, and open PARTIAL items. It is updated at
+> every major milestone so a session never depends on prior chat history.
+
 ## Map
 
 | Path | What |
