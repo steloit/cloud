@@ -25,7 +25,7 @@ node scripts/spec-sync/validate.mjs   # graph valid + ready-unblocked count
 # the real roadmap position — MUST exclude _epic.md/_template.md, which carry
 # their own `status:` and are not work items (a plain grep over tasks/ overcounts)
 for f in $(find tasks -name "*.md" ! -name "_epic.md" ! -name "_template.md" ! -path "*_archive*"); do
-  grep -m1 "^status:" "$f"; done | sort | uniq -c | sort -rn   # sums to 182
+  grep -m1 "^status:" "$f"; done | sort | uniq -c | sort -rn   # sums to 183
 
 git ls-remote --heads origin 'task/*' # LOCKS LIVE ON ORIGIN — see §2
 ```
@@ -53,7 +53,7 @@ Then:
 
 ### 1a. The enrichment gate (applies to nearly all remaining work)
 
-**88 of 182 tasks are `stub`. Only 1 is `ready`.** A stub is a placeholder — it
+**87 of 183 tasks are `stub`. Only 2 are `ready`.** A stub is a placeholder — it
 has no acceptance criteria, `files:` globs, or `verify:` block, so there is
 nothing to implement against and no way to prove done. `AGENTS.md` therefore
 forbids starting one.
@@ -130,14 +130,16 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
 ## 3. Next Work (execution order)
 
 ### 1. `US-10.3` — Bell projection · `tasks/e10-observability/US-10.3.md` · **`ready` → IMPLEMENT**
-- Enrichment merged (#284, 2026-07-20). The task file carries the design, edge
-  cases, ACs and deferrals — read it, not this entry.
+- Enrichment merged (#284). The task file carries the design, ACs and deferrals
+  — read it, not this entry. Server half only; five concerns split out on review.
 - **Design in one line:** bell = spine projection over a `bell_scanned`
   **terminal ledger**. Never an `at`-based cursor: `events.at` is tx-*start*
   time, so a long tx committing late is skipped forever. Both rejected designs
   are in `contexts/events-spine.md`'s mistake bank — read them before "improving"
   the scan.
-- Server half only; five concerns were split out across four review rounds.
+- **The spec forbids an unread-count endpoint** — `Design-Spec.md:410` makes the
+  badge derived ("the bell carries the red dot as the single unread source"), so
+  serving a count would create a second truth that can drift.
 
 ### 2. `US-10.4` — 12 transactional emails · `tasks/e10-observability/US-10.4.md` · **`stub` → enrich first**
 - **Objective:** one skeleton; subject grammar `[org/project] <fact>`; one event →
@@ -161,7 +163,7 @@ Control-plane: `US-11.3` (proration remainder) · `US-13.4` (AI disable across
 every surface) · `T8.1`/`T8.3` (console regen pipeline, four-state harness) ·
 `Q5`. Everything else waits on the runtime plane.
 
-**`O6` is the one `ready` task** (`tasks/eops/O6.md`) — agent registration (§6) —
+**`O6` is the *other* `ready` task** (`tasks/eops/O6.md`) — agent registration (§6) —
 but it is **not** an easy first PR: its `verify:` entries are English sentences,
 not commands, so it cannot satisfy §4 as written, and two of its ACs describe
 **harness** behavior (plugin precedence, hard-fail on unknown agent) not reachable
@@ -357,7 +359,7 @@ directly and check it before assuming any provider, id, price, or secret; a
 
 | Item | Status | Why blocked | Implementation impact |
 |---|---|---|---|
-| **P6/N2 frame amendment for the ruled taxonomy** | Open — **founder action**, not engineering | The founder ruled seven notification kinds on 2026-07-20 (Option B: `billing`/`security` are first-class, not folded into `alert`), but `00-sources` P6's routing matrix and N2's type chips still list six. `docs/product/00-sources/**` changes by human decision only (hook-enforced), so no agent can land it. | `US-10.6` (pin `NotificationList.kind` to the seven-value enum + audit legacy rows) stays `blocked`. `notify.Classify` (US-10.3) emits only kinds that have a frame row to source a verbatim title from, so billing/security bells stay silent until the frames land — correct behavior, not a gap. **No eighth kind may be invented** (§5 rule 10). |
+| **P6/N2 frame amendment for the ruled taxonomy** | Open — **founder action**, not engineering | The founder ruled seven notification kinds on 2026-07-20 (Option B: `billing`/`security` are first-class, not folded into `alert`), but `00-sources` P6's routing matrix and N2's type chips still list six. `docs/product/00-sources/**` changes by human decision only (hook-enforced), so no agent can land it. | `US-10.6` (pin `NotificationList.kind` to the seven-value enum + audit legacy rows) stays `blocked`. `notify.Classify` (US-10.3) emits only kinds with a frame row to source a verbatim title from, so it never produces billing/security. Note this does **not** gate billing bells generally: `EmitQuotaWarning` calls `Router.Notify` directly with its own `Kind` (`notify.go:118-121`), bypassing `Classify` entirely — those bells are silent only because that emitter is unwired, and would ring with no frame row once it is. **Second founder action:** the ruling currently lives only in the *proposals* ledger, whose header says nothing there is resolved — it needs ratifying into `docs/product/18-philosophy/decisions.md` (human-only) or it has no authority home. **No eighth kind may be invented** (§5 rule 10). |
 | **Dashboard share-grant model** | Open | §2c names "share grants" with **no shape**; no restricted-share member model exists (`restricted` = owner-only). Designing it is a product decision. | Dashboards ship personal/org/restricted only; `restricted` behaves as owner-only; no share-with-specific-people surface. |
 | **Prebuilt-dashboard topology generation** | Open | "Generated views, always current" needs service topology + metrics (data plane). | Prebuilt dashboards are read-only + forkable rows; generation unimplemented; rows must be seeded. |
 | **`architecture.md` version drift** | Open finding (not founder-gated) | `docs/architecture.md:3` and `CLAUDE.md` both say **v1.2**, but ADR-042 (`decisions.md:81`) records the substrate delta as **v1.3**. The version bump was decided but never applied to the file's status line. | Cite the file as-is (v1.2) and treat ADR-042 as the authority for the substrate delta. Fixing the status line is a doc-only PR; per the hook, `decisions.md` itself is human-only. Recorded rather than silently corrected (§5 rule 5). |
