@@ -90,3 +90,38 @@ LEFT JOIN webhook_deliveries d ON d.webhook_id = w.id AND d.event_id = e.id
 WHERE d.id IS NULL OR (d.status NOT IN ('sent', 'skipped') AND d.attempts < 5)
 ORDER BY e.at ASC
 LIMIT 100;
+
+-- name: ListPendingBellEvents :many
+-- US-10.3: the bell projection scan. A pure anti-join against bell_scanned —
+-- deliberately WITHOUT a time bound.
+--
+-- `e.at >= <watermark>` would be wrong here, not merely slower: events.at
+-- defaults to now(), which is TRANSACTION START time, so a write tx that opens
+-- before a tick and commits after it lands below any watermark and is skipped
+-- permanently and silently. An unscanned event simply has no ledger row, so it
+-- is picked up whenever it becomes visible, however late that is.
+--
+-- Ordered by (at, id) because ids.New is random hex and `at` collides freely
+-- under batch insert; the pair is total. Served by events_at_id_idx.
+SELECT e.*
+FROM events e
+LEFT JOIN bell_scanned bs ON bs.event_id = e.id
+WHERE bs.event_id IS NULL
+ORDER BY e.at ASC, e.id ASC
+LIMIT 100;
+
+-- name: ClaimBellEvent :one
+-- Claim an event for projection. Returns no row when another replica already
+-- claimed it, so exactly one fans out.
+--
+-- Unlike ClaimWebhookDelivery this claim is held INSIDE the fan-out transaction
+-- — which is only safe because the bell does no network I/O. A crash rolls the
+-- claim back with the partial fan-out, so a later run re-notifies EVERY member
+-- rather than leaving members 4..10 of a 10-member org silently un-rung.
+--
+-- The cost, stated plainly: a second replica BLOCKS on the speculative index
+-- entry until the winner's tx ends, so replicas serialize per batch.
+INSERT INTO bell_scanned (event_id)
+VALUES ($1)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING event_id;

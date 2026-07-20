@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimBellEvent = `-- name: ClaimBellEvent :one
+INSERT INTO bell_scanned (event_id)
+VALUES ($1)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING event_id
+`
+
+// Claim an event for projection. Returns no row when another replica already
+// claimed it, so exactly one fans out.
+//
+// Unlike ClaimWebhookDelivery this claim is held INSIDE the fan-out transaction
+// — which is only safe because the bell does no network I/O. A crash rolls the
+// claim back with the partial fan-out, so a later run re-notifies EVERY member
+// rather than leaving members 4..10 of a 10-member org silently un-rung.
+//
+// The cost, stated plainly: a second replica BLOCKS on the speculative index
+// entry until the winner's tx ends, so replicas serialize per batch.
+func (q *Queries) ClaimBellEvent(ctx context.Context, eventID string) (string, error) {
+	row := q.db.QueryRow(ctx, claimBellEvent, eventID)
+	var event_id string
+	err := row.Scan(&event_id)
+	return event_id, err
+}
+
 const claimWebhookDelivery = `-- name: ClaimWebhookDelivery :one
 INSERT INTO webhook_deliveries (webhook_id, event_id, id, status, attempts)
 VALUES ($1, $2, $3, 'pending', 1)
@@ -251,6 +275,56 @@ func (q *Queries) ListOrgMemberRecipients(ctx context.Context, orgID string) ([]
 	for rows.Next() {
 		var i ListOrgMemberRecipientsRow
 		if err := rows.Scan(&i.UserID, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingBellEvents = `-- name: ListPendingBellEvents :many
+SELECT e.id, e.org_id, e.kind, e.via, e.actor, e.action, e.subject, e.at, e.detail
+FROM events e
+LEFT JOIN bell_scanned bs ON bs.event_id = e.id
+WHERE bs.event_id IS NULL
+ORDER BY e.at ASC, e.id ASC
+LIMIT 100
+`
+
+// US-10.3: the bell projection scan. A pure anti-join against bell_scanned —
+// deliberately WITHOUT a time bound.
+//
+// `e.at >= <watermark>` would be wrong here, not merely slower: events.at
+// defaults to now(), which is TRANSACTION START time, so a write tx that opens
+// before a tick and commits after it lands below any watermark and is skipped
+// permanently and silently. An unscanned event simply has no ledger row, so it
+// is picked up whenever it becomes visible, however late that is.
+//
+// Ordered by (at, id) because ids.New is random hex and `at` collides freely
+// under batch insert; the pair is total. Served by events_at_id_idx.
+func (q *Queries) ListPendingBellEvents(ctx context.Context) ([]Event, error) {
+	rows, err := q.db.Query(ctx, listPendingBellEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Kind,
+			&i.Via,
+			&i.Actor,
+			&i.Action,
+			&i.Subject,
+			&i.At,
+			&i.Detail,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
