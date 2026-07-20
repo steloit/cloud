@@ -10,6 +10,7 @@ package identity_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -283,17 +284,24 @@ func TestConcurrentProcessBellFansExactlyOnce(t *testing.T) {
 
 // failingNthStore fails the Nth InsertNotification, so the partial-fan-out
 // rollback is observable. This is why Txer yields a Store, not *store.Queries.
+// failingNthStore fails the Nth InsertNotification across the WHOLE batch (the
+// counter is shared by the Txer), so the injected failure lands on one event and
+// its siblings proceed.
+//
+// NOTE: Store is embedded, so any future Store method that writes bell rows is
+// forwarded straight through and bypasses this injection point. If one is added,
+// override it here too or this seam silently weakens.
 type failingNthStore struct {
 	notify.Store
-	mu     sync.Mutex
-	n      int
+	mu     *sync.Mutex
+	n      *int
 	failOn int
 }
 
 func (f *failingNthStore) InsertNotification(ctx context.Context, arg store.InsertNotificationParams) (store.Notification, error) {
 	f.mu.Lock()
-	f.n++
-	hit := f.n == f.failOn
+	*f.n++
+	hit := *f.n == f.failOn
 	f.mu.Unlock()
 	if hit {
 		return store.Notification{}, fmt.Errorf("injected insert failure")
@@ -306,6 +314,8 @@ type failingTxer struct {
 	inner  notify.Txer
 	failOn int
 	armed  bool
+	count  *int
+	mu     sync.Mutex
 }
 
 func (f *failingTxer) WithTx(ctx context.Context, fn func(notify.Store) error) error {
@@ -313,7 +323,7 @@ func (f *failingTxer) WithTx(ctx context.Context, fn func(notify.Store) error) e
 		if !f.armed {
 			return fn(s)
 		}
-		return fn(&failingNthStore{Store: s, failOn: f.failOn})
+		return fn(&failingNthStore{Store: s, failOn: f.failOn, n: f.count, mu: &f.mu})
 	})
 }
 
@@ -329,16 +339,34 @@ func TestPartialFanOutIsRetriedNotSwallowed(t *testing.T) {
 	_, m3 := b.addMember(t, "bell-partial-3@example.com", b.orgID, ownerCk)
 
 	b.appendEvent(t, "evt_partial1", "deploy.created", b.depID)
+	// A sibling in the SAME batch pins AC8's second half: one event's rollback
+	// must not affect the others. The counter is shared across the batch, so the
+	// injected failure lands on the first event only.
+	b.appendEvent(t, "evt_partial2", "deploy.created", b.depID)
 
-	// Fail the 2nd insert of 3 → the whole event's tx must unwind.
-	ft := &failingTxer{inner: notify.NewPoolTxer(b.pool), failOn: 2, armed: true}
+	// Fail the 2nd insert of 3 → that event's tx must unwind, the sibling must not.
+	shared := 0
+	ft := &failingTxer{inner: notify.NewPoolTxer(b.pool), failOn: 2, armed: true, count: &shared}
 	broken := notify.NewRouter(b.q, b.kek).WithTxer(ft)
-	if n, _ := broken.ProcessBell(ctx); n != 0 {
-		t.Fatalf("failed fan-out reported %d projected, want 0", n)
+	// The sibling still projects, so exactly one of the two succeeds.
+	if n, _ := broken.ProcessBell(ctx); n != 1 {
+		t.Fatalf("batch reported %d projected, want 1 (sibling ok, failing event rolled back)", n)
+	}
+	if shared < 2 {
+		t.Fatalf("injected failure landed after only %d inserts — it must fire AFTER a "+
+			"successful one, or this proves nothing about partial rollback", shared)
+	}
+	if !b.scannedHas(t, "evt_partial2") {
+		t.Fatal("sibling event in the same batch was rolled back too — batch isolation broken")
 	}
 	for _, id := range []string{b.ownerID, m2, m3} {
-		if got := b.bellCount(t, id); got != 0 {
+		if got := b.bellCountFor(t, id, "evt_partial1"); got != 0 {
 			t.Fatalf("partial fan-out COMMITTED for %s (%d rows) — the claim did not roll back", id, got)
+		}
+		// …while the sibling in the same batch went through untouched.
+		if got := b.bellCountFor(t, id, "evt_partial2"); got != 1 {
+			t.Fatalf("sibling event gave %s %d rows, want 1 — one event's rollback "+
+				"must not affect the others in its batch", id, got)
 		}
 	}
 	if b.scannedHas(t, "evt_partial1") {
@@ -350,8 +378,8 @@ func TestPartialFanOutIsRetriedNotSwallowed(t *testing.T) {
 		t.Fatalf("retry ProcessBell = %d, %v; want 1, nil", n, err)
 	}
 	for _, id := range []string{b.ownerID, m2, m3} {
-		if got := b.bellCount(t, id); got != 1 {
-			t.Fatalf("member %s has %d bell rows after retry, want 1 — a member was silently skipped", id, got)
+		if got := b.bellCountFor(t, id, "evt_partial1"); got != 1 {
+			t.Fatalf("member %s has %d rows for the retried event, want 1 — a member was silently skipped", id, got)
 		}
 	}
 }
@@ -393,8 +421,21 @@ func TestPreExistingSpineIsNotBackfilled(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		b.appendEvent(t, fmt.Sprintf("evt_hist%d", i), "deploy.created", b.depID)
 	}
-	mustExec(t, b.world, `delete from bell_scanned`)
-	mustExec(t, b.world, `insert into bell_scanned (event_id) select id from events on conflict do nothing`)
+	// Execute the REAL migration files, not a copy of their SQL. A hand-typed
+	// seed statement would keep passing if the shipped predicate changed — and
+	// this migration's effect is irreversible in production and invisible to CI
+	// (CI migrates an empty spine, so the seed is a no-op there).
+	const migDir = "../platform/db/migrations/"
+	down, err := os.ReadFile(migDir + "20260720093937_bell_scanned.down.sql")
+	if err != nil {
+		t.Fatalf("read down migration: %v", err)
+	}
+	up, err := os.ReadFile(migDir + "20260720093937_bell_scanned.up.sql")
+	if err != nil {
+		t.Fatalf("read up migration: %v", err)
+	}
+	mustExec(t, b.world, string(down))
+	mustExec(t, b.world, string(up))
 
 	n, err := b.router.ProcessBell(ctx)
 	if err != nil {
@@ -406,6 +447,18 @@ func TestPreExistingSpineIsNotBackfilled(t *testing.T) {
 	if got := b.bellCount(t, b.ownerID); got != 0 {
 		t.Fatalf("history was fanned onto the bell: %d rows, want 0", got)
 	}
+}
+
+// bellCountFor scopes to one (user, event) — necessary once a batch carries more
+// than one event, since a global per-user count conflates them.
+func (b *bellWorld) bellCountFor(t *testing.T, userID, eventID string) int {
+	t.Helper()
+	var n int
+	if err := b.pool.QueryRow(context.Background(),
+		`select count(*) from notifications where user_id=$1 and event_id=$2`, userID, eventID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func (b *bellWorld) unrenderableFlag(t *testing.T, eventID string) bool {

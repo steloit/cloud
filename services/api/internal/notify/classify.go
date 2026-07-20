@@ -13,9 +13,11 @@ import (
 //
 // Two rules govern this file and neither is negotiable:
 //
-//  1. The KIND vocabulary is closed. The founder ruled seven kinds on
-//     2026-07-20; an eighth is a new founder decision, never an engineering
-//     one (AGENTS.md §5 rule 10).
+//  1. The KIND vocabulary is closed: the founder ruled seven kinds on
+//     2026-07-20. That ruling is recorded on the docs branch (PR #285) and is
+//     NOT yet on main — cite it there, not from this file, and treat it as
+//     pending ratification into 18-philosophy/decisions.md. An eighth kind is a
+//     new founder decision, never an engineering one (AGENTS.md §5 rule 10).
 //  2. Every TITLE is frame-verbatim. Titles come from the N1/N2 frames in
 //     docs/product/00-sources/Steloit-Console-Screens.html and nowhere else.
 //     An action with no frame row classifies as NOT notification-worthy — we
