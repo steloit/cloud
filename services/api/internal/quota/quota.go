@@ -83,3 +83,64 @@ func ShouldWarn(allowance, used int64) bool {
 	lvl := WarnLevel(allowance, used)
 	return lvl >= 0.8
 }
+
+// ClampOverageToCap is the soft-overage-halt-at-cap coupling (US-11.7 + US-11.2):
+// a running service's soft overage STOPS ACCRUING once the org reaches its hard
+// monthly spend cap. Given the org's spend so far this period, the org's hard
+// cap (< 0 = uncapped), and a soft-overage amount about to accrue, it returns
+// the portion that fits UNDER the cap — 0 once the cap is reached. The hard cap
+// is a bound the soft meters cannot silently cross.
+func ClampOverageToCap(spentCents, capCents, overageCents int64) int64 {
+	if capCents < 0 || overageCents <= 0 {
+		return maxInt64(overageCents, 0) // uncapped, or nothing to accrue
+	}
+	headroom := capCents - spentCents
+	if headroom <= 0 {
+		return 0 // at/over the cap: soft overage halts
+	}
+	if overageCents > headroom {
+		return headroom // the last slice up to the cap accrues; the rest halts
+	}
+	return overageCents
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// QuotaWarning is the 80% notification payload (QA scenario 2): the meter, its
+// usage vs allowance, the percent consumed, and the overage unit price so the
+// math is shown up front ("keeps working and bills — warned at 80% with the
+// math"), never discovered on the invoice.
+type QuotaWarning struct {
+	Meter          string
+	Used           int64
+	Allowance      int64
+	PercentUsed    int   // 0..100+
+	OverageRate    int64 // cents per unit beyond the allowance
+	RemainingUnits int64 // allowance - used (0 if over)
+}
+
+// WarnMessage returns the 80% warning for a meter, and whether it should fire.
+// It fires at >= 80% of a finite allowance (unlimited never warns). The payload
+// carries the overage unit price — the "math" the banner/bell/email shows.
+func WarnMessage(meter string, allowance, used, overageRateCents int64) (QuotaWarning, bool) {
+	if !ShouldWarn(allowance, used) {
+		return QuotaWarning{}, false
+	}
+	pct := 100
+	if allowance > 0 {
+		pct = int((used * 100) / allowance)
+	}
+	remaining := allowance - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	return QuotaWarning{
+		Meter: meter, Used: used, Allowance: allowance, PercentUsed: pct,
+		OverageRate: overageRateCents, RemainingUnits: remaining,
+	}, true
+}
