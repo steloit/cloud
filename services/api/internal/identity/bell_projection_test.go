@@ -294,14 +294,19 @@ func TestConcurrentProcessBellFansExactlyOnce(t *testing.T) {
 type failingNthStore struct {
 	notify.Store
 	mu     *sync.Mutex
-	n      *int
+	n      *int // inserts within THIS transaction
 	failOn int
+	fired  *int
+	done   *bool // fire once across the batch
 }
 
 func (f *failingNthStore) InsertNotification(ctx context.Context, arg store.InsertNotificationParams) (store.Notification, error) {
 	f.mu.Lock()
 	*f.n++
-	hit := *f.n == f.failOn
+	hit := !*f.done && *f.n == f.failOn
+	if hit {
+		*f.done, *f.fired = true, *f.n
+	}
 	f.mu.Unlock()
 	if hit {
 		return store.Notification{}, fmt.Errorf("injected insert failure")
@@ -310,20 +315,31 @@ func (f *failingNthStore) InsertNotification(ctx context.Context, arg store.Inse
 }
 
 // failingTxer wraps a real Txer, substituting the failing store.
+// failingTxer counts inserts WITHIN each transaction and fires once per batch.
+//
+// Two things this must get right, both learned the hard way:
+//   - The counter is per-transaction, not batch-wide. A batch-wide count cannot
+//     express "the failure landed after a successful insert", because the
+//     sibling event's inserts inflate it and the vacuity guard can never fire.
+//   - Arming cannot key off transaction ORDER. Creating the org appends its own
+//     spine events, which sort earlier and get their own (insert-free)
+//     transactions — so "arm tx #1" arms a setup event and never reaches the
+//     deploy. Arm on the first transaction that actually inserts.
 type failingTxer struct {
-	inner  notify.Txer
-	failOn int
-	armed  bool
-	count  *int
-	mu     sync.Mutex
+	inner   notify.Txer
+	failOn  int
+	mu      sync.Mutex
+	done    bool
+	firedAt int // insert index within the failing tx; 0 = never fired
 }
 
 func (f *failingTxer) WithTx(ctx context.Context, fn func(notify.Store) error) error {
+	n := 0 // per-transaction
 	return f.inner.WithTx(ctx, func(s notify.Store) error {
-		if !f.armed {
-			return fn(s)
-		}
-		return fn(&failingNthStore{Store: s, failOn: f.failOn, n: f.count, mu: &f.mu})
+		return fn(&failingNthStore{
+			Store: s, failOn: f.failOn, n: &n,
+			fired: &f.firedAt, done: &f.done, mu: &f.mu,
+		})
 	})
 }
 
@@ -345,16 +361,18 @@ func TestPartialFanOutIsRetriedNotSwallowed(t *testing.T) {
 	b.appendEvent(t, "evt_partial2", "deploy.created", b.depID)
 
 	// Fail the 2nd insert of 3 → that event's tx must unwind, the sibling must not.
-	shared := 0
-	ft := &failingTxer{inner: notify.NewPoolTxer(b.pool), failOn: 2, armed: true, count: &shared}
+	ft := &failingTxer{inner: notify.NewPoolTxer(b.pool), failOn: 2}
 	broken := notify.NewRouter(b.q, b.kek).WithTxer(ft)
 	// The sibling still projects, so exactly one of the two succeeds.
 	if n, _ := broken.ProcessBell(ctx); n != 1 {
 		t.Fatalf("batch reported %d projected, want 1 (sibling ok, failing event rolled back)", n)
 	}
-	if shared < 2 {
-		t.Fatalf("injected failure landed after only %d inserts — it must fire AFTER a "+
-			"successful one, or this proves nothing about partial rollback", shared)
+	// Vacuity guard, and it must actually be able to fire: with failOn=1 nothing
+	// would have succeeded, so there would be no partial state to roll back and
+	// this test would prove nothing. Flip failOn to 1 to confirm this trips.
+	if ft.firedAt < 2 {
+		t.Fatalf("injected failure fired at insert %d WITHIN its transaction — it must fire "+
+			"AFTER a successful one, or partial rollback is not being exercised", ft.firedAt)
 	}
 	if !b.scannedHas(t, "evt_partial2") {
 		t.Fatal("sibling event in the same batch was rolled back too — batch isolation broken")
@@ -505,9 +523,11 @@ func TestUnrenderableWorthyEventIsSilentAndFlagged(t *testing.T) {
 			actor:   "dep_does_not_exist",
 		},
 	}
+	ran := 0
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _ := newBellWorld(t, "unrend-"+tc.eventID+"@example.com", tc.slug)
+			ran++
 			ctx := context.Background()
 			tc.arrange(t, b)
 
@@ -535,6 +555,12 @@ func TestUnrenderableWorthyEventIsSilentAndFlagged(t *testing.T) {
 					"indistinguishable from an uninteresting event and can never be re-projected")
 			}
 		})
+	}
+	// Without this the parent reports `--- PASS` even when every subtest skipped
+	// for want of a container runtime — and the verify: block's PASS grep would
+	// be satisfied vacuously (Trap T9, one level up).
+	if ran == 0 {
+		t.Fatal("every subtest skipped — this reported PASS without asserting anything")
 	}
 }
 

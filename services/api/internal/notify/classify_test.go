@@ -1,10 +1,13 @@
 package notify
 
 import (
+	"context"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
 
 func TestClassify(t *testing.T) {
@@ -156,5 +159,54 @@ func TestClassifyTitlesMatchFrameSource(t *testing.T) {
 			t.Fatalf("negative control %q found inside the N1/N2 region — the region is too wide, "+
 				"so fragment matches prove nothing", outside)
 		}
+	}
+}
+
+// fakeRenderStore serves one query; every other Store method is nil and would
+// panic if called, which is the point — this pins the renderer, nothing else.
+type fakeRenderStore struct {
+	Store
+	row store.GetDeployNotificationContextRow
+	err error
+}
+
+func (f fakeRenderStore) GetDeployNotificationContext(context.Context, store.GetDeployNotificationContextParams) (store.GetDeployNotificationContextRow, error) {
+	return f.row, f.err
+}
+
+// TestRenderDeployCreatedIsFrameVerbatim pins the RENDER, not just the template.
+//
+// TestClassifyTitleIsGolden pins the format string, but it cannot see the
+// Sprintf argument order — swapping row.EnvName and row.ActorName leaves the
+// const untouched and passes every other pure test. Without this, that mistake
+// is caught only by a container-gated integration test.
+func TestRenderDeployCreatedIsFrameVerbatim(t *testing.T) {
+	ok := store.GetDeployNotificationContextRow{Number: 142, EnvName: "production", ActorName: "priya"}
+
+	title, rendered, err := renderDeployCreated(context.Background(), fakeRenderStore{row: ok}, store.Event{})
+	if err != nil || !rendered {
+		t.Fatalf("render = %v, %v; want rendered, nil", rendered, err)
+	}
+	if want := "Deploy #142 to production by priya"; title != want {
+		t.Fatalf("title = %q, want %q — N1 verbatim, and the argument ORDER is part of it", title, want)
+	}
+
+	// Never invent copy: a missing name or env yields no title at all.
+	for _, tc := range []struct {
+		name string
+		row  store.GetDeployNotificationContextRow
+	}{
+		{"no actor name", store.GetDeployNotificationContextRow{Number: 1, EnvName: "production"}},
+		{"no env name", store.GetDeployNotificationContextRow{Number: 1, ActorName: "priya"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			title, rendered, err := renderDeployCreated(context.Background(), fakeRenderStore{row: tc.row}, store.Event{})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if rendered || title != "" {
+				t.Fatalf("rendered %q from incomplete data — no copy may be substituted", title)
+			}
+		})
 	}
 }
