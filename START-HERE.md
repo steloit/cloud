@@ -86,9 +86,9 @@ squash residue.
 
 ## 2. Current State
 
-**Roadmap: 86 `done` / 182 work items** — plus 88 `stub`, 5 `blocked`,
-2 `in-progress`, **1 `ready`** (`O6`). Milestone: **E11 Billing flagship
-complete**, E10 Observe in progress. Re-derive with the §1 commands rather than
+**Roadmap: 86 `done` / 183 work items** — plus 87 `stub`, 6 `blocked`,
+2 `in-progress`, **2 `ready`** (`O6`, `US-10.3`). Milestone: **E11 Billing
+flagship complete**, E10 Observe in progress. Re-derive with the §1 commands rather than
 trusting this line; `validate.mjs` checks the *graph* (deps, caps, frontmatter)
 and prints ready-unblocked, **not** a done total.
 
@@ -106,8 +106,9 @@ At the last update the live locks were `task/O2` (cost guardrails) and
 is real work: inspect the branch, then either finish and PR it or deliberately
 park it (reset `status:`, note why). **Never silently restart a locked task.**
 
-**5 `blocked` tasks** (`US-3.3`–`US-3.6`, `CK-M3`, all E3 provisioning) await the
-runtime plane. Leave them blocked.
+**6 `blocked` tasks.** `US-3.3`–`US-3.6` + `CK-M3` (E3 provisioning) await the
+runtime plane. `US-10.6` is different: it waits on a **founder frame amendment**
+(§8), not on engineering. Leave all six blocked.
 
 **Built — the control plane is broadly complete:** identity/auth/orgs/RBAC ·
 projects/envs/services/bindings/deployments · estimates + the gate · metering +
@@ -128,22 +129,15 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
 
 ## 3. Next Work (execution order)
 
-### 1. `US-10.3` — Bell projection · `tasks/e10-observability/US-10.3.md` · **`ready`**
-- **Enriched 2026-07-20** — implement it next; the task file carries the design,
-  edge cases and deferrals. Two corrections it made to this section:
-- **The spec forbids an unread-count endpoint** — `Design-Spec.md:410` makes the
-  badge **derived** ("the bell carries the red dot as the single unread source").
-  The AC therefore means the bell must project **notification-worthy** spine
-  events, not raw ones (`spec-change-proposals.md:225`). A served count would be
-  a second truth that can drift.
-- **`testWebhook` was never unimplemented** (this section previously said so): it
-  ships as a pre-strict mux shim (`webhooks_http.go:94`), outside
-  `include-operation-ids` per Trap T1. Only `deleteWebhook` is genuinely absent
-  → §8 proposal, deferred.
-- **Design:** bell = spine projection over a `bell_scanned` **terminal ledger**
-  (never an `at`-based cursor — `events.at` is tx-*start* time, so a concurrent
-  long tx commits below any watermark and is skipped forever). Scope is the
-  server half only; four concerns were split out on review. See the task file.
+### 1. `US-10.3` — Bell projection · `tasks/e10-observability/US-10.3.md` · **`ready` → IMPLEMENT**
+- Enrichment merged (#284, 2026-07-20). The task file carries the design, edge
+  cases, ACs and deferrals — read it, not this entry.
+- **Design in one line:** bell = spine projection over a `bell_scanned`
+  **terminal ledger**. Never an `at`-based cursor: `events.at` is tx-*start*
+  time, so a long tx committing late is skipped forever. Both rejected designs
+  are in `contexts/events-spine.md`'s mistake bank — read them before "improving"
+  the scan.
+- Server half only; five concerns were split out across four review rounds.
 
 ### 2. `US-10.4` — 12 transactional emails · `tasks/e10-observability/US-10.4.md` · **`stub` → enrich first**
 - **Objective:** one skeleton; subject grammar `[org/project] <fact>`; one event →
@@ -363,6 +357,7 @@ directly and check it before assuming any provider, id, price, or secret; a
 
 | Item | Status | Why blocked | Implementation impact |
 |---|---|---|---|
+| **P6/N2 frame amendment for the ruled taxonomy** | Open — **founder action**, not engineering | The founder ruled seven notification kinds on 2026-07-20 (Option B: `billing`/`security` are first-class, not folded into `alert`), but `00-sources` P6's routing matrix and N2's type chips still list six. `docs/product/00-sources/**` changes by human decision only (hook-enforced), so no agent can land it. | `US-10.6` (pin `NotificationList.kind` to the seven-value enum + audit legacy rows) stays `blocked`. `notify.Classify` (US-10.3) emits only kinds that have a frame row to source a verbatim title from, so billing/security bells stay silent until the frames land — correct behavior, not a gap. **No eighth kind may be invented** (§5 rule 10). |
 | **Dashboard share-grant model** | Open | §2c names "share grants" with **no shape**; no restricted-share member model exists (`restricted` = owner-only). Designing it is a product decision. | Dashboards ship personal/org/restricted only; `restricted` behaves as owner-only; no share-with-specific-people surface. |
 | **Prebuilt-dashboard topology generation** | Open | "Generated views, always current" needs service topology + metrics (data plane). | Prebuilt dashboards are read-only + forkable rows; generation unimplemented; rows must be seeded. |
 | **`architecture.md` version drift** | Open finding (not founder-gated) | `docs/architecture.md:3` and `CLAUDE.md` both say **v1.2**, but ADR-042 (`decisions.md:81`) records the substrate delta as **v1.3**. The version bump was decided but never applied to the file's status line. | Cite the file as-is (v1.2) and treat ADR-042 as the authority for the substrate delta. Fixing the status line is a doc-only PR; per the hook, `decisions.md` itself is human-only. Recorded rather than silently corrected (§5 rule 5). |
@@ -504,6 +499,11 @@ regeneration drift, console lint/typecheck/test/build, SDK, canon), **`go`**
 
 ## 13. Milestone Log (newest first — keep 4, drop the oldest)
 
+- **2026-07-20 — Notification taxonomy ruled + first enrichment merged.** Founder
+  ruled **seven** kinds (`alert proposal approval deploy lifecycle billing
+  security`) — `billing`/`security` are first-class, not folded into `alert`;
+  no eighth kind without a new ruling. `US-10.3` enriched to `ready` (#284, four
+  review rounds); `US-10.6` filed, blocked on the frame amendment.
 - **2026-07-20 — E11 Billing flagship complete.** Cancel≠Delete,
   plans-gate-capabilities-not-safety, hard spend cap as an enforced 402 bound,
   invoice==estimate grammar, soft/hard quotas + 80% warning — all with
@@ -514,8 +514,6 @@ regeneration drift, console lint/typecheck/test/build, SDK, canon), **`go`**
 - **2026-07-19 — Review pipeline corrected.** ADR-0008 fixes reviewer identity to
   the repo-native `reviewer`/`qa` agents; external/plugin reviewers (incl.
   `kernel:*`) forbidden; `O6` filed for agent registration.
-- **2026-07-19 — P1 GCP foundation.** `steloit-dev`, Terraform state, Workload
-  Identity Federation, zero long-lived credentials.
 
 **Why the review pipeline exists (durable evidence):** on this codebase it has
 caught, pre-merge — secret-smuggling template shapes; a scheduled downgrade that
