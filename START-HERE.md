@@ -128,22 +128,22 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
 
 ## 3. Next Work (execution order)
 
-### 1. `US-10.3` — Notifications family · `tasks/e10-observability/US-10.3.md` · **`ready`**
-- **Enriched 2026-07-20** — implement it next; the task file carries the full
-  design, edge cases and deferrals. Two corrections it made to this section:
-- **The spec forbids an unread-count endpoint.** The design spec makes the badge
-  **derived** from `?unread=true` (`Design-Spec.md:410` — "the bell carries the
-  red dot as the single unread source"). So the AC means the bell must project
-  **notification-worthy** spine events, not raw ones — the live defect recorded at
-  `spec-change-proposals.md:225`, which names this slice as its owner. Serving a
-  count would create a second truth that can drift.
-- **`testWebhook` was never unimplemented** (this section previously said it was):
-  it ships as a pre-strict mux shim (`webhooks_http.go:94`), deliberately outside
-  `include-operation-ids` because of Trap T1. Only `deleteWebhook` is genuinely
-  absent from the contract → §8 proposal, deferred (§5 rule 12).
-- **Design:** bell = spine projection reusing `ListPendingWebhookEvents`' scan
-  shape; `notify.Classify` maps a spine action → frame-verbatim title, defaulting
-  to silence. Frames supply every title, so nothing is invented.
+### 1. `US-10.3` — Bell projection · `tasks/e10-observability/US-10.3.md` · **`ready`**
+- **Enriched 2026-07-20** — implement it next; the task file carries the design,
+  edge cases and deferrals. Two corrections it made to this section:
+- **The spec forbids an unread-count endpoint** — `Design-Spec.md:410` makes the
+  badge **derived** ("the bell carries the red dot as the single unread source").
+  The AC therefore means the bell must project **notification-worthy** spine
+  events, not raw ones (`spec-change-proposals.md:225`). A served count would be
+  a second truth that can drift.
+- **`testWebhook` was never unimplemented** (this section previously said so): it
+  ships as a pre-strict mux shim (`webhooks_http.go:94`), outside
+  `include-operation-ids` per Trap T1. Only `deleteWebhook` is genuinely absent
+  → §8 proposal, deferred.
+- **Design:** bell = spine projection over a `bell_scanned` **terminal ledger**
+  (never an `at`-based cursor — `events.at` is tx-*start* time, so a concurrent
+  long tx commits below any watermark and is skipped forever). Scope is the
+  server half only; four concerns were split out on review. See the task file.
 
 ### 2. `US-10.4` — 12 transactional emails · `tasks/e10-observability/US-10.4.md` · **`stub` → enrich first**
 - **Objective:** one skeleton; subject grammar `[org/project] <fact>`; one event →
@@ -332,13 +332,17 @@ fail-fast remain unverified — see §3 before picking it up.
   call site. Passing a `perm` variable makes the permission invisible → put the
   literal at the call site and register it in `enforcedPermissions`
   (`services/api/internal/identity/endpoint_permission_coverage_test.go`).
-- **T9 — `go test -run` exits 0 when nothing matches.** It prints
-  `ok … [no tests to run]` and **succeeds**, so a `verify:` entry naming a
-  not-yet-written test passes green *before* the work — it proves nothing and can
-  never go red, defeating §4's evidence requirement. Guard it by piping `-v`
-  through `grep -q '^--- PASS. TestX'`. **24 `done` tasks carry the unguarded
-  form**; every test they name does exist (latent weakness, not a live defect —
-  audited 2026-07-20), but write all new `verify:` entries guarded.
+- **T9 — `go test -run` exits 0 when nothing matches**, printing
+  `ok … [no tests to run]`, so a `verify:` entry naming a not-yet-written test
+  passes green *before* the work. **24 `done` tasks carry the unguarded form**
+  (every test they name does exist — audited 2026-07-20, latent not live). Guard
+  new entries by asserting an explicit PASS line **and** the exit code:
+  `go test -v >"$o" 2>&1; rc=$?; grep -q '^--- PASS: TestX (' "$o" && [ $rc -eq 0 ]`.
+  Three sub-traps, each of which cost a review round here: a bare `… | grep -q`
+  pipeline returns *grep's* status and masks a post-PASS panic; the pattern must
+  end at `(` because `-v` prints `--- PASS: TestX (0.00s)`, so a `$` anchor is
+  red on a **passing** test; and **prove the green state as well as the red** — a
+  guard that never matches passes a red-state probe perfectly.
 - **T8 — non-members get 404, not 403, on id-addressed reads.** Never leak
   resource existence. (The billing/subscription surface is the deliberate
   exception: `requireOrg` denies uniformly with 403 there.)
