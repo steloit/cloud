@@ -128,25 +128,22 @@ provisioner driver) · observability data plane (Loki/OTel — `T1.5`) · data p
 
 ## 3. Next Work (execution order)
 
-### 1. `US-10.3` — Notifications family · `tasks/e10-observability/US-10.3.md` · **`stub` → enrich first**
-- **Objective:** close the remaining notification-family surface.
-- **Deps:** `S4` ✅ `T10.3` ✅ — dependency-clear; only the stub gate applies.
-- **Already shipped (T10.3):** `listNotifications`, `markNotificationsRead`,
-  `get/updateNotificationPrefs`, `listWebhooks`, `createWebhook`.
-- **Verified gaps:** (a) `testWebhook` **is** in `openapi.yaml` (line ~980) but is
-  **absent from `include-operation-ids`** → unimplemented. Its path
-  `/webhooks/{wbh}:test` hits **Trap T1**, so reshape it to a sub-path.
-  `notify.Router` already emits the synthetic `webhook.test` event
-  (`notify.go:202`). (b) **`deleteWebhook` does not exist in the contract at
-  all.** (c) AC: unread count consistent with the events spine.
-  Note (a) and (b) take **different** routes through T2's spec-change rule.
-- **Scope:** ship (a) plus the unread-count invariant; file (b) as a §8 ledger
-  proposal in the same PR and defer it to a follow-up task. **Do not hold
-  US-10.3 waiting on (b)** — that is §5 rule 12, made explicit here because it
-  sits on the critical path.
-- **Deliverables:** endpoint(s) + a self-verifying unread-count invariant +
-  webhook delivery verification — against an `httptest` server via the
-  `notify.Router` post seam, **never** a real network call (§4).
+### 1. `US-10.3` — Notifications family · `tasks/e10-observability/US-10.3.md` · **`ready`**
+- **Enriched 2026-07-20** — implement it next; the task file carries the full
+  design, edge cases and deferrals. Two corrections it made to this section:
+- **The spec forbids an unread-count endpoint.** The design spec makes the badge
+  **derived** from `?unread=true` (`Design-Spec.md:410` — "the bell carries the
+  red dot as the single unread source"). So the AC means the bell must project
+  **notification-worthy** spine events, not raw ones — the live defect recorded at
+  `spec-change-proposals.md:225`, which names this slice as its owner. Serving a
+  count would create a second truth that can drift.
+- **`testWebhook` was never unimplemented** (this section previously said it was):
+  it ships as a pre-strict mux shim (`webhooks_http.go:95`), deliberately outside
+  `include-operation-ids` because of Trap T1. Only `deleteWebhook` is genuinely
+  absent from the contract → §8 proposal, deferred (§5 rule 12).
+- **Design:** bell = spine projection reusing `ListPendingWebhookEvents`' scan
+  shape; `notify.Classify` maps a spine action → frame-verbatim title, defaulting
+  to silence. Frames supply every title, so nothing is invented.
 
 ### 2. `US-10.4` — 12 transactional emails · `tasks/e10-observability/US-10.4.md` · **`stub` → enrich first**
 - **Objective:** one skeleton; subject grammar `[org/project] <fact>`; one event →
@@ -335,6 +332,13 @@ fail-fast remain unverified — see §3 before picking it up.
   call site. Passing a `perm` variable makes the permission invisible → put the
   literal at the call site and register it in `enforcedPermissions`
   (`services/api/internal/identity/endpoint_permission_coverage_test.go`).
+- **T9 — `go test -run` exits 0 when nothing matches.** It prints
+  `ok … [no tests to run]` and **succeeds**, so a `verify:` entry naming a
+  not-yet-written test passes green *before* the work — it proves nothing and can
+  never go red, defeating §4's evidence requirement. Guard it by piping `-v`
+  through `grep -q '^--- PASS. TestX'`. **24 `done` tasks carry the unguarded
+  form**; every test they name does exist (latent weakness, not a live defect —
+  audited 2026-07-20), but write all new `verify:` entries guarded.
 - **T8 — non-members get 404, not 403, on id-addressed reads.** Never leak
   resource existence. (The billing/subscription surface is the deliberate
   exception: `requireOrg` denies uniformly with 403 there.)
