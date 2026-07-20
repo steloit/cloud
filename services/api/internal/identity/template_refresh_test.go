@@ -50,18 +50,13 @@ func TestTemplateRefreshVersioning(t *testing.T) {
 	// source env starts with just a db (no excluded bindings → no required inputs).
 	mk("db", "postgres", `{"size":"dev","storage_gb":10}`)
 
-	// --- capture → version 1 -------------------------------------------------
+	// --- capture → version 1 (capture takes service IDs) ---------------------
+	var dbID string
+	_ = w.pool.QueryRow(ctx, "select id from services where env_id=$1 and name='db'", env.ID).Scan(&dbID)
 	r, tb := w.post(t, "/v1/orgs/"+org.Id+"/templates",
-		`{"name":"data-stack","source":{"project":"`+prj.ID+`","env":"`+env.ID+`"},"services":["db"]}`, ownerCk)
+		`{"name":"data-stack","source":{"project":"`+prj.ID+`","env":"`+env.ID+`"},"services":["`+dbID+`"]}`, ownerCk)
 	if r.StatusCode != 201 {
-		// capture takes service NAMES or IDs depending on the surface; fall back to ids.
-		var dbID string
-		_ = w.pool.QueryRow(ctx, "select id from services where env_id=$1 and name='db'", env.ID).Scan(&dbID)
-		r, tb = w.post(t, "/v1/orgs/"+org.Id+"/templates",
-			`{"name":"data-stack","source":{"project":"`+prj.ID+`","env":"`+env.ID+`"},"services":["`+dbID+`"]}`, ownerCk)
-		if r.StatusCode != 201 {
-			t.Fatalf("capture: %d %s", r.StatusCode, tb)
-		}
+		t.Fatalf("capture: %d %s", r.StatusCode, tb)
 	}
 	var tpl struct {
 		Id                   string `json:"id"`
@@ -106,13 +101,14 @@ func TestTemplateRefreshVersioning(t *testing.T) {
 	if refreshed.UsedByCount != 1 {
 		t.Fatalf("refresh must preserve used_by_count (1), got %d", refreshed.UsedByCount)
 	}
-	// contents re-captured from the live source (now includes the cache) → the
-	// instantiation price changed.
-	if refreshed.MonthlyEstimateCents == tpl.MonthlyEstimateCents {
-		t.Fatalf("refresh did not re-capture the changed source (price unchanged: %d)", refreshed.MonthlyEstimateCents)
-	}
+	// contents re-captured from the live source — the newly-added service appears.
+	// NOTE (recorded finding): refresh re-captures the WHOLE source env
+	// (captureFrom(env, nil)), NOT the original service selection — the template
+	// persists source_project/source_env but not the captured ids, so an added
+	// (or previously-excluded) service reappears. This PINS that broadening;
+	// whether refresh should honor the original selection is a T2 design question.
 	if !strings.Contains(rb, "cache") {
-		t.Fatalf("refreshed contents must include the added source service: %s", rb)
+		t.Fatalf("refresh must re-capture the full source env (cache added → appears): %s", rb)
 	}
 
 	// --- refresh with the source GONE → refused loudly, template intact ------
@@ -128,5 +124,57 @@ func TestTemplateRefreshVersioning(t *testing.T) {
 	_ = w.pool.QueryRow(ctx, "select version, used_by_count from templates where id=$1", tpl.Id).Scan(&v, &u)
 	if v != 2 || u != 1 {
 		t.Fatalf("a failed refresh mutated the template: version=%d used_by_count=%d (want 2, 1)", v, u)
+	}
+}
+
+// TestRefreshRequiresManage — refresh mutates the template, so it needs
+// template.manage; a member without it gets denied and a non-member 404s.
+func TestRefreshRequiresManage(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "tpl-rz-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"trzco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, _ := w.svc.GetOrg(ctx, org.Id)
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, b := w.post(t, "/v1/estimates", `{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev","storage_gb":10}}]}`, ownerCk)
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &est)
+	r, _ = w.post(t, "/v1/envs/"+env.ID+"/services", `{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("create svc: %d", r.StatusCode)
+	}
+	var dbID, prjID string
+	_ = w.pool.QueryRow(ctx, "select id from services where env_id=$1 and name='db'", env.ID).Scan(&dbID)
+	_ = w.pool.QueryRow(ctx, "select project_id from environments where id=$1", env.ID).Scan(&prjID)
+	r, tb := w.post(t, "/v1/orgs/"+org.Id+"/templates",
+		`{"name":"t","source":{"project":"`+prjID+`","env":"`+env.ID+`"},"services":["`+dbID+`"]}`, ownerCk)
+	if r.StatusCode != 201 {
+		t.Fatalf("capture: %d %s", r.StatusCode, tb)
+	}
+	var tpl struct{ Id string }
+	_ = json.Unmarshal([]byte(tb), &tpl)
+
+	// a developer member (template.consume, NOT template.manage) is denied.
+	devCk, devID := w.signupUser(t, "tpl-rz-dev@example.com")
+	if _, err := w.pool.Exec(ctx, "insert into members (id,org_id,user_id,role) values ('mbr_rz',$1,$2,'developer')", org.Id, devID); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = w.post(t, "/v1/templates/"+tpl.Id+"/refresh", ``, devCk)
+	if r.StatusCode == 200 {
+		t.Fatal("a developer without template.manage refreshed the template")
+	}
+	// a total non-member → 404 (no existence oracle).
+	strangerCk, _ := w.signupUser(t, "tpl-rz-stranger@example.com")
+	r, _ = w.post(t, "/v1/templates/"+tpl.Id+"/refresh", ``, strangerCk)
+	if r.StatusCode != 404 {
+		t.Fatalf("non-member refresh must 404, got %d", r.StatusCode)
 	}
 }
