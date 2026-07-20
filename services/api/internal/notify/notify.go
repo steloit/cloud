@@ -99,6 +99,10 @@ type NotifyInput struct {
 	Title   string
 	Body    string
 	Link    string
+	// Urgent marks a security/paging-class notification: quiet hours NEVER gate
+	// it (US-10.2 — quiet hours affect routing only; safety/paging is never
+	// deferred). The bell + spine recording are unaffected either way.
+	Urgent bool
 }
 
 // Notify fans a projection to every org member's bell + email, each gated by
@@ -119,7 +123,10 @@ func (r *Router) Notify(ctx context.Context, in NotifyInput) error {
 				slog.Error("notify: insert bell", "user", m.UserID, "err", err)
 			}
 		}
-		if p.email && r.email != nil && !p.quietNow(r.now()) {
+		// email routes unless quiet hours suppress it — but an Urgent
+		// (security/paging) notification bypasses quiet hours entirely (never
+		// gated). Recording (the bell above) already happened regardless.
+		if p.email && r.email != nil && (in.Urgent || !p.quietNow(r.now())) {
 			body := in.Body
 			if in.Link != "" {
 				body += "\n\n" + in.Link
