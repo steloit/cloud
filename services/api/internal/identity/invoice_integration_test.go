@@ -82,7 +82,8 @@ func TestInvoiceGenerator(t *testing.T) {
 		if !strings.HasPrefix(l.UsageRef, "plan:") && !strings.HasPrefix(l.UsageRef, "meter:") {
 			t.Fatalf("line %q violates the §74 grammar (not plan:* or meter:*): usage_ref=%q", l.Description, l.UsageRef)
 		}
-		// integer cents end-to-end (ADR-025): a line is whole cents, never a float.
+		// non-negative line (int64 is already integer per ADR-025; a negative meter
+		// rate would be a pricing bug, never a valid line).
 		if l.Cents < 0 {
 			t.Fatalf("negative line cents: %+v", l)
 		}

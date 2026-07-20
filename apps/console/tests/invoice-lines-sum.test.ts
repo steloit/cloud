@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { invoices } from "../src/mocks/world";
 import type { Invoice } from "../src/lib/api";
+import { invoices } from "../src/mocks/world";
 
 /**
  * US-11.6 — the invoice-layer arithmetic invariant (ADR-025, taxonomy §74):
@@ -20,8 +20,9 @@ import type { Invoice } from "../src/lib/api";
 
 const B3_PENDING_S5 = "inv_2026_06";
 
-// the reusable invariant, factored so its RED state is directly testable.
-export function invoiceLinesSum(inv: Invoice): { ok: boolean; sum: number } {
+// the invariant, factored so its RED state is directly testable (local — biome
+// forbids exports from test files).
+function invoiceLinesSum(inv: Invoice): { ok: boolean; sum: number } {
   const lines = inv.lines ?? [];
   if (lines.length === 0) return { ok: true, sum: inv.total_cents };
   let sum = 0;
@@ -36,15 +37,24 @@ export function invoiceLinesSum(inv: Invoice): { ok: boolean; sum: number } {
 describe("invoice lines sum to subtotal (ADR-025 / §74)", () => {
   it("has a proven RED state (a malformed invoice fails)", () => {
     const good: Invoice = {
-      id: "x", period: "p", status: "paid", total_cents: 300,
+      id: "x",
+      period: "p",
+      status: "paid",
+      total_cents: 300,
       lines: [{ cents: 100 }, { cents: 200 }],
     };
     const bad: Invoice = {
-      id: "y", period: "p", status: "paid", total_cents: 999,
+      id: "y",
+      period: "p",
+      status: "paid",
+      total_cents: 999,
       lines: [{ cents: 100 }, { cents: 200 }],
     };
     const floaty: Invoice = {
-      id: "z", period: "p", status: "paid", total_cents: 3,
+      id: "z",
+      period: "p",
+      status: "paid",
+      total_cents: 3,
       lines: [{ cents: 1.5 }, { cents: 1.5 }],
     };
     expect(invoiceLinesSum(good).ok).toBe(true);
@@ -62,11 +72,12 @@ describe("invoice lines sum to subtotal (ADR-025 / §74)", () => {
       }
       if ((inv.lines?.length ?? 0) > 0) checked += 1;
     }
-    // the B3 defect is the only lined mock invoice today; when its S5 fix lands
-    // (or the real API supplies invoices), this asserts they are grammatical.
-    // Guard against silent inertness of the mock-scan (the red-state test above
-    // is what proves the detector works regardless).
-    expect(checked).toBeGreaterThanOrEqual(0);
+    // HONESTY (US-11.1 lesson): B3 is the only lined mock invoice today, so with
+    // it deferred the scan currently checks `checked === 0`. The scan is NOT the
+    // load-bearing coverage — the red-state test above proves the detector fails
+    // a mis-summing invoice; this scan BINDS the day a new lined invoice (real
+    // API or the S5-fixed B3) appears — it would fail unless grammatical.
+    expect(checked).toBe(0); // flips to >=1 when B3 is fixed or real invoices land
   });
 
   it("the B3 defect is still present and quantified (remove this when S5 rules)", () => {
