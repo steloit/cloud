@@ -104,15 +104,30 @@ LIMIT 100;
 -- Ordered by (at, id) because ids.New is random hex and `at` collides freely
 -- under batch insert; the pair is total. Served by events_at_id_idx.
 --
--- COST, stated honestly: this is O(total spine), not O(unscanned). With no floor
--- the plan walks events in (at, id) order from the OLDEST row and probes
--- bell_scanned for each, discarding already-scanned rows until it can emit 100.
--- Since nearly every row is scanned, that work grows without bound on the append
--- path's own table. Accepted for now because correctness comes first — an `at`
--- floor silently drops late-committing transactions — but it is a real growth
--- problem, filed in the ledger. The durable fix is a monotonic min-unscanned
--- cursor or pruning scanned rows behind a watermark; both derive from the LEDGER
--- rather than from time, so neither reintroduces the dropped-transaction bug.
+-- COST — MEASURED, not reasoned. Two earlier descriptions of this plan (an
+-- index-probe walk from the oldest row) were written from inspection and were
+-- both WRONG. EXPLAIN (ANALYZE) at 200k spine rows in steady state:
+--
+--   Parallel Hash Anti Join
+--     -> Parallel Seq Scan on events
+--     -> Parallel Hash -> Parallel Seq Scan on bell_scanned
+--
+-- events_at_id_idx is NOT used. There is no early exit: LIMIT sits above a Sort
+-- above a COMPLETED anti-join, so the whole ledger is hashed every tick and the
+-- first scaling wall is work_mem (the hash spills to disk), not CPU. Measured
+-- latency: 10k rows 3.8ms · 110k 31ms · 610k 514ms — roughly linear, reaching
+-- the 10s tick period near 10M events.
+--
+-- Consequence to settle BEFORE this ships: the migration takes a SHARE lock on
+-- `events` — blocking every mutating API call — to build an index this query
+-- never uses, then pays that index's write amplification on the platform's
+-- hottest append path forever. Either the query is reshaped so the index earns
+-- its lock, or the index does not ship.
+--
+-- The floor-less shape is still correct and must stay: an `at` bound silently
+-- drops transactions that open before a tick and commit after it. The durable
+-- fix is a ledger-derived min-unscanned cursor plus pruning behind it, which
+-- bounds the scan without reintroducing that bug.
 SELECT e.*
 FROM events e
 LEFT JOIN bell_scanned bs ON bs.event_id = e.id
