@@ -49,3 +49,14 @@ one events table; `/orgs/{org}/audit` and `/envs/{env}/events` are views over it
   the result idempotent. They are mutually exclusive — if the scan excludes handled events the
   conflict never fires — and a non-transactional per-member fan-out that crashes halfway leaves
   the event looking handled while most members were never notified (US-10.3 enrichment review).
+- Bounding a spine scan by `e.at >= <watermark>`. `events.at` defaults to `now()`, which in
+  Postgres is **transaction start** time — so a write tx that opens before a scan tick and commits
+  after it lands *below* the watermark and is skipped **permanently and silently**. Timestamps
+  order events; they never prove one was handled. Use a terminal ledger row keyed by `event_id`
+  (US-10.3 enrichment review; the webhook path's `e.at >= w.created_at` is safe only because it
+  bounds a *starting point*, never a resume point).
+- Assuming a spine consumer exists because its TABLE does. `email_deliveries` looks like an outbox,
+  but the mailer dispatcher scans *events by action* against a static template registry and nothing
+  reads that table's `pending` rows — enqueuing into it delivers nothing. Read the consumer's scan
+  predicate before treating any table as a queue (US-10.3 enrichment review, third recurrence of
+  this error class in one task: prior art must be read end-to-end, not pattern-matched).
