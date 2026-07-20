@@ -125,3 +125,19 @@ INSERT INTO bell_scanned (event_id)
 VALUES ($1)
 ON CONFLICT (event_id) DO NOTHING
 RETURNING event_id;
+
+-- name: GetDeployNotificationContext :one
+-- US-10.3: the presentation data N1's deploy title needs, resolved during
+-- projection (founder ruling 2026-07-20, Option A: render once, persist the
+-- rendered title — a notification is a historical fact, and a later rename must
+-- not rewrite it).
+--
+-- Local reads only, inside the fan-out tx. actor_name is COALESCEd to '' rather
+-- than substituted: an absent name makes the frame UNRENDERABLE, and the
+-- projection skips it instead of inventing copy.
+SELECT d.number,
+       env.name AS env_name,
+       COALESCE((SELECT u.name FROM users u WHERE u.id = @actor_id), '')::text AS actor_name
+FROM deployments d
+JOIN environments env ON env.id = d.env_id
+WHERE d.id = @deployment_id;

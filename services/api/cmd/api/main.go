@@ -226,8 +226,11 @@ func main() {
 	go subs.RunLifecycle(ctx, time.Hour)
 	// T10.3: the notification routing matrix. The webhook route runs off the
 	// spine via a durable outbox (signed, SSRF-guarded, bounded retry).
-	router := notify.NewRouter(queries, kek)
+	router := notify.NewRouter(queries, kek).WithTxer(notify.NewPoolTxer(pool))
 	go router.RunOutbox(ctx, 10*time.Second)
+	// US-10.3: the bell projection. Notification-worthy spine events fan onto
+	// per-user bell rows exactly once, tracked by the bell_scanned ledger.
+	go router.RunBell(ctx, 10*time.Second)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

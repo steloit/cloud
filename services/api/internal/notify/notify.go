@@ -27,6 +27,9 @@ type Store interface {
 	ListOrgMemberRecipients(ctx context.Context, orgID string) ([]store.ListOrgMemberRecipientsRow, error)
 	GetNotificationPrefs(ctx context.Context, userID string) (store.NotificationPref, error)
 	InsertNotification(ctx context.Context, arg store.InsertNotificationParams) (store.Notification, error)
+	ListPendingBellEvents(ctx context.Context) ([]store.Event, error)
+	ClaimBellEvent(ctx context.Context, eventID string) (string, error)
+	GetDeployNotificationContext(ctx context.Context, arg store.GetDeployNotificationContextParams) (store.GetDeployNotificationContextRow, error)
 	ListPendingWebhookEvents(ctx context.Context) ([]store.ListPendingWebhookEventsRow, error)
 	GetWebhook(ctx context.Context, id string) (store.Webhook, error)
 	ClaimWebhookDelivery(ctx context.Context, arg store.ClaimWebhookDeliveryParams) (string, error)
@@ -51,6 +54,7 @@ type Router struct {
 	http     *http.Client
 	now      func() time.Time
 	insecure bool // test-only: deliver to http/loopback targets
+	tx       Txer // US-10.3: transaction source for the bell projection
 }
 
 func NewRouter(q Store, kek secrets.KEK) *Router {
@@ -239,8 +243,15 @@ func (p prefs) quietNow(now time.Time) bool {
 // prefsFor loads a user's routing prefs; a missing row is the default
 // (bell + email on, no quiet hours) — never a route-suppression.
 func (r *Router) prefsFor(ctx context.Context, userID string) prefs {
+	return r.prefsForStore(ctx, r.q, userID)
+}
+
+// prefsForStore is prefsFor against an explicit Store, so the bell projection
+// reads prefs on its OWN transaction rather than the pool — one consistent
+// snapshot per fan-out instead of a mix of tx and non-tx reads.
+func (r *Router) prefsForStore(ctx context.Context, q Store, userID string) prefs {
 	def := prefs{inapp: true, email: true}
-	row, err := r.q.GetNotificationPrefs(ctx, userID)
+	row, err := q.GetNotificationPrefs(ctx, userID)
 	if err != nil {
 		if err != pgx.ErrNoRows {
 			slog.Error("notify: load prefs", "user", userID, "err", err)

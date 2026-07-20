@@ -109,6 +109,41 @@ func (q *Queries) CreateWebhook(ctx context.Context, arg CreateWebhookParams) (W
 	return i, err
 }
 
+const getDeployNotificationContext = `-- name: GetDeployNotificationContext :one
+SELECT d.number,
+       env.name AS env_name,
+       COALESCE((SELECT u.name FROM users u WHERE u.id = $1), '')::text AS actor_name
+FROM deployments d
+JOIN environments env ON env.id = d.env_id
+WHERE d.id = $2
+`
+
+type GetDeployNotificationContextParams struct {
+	ActorID      string
+	DeploymentID string
+}
+
+type GetDeployNotificationContextRow struct {
+	Number    int32
+	EnvName   string
+	ActorName string
+}
+
+// US-10.3: the presentation data N1's deploy title needs, resolved during
+// projection (founder ruling 2026-07-20, Option A: render once, persist the
+// rendered title — a notification is a historical fact, and a later rename must
+// not rewrite it).
+//
+// Local reads only, inside the fan-out tx. actor_name is COALESCEd to ” rather
+// than substituted: an absent name makes the frame UNRENDERABLE, and the
+// projection skips it instead of inventing copy.
+func (q *Queries) GetDeployNotificationContext(ctx context.Context, arg GetDeployNotificationContextParams) (GetDeployNotificationContextRow, error) {
+	row := q.db.QueryRow(ctx, getDeployNotificationContext, arg.ActorID, arg.DeploymentID)
+	var i GetDeployNotificationContextRow
+	err := row.Scan(&i.Number, &i.EnvName, &i.ActorName)
+	return i, err
+}
+
 const getNotificationPrefs = `-- name: GetNotificationPrefs :one
 SELECT user_id, channels, quiet_hours, updated_at FROM notification_prefs WHERE user_id = $1
 `
