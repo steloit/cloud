@@ -14,9 +14,11 @@ import (
 	"github.com/steloit/cloud/services/api/internal/quota"
 )
 
-// EmitQuotaWarning routes an 80% quota warning through the notify router.
-// Idempotency (one warning per meter per period) is the caller's concern (the
-// rollup hook) — this is the composition + routing.
+// EmitQuotaWarning routes an 80% quota warning through the notify router. The
+// warning is a DERIVED projection over metered usage that is already on the
+// spine (the rollup records the usage rows); it carries no new EventID because
+// no new state change happened — a threshold was merely crossed. Idempotency
+// (one warning per meter per period) is the caller's concern (the rollup hook).
 func EmitQuotaWarning(ctx context.Context, router *notify.Router, orgID string, w quota.QuotaWarning) error {
 	title := fmt.Sprintf("%s at %d%% — %d of %d used", w.Meter, w.PercentUsed, w.Used, w.Allowance)
 	body := fmt.Sprintf(
@@ -24,7 +26,7 @@ func EmitQuotaWarning(ctx context.Context, router *notify.Router, orgID string, 
 		w.PercentUsed, w.Meter, w.Used, w.Allowance, w.Meter, dollarsPerUnit(w.OverageRate),
 	)
 	return router.Notify(ctx, notify.NotifyInput{
-		OrgID: orgID, Kind: "lifecycle", Title: title, Body: body, Link: "/billing/usage",
+		OrgID: orgID, Kind: "billing", Title: title, Body: body, Link: "/billing/usage",
 	})
 }
 

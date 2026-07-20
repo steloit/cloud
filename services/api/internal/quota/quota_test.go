@@ -105,6 +105,7 @@ func TestClampOverageToCap(t *testing.T) {
 		{"uncapped accrues fully", 5000, -1, 200, 200},
 		{"well under cap accrues fully", 5000, 10000, 200, 200},
 		{"partial slice up to the cap", 9900, 10000, 200, 100},
+		{"overage exactly fills headroom", 9800, 10000, 200, 200},
 		{"exactly at cap halts", 10000, 10000, 200, 0},
 		{"over cap halts", 10500, 10000, 200, 0},
 		{"zero overage is zero", 5000, 10000, 0, 0},
@@ -139,5 +140,13 @@ func TestWarnMessageScenario2(t *testing.T) {
 	// unlimited never warns.
 	if _, warn := WarnMessage("events", -1, 999999, 120); warn {
 		t.Fatal("unlimited allowance must never warn")
+	}
+	// OVER the allowance (a running meter past its allowance) — pct>100, remaining 0.
+	if w, warn := WarnMessage("egress", 100, 120, 9); !warn || w.PercentUsed != 120 || w.RemainingUnits != 0 {
+		t.Fatalf("over-allowance: warn=%v pct=%d remaining=%d (want true,120,0)", warn, w.PercentUsed, w.RemainingUnits)
+	}
+	// a zero-allowance meter with usage is 100%, remaining 0.
+	if w, warn := WarnMessage("x", 0, 5, 9); !warn || w.PercentUsed != 100 || w.RemainingUnits != 0 {
+		t.Fatalf("zero-allowance: warn=%v pct=%d remaining=%d (want true,100,0)", warn, w.PercentUsed, w.RemainingUnits)
 	}
 }
