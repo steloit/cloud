@@ -53,7 +53,13 @@ func (r *Router) ProcessBell(ctx context.Context) (int, error) {
 
 	projected := 0
 	for _, ev := range events {
+		// fanned distinguishes "handled" from "rang the bell". A silent event is
+		// handled successfully and must NOT be counted, or the return value
+		// reports scan volume instead of notifications — which is what the
+		// caller and every test actually mean by "projected".
+		fanned := false
 		err := r.tx.WithTx(ctx, func(s Store) error {
+			fanned = false
 			// Claim first. No row means a concurrent replica already owns this
 			// event, so unwind rather than fan out twice.
 			if _, err := s.ClaimBellEvent(ctx, ev.ID); err != nil {
@@ -78,11 +84,17 @@ func (r *Router) ProcessBell(ctx context.Context) (int, error) {
 					"event", ev.ID, "action", ev.Action)
 				return nil
 			}
-			return r.fanOut(ctx, s, ev, c.kind, title)
+			if err := r.fanOut(ctx, s, ev, c.kind, title); err != nil {
+				return err
+			}
+			fanned = true
+			return nil
 		})
 		switch {
 		case err == nil:
-			projected++
+			if fanned {
+				projected++
+			}
 		case errors.Is(err, errClaimedElsewhere):
 			// Another replica has it; not an error and not our count.
 		default:
