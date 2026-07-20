@@ -146,3 +146,29 @@ func TestSafetyNeverGated(t *testing.T) {
 		}
 	}
 }
+
+// TestGateCapabilityNeverGatesSafety — the US-11.1 enforcement path (US-11.2):
+// the capability gate consults IsNeverGated BEFORE gating, so no safety
+// capability is ever plan-gated at the call site (not just off the list).
+func TestGateCapabilityNeverGatesSafety(t *testing.T) {
+	tbl, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// every safety capability is permitted on the FREE plan without it being
+	// "had" — the gate must never fire for safety.
+	for _, cap := range []string{"tls", "backups", "mfa", "policies", "alerts", "dunning_protections", "self_deletion"} {
+		if _, gated := tbl.GateCapability("free", cap, false); gated {
+			t.Errorf("safety capability %q was plan-gated at the call site — US-11.1 invariant broken", cap)
+		}
+	}
+	// a real capability the plan lacks IS gated (the gate still works for
+	// genuine capabilities).
+	if rp, gated := tbl.GateCapability("free", "sso", false); !gated || rp != "free" {
+		t.Fatalf("a non-safety capability the plan lacks must gate: gated=%v requiredPlan=%q", gated, rp)
+	}
+	// …but not if the plan already has it.
+	if _, gated := tbl.GateCapability("business", "sso", true); gated {
+		t.Fatal("a capability the plan HAS must not be gated")
+	}
+}

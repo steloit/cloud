@@ -95,3 +95,58 @@ func TestWarnAt80(t *testing.T) {
 		t.Fatal("exactly 80% should warn")
 	}
 }
+
+// TestClampOverageToCap — soft overage halts at the hard spend cap (US-11.2/11.7).
+func TestClampOverageToCap(t *testing.T) {
+	cases := []struct {
+		name                            string
+		spent, cap, overage, wantAccrue int64
+	}{
+		{"uncapped accrues fully", 5000, -1, 200, 200},
+		{"well under cap accrues fully", 5000, 10000, 200, 200},
+		{"partial slice up to the cap", 9900, 10000, 200, 100},
+		{"overage exactly fills headroom", 9800, 10000, 200, 200},
+		{"exactly at cap halts", 10000, 10000, 200, 0},
+		{"over cap halts", 10500, 10000, 200, 0},
+		{"zero overage is zero", 5000, 10000, 0, 0},
+	}
+	for _, c := range cases {
+		if got := ClampOverageToCap(c.spent, c.cap, c.overage); got != c.wantAccrue {
+			t.Errorf("%s: ClampOverageToCap(%d,%d,%d)=%d, want %d", c.name, c.spent, c.cap, c.overage, got, c.wantAccrue)
+		}
+	}
+}
+
+// TestWarnMessageScenario2 — QA scenario 2 (canon-pinned Business egress): at
+// 87/100 GB the 80% warning fires with the math (percent + the $0.09/GB overage
+// price). The per-plan Free/Pro egress allowances stay canon-deferred (plans.json
+// $note); this proves the mechanism for the one canon-pinned allowance.
+func TestWarnMessageScenario2(t *testing.T) {
+	// egress: allowance 100 GB, used 87 GB, overage 9¢/GB (canon).
+	w, warn := WarnMessage("egress", 100, 87, 9)
+	if !warn {
+		t.Fatal("87/100 GB (87%) must fire the 80% warning")
+	}
+	if w.PercentUsed != 87 {
+		t.Fatalf("percent = %d, want 87", w.PercentUsed)
+	}
+	if w.OverageRate != 9 || w.RemainingUnits != 13 {
+		t.Fatalf("math wrong: rate=%d remaining=%d (want 9, 13)", w.OverageRate, w.RemainingUnits)
+	}
+	// under 80% does NOT warn.
+	if _, warn := WarnMessage("egress", 100, 79, 9); warn {
+		t.Fatal("79/100 (79%) must not warn")
+	}
+	// unlimited never warns.
+	if _, warn := WarnMessage("events", -1, 999999, 120); warn {
+		t.Fatal("unlimited allowance must never warn")
+	}
+	// OVER the allowance (a running meter past its allowance) — pct>100, remaining 0.
+	if w, warn := WarnMessage("egress", 100, 120, 9); !warn || w.PercentUsed != 120 || w.RemainingUnits != 0 {
+		t.Fatalf("over-allowance: warn=%v pct=%d remaining=%d (want true,120,0)", warn, w.PercentUsed, w.RemainingUnits)
+	}
+	// a zero-allowance meter with usage is 100%, remaining 0.
+	if w, warn := WarnMessage("x", 0, 5, 9); !warn || w.PercentUsed != 100 || w.RemainingUnits != 0 {
+		t.Fatalf("zero-allowance: warn=%v pct=%d remaining=%d (want true,100,0)", warn, w.PercentUsed, w.RemainingUnits)
+	}
+}

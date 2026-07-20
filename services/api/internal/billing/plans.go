@@ -145,3 +145,23 @@ func (t *Table) IsNeverGated(capability string) bool {
 	}
 	return false
 }
+
+// CapabilityGate is the decision a caller renders: gate a capability behind a
+// plan, EXCEPT safety — a never-gated capability is always permitted (US-11.1
+// enforcement path, US-11.2). The caller maps Gated → problem.PlanGated; a nil
+// return means "permit, do not gate". `has` reports whether the current plan
+// already includes the capability (callers with a real capability→plan matrix
+// pass it; today no capability matrix exists, so safety is the only rule wired).
+//
+// The invariant this closes: a plan gate must consult IsNeverGated FIRST, so a
+// safety capability (TLS, backups, MFA, policies, alerts, dunning, deletion) is
+// never plan-gated at the call site — not merely absent from a list.
+func (t *Table) GateCapability(plan, capability string, has bool) (requiredPlan string, gated bool) {
+	if t.IsNeverGated(capability) {
+		return "", false // safety is never gated, whatever the plan
+	}
+	if has {
+		return "", false // the plan includes it
+	}
+	return plan, true // a real capability the plan lacks → gate
+}
