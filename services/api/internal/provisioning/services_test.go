@@ -69,3 +69,55 @@ func TestServiceViewDoesNotLeakReconcilerColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestDesiredDocShape(t *testing.T) {
+	// product + intent + shape + scaling, no deleting flag
+	d := desiredDoc("postgres", "database", []byte(`{"size":"dev"}`), []byte(`{"mode":"auto"}`), nil, false)
+	var m map[string]any
+	if err := json.Unmarshal(d, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["product"] != "postgres" || m["intent"] != "database" {
+		t.Fatalf("desired doc missing product/intent: %v", m)
+	}
+	if _, ok := m["shape"]; !ok {
+		t.Fatal("desired doc missing shape")
+	}
+	if _, ok := m["deleting"]; ok {
+		t.Fatal("a live service must not carry a deleting flag")
+	}
+	// deleting flag present when set
+	d2 := desiredDoc("postgres", "", []byte(`{}`), nil, nil, true)
+	_ = json.Unmarshal(d2, &m)
+	if m["deleting"] != true {
+		t.Fatal("deleting flag not set")
+	}
+	// no substrate names leak (D8)
+	for _, banned := range []string{"cnpg", "zfs", "gvisor", "gke"} {
+		if strings.Contains(strings.ToLower(string(d)), banned) {
+			t.Fatalf("desired doc leaked substrate name %q", banned)
+		}
+	}
+}
+
+func TestDesiredDocEdgeCases(t *testing.T) {
+	// nil shape + nil scaling → just product, valid JSON
+	d := desiredDoc("postgres", "", nil, nil, nil, false)
+	var m map[string]any
+	if err := json.Unmarshal(d, &m); err != nil {
+		t.Fatalf("nil shape/scaling produced invalid JSON: %v", err)
+	}
+	if len(m) != 1 || m["product"] != "postgres" {
+		t.Fatalf("want just product, got %v", m)
+	}
+	// malformed shape JSON is dropped (not fatal) — pin current behavior
+	d2 := desiredDoc("postgres", "", []byte("not json"), nil, nil, false)
+	_ = json.Unmarshal(d2, &m)
+	if _, has := m["shape"]; has {
+		t.Fatal("malformed shape must be dropped, not embedded")
+	}
+	// empty product still produces valid JSON (no panic)
+	if !json.Valid(desiredDoc("", "", nil, nil, nil, true)) {
+		t.Fatal("empty product produced invalid JSON")
+	}
+}

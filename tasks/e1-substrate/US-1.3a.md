@@ -2,7 +2,7 @@
 id: US-1.3a
 title: "Desired-state writers: edits and deletes bump generation and reach the cell"
 epic: E1
-status: ready
+status: done
 phase: MVP
 priority: high
 sprint: 2
@@ -15,13 +15,16 @@ contexts: [provisioning]
 files:
   - services/api/internal/provisioning/services.go
   - services/api/internal/provisioning/services_test.go
-  - services/api/db/queries/reconcile.sql
+  - services/api/db/queries/services.sql
+  - services/api/internal/identity/store/services.sql.go
+  - services/api/internal/reconcile/wiring_integration_test.go
 apis: []
 tables: [services]
 events: []
-tests: [TestShapeEditBumpsGeneration, TestShapeEditBecomesOutstanding, TestDeleteWritesDeletingDesired, TestDeleteConvergesToGone]
+tests: [TestCreateServicePopulatesDesired, TestShapeEditBumpsGenerationAndBecomesOutstanding, TestDeleteWritesDeletingDesiredAndBecomesOutstanding, TestUpdateOnDeletingServiceIsRejected, TestNoOpUpdateStillBumpsGeneration, TestOverrideEditReachesCell, TestDesiredDocShape, TestDesiredDocEdgeCases]
 verify:
-  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go test ./internal/provisioning/ ./internal/reconcile/"
+  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./...   # FULL suite — a narrow subset hid a NOT-NULL regression in internal/identity"
+  - "make gen-go && make gen-sql && git diff --exit-code -- services packages   # contract + sqlc drift (gen-go alone misses sqlc — see O7)"
 owner: agent
 ---
 
@@ -63,13 +66,17 @@ scope. This task is that wiring.
 
 ## Acceptance criteria
 
-- [ ] A shape edit bumps `generation`, making the service outstanding again;
-  `Desired(cell, 0)` returns it. Proven against real Postgres.
-- [ ] A delete writes a `deleting` desired flag and bumps generation; the
-  AckRenderer returns `gone` for it (integration-level).
-- [ ] `createService` populates `desired` (non-empty) from the shape.
-- [ ] No customer-facing leak of the desired document (the D8 guard in
-  `TestServiceViewDoesNotLeakReconcilerColumns` stays green).
+- [x] A shape edit bumps `generation`, making the service outstanding again;
+  `Desired(cell, 0)` returns it. Proven against real Postgres
+  (`TestShapeEditBumpsGenerationAndBecomesOutstanding`).
+- [x] A delete writes a `deleting` desired flag and bumps generation; the poll
+  carries `status=deleting` which the AckRenderer maps to `gone`
+  (`TestDeleteWritesDeletingDesiredAndBecomesOutstanding` +
+  `TestAckRendererDeletingStatusConvergesToGone`, cell-agent).
+- [x] `createService` populates `desired` (non-empty) from the shape
+  (`TestCreateServicePopulatesDesired`).
+- [x] No customer-facing leak of the desired document —
+  `TestServiceViewDoesNotLeakReconcilerColumns` stays green.
 
 ## Also carry these US-1.3 review findings (recorded, not yet fixed)
 
@@ -107,3 +114,73 @@ land here so they are not lost:
 
 US-1.3 (the protocol) · T3.3 (service writers) · US-3.5 (deletion + final backup)
 · `docs/plan/e1-substrate-design.md` §2
+
+## Outcome
+
+The producing half of the reconciler protocol, end to end against real Postgres.
+
+- **`desiredDoc` helper** builds the §2 desired document (product + intent +
+  shape + scaling + a `deleting` lifecycle flag) — grammar only, no substrate
+  names (D8, pinned by `TestDesiredDocShape`).
+- **createService** populates `desired` at `InsertService` (was the `'{}'`
+  default). A fresh service is outstanding (observed 0 < generation 1) and the
+  cell picks it up — no separate wiring needed for creation.
+- **updateService** rewrites `desired` from the effective post-edit shape/scaling
+  and the query bumps `generation`, so an edited service becomes outstanding
+  again; without the bump a converged service would never see the edit.
+- **deleteService** writes the deleting desired doc + bumps generation
+  (`MarkServiceDeleting`), then transitions status to `deleting`. The service
+  becomes outstanding, the poll carries `status=deleting`, and the AckRenderer
+  converges it to `gone` — closing the delete-hot-loop US-1.3 flagged.
+
+Deferred, still recorded here (the carried-findings list above): full
+transactional atomicity (the two writes in deleteService self-heal via the
+outstanding poll on a crash, but are not one transaction), page-starvation past
+the poll LIMIT, and persistent-converge-failure visibility. These are genuinely
+downstream of a real renderer (T1.4/T3.4) or a larger provisioning-side tx
+refactor, and are not silently absorbed into this task.
+
+Files-glob note: the desired-writer queries live in `services.sql` (not the
+`reconcile.sql` the original glob guessed), and the end-to-end tests reuse the
+reconcile package's real-Postgres harness rather than standing up a second one —
+so the glob is widened to match what the wiring actually touches. No behavior
+outside the producing path changed.
+
+Review round 1 caught a **regression my too-narrow verify block hid** — the
+exact discipline failure this project guards against. Adding `desired` to
+`InsertService` made a caller that omitted it insert NULL into a NOT NULL column;
+`internal/identity`'s github integration test does exactly that. I had run only
+`./internal/provisioning/ ./internal/reconcile/`, so I reported green while CI's
+`go test ./...` would be red. Fixed at the source — `InsertService` now
+`coalesce(narg('desired'), '{}'::jsonb)`, so **no** caller can hit it, not just
+today's — and the verify block now runs the **full** api suite.
+
+Also from review: an edit on a **deleting** service is now rejected (it would
+rewrite desired with `deleting=false` and cancel the teardown — newly reachable
+once desired became load-bearing); `MarkServiceDeleting` was a byte-identical
+duplicate of `BumpServiceGeneration`, now reused; the deleteService crash comment
+was corrected (retry-recoverable, not poll-self-healing); and `desiredDoc` edge
+cases (nil/malformed shape, empty product) and the no-op-bump behavior are pinned.
+
+Review round 2 found two more issues I'd introduced, both fixed here rather than
+deferred:
+- **`override` (the manual instance-pin) was dropped from `desired`** — an
+  override edit re-outstanded the row but the pin never reached the cell, the
+  exact inert-desired defect this task closes, left open for one field. Now
+  `desiredDoc` embeds override and `TestOverrideEditReachesCell` pins it.
+- **The edit-on-deleting guard had a TOCTOU** — status was read
+  non-transactionally, so a delete racing in after the Go check could still
+  clobber. Closed with a SQL fence (`UpdateServiceShape ... WHERE status <>
+  'deleting'`), mapped to the same Conflict; the Go check stays as the fast path.
+
+Review round 3 caught that the fence was in the source `.sql` but the **generated
+`services.sql.go` was stale** — the runtime query had no fence, so the close was
+dead code. Root cause: my drift check (and CI's) ran `make gen-go`, which does
+**not** regenerate sqlc. Regenerated with `make gen-sql`; the fence is now in the
+generated const. The verify block now runs `make gen-sql` in its drift line, and
+**O7** is filed because CI has the identical gap — a `.sql` edit without
+regeneration would ship stale and pass CI.
+
+Verified: the **full** `go test ./...` for the api module passes (real Postgres,
+no skips), including `internal/identity` (exit 0); `desiredDoc` unit + edge tests
+and the D8 guard green; contract drift clean.
