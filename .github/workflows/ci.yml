@@ -6,6 +6,9 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # authority-paths reads the PR diff via gh
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -19,10 +22,14 @@ jobs:
         run: bash .claude/hooks/protect-authority.test.sh
       - name: Authority paths unchanged (human decision only — AGENTS.md hard rule)
         if: github.event_name == 'pull_request'
+        shell: bash   # GitHub's default is `bash -e {0}` with NO pipefail; without this a
+                      # failing `gh pr diff` yields an empty changed-set and the step reports
+                      # "untouched" — failing OPEN exactly when it did not run.
         env:
           PR: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           # The PreToolUse hook is an accident floor a determined agent can talk around.
           # This reads the PR diff, so no call-shape trick reaches it and --no-verify does
           # not apply. It REPORTS reliably; whether it BLOCKS depends on branch protection,
@@ -32,10 +39,15 @@ jobs:
           # gh pr diff, not `git diff BASE HEAD`: the checkout is shallow (head.sha is absent
           # -> "fatal: bad object"), and a two-dot range also re-reports paths that landed on
           # main after the branch started, which trains people to bypass on unrelated PRs.
-          changed="$(gh pr diff "$PR" --name-only | grep -E '^(docs/product/00-sources/|docs/product/18-philosophy/decisions\.md$|\.github/workflows/ci\.yml$|\.claude/hooks/)' || true)"
+          # Two statements, not one pipeline: a `gh` failure must fail the job, never produce
+          # an empty changed-set that reads as "clean".
+          files="$(gh pr diff "$PR" --name-only)"
+          changed="$(printf '%s\n' "$files" | grep -E '^(docs/product/00-sources/|docs/product/18-philosophy/decisions\.md$|\.github/workflows/ci\.yml$|\.claude/hooks/)' || true)"
           [ -z "$changed" ] && { echo "authority-paths: untouched"; exit 0; }
-          # The guarded set includes this check and the hook itself: a control that does not
-          # protect itself is one PR away from being deleted by the thing it constrains.
+          # ci.yml and .claude/hooks/ are in the guarded set so incidental edits to the controls
+          # are flagged. This is NOT self-protection: a pull_request runs the workflow from the
+          # PR head, so a PR that deletes this step simply runs without it. Real self-protection
+          # needs a required check name under branch protection — gated on O6g.
           #
           # The marker must be the FIRST line of the body. Matching anywhere let the job's own
           # failure text arm it, because the house rules require pasting CI output into the PR.

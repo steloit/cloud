@@ -9,8 +9,9 @@
 #
 # Shape 2 targets ACCIDENTS with high precision. It is deliberately NOT exhaustive:
 # a false positive gets this hook disabled, which is strictly worse than a known gap.
-# The enforceable control is the CI check on the PR diff (ci.yml: authority-paths),
-# which binds at merge and cannot be talked around. See "Residual surface" at the bottom.
+# The companion control is the CI check on the PR diff (ci.yml: authority-paths). It is
+# call-shape-independent and --no-verify-proof, so it REPORTS reliably — but it does not
+# block a merge: this repo has no branch protection (O6g). See "Residual surface" below.
 #
 # Founder escape hatch: prefix the command with STELOIT_RATIFY=1 to apply a ratified
 # decision (the documented stamped-copy flow — see docs/plan/consistency-audit-2026-07-18.md,
@@ -145,6 +146,7 @@ exit 0
 #   • xargs and other command-splitting (echo PATH | xargs rm)
 #   • any tool shape not matched here (a future write tool, an MCP server)
 #   • STELOIT_RATIFY=1, deliberately
-# This is an accident floor, not enforcement. The control that actually binds is the
-# authority-paths job in .github/workflows/ci.yml, which fails any PR whose diff touches
-# these paths without the founder-approval marker. Regression tests: protect-authority.test.sh.
+# This is an accident floor, not enforcement. The authority-paths job in
+# .github/workflows/ci.yml flags any PR whose diff touches these paths without the founder
+# marker — reliably, but it cannot BLOCK the merge (no branch protection on this repo: O6g).
+# Nothing here binds. Review and the diff still do. Tests: protect-authority.test.sh.

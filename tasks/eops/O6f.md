@@ -158,8 +158,9 @@ hand-tuned security control, and they were right — five regexes with no pinnin
 test is the same "guarantee nothing checks" pattern this whole task family exists
 to close.
 
-AGENTS.md now says what is true: a hook stops common accidental writes, **CI is
-what binds**. The residual surface the hook cannot reach — variable indirection,
+AGENTS.md now says what is true: a hook stops common accidental writes, CI flags
+any PR that touches these paths, and **nothing blocks a merge** — the real
+control is still the reviewer and the diff. The residual surface the hook cannot reach — variable indirection,
 interpreter argv/stdin, script-then-execute, symlink and `../` aliasing, xargs
 splitting, future tool shapes, and the deliberate `STELOIT_RATIFY=1` — is
 enumerated in the hook header, because the honesty of the claim rests on that
