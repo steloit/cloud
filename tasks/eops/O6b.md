@@ -17,6 +17,7 @@ files:
   - AGENTS.md
 verify:
   - "CLAUDE.md step 5a names subagent_type 'reviewer' and 'qa' explicitly"
+  - "diff AGENTS.md CLAUDE.md is empty — the two files are byte-identical mirrors"
   - "a session reading only CLAUDE.md invokes the pipeline by name without re-deriving it"
 owner: agent
 ---
@@ -46,6 +47,11 @@ existed in the harness but nowhere in writing, so every session re-derived it.
   `.claude/agents/README.md`.
 - [ ] The line is short enough to survive the file's token discipline — one
   sentence, not a section.
+- [ ] **AGENTS.md receives the identical edit.** The two files are currently
+  byte-identical mirrors (`diff AGENTS.md CLAUDE.md` is empty, 93 lines each) and
+  nothing pins that — `validate.mjs` checks only AGENTS.md's line cap. Editing
+  one and not the other silently forks the repo's two entry points, and this task
+  is the first to edit either.
 - [ ] No change to review POLICY, which is ADR-0008's and stays there.
 
 ## Out of scope

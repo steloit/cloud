@@ -16,7 +16,7 @@ files:
   - .claude/settings.json
   - .claude/agents/README.md
 verify:
-  - "invoking subagent_type 'kernel:reviewer' is refused by configuration, not by convention"
+  - "either kernel:* invocation is refused by configuration, or the absence of any subagent_type matcher is evidenced and the task closes [~]"
   - "invoking 'reviewer' and 'qa' still succeeds unchanged"
 owner: agent
 ---
@@ -39,20 +39,25 @@ distracted session away from being violated again.
 
 ## Acceptance criteria
 
-- [ ] Invoking a `kernel:*` subagent is refused by `.claude/settings.json`
-  configuration (deny rule or equivalent), not by convention.
-- [ ] The refusal names ADR-0008 so the reader learns why, not just that.
-- [ ] `reviewer`, `qa`, `research`, `docs` are unaffected.
-- [ ] `.claude/agents/README.md` drops the "nothing currently enforces this"
-  caveat and points at the mechanism.
+Resolve the Open question below **first** — it decides which branch applies.
+
+- [ ] *If a subagent matcher exists:* invoking a `kernel:*` subagent is refused
+  by `.claude/settings.json` configuration, not by convention; the refusal names
+  ADR-0008 so the reader learns why, not just that; and
+  `.claude/agents/README.md` drops its "nothing currently enforces this" caveat
+  and points at the mechanism.
+- [ ] *If no matcher exists:* close `[~]` with the evidence — what was tried,
+  what the harness does instead — and leave the README caveat standing. Do not
+  invent a mechanism, and do not mark the criterion met.
+- [ ] Either way: `reviewer`, `qa`, `research`, `docs` are unaffected.
 
 ## Open question
 
-Whether `permissions.deny` matches on the `Agent` tool's `subagent_type`
-argument is **unverified** — O6 confirmed only that the existing deny rules are
-`Bash`-scoped. Establish that first; if the harness offers no such matcher, that
-is a legitimate finding and this task closes as "not achievable from repo
-config", recording the evidence rather than inventing a mechanism.
+Whether `permissions.deny` can match on a subagent invocation is **unverified**.
+O6 confirmed only that every existing deny/ask rule is `Bash`-scoped. The
+argument name to match on is likewise unconfirmed in-repo — establish the real
+one from the harness rather than assuming `subagent_type`. If no such matcher
+exists, that is a legitimate finding, not a failure: record it and close `[~]`.
 
 ## Related
 

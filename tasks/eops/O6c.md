@@ -42,25 +42,42 @@ the re-derivation cost O6 exists to remove.
 
 ## Acceptance criteria
 
-- [ ] Rule `agents-readonly`: parse each `.claude/agents/*.md` frontmatter;
-  assert `reviewer` and `qa` declare `tools ⊆ {Read, Grep, Glob, Bash}`. Failure
-  message cites ADR-0008's reviewer-identity clause.
-- [ ] Rule `agents-table-sync`: the set of frontmatter `name`s equals the
-  README table's `subagent_type` column, and each `name` matches its filename
-  stem. README.md itself is excluded (it has no agent frontmatter).
-- [ ] Both rules run in the existing `validate.mjs` invocation — no new command.
-- [ ] Malformed or unparseable frontmatter fails loudly rather than being skipped.
+`validate.mjs` is 72 flat lines with a single `err(file, msg)` helper and no rule
+registry — add two checks in that style, with failure messages prefixed
+`agents-readonly:` and `agents-table-sync:`. Do not refactor to introduce a rule
+abstraction for two checks.
 
-## Note on what this cannot check
+- [ ] `agents-readonly`: parse each `.claude/agents/*.md` frontmatter; assert
+  `reviewer` and `qa` declare `tools ⊆ {Read, Grep, Glob, Bash}`. Failure cites
+  ADR-0008's reviewer-identity clause.
+- [ ] `agents-table-sync`: the set of frontmatter `name`s equals the README
+  table's `subagent_type` column, and each `name` matches its filename stem.
+  **Exclude `README.md` by filename**, not by "has no frontmatter" — `lib.mjs`
+  `parseFrontmatter` throws the same `missing frontmatter` error for absent and
+  malformed blocks, so those two cases are indistinguishable at the parser and a
+  content-based discriminator would silently skip a typo'd agent file.
+- [ ] A file with a malformed frontmatter block fails loudly rather than being
+  skipped — test with a `notes.md` carrying a typo'd `---` fence.
+- [ ] Both checks run in the existing `validate.mjs` invocation — no new command.
 
-Frontmatter is the *requested* grant. O6 observed the effective runtime grant to
-be narrower (`reviewer` resolved to `Read, Bash` from a four-tool list), so these
-rules pin intent, not the harness's behavior. That is still worth pinning: the
-harness may narrow a grant, but it will not narrow one that was never requested.
+## What this cannot check — read before assuming it closes ADR-0008
+
+**`agents-readonly` does not make a reviewer read-only, and must not be described
+as if it does.** O6 verified that `reviewer`'s `Bash` grant executes
+`echo x > file` with no prompt, and `protect-authority.sh` inspects only a tool's
+`file_path`, so a shell redirect bypasses it. Withholding `Write`/`Edit` while
+granting `Bash` leaves writing fully available. This rule pins the *declared*
+grant against a careless edit — worth having, but ADR-0008's "the two reviewers
+are read-only" stays a behavioral constraint until something constrains `Bash`.
+If that gap is worth closing, it needs its own task and probably its own ADR.
+
+Frontmatter is also only the *requested* grant: O6 observed the effective runtime
+grant to be narrower (`reviewer` → `Read, Bash` from a four-tool list). The
+harness may narrow a grant; it will not grant one that was never requested.
 
 Detecting a **stale** served prompt (file edited, old version still in effect)
-remains unsolved; a `registration-token` fingerprint each agent echoes was
-proposed and deferred as ceremony not yet justified by an observed failure.
+remains unsolved. A `registration-token` fingerprint each agent echoes was
+proposed and deferred — ceremony not yet justified by an observed failure.
 
 ## Related
 

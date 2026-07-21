@@ -6,14 +6,16 @@ you invoke. (This README has no such frontmatter — it is documentation, not an
 
 | File | `subagent_type` | Role |
 |---|---|---|
-| `reviewer.md` | `reviewer` | Architecture Reviewer (ADR-0008 pipeline, read-only) |
-| `qa.md` | `qa` | Security/QA Reviewer (ADR-0008 pipeline, read-only) |
+| `reviewer.md` | `reviewer` | Architecture Reviewer (ADR-0008 pipeline) |
+| `qa.md` | `qa` | Security/QA Reviewer (ADR-0008 pipeline) |
 | `research.md` | `research` | Ecosystem investigation — instructed never to edit code |
 | `docs.md` | `docs` | Developer-facing docs; instructed to write only under `docs/dev/` and `examples/` |
 
-Those scope limits are **instructions to the agent, not enforced sandboxes** — `docs` holds
-unscoped `Write`/`Edit`, and the only `PreToolUse` hook guards `docs/product/00-sources/**`
-and `decisions.md`. Treat the column as intent, and review what these agents actually wrote.
+**Every scope limit above is an instruction to the agent, not an enforced sandbox.** `docs`
+*requests* unscoped `Write`/`Edit`; the only `PreToolUse` hook guards
+`docs/product/00-sources/**` and `decisions.md` and inspects only a tool's `file_path`. And
+critically — see below — a `Bash` grant writes files, so **withholding `Write`/`Edit` does
+not make an agent read-only.** Treat the column as intent and review what these agents did.
 
 ## The registration contract
 
@@ -53,10 +55,17 @@ Registration is a harness behavior, so verify by observation. Self-identificatio
 **not** sufficient — an agent handed this file's text by any other means recites it just as
 well, which is precisely the retired workaround. Check the two things prompt text cannot fake:
 
-- **Tool grant** — ask a read-only agent (`reviewer`, `qa`) to attempt a `Write` and report
-  whether the tool is *available*. It must report the tool is absent. A generic runner
-  standing in has `Write`; tool grants are harness-enforced. Assert the tool's absence, not
-  the agent's refusal to use it.
+- **Tool grant** — ask `reviewer` or `qa` to report whether a `Write` tool is *available*.
+  It must report the tool is absent. A generic runner standing in has `Write`; tool grants
+  are harness-enforced, so this is what prompt text cannot fake. Assert the tool's absence,
+  not the agent's refusal to use it.
+
+  This distinguishes a real repo agent from a stand-in. It does **not** establish that the
+  agent cannot write: `reviewer` holds `Bash`, and `echo x > file` was verified to execute
+  with no prompt. ADR-0008's "the two reviewers are read-only" is therefore a **behavioral
+  constraint the agent observes, not a technical control** — no layer enforces it today.
+  Do not cite the absent `Write` tool as if it were a sandbox. O6c tracks pinning what
+  can be pinned.
 - **Fail-fast** — request near-miss names where a substitution would plausibly occur.
   `reviewers` (plural) and `code-reviewer` (semantic neighbor) must hard-error and list the
   available agents. `Reviewer` (case) is the exception: matching is **case-insensitive**, so
