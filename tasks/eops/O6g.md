@@ -2,7 +2,7 @@
 id: O6g
 title: No branch protection exists, so no CI check can block anything
 epic: EOPS
-status: blocked
+status: blocked   # deferred by founder ruling 2026-07-21 — see Ruling
 phase: V1
 priority: high
 sprint: 1
@@ -70,10 +70,30 @@ commit signed with the founder's key and verified with `git verify-commit`. Deci
 together with the plan question — a marker that constrains nobody is worse than no
 marker, because it reads as a control.
 
+## Ruling (founder, 2026-07-21) — do not re-ask
+
+**Option 3: accept advisory-only, and keep the documentation honest.** Verbatim:
+
+> Keep repository documentation honest. Do not claim enforcement that GitHub
+> cannot provide on the current plan. Leave O6g open until we reach external
+> collaboration or pre-production hardening, at which point we'll enable GitHub
+> Team (or an equivalent solution) and enforce branch protection properly.
+
+So the current wording in AGENTS.md — a hook stops common accidental writes, CI
+flags the diff, **nothing blocks a merge** — is the ratified state, not a
+placeholder. Do not "fix" it by asserting enforcement.
+
+**Revisit trigger (concrete, per the review's objection to "must not be
+forgotten"):** the *first* of — (a) anyone outside the two founders gains push
+access, or (b) pre-production hardening begins. At that point enable GitHub Team,
+require the `validate` check, and pair it with CODEOWNERS on `.github/`, then
+close this task and re-word AGENTS.md in the same PR.
+
 ## Status
 
-`blocked` on a founder decision. **Owner is the founder, not an agent** — an agent
-cannot buy a plan or make a private repo public, and should not.
+`blocked` by **founder ruling**, not by missing information — deliberately
+deferred with a named trigger. Owner remains the founder: an agent cannot buy a
+plan or make a private repo public, and should not.
 
 ## Related
 
