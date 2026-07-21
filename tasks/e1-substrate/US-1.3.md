@@ -117,3 +117,50 @@ trial burn stays ~$0 and the loop is provable against the API alone.
 `docs/plan/e1-substrate-design.md` §2 · `contexts/provisioning.md` ·
 `services/api/internal/platform/db/migrations/20260718203138_services.up.sql` ·
 `services/api/internal/provisioning/services.go` (the desired-state writer today)
+
+## Resume plan (founder-set, 2026-07-21) — this task is mid-implementation
+
+Landed on `task/US-1.3-impl` (commit `e21b17f`): schema, contract, and the
+control-plane logic with 19 green tests. **Not PR'd — incomplete by design.**
+
+Remaining, in this order:
+
+1. HTTP handlers (`internal/reconcile/http.go`).
+2. Wire into `cmd/api/main.go`.
+3. Register `getDesiredState` + `postReconcileStatus` in
+   `oapi-server.cfg.yaml` `include-operation-ids` — **only now**, per the
+   staged-conformance rule (an op is served once its handler exists and is
+   tested), then `make gen-go`.
+4. Build `services/cell-agent` (new Go module): poll → converge → writeback,
+   level-triggered, renderer behind a seam.
+5. Integration test against real Postgres — the SQL guard `generation >= $2` is
+   currently mirrored by a fake, not exercised.
+6. The outage drill — the headline acceptance criterion.
+7. Two-reviewer pipeline (`reviewer`, `qa` by name), **fix everything found
+   before opening the PR.** Founder: "Do not shortcut the review process."
+
+Definition of done is this file's `verify:` block, nothing looser.
+
+### Decisions already made — do not re-litigate, do not silently reverse
+
+- **`Querier` is deliberately narrow.** It does not expose the provisioning
+  writers, so D9's "no imperative provisioning" holds because the type cannot
+  reach them, not because someone remembered. Widening it re-opens that.
+- **Writeback reuses `provisioning.Transition`.** ADR-024 edges, D10 events, and
+  metering-starts-at-ready already live there; a second status machine would
+  drift from the first. Do not reimplement it in this package.
+- **Reconciler auth is a separate principal** from user sessions and org API
+  keys, so a user token cannot reach these endpoints by construction. An unset
+  secret fails **closed**.
+- **Foreign cell and unknown cell are indistinguishable** (both 404) so a
+  reconciler token cannot enumerate cells.
+- **Migrations only via `make migrate-new`** (founder rule, Makefile). The first
+  attempt here was hand-named and had to be redone — that rule exists for a
+  reason.
+
+### Open, for the implementer to decide with evidence
+
+Alpha auth is one shared secret scoped to an explicit cell list. Per-cell
+rotation and mTLS were deferred as ceremony at one cell; `Auth.Allows(token,
+cell)` is the seam a real credential store plugs into. If cell-1 lands, revisit
+before it does, not after.
