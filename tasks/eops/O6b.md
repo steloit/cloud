@@ -2,7 +2,7 @@
 id: O6b
 title: Make the by-name review invocation discoverable in CLAUDE.md
 epic: EOPS
-status: ready
+status: in-progress
 phase: V1
 priority: high
 sprint: 1
