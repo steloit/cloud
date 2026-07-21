@@ -189,3 +189,23 @@ func TestHTTPGoneOnLiveServiceLeavesStatusUnchanged(t *testing.T) {
 		t.Fatalf("gone on a live service changed status to %q", q.services["svc_a"].Status)
 	}
 }
+
+// The /desired payload MUST carry per-service "status" — the AckRenderer's
+// delete-hot-loop fix branches on it. If the field drifts or loses its json tag,
+// every other test stays green while the deleting→ready 409 loop silently
+// returns; this pins the wire seam. (fakeQ's rows carry status "provisioning".)
+func TestHTTPDesiredCarriesStatus(t *testing.T) {
+	ts, _, _ := mount(t)
+	_, m := call(t, ts, "GET", "/v1/reconcile/cell-0/desired", "s3cret", "")
+	svcs, ok := m["services"].([]any)
+	if !ok || len(svcs) == 0 {
+		t.Fatalf("no services in payload: %v", m["services"])
+	}
+	row := svcs[0].(map[string]any)
+	if _, has := row["status"]; !has {
+		t.Fatalf("the /desired payload must carry per-service status (the renderer branches on it): %v", row)
+	}
+	if row["status"] == "" {
+		t.Fatal("status present but empty — the renderer cannot distinguish a deleting service")
+	}
+}

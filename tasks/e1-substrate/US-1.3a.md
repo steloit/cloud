@@ -96,6 +96,12 @@ land here so they are not lost:
 - **`gone` on a non-deleting service** is currently inert w.r.t. status
   (observation-only) but still a nonsensical report; when the deletion pipeline
   (US-3.5) lands, decide whether it should be an explicit reject.
+- **Mistake-bank note (QA, US-1.3 round 4):** the agent's HTTP client treats a
+  409 writeback as a loggable non-error, which is behaviorally correct only
+  because the loop is stateless (recovery is server-side via the outstanding
+  poll). The moment the agent grows state keyed on report success — conditions,
+  backoff, a local watermark — that 409-as-success becomes load-bearing and
+  needs its own handling. Do not add such state without revisiting it.
 
 ## Related
 
