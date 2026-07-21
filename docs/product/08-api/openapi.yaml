@@ -1203,7 +1203,7 @@ paths:
       tags: [reconcile]
       operationId: getDesiredState
       summary: "Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time"
-      description: "The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403."
+      description: "The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat."
       parameters:
         - {name: cell, in: path, required: true, schema: {type: string}, description: "cell id, e.g. cell-0", x-go-name: CellPathParam}
         - {name: since_generation, in: query, required: false, schema: {type: integer, format: int64, minimum: 0}, description: "return only services whose generation exceeds this; omit for a full sweep", x-go-name: SinceGenerationParam}

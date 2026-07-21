@@ -28,5 +28,8 @@ ALTER TABLE services
 ALTER TABLE services
     ADD CONSTRAINT services_cell_id_fkey FOREIGN KEY (cell_id) REFERENCES cells (id);
 
--- The desired-poll query shape: WHERE cell_id = $1 AND generation > $2.
-CREATE INDEX services_cell_generation_idx ON services (cell_id, generation);
+-- The desired-poll query shape: WHERE cell_id = $1 AND observed_generation < generation.
+-- Partial index — only OUTSTANDING rows are indexed, so the hot poll path never
+-- scans converged services.
+CREATE INDEX services_cell_outstanding_idx ON services (cell_id, generation)
+    WHERE observed_generation < generation;

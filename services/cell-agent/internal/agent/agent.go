@@ -59,6 +59,15 @@ type ControlPlane interface {
 //
 // Converge MUST be idempotent — the loop may call it repeatedly for the same
 // unchanged desired state, and a redundant converge must be a no-op.
+//
+// It MUST return a TERMINAL observed status (ready/failed/gone/…), never a
+// transient one. The control plane marks the reported generation observed, so a
+// row that reports a non-terminal status (e.g. "provisioning" while a real CNPG
+// cluster is still spinning up) drops out of the outstanding set and is never
+// re-polled to later report "ready". A real renderer (T1.4/T3.4) that needs to
+// report progress must either block until terminal or grow its own
+// observation-only reporting path — the alpha AckRenderer only returns terminal
+// statuses, so this constraint is not yet load-bearing but the seam must honor it.
 type Renderer interface {
 	Converge(ctx context.Context, svc DesiredService) (observedStatus string, err error)
 }

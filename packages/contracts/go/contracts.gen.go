@@ -4582,7 +4582,7 @@ type ClientInterface interface {
 
 	// GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 	//
-	// The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403.
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 	//
 	// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
 	GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -7071,7 +7071,7 @@ func (c *Client) CreateEnvironment(ctx context.Context, projectPathParam Project
 
 // GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 //
-// The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403.
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 //
 // Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
 func (c *Client) GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -14172,7 +14172,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 	//
-	// The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403.
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -21784,7 +21784,7 @@ func (c *ClientWithResponses) CreateEnvironmentWithResponse(ctx context.Context,
 
 // GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 //
-// The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403.
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 //
 // Returns a wrapper object for the known response body format(s).
 //

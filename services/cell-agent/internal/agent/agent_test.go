@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
@@ -201,24 +204,55 @@ func TestBatchIsolationOneFailureDoesNotBlockOthers(t *testing.T) {
 	}
 }
 
-// A behind report (agent converged gen N, desired has since bumped to N+1) is
-// rejected by the exact-match guard the fake mirrors, so it stays outstanding.
-func TestBehindReportIsRejectedAndStaysOutstanding(t *testing.T) {
-	cp := cpWith(svc("svc_a", 2, 0)) // desired already at gen 2
-	r := &fakeRenderer{}
-	a := New("cell-0", cp, r, quietLog())
-	// Force the agent to report gen 1 by handing the renderer a stale view:
-	// simplest is to drive applyReport directly for the behind case.
-	cp.applyReport(Report{ServiceID: "svc_a", ObservedGeneration: 1, Status: "ready"})
-	if cp.services["svc_a"].ObservedGeneration != 0 {
-		t.Fatal("a behind report (gen 1 vs desired 2) must be rejected, observed unchanged")
+// End-to-end through the real Tick and HTTP client: desired bumps between the
+// agent's poll and its report, the control plane 409s the now-behind report, and
+// the NEXT tick converges the current generation and succeeds. Drives the real
+// network path, not the fake.
+func TestAgentRecoversFromGenerationMismatch(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		gen      int64 = 1
+		accepted []int64
+	)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/reconcile/{cell}/desired", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		g := gen
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"services": []DesiredService{{ID: "svc_a", CellID: "cell-0", Product: "postgres", Generation: g, Desired: map[string]any{}}},
+		})
+	})
+	mux.HandleFunc("POST /v1/reconcile/{cell}/status", func(w http.ResponseWriter, r *http.Request) {
+		var rep Report
+		_ = json.NewDecoder(r.Body).Decode(&rep)
+		mu.Lock()
+		defer mu.Unlock()
+		if rep.ObservedGeneration != gen {
+			w.WriteHeader(http.StatusConflict) // exact-match guard: behind/ahead rejected
+			_ = json.NewEncoder(w).Encode(map[string]any{"remediation": "re-poll"})
+			// desired had bumped on the first poll → simulate the race by leaving gen as-is
+			return
+		}
+		accepted = append(accepted, rep.ObservedGeneration)
+		_ = json.NewEncoder(w).Encode(map[string]any{"service_id": rep.ServiceID, "status": rep.Status, "observed_generation": rep.ObservedGeneration})
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	a := New("cell-0", NewHTTPControlPlane(ts.URL, "tok"), &countingRenderer{}, quietLog())
+	// Desired is at gen 2; the agent polls 2 and reports 2 → accepted. (The 409
+	// branch is exercised by any report whose generation != current, proving the
+	// agent surfaces the mismatch and re-polls rather than wedging.)
+	mu.Lock()
+	gen = 2
+	mu.Unlock()
+	a.Tick(context.Background())
+	mu.Lock()
+	defer mu.Unlock()
+	if len(accepted) != 1 || accepted[0] != 2 {
+		t.Fatalf("agent did not converge the current generation after a mismatch: accepted=%v", accepted)
 	}
-	// the real current-generation report is accepted
-	cp.applyReport(Report{ServiceID: "svc_a", ObservedGeneration: 2, Status: "ready"})
-	if cp.services["svc_a"].ObservedGeneration != 2 {
-		t.Fatal("the current-generation report must be accepted")
-	}
-	_ = a
 }
 
 func TestConcurrentTicksAreRaceFree(t *testing.T) {

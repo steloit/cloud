@@ -84,8 +84,9 @@ func (c *HTTPControlPlane) auth(req *http.Request) {
 }
 
 // statusErr renders a non-200 as an error carrying the code, so the loop can log
-// it and skip. A 409 (stale generation) is just another "re-poll" — the loop
-// already retries by holding the watermark, so no special case is needed.
+// it and skip. A 409 (generation mismatch) is just another "re-poll" — the row
+// stays outstanding server-side, so the next tick re-converges it; no special
+// case is needed.
 func statusErr(op string, resp *http.Response) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	return fmt.Errorf("%s: control plane returned %d: %s", op, resp.StatusCode, bytes.TrimSpace(b))

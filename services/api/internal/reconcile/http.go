@@ -168,7 +168,7 @@ func (h *Handlers) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		problem.Write(w, r, problem.NotFound("cell or service"))
 	case errors.Is(err, ErrStaleGeneration):
 		problem.Write(w, r, problem.Conflict(
-			[]string{"the reported generation is ahead of desired state"},
+			[]string{"the reported generation is not the one desired currently holds"},
 			"Re-poll /desired and report on the current generation."))
 	default:
 		if c, ok := errors.AsType[problem.Carrier](err); ok {

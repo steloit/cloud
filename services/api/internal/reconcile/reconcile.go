@@ -81,6 +81,14 @@ func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int6
 		}
 		return nil, err
 	}
+	// The poll is the liveness signal for a QUIESCENT cell: a fully-converged
+	// cell has no outstanding work, so it never writes back, so the status-call
+	// heartbeat would freeze and a health check (O4) would call a healthy cell
+	// dead. The agent polls every tick regardless of work, so touch the
+	// heartbeat here — the cell is "seen" whenever it asks for desired state.
+	if err := s.q.TouchCellHeartbeat(ctx, cell); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 100
 	}
@@ -130,14 +138,18 @@ type Report struct {
 // Order matters and is deliberate:
 //  1. heartbeat first — an agent that is alive but reporting something invalid
 //     must still count as alive, or a bad report would look like a dead cell.
-//  2. MarkObserved, whose exact-match guard REJECTS any report not on the
-//     current generation (behind or ahead) — see ErrStaleGeneration.
-//  3. the status edge, through the existing Transition (events + metering).
+//  2. generation pre-check — a report not on the current generation is rejected
+//     before anything mutates (the AC's behind-report scenario).
+//  3. the status edge FIRST (events + metering, via the existing Transition),
+//  4. then MarkObserved — observed_generation advances ONLY after a durable
+//     edge, so a failed transition never strands the row out of the outstanding
+//     set. MarkObserved's exact-match guard is the atomic backstop for the
+//     read-then-check race.
 //
-// Repeating an identical writeback is a no-op: MarkObserved re-sets observed to
-// the same value, and an already-current status skips the transition.
+// Repeating an identical writeback is a no-op: an already-current status skips
+// the transition, and MarkObserved re-sets observed to the same value.
 // Concurrency is handled by Transition's own FROM-guard, so two agents
-// reporting the same edge apply once.
+// reporting the same edge apply the edge once.
 func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store.Service, error) {
 	if _, err := s.q.GetCell(ctx, cell); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -162,24 +174,47 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 		return store.Service{}, ErrUnknownCell
 	}
 
+	// Generation pre-check BEFORE any transition: a report for a generation other
+	// than the one desired holds now (behind or ahead) drives nothing — the AC's
+	// behind-report scenario must leave the row untouched. This read-then-check
+	// has a microsecond TOCTOU with a concurrent desired bump; MarkObserved's SQL
+	// guard (generation = $2) is the atomic backstop below.
+	if svc.Generation != rep.ObservedGeneration {
+		return store.Service{}, fmt.Errorf("%w: reported %d, desired holds %d",
+			ErrStaleGeneration, rep.ObservedGeneration, svc.Generation)
+	}
+
+	// Order is deliberate and load-bearing: the status edge runs FIRST, and
+	// observed_generation advances ONLY after it durably lands. If Transition
+	// fails (illegal edge, or a mid-request DB error), observed has NOT advanced,
+	// so the row stays outstanding and the next tick retries it — the whole
+	// retry story depends on this. The reverse order stranded the row: observed
+	// advanced, the row left the outstanding set, and a failed edge was lost.
+	if rep.Status != "" && rep.Status != svc.Status {
+		orgID, err := s.q.OrgForService(ctx, rep.ServiceID)
+		if err != nil {
+			return store.Service{}, err
+		}
+		// via=system: this edge came from the cell converging, not a person.
+		if _, err := s.trans.Transition(ctx, svc, rep.Status, "system", "system", orgID); err != nil {
+			return store.Service{}, err // observed NOT advanced — row stays outstanding
+		}
+	}
+
+	// The transition (if any) is durable; now record that the cell converged this
+	// generation. The exact-match guard is the atomic backstop for the TOCTOU
+	// above: if desired bumped concurrently, this rejects and the row stays
+	// outstanding (the transition that ran was for the now-superseded generation,
+	// which the next tick reconciles). Idempotent replays re-set the same value.
 	updated, err := s.q.MarkObserved(ctx, store.MarkObservedParams{
 		ID: rep.ServiceID, ObservedGeneration: rep.ObservedGeneration,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.Service{}, fmt.Errorf("%w: reported %d, desired holds a different generation",
+			return store.Service{}, fmt.Errorf("%w: reported %d, desired moved concurrently",
 				ErrStaleGeneration, rep.ObservedGeneration)
 		}
 		return store.Service{}, err
 	}
-
-	if rep.Status == "" || rep.Status == updated.Status {
-		return updated, nil // observation only — nothing to transition
-	}
-	orgID, err := s.q.OrgForService(ctx, rep.ServiceID)
-	if err != nil {
-		return store.Service{}, err
-	}
-	// via=system: this edge came from the cell converging, not a person.
-	return s.trans.Transition(ctx, updated, rep.Status, "system", "system", orgID)
+	return updated, nil
 }

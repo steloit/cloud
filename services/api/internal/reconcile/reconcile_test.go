@@ -15,7 +15,7 @@ import (
 // fakeQ is an in-memory Querier. The reconciler's load-bearing rules —
 // staleness rejection, cell fencing, idempotency — are pure logic over the
 // store, so they are provable without Postgres. The SQL guard itself
-// (generation >= $2) is pinned by the integration test.
+// (generation = $2, exact match) is pinned by the integration test.
 type fakeQ struct {
 	mu        sync.Mutex
 	cells     map[string]store.Cell
@@ -84,15 +84,19 @@ func (f *fakeQ) OrgForService(context.Context, string) (string, error) { return 
 // fakeTrans records edges and enforces the one rule the reconciler depends on:
 // an edge is applied at most once per (id, from→to).
 type fakeTrans struct {
-	mu    sync.Mutex
-	calls int
-	edges []string
-	q     *fakeQ
+	mu     sync.Mutex
+	calls  int
+	edges  []string
+	q      *fakeQ
+	failTo string // if set, Transition to this status returns an error (illegal edge)
 }
 
 func (t *fakeTrans) Transition(_ context.Context, svc store.Service, to, via, _, _ string) (store.Service, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.failTo != "" && to == t.failTo {
+		return store.Service{}, errors.New("illegal edge")
+	}
 	cur := t.q.services[svc.ID]
 	if cur.Status == to {
 		return cur, errors.New("illegal transition (already there)")
@@ -358,5 +362,37 @@ func TestUnconfiguredSecretFailsClosed(t *testing.T) {
 	}
 	if a.Allows(req("anything"), "cell-0") || a.Allows(req(""), "cell-0") {
 		t.Fatal("absent config must mean CLOSED, never open")
+	}
+}
+
+// The stranding regression both reviewers flagged: if the status edge fails,
+// observed_generation must NOT advance, so the row stays outstanding and the
+// next tick retries it. The reverse order lost the edge forever.
+func TestFailedTransitionDoesNotAdvanceObserved(t *testing.T) {
+	s, q, tr := newFixture()
+	tr.failTo = "ready" // simulate an illegal edge / mid-request failure
+	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3, Status: "ready"})
+	if err == nil {
+		t.Fatal("a failing transition must surface an error")
+	}
+	if q.services["svc_a"].ObservedGeneration != 0 {
+		t.Fatalf("observed_generation advanced to %d despite a failed transition — the row is stranded",
+			q.services["svc_a"].ObservedGeneration)
+	}
+	if q.services["svc_a"].Status != "provisioning" {
+		t.Fatal("status changed despite a failed transition")
+	}
+}
+
+// A quiescent cell (no outstanding work) still heartbeats via the poll, so a
+// health check does not call a healthy cell dead.
+func TestPollTouchesHeartbeat(t *testing.T) {
+	s, q, _ := newFixture()
+	before := q.heartbeat
+	if _, err := s.Desired(context.Background(), "cell-0", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if q.heartbeat != before+1 {
+		t.Fatalf("the poll must touch the heartbeat (quiescent-cell liveness); count %d→%d", before, q.heartbeat)
 	}
 }

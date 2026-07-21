@@ -71,6 +71,32 @@ scope. This task is that wiring.
 - [ ] No customer-facing leak of the desired document (the D8 guard in
   `TestServiceViewDoesNotLeakReconcilerColumns` stays green).
 
+## Also carry these US-1.3 review findings (recorded, not yet fixed)
+
+These are real but out of US-1.3's file scope or genuinely renderer-side; they
+land here so they are not lost:
+
+- **Persistent converge failure is invisible to the control plane.** The agent's
+  converge-error path is `continue` — no writeback, so a service whose render
+  always errors shows `provisioning` forever with no signal. Needs a
+  failure-reporting/backoff path once the real renderer (T1.4) can fail
+  meaningfully. Today's AckRenderer never fails, so it is not yet reachable.
+- **Page starvation past the poll LIMIT.** `ListDesiredForCell` is
+  `ORDER BY generation LIMIT 100`; >100 permanently-stuck low-generation rows
+  would shadow all higher-generation work. Low risk at one-cell alpha; needs
+  rotation/backoff or offset before a cell carries >100 concurrently-outstanding
+  services.
+- **Writeback atomicity is by ordering, not a transaction.** US-1.3 fixed the
+  stranding bug by advancing `observed_generation` only after a durable
+  transition, with a microsecond read-then-check TOCTOU on a concurrent desired
+  bump (backstopped by the exact-match SQL guard). Full atomicity wants
+  `MarkObserved` + `Transition` (with its events + metering) in one transaction —
+  a provisioning-side refactor to a tx-aware transition, best done when edits
+  become genuinely concurrent.
+- **`gone` on a non-deleting service** is currently inert w.r.t. status
+  (observation-only) but still a nonsensical report; when the deletion pipeline
+  (US-3.5) lands, decide whether it should be an explicit reject.
+
 ## Related
 
 US-1.3 (the protocol) · T3.3 (service writers) · US-3.5 (deletion + final backup)

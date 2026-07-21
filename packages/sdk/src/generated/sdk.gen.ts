@@ -1275,7 +1275,7 @@ export const applyProposal = <ThrowOnError extends boolean = false>(options: Opt
 /**
  * Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
  *
- * The cell-agent's poll. Returns every service in this cell whose generation exceeds since_generation, so the agent renders from desired and never diffs by memory. Reconciler-scoped token only; a cell the token does not own is 404, never 403.
+ * The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
  */
 export const getDesiredState = <ThrowOnError extends boolean = false>(options: Options<GetDesiredStateData, ThrowOnError>): RequestResult<GetDesiredStateResponses, GetDesiredStateErrors, ThrowOnError> => (options.client ?? client).get<GetDesiredStateResponses, GetDesiredStateErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

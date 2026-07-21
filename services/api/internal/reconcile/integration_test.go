@@ -263,7 +263,12 @@ func TestHeartbeatPersistsAgainstRealPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := time.Now()
+	// Compare against the DB clock (SELECT now()), not the host clock — a colima
+	// VM clock can drift from the host and flake a host-vs-container comparison.
+	var before time.Time
+	if err := pool.QueryRow(ctx, "SELECT now()").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_hb", ObservedGeneration: 1}); err != nil {
 		t.Fatal(err)
 	}
