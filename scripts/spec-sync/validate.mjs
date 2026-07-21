@@ -1,16 +1,25 @@
 #!/usr/bin/env node
-// Validate every task file: schema-ish checks, dep resolution, context-pack resolution, caps.
-// Exit 1 on any failure. No dependencies.
+// Validate repo invariants: task files (schema, deps, context packs, caps), the CLAUDE.md
+// entrypoint symlink, and the .claude/agents/ directory. Exit 1 on any failure. No dependencies.
 import { readFileSync, existsSync, readdirSync, lstatSync, readlinkSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadTasks, parseFrontmatter } from "./lib.mjs";
 
-const CONTEXTS_DIR = new URL("../../contexts/", import.meta.url).pathname;
-const AGENTS_MD = new URL("../../AGENTS.md", import.meta.url).pathname;
-const CLAUDE_MD = new URL("../../CLAUDE.md", import.meta.url).pathname;
-const AGENTS_DIR = new URL("../../.claude/agents/", import.meta.url).pathname;
+// fileURLToPath, not .pathname: the latter percent-encodes, so a checkout under a path
+// containing a space resolves to a directory that does not exist.
+const p = (rel) => fileURLToPath(new URL(rel, import.meta.url));
+const CONTEXTS_DIR = p("../../contexts/");
+const AGENTS_MD = p("../../AGENTS.md");
+const CLAUDE_MD = p("../../CLAUDE.md");
+const AGENTS_DIR = p("../../.claude/agents/");
 const AGENTS_README = `${AGENTS_DIR}README.md`;
-// ADR-0008: the two pipeline reviewers must not request write tools.
+// ADR-0008 names these two as the mandatory pipeline reviewers. Compared case-insensitively
+// because harness name resolution is case-insensitive (verified: `Reviewer` folds to `reviewer`),
+// so a file named QA.md would otherwise escape the check while still serving `subagent_type: qa`.
 const REVIEW_AGENTS = ["reviewer", "qa"];
+// These are the tools the two reviewers may REQUEST. Bash is permitted because they need
+// `git diff`/`go test`/`grep` — it is NOT read-only, and this list must never be cited as
+// proof that a reviewer cannot write. See .claude/agents/README.md and O6d.
 const READONLY_TOOLS = new Set(["Read", "Grep", "Glob", "Bash"]);
 
 const schema = JSON.parse(readFileSync(new URL("./task.schema.json", import.meta.url), "utf8"));
@@ -56,8 +65,14 @@ for (const t of tasks) {
 }
 
 // caps: steering + packs
-const agentsLines = readFileSync(AGENTS_MD, "utf8").split("\n").length;
-if (agentsLines > 150) errors.push(`AGENTS.md: ${agentsLines} lines > 150 cap`);
+if (!existsSync(AGENTS_MD)) {
+  // Remediation, not an ENOENT trace — and it must not abort before the entrypoint check below,
+  // since a missing AGENTS.md is exactly when a dangling CLAUDE.md symlink matters most.
+  errors.push(`AGENTS.md: missing — it is the real steering file; CLAUDE.md is a symlink to it`);
+} else {
+  const agentsLines = readFileSync(AGENTS_MD, "utf8").split("\n").length;
+  if (agentsLines > 150) errors.push(`AGENTS.md: ${agentsLines} lines > 150 cap`);
+}
 for (const p of packs) {
   const lines = readFileSync(`${CONTEXTS_DIR}${p}.md`, "utf8").split("\n").length;
   if (lines > 160) errors.push(`contexts/${p}.md: ${lines} lines > 150 cap`);
@@ -68,14 +83,23 @@ if (packs.size > 12) errors.push(`contexts/: ${packs.size} packs > 12 cap`);
 // Checked on the WORKING TREE, not the index: under a core.symlinks=false checkout the index
 // still reads 120000 while CLAUDE.md is a 9-byte regular file containing "AGENTS.md", and a
 // session auto-loading it gets those nine bytes instead of the Engineering OS — silently.
+// CI note: actions/checkout preserves symlinks, so CI's own environment never produces the
+// degraded form. The check still protects, because a core.symlinks=false contributor COMMITS a
+// regular-file blob (mode 100644 lands in the index) and CI's lstat then sees a regular file.
 try {
-  const st = lstatSync(CLAUDE_MD);
-  if (!st.isSymbolicLink())
+  if (!lstatSync(CLAUDE_MD).isSymbolicLink())
     errors.push(`entrypoint-symlink: CLAUDE.md is a regular file; it must stay a symlink to AGENTS.md — edit AGENTS.md instead`);
-  else if (readlinkSync(CLAUDE_MD) !== "AGENTS.md")
-    errors.push(`entrypoint-symlink: CLAUDE.md points at "${readlinkSync(CLAUDE_MD)}"; it must point at AGENTS.md`);
-} catch {
-  errors.push(`entrypoint-symlink: CLAUDE.md is missing; it must be a symlink to AGENTS.md`);
+  else {
+    const target = readlinkSync(CLAUDE_MD).replace(/^\.\//, ""); // ./AGENTS.md is equivalent
+    if (target !== "AGENTS.md")
+      errors.push(`entrypoint-symlink: CLAUDE.md points at "${target}"; it must point at AGENTS.md`);
+  }
+} catch (e) {
+  errors.push(
+    e.code === "ENOENT"
+      ? `entrypoint-symlink: CLAUDE.md is missing; it must be a symlink to AGENTS.md`
+      : `entrypoint-symlink: cannot stat CLAUDE.md (${e.code ?? e.message})`
+  );
 }
 
 // agents-readme-exists: AGENTS.md step 5a points at this file; a rename would dangle silently.
@@ -85,8 +109,10 @@ if (!agentsReadmeOk)
   errors.push(`agents-readme-exists: .claude/agents/README.md is missing — AGENTS.md step 5a points at it`);
 
 if (existsSync(AGENTS_DIR)) {
-  const agentFiles = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md") && f !== "README.md");
-  const declared = new Map(); // name -> filename
+  // sorted: readdirSync order is filesystem-dependent (APFS sorts, ext4 hashes), and error
+  // order must be deterministic so output stays diffable.
+  const agentFiles = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md") && f !== "README.md").sort();
+  const declared = new Map(); // lowercased name -> { name, file }
 
   for (const f of agentFiles) {
     let meta;
@@ -94,39 +120,58 @@ if (existsSync(AGENTS_DIR)) {
       ({ meta } = parseFrontmatter(readFileSync(`${AGENTS_DIR}${f}`, "utf8"), f));
     } catch {
       // Loud, not skipped: a typo'd fence is indistinguishable from no frontmatter at the parser.
-      errors.push(`agents-table-sync: .claude/agents/${f} has missing or malformed frontmatter`);
+      errors.push(`agents-table-sync: .claude/agents/${f} has missing or malformed frontmatter — README.md is the only permitted non-agent file here`);
       continue;
     }
-    const name = meta.name;
+    const name = String(meta.name ?? "");
     if (!name) { errors.push(`agents-table-sync: .claude/agents/${f} has no frontmatter name`); continue; }
     if (name !== f.replace(/\.md$/, ""))
       errors.push(`agents-table-sync: .claude/agents/${f} declares name "${name}" — must match its filename stem`);
-    declared.set(name, f);
+    declared.set(name.toLowerCase(), { name, file: f });
 
-    // agents-readonly (ADR-0008 reviewer identity): the two reviewers request no write tools.
-    if (REVIEW_AGENTS.includes(name)) {
-      const tools = String(meta.tools ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      const bad = tools.filter((t) => !READONLY_TOOLS.has(t));
-      if (bad.length)
-        errors.push(`agents-readonly: .claude/agents/${f} requests ${bad.join(", ")} — ADR-0008 requires the two pipeline reviewers to be read-only (allowed: ${[...READONLY_TOOLS].join(", ")})`);
+    // agents-readonly (ADR-0008 reviewer identity). Case-insensitive: `subagent_type: qa` resolves
+    // to a file declaring `name: QA`, so an exact-match filter would let it escape.
+    if (REVIEW_AGENTS.includes(name.toLowerCase())) {
+      // An ABSENT or empty `tools:` is the widest possible grant — the agent inherits the full
+      // toolset, Write and Edit included. Requiring the key is the whole point of this check;
+      // deleting the line is a likelier careless edit than adding a tool to it.
+      if (meta.tools === undefined || meta.tools === null || String(meta.tools).trim() === "") {
+        errors.push(`agents-readonly: .claude/agents/${f} declares no tools: — an omitted list inherits every tool, including Write and Edit; ADR-0008 requires an explicit list (allowed: ${[...READONLY_TOOLS].join(", ")})`);
+      } else {
+        const tools = String(meta.tools).split(",").map((s) => s.trim()).filter(Boolean);
+        const bad = tools.filter((t) => !READONLY_TOOLS.has(t));
+        if (bad.length)
+          errors.push(`agents-readonly: .claude/agents/${f} requests ${bad.join(", ")} — ADR-0008 requires the two pipeline reviewers to request no write tools (allowed: ${[...READONLY_TOOLS].join(", ")}; note Bash is permitted for evidence-gathering and is NOT read-only)`);
+      }
     }
   }
 
+  // The two ADR-0008 reviewers must EXIST, not merely be well-formed if present.
+  for (const want of REVIEW_AGENTS)
+    if (!declared.has(want))
+      errors.push(`agents-readonly: .claude/agents/${want}.md is missing — ADR-0008 makes it a mandatory pipeline reviewer`);
+
   // agents-table-sync: the README table is hand-maintained; keep it equal to the directory.
   if (agentsReadmeOk) {
-    const tabled = new Set();
+    const tabled = new Map(); // lowercased subagent_type -> { name, fileCol }
     for (const line of readFileSync(AGENTS_README, "utf8").split("\n")) {
-      if (!line.startsWith("|")) continue;
-      const cols = line.split("|").slice(1, -1).map((c) => c.trim().replace(/`/g, ""));
+      const trimmed = line.trim();
+      if (!trimmed.includes("|")) continue;
+      const cols = trimmed.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim().replace(/`/g, ""));
       if (cols.length < 2 || !cols[0].endsWith(".md")) continue; // header + separator rows
-      tabled.add(cols[1]);
+      tabled.set(cols[1].toLowerCase(), { name: cols[1], fileCol: cols[0] });
     }
-    for (const name of declared.keys())
-      if (!tabled.has(name))
-        errors.push(`agents-table-sync: agent "${name}" is not listed in .claude/agents/README.md's table`);
-    for (const name of tabled)
-      if (!declared.has(name))
-        errors.push(`agents-table-sync: README table lists "${name}" but no .claude/agents/${name}.md declares it`);
+    for (const [key, { name, file }] of declared) {
+      const row = tabled.get(key);
+      if (!row) { errors.push(`agents-table-sync: agent "${name}" is not listed in .claude/agents/README.md's table`); continue; }
+      if (row.name !== name)
+        errors.push(`agents-table-sync: README table lists "${row.name}" but .claude/agents/${file} declares "${name}" — casing must match`);
+      if (row.fileCol !== file)
+        errors.push(`agents-table-sync: README table's File column says "${row.fileCol}" for "${name}", but it is declared in ${file}`);
+    }
+    for (const [key, { name }] of tabled)
+      if (!declared.has(key))
+        errors.push(`agents-table-sync: README table lists "${name}" but no .claude/agents/*.md declares it`);
   }
 }
 

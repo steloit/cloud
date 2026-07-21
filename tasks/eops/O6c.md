@@ -146,6 +146,26 @@ bytes instead of the authority order, hard rules, and task protocol, silently,
 and the check would have printed `OK`. QA caught it; the implementation asserts
 the working tree via `lstatSync`/`readlinkSync`.
 
+Review round 2 found the check had a hole worse than the fault it caught. **A
+missing or empty `tools:` passed** — and an omitted list is the *widest* grant,
+inheriting every tool including `Write` and `Edit`. So the check reported `OK` on
+the worst case while failing only the narrower "tool added" case, and deleting a
+line is a likelier careless edit than adding to it. Both reviewers found it
+independently. Four more escapes came out of the same round, all now closed and
+verified by injection: a case-variant `QA.md` bypassed the filter entirely while
+still serving `subagent_type: qa` (harness matching is case-insensitive); both
+reviewers could be **deleted outright** with `OK`, since nothing asserted they
+exist; the table's File column could drift arbitrarily; and `ln -s ./AGENTS.md`
+was a false positive — the class of failure that gets a check disabled.
+
+Also fixed: a missing `AGENTS.md` threw a raw `ENOENT` trace *before* the
+entrypoint check ran, which is precisely when a dangling symlink matters most;
+`readdirSync` order is now sorted so error output is deterministic; and paths use
+`fileURLToPath` rather than `.pathname`, which percent-encodes and breaks under a
+checkout path containing a space.
+
+15 fault classes verified in total, each injected and restored.
+
 Deviation: `agents-readonly` pins the **declared** grant only, and must not be
 read as making the reviewers read-only. O6 verified `reviewer` holds `Bash` and
 `echo x > file` executes with no prompt. This check stops a careless frontmatter
@@ -153,3 +173,11 @@ edit; it does not close the hole. **O6d** carries the wording fix, and whether
 to constrain `Bash` at all remains explicitly undecided — it would cost the
 reviewers `git diff`, `go test`, and `grep`, which is most of how they gather
 evidence.
+
+**PARTIAL, recorded rather than claimed:** the four checks are enforced, but
+`validate.mjs` itself has **no tests**. Every verification here was a manual
+injection run once by hand, so the next edit to this file can neuter all four
+with CI still green — the same argument this task's Why section makes about the
+reviewers, one level up. **O6e** filed for the fault-injection suite; it needs
+`.github/workflows/ci.yml`, outside this task's glob. Until it lands, these
+checks are enforced but unpinned.

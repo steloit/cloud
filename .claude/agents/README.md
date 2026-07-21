@@ -1,8 +1,10 @@
 # Repository agents
 
-Every `.md` file in this directory **with agent frontmatter** is a first-class subagent.
-The harness registers it by its frontmatter `name`, and that name is the `subagent_type`
-you invoke. (This README has no such frontmatter — it is documentation, not an agent.)
+Every `.md` file in this directory is a first-class subagent, registered by its frontmatter
+`name` — and that name is the `subagent_type` you invoke. **`README.md` is the only
+permitted non-agent file here**; `validate.mjs` treats every other `.md` as an agent and
+fails on one that will not parse, because a typo'd `---` fence and an absent one are
+indistinguishable at the parser. Put design notes somewhere else.
 
 | File | `subagent_type` | Role |
 |---|---|---|
