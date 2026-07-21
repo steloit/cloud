@@ -22,7 +22,7 @@ export type DesiredService = {
      * ADR-024 vocabulary
      */
     status: string;
-    product: 'postgres' | 'valkey' | 'web' | 'worker';
+    product: Product;
     intent?: string;
     name?: string;
     env_id?: string;

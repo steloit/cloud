@@ -1307,7 +1307,7 @@ components:
         generation: {type: integer, format: int64, description: "bumps on every desired-state edit"}
         observed_generation: {type: integer, format: int64, description: "how far the agent has converged; observed < generation means work outstanding"}
         status: {type: string, description: "ADR-024 vocabulary"}
-        product: {type: string, enum: [postgres, valkey, web, worker]}
+        product: {$ref: "#/components/schemas/Product"}
         intent: {type: string}
         name: {type: string}
         env_id: {type: string}

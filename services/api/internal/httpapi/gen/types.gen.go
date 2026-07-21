@@ -327,30 +327,6 @@ func (e DeploymentState) Valid() bool {
 	}
 }
 
-// Defines values for DesiredServiceProduct.
-const (
-	DesiredServiceProductPostgres DesiredServiceProduct = "postgres"
-	DesiredServiceProductValkey   DesiredServiceProduct = "valkey"
-	DesiredServiceProductWeb      DesiredServiceProduct = "web"
-	DesiredServiceProductWorker   DesiredServiceProduct = "worker"
-)
-
-// Valid indicates whether the value is a known member of the DesiredServiceProduct enum.
-func (e DesiredServiceProduct) Valid() bool {
-	switch e {
-	case DesiredServiceProductPostgres:
-		return true
-	case DesiredServiceProductValkey:
-		return true
-	case DesiredServiceProductWeb:
-		return true
-	case DesiredServiceProductWorker:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DnsRecordType.
 const (
 	CNAME DnsRecordType = "CNAME"
@@ -839,22 +815,22 @@ func (e Plan) Valid() bool {
 
 // Defines values for Product.
 const (
-	ProductPostgres Product = "postgres"
-	ProductValkey   Product = "valkey"
-	ProductWeb      Product = "web"
-	ProductWorker   Product = "worker"
+	Postgres Product = "postgres"
+	Valkey   Product = "valkey"
+	Web      Product = "web"
+	Worker   Product = "worker"
 )
 
 // Valid indicates whether the value is a known member of the Product enum.
 func (e Product) Valid() bool {
 	switch e {
-	case ProductPostgres:
+	case Postgres:
 		return true
-	case ProductValkey:
+	case Valkey:
 		return true
-	case ProductWeb:
+	case Web:
 		return true
-	case ProductWorker:
+	case Worker:
 		return true
 	default:
 		return false
@@ -2005,17 +1981,16 @@ type DesiredService struct {
 	Name       *string `json:"name,omitempty"`
 
 	// ObservedGeneration how far the agent has converged; observed < generation means work outstanding
-	ObservedGeneration *int64                  `json:"observed_generation,omitempty"`
-	Product            DesiredServiceProduct   `json:"product"`
-	Scaling            *map[string]interface{} `json:"scaling,omitempty"`
-	Shape              *map[string]interface{} `json:"shape,omitempty"`
+	ObservedGeneration *int64 `json:"observed_generation,omitempty"`
+
+	// Product managed services Steloit builds (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed.
+	Product Product                 `json:"product"`
+	Scaling *map[string]interface{} `json:"scaling,omitempty"`
+	Shape   *map[string]interface{} `json:"shape,omitempty"`
 
 	// Status ADR-024 vocabulary
 	Status string `json:"status"`
 }
-
-// DesiredServiceProduct defines model for DesiredService.Product.
-type DesiredServiceProduct string
 
 // DnsRecord defines model for DnsRecord.
 type DnsRecord struct {
