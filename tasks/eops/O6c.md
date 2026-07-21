@@ -2,7 +2,7 @@
 id: O6c
 title: Pin the agent directory's load-bearing properties in validate.mjs
 epic: EOPS
-status: ready
+status: in-progress
 phase: V1
 priority: medium
 sprint: 1
