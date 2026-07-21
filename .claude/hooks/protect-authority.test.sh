@@ -16,9 +16,12 @@ pass=0; fail=0
 t() {
   local rc; rc=0
   printf '%s' "$3" | bash "$HOOK" >/dev/null 2>&1 || rc=$?
-  local got; [ "$rc" -eq 2 ] && got=block || got=allow
+  # rc must be exactly 0 (allow) or 2 (block). Anything else is a crash — treating a crash
+  # as "allow" would score a broken hook as passing every allow case.
+  local got
+  case "$rc" in 0) got=allow ;; 2) got=block ;; *) got="crash(rc=$rc)" ;; esac
   if [ "$got" = "$1" ]; then pass=$((pass+1));
-  else fail=$((fail+1)); printf '  FAIL  expected %-5s got %-5s : %s\n' "$1" "$got" "$2"; fi
+  else fail=$((fail+1)); printf '  FAIL  expected %-5s got %-9s : %s\n' "$1" "$got" "$2"; fi
 }
 bash_cmd() { printf '{"tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -Rs .)"; }
 file_tool() { printf '{"tool_input":{"file_path":"%s"}}' "$1"; }
@@ -80,6 +83,36 @@ t allow "write a task file"            "$(bash_cmd "echo x > tasks/eops/O6f.md")
 t allow "heredoc documenting the hook" "$(bash_cmd "cat > /tmp/note.md <<'EOF'
 repro: echo x >> $DEC
 EOF")"
+
+echo "== round-2 bypasses (all were ALLOWED by the first version) =="
+t block "cp dest + trailing 2>/dev/null" "$(bash_cmd "cp /tmp/stamped.md $DEC 2>/dev/null")"
+t block "mv dest + trailing redirect"   "$(bash_cmd "mv /tmp/x $DEC 2>/dev/null")"
+t block "tee dest + >/dev/null"         "$(bash_cmd "echo x | tee $DEC >/dev/null")"
+t block "cp dest + trailing flag"       "$(bash_cmd "cp /tmp/x $DEC -v")"
+t block "interpreter heredoc (bash)"    "$(bash_cmd "bash <<'EOF'
+echo ratified >> $DEC
+EOF")"
+t block "interpreter heredoc (sh rm)"   "$(bash_cmd "sh <<'SH'
+rm -rf $SRC
+SH")"
+t block "interpreter heredoc (python)"  "$(bash_cmd "python3 <<'PY'
+open('$DEC','w').write('x')
+PY")"
+t block "patch"                         "$(bash_cmd "patch $DEC < /tmp/p.diff")"
+t block "touch new authority doc"       "$(bash_cmd "touch $SRC/GOV-999.md")"
+t block "git checkout . (pathless)"     "$(bash_cmd "git checkout .")"
+t block "git reset --hard"              "$(bash_cmd "git reset --hard HEAD~1")"
+t block "git stash pop"                 "$(bash_cmd "git stash pop")"
+t block "git clean -fd on 00-sources"   "$(bash_cmd "git clean -fd $SRC")"
+
+echo "== round-2 false positives (all were BLOCKED by the first version) =="
+t allow "multi-line heredoc finding"    "$(bash_cmd "cat > /tmp/finding.md <<'EOF'
+Repro
+the hook missed this:
+echo x >> $DEC
+EOF")"
+t allow "read authority && write elsewhere" "$(bash_cmd "python3 -c \"print(open('$DEC').read())\" && node -e \"require('fs').writeFileSync('/tmp/o','x')\"")"
+t allow "read authority && echo 'w'"    "$(bash_cmd "python3 -c \"print(open('$DEC').read())\" && echo 'w'")"
 
 echo "== founder escape hatch =="
 t allow "STELOIT_RATIFY=1 cp"          "$(bash_cmd "STELOIT_RATIFY=1 cp /tmp/stamped.md $DEC")"

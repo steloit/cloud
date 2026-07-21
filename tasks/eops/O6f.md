@@ -106,16 +106,24 @@ O6d (same root cause, prose fix) · ADR-0002 · AGENTS.md hard rules ·
 
 Two controls, because one was not enough and the review proved it.
 
-**CI `authority-paths` is the control that binds.** It reads the PR diff, so no
-call-shape trick reaches it and `--no-verify` does not apply. A PR touching the
-protected paths fails unless `FOUNDER-RATIFIED` appears in its title or body —
-which puts the approval in the permanent record rather than in someone's memory.
-This was **not** in the original plan: the first draft dismissed Option 3 by
-considering only the *local* pre-commit variant (advisory, `--no-verify`-able)
-and never the CI variant, which is neither. The reviewer caught that the
-dismissal reasoning did not support its conclusion, and that AGENTS.md was
-meanwhile pointing at "review and git history" as the real control while
-**nothing in CI asserted it** — narrative, not mechanical.
+**CI `authority-paths` reports on every PR.** It reads the PR diff, so no call-shape
+trick reaches it and `--no-verify` does not apply. It was not in the original plan:
+the first draft dismissed Option 3 by considering only the *local* pre-commit
+variant (advisory) and never the CI variant. The reviewer caught that.
+
+**But it does not BIND, and I claimed it did.** Verified after the review pushed
+on it: `gh api .../branches/main/protection` and `/rulesets` both return 403
+"Upgrade to GitHub Pro or make this repository public" — private repo, free org
+plan. CI reports; a red PR merges exactly like a green one. CODEOWNERS is
+decorative for the same reason, and the `FOUNDER-RATIFIED` marker is written by
+the same agent that opens the PR, so it constrains nobody.
+
+I had written "**CI is what binds**" into AGENTS.md. That would have been the
+**fourth** restatement of this family's one recurring defect — a document
+asserting a guarantee no mechanism provides — and the worst, because it replaced
+a claim I had just correctly weakened with a stronger false one. AGENTS.md now
+says nothing blocks a merge. **O6g** carries the founder decision that would
+change it.
 
 **The PreToolUse hook is an accident floor.** `settings.json`'s matcher gains
 `Bash`; the hook inspects `.tool_input.command` when no `file_path` is present.
@@ -142,7 +150,7 @@ review found it:
 - *Fail-open.* With `jq` absent the hook exited 127, which is non-blocking — a
   missing dependency silently disabled the control. It now fails closed.
 
-**41 regression tests** in `protect-authority.test.sh`, wired into CI. Every case
+**57 regression tests** in `protect-authority.test.sh`, wired into CI. Every case
 came from a review finding rather than imagination: the BLOCK cases are bypasses
 the first version allowed, the ALLOW cases are false positives it produced. Both
 reviewers independently called the absence of tests the load-bearing gap for a

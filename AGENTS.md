@@ -86,8 +86,9 @@ never hand-written · demo data from `19-canon` only.
 - The AI four laws bind generated code: **no auto-apply path exists in the API, ever.**
 - Estimate-before-provision is enforced at the API layer, never only in a client.
 - `docs/product/00-sources/**` and `docs/product/18-philosophy/decisions.md` change by **human decision
-  only**. A hook stops the common accidental writes; **CI is what binds** — `authority-paths` fails any
-  PR whose diff touches them without `FOUNDER-RATIFIED`. Engineering decisions get an ADR in `docs/adr/`.
+  only**. A hook stops common accidental writes and CI's `authority-paths` flags any PR that touches
+  them — but **nothing blocks a merge** (this repo has no branch protection: O6g), so the real control
+  is still you and the diff. Engineering decisions get an ADR in `docs/adr/`.
 - Never mix restructuring and feature work in one commit.
 
 ## Don't read (token discipline)

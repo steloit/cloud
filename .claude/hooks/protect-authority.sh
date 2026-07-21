@@ -50,13 +50,32 @@ cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null |
 # Explicit, auditable founder bypass.
 printf '%s' "$cmd" | grep -qE '(^|[[:space:]])STELOIT_RATIFY=1([[:space:]]|$)' && exit 0
 
-# Strip heredoc BODIES before matching. Without this you cannot document, review, or file a
-# finding about this hook using the very shapes it blocks — which is how a hook gets removed.
+# Strip heredoc BODIES before matching — otherwise you cannot document, review, or file a
+# finding about this hook using the shapes it blocks, which is how a hook gets removed.
+# Two constraints learned from review:
+#   • track the ACTUAL delimiter and end only on it; ending on any bare word resumed scanning
+#     mid-body and re-blocked multi-line findings.
+#   • never strip the body of an INTERPRETER heredoc (bash/sh/python/node/…) — that body is
+#     executed, so stripping it turned `bash <<'EOF' … EOF` into a bypass.
 scan="$(printf '%s' "$cmd" | awk '
-  /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/ { print; inbody=1; next }
-  inbody && /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*$/ { inbody=0; next }
-  !inbody { print }
+  {
+    if (inbody) { if ($0 ~ "^[[:space:]]*" delim "[[:space:]]*$") { inbody=0 }; next }
+    line=$0
+    if (match(line, /<<-?[[:space:]]*['"'"'"]?[A-Za-z_][A-Za-z0-9_]*/)) {
+      head=substr(line, 1, RSTART-1)
+      # interpreter heredoc: the body runs, so keep it in the scan
+      if (head ~ /(^|[[:space:];&|])(bash|sh|zsh|ksh|python3?|node|ruby|perl|deno|bun|env)([[:space:]]|$)/) { print; next }
+      d=substr(line, RSTART, RLENGTH); gsub(/^<<-?[[:space:]]*['"'"'"]?/, "", d)
+      delim=d; inbody=1
+    }
+    print line
+  }
 ')"
+# PATHLESS restores run BEFORE the path gate: they rewrite protected files without ever naming
+# them, so a command-string gate would let every one of them through.
+printf '%s' "$scan" | grep -qE "$CMDPOS"'git[[:space:]]+(checkout[[:space:]]+\.|restore[[:space:]]+\.|reset[[:space:]]+--hard|stash[[:space:]]+pop|clean[[:space:]]+-[a-z]*f)' \
+  && deny "the whole tree (pathless git restore — it would rewrite protected files too)"
+
 # Gate is deliberately WIDER than PROTECTED: it must also admit a bare `cd` into a protected
 # directory, where the filename arrives separately (rule g).
 printf '%s' "$scan" | grep -qE "$PROTECTED"'|docs/product/18-philosophy' || exit 0
@@ -74,24 +93,41 @@ printf '%s' "$scan" | grep -qE "$CMDPOS"'(sed|perl|ruby|gawk|awk|ex|ed|vim|sort|
 printf '%s' "$scan" | grep -qE "$CMDPOS"'(rm|truncate|shred|unlink|dd)\b[^;|&]*('"$PROTECTED"')' \
   && deny "a protected path (delete/truncate)"
 
-# d) tee / cp / mv / ln — only when a protected path is the FINAL (destination) argument.
-#    `cp decisions.md /tmp/backup.md` is a READ and must stay allowed.
-printf '%s' "$scan" | grep -qE "$CMDPOS"'(tee|cp|mv|ln|install)\b[^;|&]*('"$PROTECTED"')[^[:space:];|&]*[[:space:]]*($|[;&|])' \
+# d) tee / cp / mv / ln / patch / sponge — protected path in DESTINATION position.
+#    `cp decisions.md /tmp/backup.md` is a READ and must stay allowed. Trailing flags and
+#    redirects are permitted after the destination: `cp x dec.md 2>/dev/null` is ordinary,
+#    and anchoring hard to end-of-line made every one of them a bypass.
+printf '%s' "$scan" | grep -qE "$CMDPOS"'(tee|cp|mv|ln|install|patch|sponge|touch)\b[^;|&]*('"$PROTECTED"')[^[:space:];|&]*([[:space:]]+([0-9]*[<>]|-)[^;|&]*)*[[:space:]]*($|[;&|])' \
   && deny "a protected path (copy/move destination)"
 
-# e) git-mediated writes — the highest-value way to revert a founder decision
-printf '%s' "$scan" | grep -qE "$CMDPOS"'git[[:space:]]+(checkout|restore|apply|stash[[:space:]]+pop|revert|rm)\b[^;|&]*('"$PROTECTED"')' \
+# e) git-mediated writes — the highest-value way to revert a founder decision.
+#    Split in two: path-naming forms, and PATHLESS forms that restore wholesale and so can
+#    never mention the path at all (the command-string gate would miss them entirely).
+printf '%s' "$scan" | grep -qE "$CMDPOS"'git[[:space:]]+(checkout|restore|apply|rm|clean)\b[^;|&]*('"$PROTECTED"')' \
   && deny "a protected path (git-mediated write)"
+printf '%s' "$scan" | grep -qE "$CMDPOS"'git[[:space:]]+(checkout[[:space:]]+\.|restore[[:space:]]+\.|reset[[:space:]]+--hard|stash[[:space:]]+pop|clean[[:space:]]+-[a-z]*f)' \
+  && deny "the whole tree (pathless git restore — it would rewrite protected files too)"
 
 # f) interpreter write — require a call shape and a write mode, not the bare substring
 #    ("open" unanchored blocked `rg openapi docs/product/00-sources/`, an everyday command)
-printf '%s' "$scan" | grep -qE '(open|write_text|write_bytes|writeFile|writeFileSync|appendFileSync|createWriteStream)[[:space:]]*\([^)]*('"$PROTECTED"')' \
+# Write-only verbs: the path appearing as an argument is enough.
+printf '%s' "$scan" | grep -qE '(write_text|write_bytes|writeFile|writeFileSync|appendFileSync|createWriteStream|unlinkSync|rmSync)[[:space:]]*\([^)]*('"$PROTECTED"')' \
+  && deny "a protected path (scripted write)"
+# open() needs a WRITE MODE — bare open('path') is a read, and blocking it made
+# "print(open(decisions).read())" a false positive.
+printf '%s' "$scan" | grep -qE 'open[[:space:]]*\([^)]*('"$PROTECTED"')[^)]*,[[:space:]]*['"'"'"][wax]' \
   && deny "a protected path (scripted write)"
 # The path is often an argument to a *constructor* (Path('…').write_text('x')), so the write
-# verb and the path sit in different call parens. Pair an interpreter + path + write verb.
-printf '%s' "$scan" | grep -qE "$CMDPOS"'(python3?|node|ruby|perl|deno|bun)\b[^;|&]*('"$PROTECTED"')' \
-  && printf '%s' "$scan" | grep -qE "(write_text|write_bytes|writeFile|writeFileSync|appendFileSync|createWriteStream|['\"][waxr]\+?['\"]|,[[:space:]]*['\"]w)" \
-  && deny "a protected path (scripted write)"
+# verb and the path sit in different call parens. Pair them WITHIN ONE command segment —
+# matching across segments blocked "read an authority file && write somewhere else".
+segments="$(printf '%s' "$scan" | awk '{gsub(/&&/,"\n"); gsub(/\|\|/,"\n"); gsub(/;/,"\n"); print}')"
+scripted=0
+while IFS= read -r seg; do
+  printf '%s' "$seg" | grep -qE '(python3?|node|ruby|perl|deno|bun)\b.*('"$PROTECTED"')' || continue
+  printf '%s' "$seg" | grep -qE "(write_text|write_bytes|writeFile|writeFileSync|appendFileSync|createWriteStream|,[[:space:]]*['\"][wax])" || continue
+  scripted=1; break
+done <<< "$segments"
+[ "$scripted" = 1 ] && deny "a protected path (scripted write)"
 
 # g) cd into a protected directory, then a bare-basename write
 printf '%s' "$scan" | grep -qE 'cd[[:space:]]+[^;|&]*docs/product/(18-philosophy|00-sources)' \
