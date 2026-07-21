@@ -316,6 +316,15 @@ func (s *Service) ServiceOrg(ctx context.Context, serviceID string) (store.Servi
 // UpdateService — shape/scaling are desired-state edits (repriced); the
 // manual override requires a reason and auto-expires in 24h (D22).
 func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, actorID string, shape map[string]any, scaling, override []byte) (store.Service, error) {
+	// A deleting service must not be edited: US-1.3a made desired load-bearing,
+	// so an edit would rewrite desired with deleting=false and re-outstand the
+	// row, cancelling an in-flight teardown. Reject it (before US-1.3a desired
+	// was inert '{}', so this clobber is newly reachable).
+	if svc.Status == "deleting" {
+		return store.Service{}, problemError{p: problem.Conflict(
+			[]string{"the service is being deleted"},
+			"Wait for deletion to complete; a deleting service cannot be edited.")}
+	}
 	params := store.UpdateServiceShapeParams{ID: svc.ID}
 	if shape != nil {
 		// merge over the existing shape: PATCH semantics, absent keys survive
@@ -399,14 +408,18 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 		return problemError{p: problem.Conflict(reasons,
 			"Unbind the listed services first — deleting would knowingly break them (U6).")}
 	}
-	// US-1.3a: write the deleting desired doc and bump generation so the service
-	// becomes outstanding and the cell converges the teardown (→ reports gone).
-	// Then transition status to deleting through the guarded machine. Two writes,
-	// not one transaction — the atomicity hardening is tracked in US-1.3a's own
-	// carried findings; a crash between them leaves the row outstanding at
-	// deleting-desired, which the next poll reconciles, so it self-heals.
+	// US-1.3a: write the deleting desired doc + bump generation (BumpServiceGeneration)
+	// so the service becomes outstanding and the cell converges the teardown,
+	// THEN transition status to deleting. Two writes, not one transaction (the
+	// atomicity hardening is a carried finding). A crash BETWEEN them is not
+	// poll-self-healing — the cell would converge the teardown and report `gone`,
+	// which is observation-only, so status would stay at its pre-delete value
+	// while the desired doc says deleting. It IS retry-recoverable: status is not
+	// yet `deleting`, so a second DeleteService passes the guard above and
+	// completes the transition. Ordered desired-first deliberately: the reverse
+	// (status-first) would strand a row that the guard then refuses to retry.
 	del := desiredDoc(svc.Product, svc.Intent.String, svc.Shape, svc.Scaling, true)
-	if _, err := s.q.MarkServiceDeleting(ctx, store.MarkServiceDeletingParams{ID: svc.ID, Desired: del}); err != nil {
+	if _, err := s.q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: svc.ID, Desired: del}); err != nil {
 		return err
 	}
 	_, err = s.Transition(ctx, svc, "deleting", "user", actorID, orgID)

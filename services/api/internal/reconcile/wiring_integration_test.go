@@ -168,3 +168,45 @@ func TestDeleteWritesDeletingDesiredAndBecomesOutstanding(t *testing.T) {
 		t.Fatal("a deleting service must be outstanding so the cell converges the teardown")
 	}
 }
+
+// A deleting service must not be editable: an edit would rewrite desired with
+// deleting=false and re-outstand the row, cancelling the teardown. (US-1.3a
+// review finding.)
+func TestUpdateOnDeletingServiceIsRejected(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db4")
+	rec := reconcile.New(q, prov)
+	if _, err := rec.Writeback(context.Background(), "cell-0", reconcile.Report{ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := prov.DeleteService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w"); err != nil {
+		t.Fatal(err)
+	}
+	// An edit on the now-deleting service must be refused.
+	_, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, []byte(`{"mode":"auto"}`), nil)
+	if err == nil {
+		t.Fatal("editing a deleting service must be rejected — it would cancel the teardown")
+	}
+	// The deleting desired doc must survive the rejected edit.
+	var d map[string]any
+	_ = json.Unmarshal(mustGet(t, q, svc.ID).Desired, &d)
+	if d["deleting"] != true {
+		t.Fatal("the rejected edit clobbered the deleting flag")
+	}
+}
+
+// A no-op update still bumps generation and re-converges — pinned as intended
+// (harmless under an idempotent renderer; noted so it is a decision, not a surprise).
+func TestNoOpUpdateStillBumpsGeneration(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db5")
+	edited, err := prov.UpdateService(context.Background(), svc, "org_w", "usr_w", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Generation <= svc.Generation {
+		t.Fatalf("a no-op update is expected to still bump generation (idempotent re-converge): %d → %d", svc.Generation, edited.Generation)
+	}
+}

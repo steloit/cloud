@@ -57,7 +57,11 @@ func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
 const insertService = `-- name: InsertService :one
 
 INSERT INTO services (id, env_id, name, product, intent, shape, scaling, provisioning_steps, monthly_estimate_cents, estimate_id, desired)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, coalesce($11, '{}'::jsonb)
+)
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
@@ -72,7 +76,7 @@ type InsertServiceParams struct {
 	ProvisioningSteps    []byte
 	MonthlyEstimateCents int64
 	EstimateID           pgtype.Text
-	Desired              []byte
+	Desired              interface{}
 }
 
 // T3.3: services — desired state. Status writes go through the guarded
@@ -159,47 +163,6 @@ func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Servi
 		return nil, err
 	}
 	return items, nil
-}
-
-const markServiceDeleting = `-- name: MarkServiceDeleting :one
-UPDATE services SET desired = $2, generation = generation + 1
-WHERE id = $1
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
-`
-
-type MarkServiceDeletingParams struct {
-	ID      string
-	Desired []byte
-}
-
-// Delete's desired-state half (US-1.3a): set the deleting desired doc and bump
-// generation so the service becomes outstanding and the cell converges the
-// teardown, reporting gone. The status transition to 'deleting' is separate
-// (SetServiceStatus, via the guarded machine).
-func (q *Queries) MarkServiceDeleting(ctx context.Context, arg MarkServiceDeletingParams) (Service, error) {
-	row := q.db.QueryRow(ctx, markServiceDeleting, arg.ID, arg.Desired)
-	var i Service
-	err := row.Scan(
-		&i.ID,
-		&i.EnvID,
-		&i.Name,
-		&i.Product,
-		&i.Intent,
-		&i.Status,
-		&i.Shape,
-		&i.Scaling,
-		&i.Override,
-		&i.ProvisioningSteps,
-		&i.MonthlyEstimateCents,
-		&i.EstimateID,
-		&i.CellID,
-		&i.CreatedAt,
-		&i.Desired,
-		&i.Generation,
-		&i.ObservedGeneration,
-		&i.LastReconciledAt,
-	)
-	return i, err
 }
 
 const orgForService = `-- name: OrgForService :one

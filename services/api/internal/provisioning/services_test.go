@@ -99,3 +99,25 @@ func TestDesiredDocShape(t *testing.T) {
 		}
 	}
 }
+
+func TestDesiredDocEdgeCases(t *testing.T) {
+	// nil shape + nil scaling → just product, valid JSON
+	d := desiredDoc("postgres", "", nil, nil, false)
+	var m map[string]any
+	if err := json.Unmarshal(d, &m); err != nil {
+		t.Fatalf("nil shape/scaling produced invalid JSON: %v", err)
+	}
+	if len(m) != 1 || m["product"] != "postgres" {
+		t.Fatalf("want just product, got %v", m)
+	}
+	// malformed shape JSON is dropped (not fatal) — pin current behavior
+	d2 := desiredDoc("postgres", "", []byte("not json"), nil, false)
+	_ = json.Unmarshal(d2, &m)
+	if _, has := m["shape"]; has {
+		t.Fatal("malformed shape must be dropped, not embedded")
+	}
+	// empty product still produces valid JSON (no panic)
+	if !json.Valid(desiredDoc("", "", nil, nil, true)) {
+		t.Fatal("empty product produced invalid JSON")
+	}
+}

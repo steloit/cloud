@@ -6,20 +6,15 @@
 -- shape so the agent has a real document to render from. generation defaults to
 -- 1, observed_generation to 0, so a fresh service is immediately outstanding.
 INSERT INTO services (id, env_id, name, product, intent, shape, scaling, provisioning_steps, monthly_estimate_cents, estimate_id, desired)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES (
+    sqlc.arg('id'), sqlc.arg('env_id'), sqlc.arg('name'), sqlc.arg('product'), sqlc.arg('intent'),
+    sqlc.arg('shape'), sqlc.arg('scaling'), sqlc.arg('provisioning_steps'),
+    sqlc.arg('monthly_estimate_cents'), sqlc.arg('estimate_id'), coalesce(sqlc.narg('desired'), '{}'::jsonb)
+)
 RETURNING *;
 
 -- name: GetService :one
 SELECT * FROM services WHERE id = $1;
-
--- name: MarkServiceDeleting :one
--- Delete's desired-state half (US-1.3a): set the deleting desired doc and bump
--- generation so the service becomes outstanding and the cell converges the
--- teardown, reporting gone. The status transition to 'deleting' is separate
--- (SetServiceStatus, via the guarded machine).
-UPDATE services SET desired = $2, generation = generation + 1
-WHERE id = $1
-RETURNING *;
 
 -- name: ListServicesForEnv :many
 SELECT * FROM services WHERE env_id = $1 ORDER BY created_at;

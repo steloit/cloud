@@ -21,9 +21,10 @@ files:
 apis: []
 tables: [services]
 events: []
-tests: [TestShapeEditBumpsGeneration, TestShapeEditBecomesOutstanding, TestDeleteWritesDeletingDesired, TestDeleteConvergesToGone]
+tests: [TestCreateServicePopulatesDesired, TestShapeEditBumpsGenerationAndBecomesOutstanding, TestDeleteWritesDeletingDesiredAndBecomesOutstanding, TestUpdateOnDeletingServiceIsRejected, TestNoOpUpdateStillBumpsGeneration, TestDesiredDocShape, TestDesiredDocEdgeCases]
 verify:
-  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go test ./internal/provisioning/ ./internal/reconcile/"
+  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./...   # FULL suite — a narrow subset hid a NOT-NULL regression in internal/identity"
+  - "make gen-go && git diff --exit-code -- services packages   # contract drift"
 owner: agent
 ---
 
@@ -145,7 +146,22 @@ reconcile package's real-Postgres harness rather than standing up a second one �
 so the glob is widened to match what the wiring actually touches. No behavior
 outside the producing path changed.
 
-Verified: `TestCreateServicePopulatesDesired`,
-`TestShapeEditBumpsGenerationAndBecomesOutstanding`,
-`TestDeleteWritesDeletingDesiredAndBecomesOutstanding` all pass against real
-Postgres; `desiredDoc` unit test and the D8 guard green.
+Review round 1 caught a **regression my too-narrow verify block hid** — the
+exact discipline failure this project guards against. Adding `desired` to
+`InsertService` made a caller that omitted it insert NULL into a NOT NULL column;
+`internal/identity`'s github integration test does exactly that. I had run only
+`./internal/provisioning/ ./internal/reconcile/`, so I reported green while CI's
+`go test ./...` would be red. Fixed at the source — `InsertService` now
+`coalesce(narg('desired'), '{}'::jsonb)`, so **no** caller can hit it, not just
+today's — and the verify block now runs the **full** api suite.
+
+Also from review: an edit on a **deleting** service is now rejected (it would
+rewrite desired with `deleting=false` and cancel the teardown — newly reachable
+once desired became load-bearing); `MarkServiceDeleting` was a byte-identical
+duplicate of `BumpServiceGeneration`, now reused; the deleteService crash comment
+was corrected (retry-recoverable, not poll-self-healing); and `desiredDoc` edge
+cases (nil/malformed shape, empty product) and the no-op-bump behavior are pinned.
+
+Verified: the **full** `go test ./...` for the api module passes (real Postgres,
+no skips), including `internal/identity`; `desiredDoc` unit + edge tests and the
+D8 guard green; contract drift clean.
