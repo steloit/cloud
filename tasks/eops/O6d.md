@@ -133,6 +133,15 @@ defect — the hook inspects only `file_path` — which points at a **cheaper th
 option the draft never surfaced: a `PreToolUse` hook that also inspects
 `.tool_input.command`**, constraining writes without denying `Bash`. That is
 filed as **O6f**, together with a strictly more serious instance of the same
-root cause. Deferral is now a choice among three named options rather than a
+root cause — AGENTS.md's "hook-enforced" claim over the founder-owned authority
+files is false by the identical mechanism.
+
+One more self-inflicted instance, caught by the re-review: the ADR text I wrote
+asserted that "reviewers are instructed to work in a temp copy and disclose tree
+mutation" — **an instruction that existed nowhere.** That is the same unbacked
+enforcement claim this task exists to remove, reintroduced inside the sentence
+correcting it. Fixed by making it true: the instruction is now in `reviewer.md`
+and `qa.md`. It is also an *obligation*, not a description, so the amendment
+stamp now says so instead of hiding behind "descriptive, not decisional". Deferral is now a choice among three named options rather than a
 foregone conclusion; the DX cost of denying `Bash` is real but thinner than
 claimed, and the observed-failure count is one, not zero.

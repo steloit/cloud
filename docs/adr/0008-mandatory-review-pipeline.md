@@ -2,8 +2,11 @@
 
 **Status:** Accepted (founder-ratified 2026-07-19) · **Amended 2026-07-21 (O6d, agent):** the
 reviewer bullet described the two reviewers as "read-only" as though enforced; corrected to a
-behavioral constraint with the evidence. **Descriptive, not decisional** — no decision in this
-ADR changed, and the reviewers must still not write.
+behavioral constraint with the evidence. **No decision changed** — who reviews, when, and what
+blocks are untouched, and the reviewers must still not write. The amendment does add one
+**working-practice instruction** (reproduce faults in a temp copy; disclose any tree mutation),
+carried into `reviewer.md`/`qa.md` in the same change; flagged here because it is an obligation,
+not a description. Open for founder revision.
 **Deciders:** Founder
 **Relates to:** ADR-0002 (AI-native engineering OS), the Phase-2 support agents (`.claude/agents/`)
 

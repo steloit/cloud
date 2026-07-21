@@ -16,8 +16,10 @@ files:
   - .claude/hooks/protect-authority.sh
   - .claude/settings.json
   - AGENTS.md
+  - docs/adr/0008-mandatory-review-pipeline.md
+  - .githooks/**
 verify:
-  - "a Bash redirect writing docs/product/18-philosophy/decisions.md is blocked, or AGENTS.md stops claiming hook enforcement"
+  - "a Bash redirect writing docs/product/18-philosophy/decisions.md is blocked (or, only if every mechanism is rejected with recorded evidence, AGENTS.md stops claiming hook enforcement)"
   - "an Edit/Write to the same path is still blocked (no regression)"
   - "ordinary Bash commands that touch no protected path are unaffected"
 owner: agent
@@ -80,8 +82,13 @@ best-effort against accidents.
 
 ## Acceptance criteria
 
-- [ ] A `Bash` redirect targeting a protected path is blocked, **or** AGENTS.md's
-  "hook-enforced" claim is corrected to what the mechanism really provides.
+- [ ] A `Bash` redirect targeting a protected path is **blocked**. This is the
+  criterion; the task exists because prose alone is not an acceptable resting
+  state for a founder-owned authority boundary.
+- [ ] *Escape hatch, not an equal option:* if every mechanism in Options is
+  rejected, AGENTS.md's "hook-enforced" claim must be corrected to what the
+  mechanism really provides **and** the rejection reasoned in the Outcome with
+  evidence per option. Closing this way without that record is not permitted.
 - [ ] `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to protected paths still blocked —
   no regression in the path that already works.
 - [ ] Ordinary `Bash` (`git diff`, `go test`, `grep`, writes anywhere else) is
