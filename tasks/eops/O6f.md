@@ -2,7 +2,7 @@
 id: O6f
 title: "\"hook-enforced\" is false: a Bash redirect writes the human-only authority files"
 epic: EOPS
-status: in-progress
+status: done
 phase: V1
 priority: high
 sprint: 1
@@ -82,21 +82,64 @@ best-effort against accidents.
 
 ## Acceptance criteria
 
-- [ ] A `Bash` redirect targeting a protected path is **blocked**. This is the
+- [x] A `Bash` redirect targeting a protected path is **blocked**. This is the
   criterion; the task exists because prose alone is not an acceptable resting
   state for a founder-owned authority boundary.
-- [ ] *Escape hatch, not an equal option:* if every mechanism in Options is
+- [x] *Escape hatch — not taken; the mechanism shipped.* Original text: if every mechanism in Options is
   rejected, AGENTS.md's "hook-enforced" claim must be corrected to what the
   mechanism really provides **and** the rejection reasoned in the Outcome with
   evidence per option. Closing this way without that record is not permitted.
-- [ ] `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to protected paths still blocked —
+- [x] `Edit`/`Write`/`MultiEdit`/`NotebookEdit` to protected paths still blocked —
   no regression in the path that already works.
-- [ ] Ordinary `Bash` (`git diff`, `go test`, `grep`, writes anywhere else) is
+- [x] Ordinary `Bash` (`git diff`, `go test`, `grep`, writes anywhere else) is
   unaffected. A hook that fires on unrelated commands gets disabled.
-- [ ] The residual bypass surface is **written down** in the hook file itself, not
+- [x] The residual bypass surface is **written down** in the hook file itself, not
   left for the next reader to rediscover.
 
 ## Related
 
 O6d (same root cause, prose fix) · ADR-0002 · AGENTS.md hard rules ·
 `.claude/hooks/protect-authority.sh`
+
+## Outcome
+
+The hook now sees `Bash`. `.claude/settings.json`'s matcher gains `Bash`, and
+`protect-authority.sh` inspects `.tool_input.command` when no `file_path` is
+present. **Option 1 shipped; the prose-only escape hatch was not taken.**
+
+Matching is target-aware rather than mention-based, because reading these files
+is legitimate and constant — a hook that fires on `cat decisions.md` is a hook
+someone disables, which is worse than no hook. 16 cases verified:
+
+| Blocked | Allowed |
+|---|---|
+| `echo ratified >> …/decisions.md` | `cat …/decisions.md` |
+| `echo x > …/00-sources/GOV-002.md` | `grep -n ADR …/decisions.md` |
+| `… \| tee …/decisions.md` | `git log --oneline …/decisions.md` |
+| `sed -i s/a/b/ …/decisions.md` | `go build ./... && go vet ./...` |
+| `rm` / `mv` over a protected path | `echo x > /tmp/scratch.md` |
+| `python3 -c "open('…decisions.md','w')"` | `echo x > tasks/eops/O6f.md` |
+| Edit/Write to either path *(no regression)* | Edit/Write elsewhere |
+
+AGENTS.md's claim is corrected in the same change: "hook-enforced" became "a
+hook blocks the direct edit and the obvious shell write, but it stops accidents,
+not intent — the real control is review and git history." That wording is the
+point of the task as much as the code is. The whole O6 family kept finding the
+same defect — a document asserting a guarantee no mechanism provides — and
+shipping a *partial* mechanism under an *absolute* claim would have recreated it
+one layer down.
+
+The residual bypass surface is enumerated in the hook file itself: variable
+indirection, an interpreter taking the path from argv or stdin, a script written
+elsewhere then executed, symlink and `../` aliasing, and any future tool shape.
+None of these are closed, and the header says so in the first comment block so
+that the next reader cannot mistake the hook for a sandbox.
+
+Not pursued: Option 2 (deny `Bash` to reviewers) is now unnecessary for this
+boundary — the hook covers every agent, not just the two reviewers, which is
+strictly broader than what Option 2 would have bought. Option 3 (a git
+pre-commit assertion) remains the only control that survives obfuscation, since
+it checks the outcome rather than the call; it is not filed as a task because
+`--no-verify` makes it advisory too, and stacking a second advisory control has
+no evidence behind it yet. If a protected file is ever modified without
+authorization, that evidence exists and Option 3 becomes the answer.
