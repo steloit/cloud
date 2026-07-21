@@ -44,6 +44,7 @@ tags:
   - {name: assistant}
   - {name: account}
   - {name: auth}
+  - {name: reconcile, description: "Internal plane (US-1.3, e1-substrate-design.md §2). Cell-agent <-> control plane. Reconciler-scoped tokens only; never a customer surface — substrate names must not leak through it (D8)."}
 
 paths:
   /orgs:
@@ -1197,6 +1198,81 @@ paths:
         "200": {description: "Applied; audit event id returned", content: {application/json: {schema: {$ref: "#/components/schemas/Proposal"}}}}
         "403": {description: "Caller lacks the underlying permission — the assistant cannot lend permissions", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
 
+  /reconcile/{cell}/desired:
+    get:
+      tags: [reconcile]
+      operationId: getDesiredState
+      summary: "Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time"
+      description: "The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat."
+      parameters:
+        - {name: cell, in: path, required: true, schema: {type: string}, description: "cell id, e.g. cell-0", x-go-name: CellPathParam}
+        - {name: since_generation, in: query, required: false, schema: {type: integer, format: int64, minimum: 0}, description: "return only services whose generation exceeds this; omit for a full sweep", x-go-name: SinceGenerationParam}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 500, default: 100}, x-go-name: LimitParam}
+      responses:
+        "200":
+          description: Desired state for the cell
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services]
+                properties:
+                  services:
+                    type: array
+                    items: {$ref: "#/components/schemas/DesiredService"}
+        "401": {description: "auth_failed — not a reconciler-scoped token", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "404": {description: "Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "422": {$ref: "#/components/responses/Validation"}
+        "503": {description: "No reconciler secret configured — the plane is visibly closed, never silently open", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+  /reconcile/{cell}/status:
+    post:
+      tags: [reconcile]
+      operationId: postReconcileStatus
+      summary: "Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)"
+      description: "The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before."
+      parameters:
+        - {name: cell, in: path, required: true, schema: {type: string}, x-go-name: CellPathParam}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service_id, observed_generation]
+              properties:
+                service_id: {type: string}
+                observed_generation: {type: integer, format: int64, minimum: 0, description: "the generation the cell converged; a report for any generation other than the one desired holds now is rejected (409)"}
+                status: {type: string, enum: [provisioning, ready, degraded, failed, suspended, deleting, gone], description: "ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown"}
+                conditions:
+                  description: "reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands"
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type: {type: string}
+                      status: {type: string, enum: ["True", "False", "Unknown"]}
+                      reason: {type: string}
+                      message: {type: string}
+                event: {type: string, description: "optional one-line note recorded on the spine event"}
+      responses:
+        "200":
+          description: Writeback accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service_id, status, observed_generation]
+                properties:
+                  service_id: {type: string}
+                  status: {type: string}
+                  observed_generation: {type: integer, format: int64}
+        "401": {description: "auth_failed — not a reconciler-scoped token"}
+        "404": {description: "Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Validation"}
+        "503": {description: "No reconciler secret configured — the plane is visibly closed, never silently open"}
+
 components:
   securitySchemes:
     bearer:
@@ -1221,6 +1297,23 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    DesiredService:
+      type: object
+      description: "One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8)."
+      required: [id, cell_id, generation, status, product, desired]
+      properties:
+        id: {type: string}
+        cell_id: {type: string}
+        generation: {type: integer, format: int64, description: "bumps on every desired-state edit"}
+        observed_generation: {type: integer, format: int64, description: "how far the agent has converged; observed < generation means work outstanding"}
+        status: {type: string, description: "ADR-024 vocabulary"}
+        product: {$ref: "#/components/schemas/Product"}
+        intent: {type: string}
+        name: {type: string}
+        env_id: {type: string}
+        desired: {type: object, additionalProperties: true, description: "the full desired document the agent renders from"}
+        shape: {type: object, additionalProperties: true}
+        scaling: {type: object, additionalProperties: true}
     Problem:
       type: object
       description: "RFC 9457 problem+json. remediation is REQUIRED product-wide: every error names a next step."

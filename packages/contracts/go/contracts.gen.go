@@ -1581,6 +1581,60 @@ func (e CreateEnvironmentJSONBodyData) Valid() bool {
 	}
 }
 
+// Defines values for PostReconcileStatusJSONBodyConditionsStatus.
+const (
+	PostReconcileStatusJSONBodyConditionsStatusFalse   PostReconcileStatusJSONBodyConditionsStatus = "False"
+	PostReconcileStatusJSONBodyConditionsStatusTrue    PostReconcileStatusJSONBodyConditionsStatus = "True"
+	PostReconcileStatusJSONBodyConditionsStatusUnknown PostReconcileStatusJSONBodyConditionsStatus = "Unknown"
+)
+
+// Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyConditionsStatus enum.
+func (e PostReconcileStatusJSONBodyConditionsStatus) Valid() bool {
+	switch e {
+	case PostReconcileStatusJSONBodyConditionsStatusFalse:
+		return true
+	case PostReconcileStatusJSONBodyConditionsStatusTrue:
+		return true
+	case PostReconcileStatusJSONBodyConditionsStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostReconcileStatusJSONBodyStatus.
+const (
+	PostReconcileStatusJSONBodyStatusDegraded     PostReconcileStatusJSONBodyStatus = "degraded"
+	PostReconcileStatusJSONBodyStatusDeleting     PostReconcileStatusJSONBodyStatus = "deleting"
+	PostReconcileStatusJSONBodyStatusFailed       PostReconcileStatusJSONBodyStatus = "failed"
+	PostReconcileStatusJSONBodyStatusGone         PostReconcileStatusJSONBodyStatus = "gone"
+	PostReconcileStatusJSONBodyStatusProvisioning PostReconcileStatusJSONBodyStatus = "provisioning"
+	PostReconcileStatusJSONBodyStatusReady        PostReconcileStatusJSONBodyStatus = "ready"
+	PostReconcileStatusJSONBodyStatusSuspended    PostReconcileStatusJSONBodyStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyStatus enum.
+func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostReconcileStatusJSONBodyStatusDegraded:
+		return true
+	case PostReconcileStatusJSONBodyStatusDeleting:
+		return true
+	case PostReconcileStatusJSONBodyStatusFailed:
+		return true
+	case PostReconcileStatusJSONBodyStatusGone:
+		return true
+	case PostReconcileStatusJSONBodyStatusProvisioning:
+		return true
+	case PostReconcileStatusJSONBodyStatusReady:
+		return true
+	case PostReconcileStatusJSONBodyStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateBindingJSONBodyScope.
 const (
 	CreateBindingJSONBodyScopeReadOnly  CreateBindingJSONBodyScope = "read_only"
@@ -1919,6 +1973,32 @@ type DeploymentState string
 type DeploymentList struct {
 	Data       *[]Deployment `json:"data,omitempty"`
 	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// DesiredService One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
+type DesiredService struct {
+	CellId string `json:"cell_id"`
+
+	// Desired the full desired document the agent renders from
+	Desired map[string]interface{} `json:"desired"`
+	EnvId   *string                `json:"env_id,omitempty"`
+
+	// Generation bumps on every desired-state edit
+	Generation int64   `json:"generation"`
+	Id         string  `json:"id"`
+	Intent     *string `json:"intent,omitempty"`
+	Name       *string `json:"name,omitempty"`
+
+	// ObservedGeneration how far the agent has converged; observed < generation means work outstanding
+	ObservedGeneration *int64 `json:"observed_generation,omitempty"`
+
+	// Product managed services Steloit builds (ADR-0004/A5). storage & ai are external Bindings; queue is a Postgres capability (pgmq); gpu removed.
+	Product Product                 `json:"product"`
+	Scaling *map[string]interface{} `json:"scaling,omitempty"`
+	Shape   *map[string]interface{} `json:"shape,omitempty"`
+
+	// Status ADR-024 vocabulary
+	Status string `json:"status"`
 }
 
 // DnsRecord defines model for DnsRecord.
@@ -3341,6 +3421,40 @@ type CreateEnvironmentJSONBody struct {
 // CreateEnvironmentJSONBodyData defines parameters for CreateEnvironment.
 type CreateEnvironmentJSONBodyData string
 
+// GetDesiredStateParams defines parameters for GetDesiredState.
+type GetDesiredStateParams struct {
+	// SinceGenerationParam return only services whose generation exceeds this; omit for a full sweep
+	SinceGenerationParam *int64 `form:"since_generation,omitempty" json:"since_generation,omitempty"`
+	LimitParam           *int   `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBody struct {
+	// Conditions reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
+	Conditions *[]struct {
+		Message *string                                     `json:"message,omitempty"`
+		Reason  *string                                     `json:"reason,omitempty"`
+		Status  PostReconcileStatusJSONBodyConditionsStatus `json:"status"`
+		Type    string                                      `json:"type"`
+	} `json:"conditions,omitempty"`
+
+	// Event optional one-line note recorded on the spine event
+	Event *string `json:"event,omitempty"`
+
+	// ObservedGeneration the generation the cell converged; a report for any generation other than the one desired holds now is rejected (409)
+	ObservedGeneration int64  `json:"observed_generation"`
+	ServiceId          string `json:"service_id"`
+
+	// Status ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+	Status *PostReconcileStatusJSONBodyStatus `json:"status,omitempty"`
+}
+
+// PostReconcileStatusJSONBodyConditionsStatus defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBodyConditionsStatus string
+
+// PostReconcileStatusJSONBodyStatus defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBodyStatus string
+
 // PreviewScheduleParams defines parameters for PreviewSchedule.
 type PreviewScheduleParams struct {
 	Cron string  `form:"cron" json:"cron"`
@@ -3511,6 +3625,9 @@ type CreateAlertRuleJSONRequestBody = AlertRuleInput
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody CreateEnvironmentJSONBody
+
+// PostReconcileStatusJSONRequestBody defines body for PostReconcileStatus for application/json ContentType.
+type PostReconcileStatusJSONRequestBody PostReconcileStatusJSONBody
 
 // UpdateServiceJSONRequestBody defines body for UpdateService for application/json ContentType.
 type UpdateServiceJSONRequestBody UpdateServiceJSONBody
@@ -4437,6 +4554,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /projects/{project}/envs (the `CreateEnvironment` operationId).
 	CreateEnvironment(ctx context.Context, projectPathParam ProjectPathParam, body CreateEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
+	//
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+	//
+	// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
+	GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+	//
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+	PostReconcileStatusWithBody(ctx context.Context, cellPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+	//
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+	PostReconcileStatus(ctx context.Context, cellPathParam string, body PostReconcileStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PreviewSchedule ?cron= → next 3 runs in tz (U4's next-runs preview)
 	//
@@ -6892,6 +7034,61 @@ func (c *Client) CreateEnvironmentWithBody(ctx context.Context, projectPathParam
 // Corresponds with POST /projects/{project}/envs (the `CreateEnvironment` operationId).
 func (c *Client) CreateEnvironment(ctx context.Context, projectPathParam ProjectPathParam, body CreateEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateEnvironmentRequest(c.Server, projectPathParam, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
+//
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+//
+// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
+func (c *Client) GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetDesiredStateRequest(c.Server, cellPathParam, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+//
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+func (c *Client) PostReconcileStatusWithBody(ctx context.Context, cellPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostReconcileStatusRequestWithBody(c.Server, cellPathParam, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+//
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+func (c *Client) PostReconcileStatus(ctx context.Context, cellPathParam string, body PostReconcileStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostReconcileStatusRequest(c.Server, cellPathParam, body)
 	if err != nil {
 		return nil, err
 	}
@@ -11861,6 +12058,126 @@ func NewCreateEnvironmentRequestWithBody(server string, projectPathParam Project
 	return req, nil
 }
 
+// NewGetDesiredStateRequest constructs an http.Request for the GetDesiredState method
+func NewGetDesiredStateRequest(server string, cellPathParam string, params *GetDesiredStateParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "cell", cellPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/reconcile/%s/desired", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.SinceGenerationParam != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "since_generation", *params.SinceGenerationParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.LimitParam != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.LimitParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostReconcileStatusRequest calls the generic PostReconcileStatus builder with application/json body
+func NewPostReconcileStatusRequest(server string, cellPathParam string, body PostReconcileStatusJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostReconcileStatusRequestWithBody(server, cellPathParam, "application/json", bodyReader)
+}
+
+// NewPostReconcileStatusRequestWithBody constructs an http.Request for the PostReconcileStatus method, with any body, and a specified content type
+func NewPostReconcileStatusRequestWithBody(server string, cellPathParam string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "cell", cellPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/reconcile/%s/status", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewPreviewScheduleRequest constructs an http.Request for the PreviewSchedule method
 func NewPreviewScheduleRequest(server string, params *PreviewScheduleParams) (*http.Request, error) {
 	var err error
@@ -13827,6 +14144,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /projects/{project}/envs (the `CreateEnvironment` operationId).
 	CreateEnvironmentWithResponse(ctx context.Context, projectPathParam ProjectPathParam, body CreateEnvironmentJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateEnvironmentResponse, error)
+
+	// GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
+	//
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
+	GetDesiredStateWithResponse(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*GetDesiredStateResponse, error)
+
+	// PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+	//
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+	PostReconcileStatusWithBodyWithResponse(ctx context.Context, cellPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostReconcileStatusResponse, error)
+
+	// PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+	//
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+	PostReconcileStatusWithResponse(ctx context.Context, cellPathParam string, body PostReconcileStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*PostReconcileStatusResponse, error)
 
 	// PreviewScheduleWithResponse ?cron= → next 3 runs in tz (U4's next-runs preview)
 	//
@@ -18447,6 +18791,149 @@ func (r CreateEnvironmentResponse) ContentType() string {
 	return ""
 }
 
+type GetDesiredStateResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Services []DesiredService `json:"services"`
+	}
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Problem
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *Problem
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Validation
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Problem
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetDesiredStateResponse) GetJSON200() *struct {
+	Services []DesiredService `json:"services"`
+} {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON401() *Problem {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON404() *Problem {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON422() *Validation {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON503() *Problem {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetDesiredStateResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetDesiredStateResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetDesiredStateResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetDesiredStateResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostReconcileStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		ObservedGeneration int64  `json:"observed_generation"`
+		ServiceId          string `json:"service_id"`
+		Status             string `json:"status"`
+	}
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *Problem
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Validation
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostReconcileStatusResponse) GetJSON200() *struct {
+	ObservedGeneration int64  `json:"observed_generation"`
+	ServiceId          string `json:"service_id"`
+	Status             string `json:"status"`
+} {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r PostReconcileStatusResponse) GetApplicationproblemJSON404() *Problem {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r PostReconcileStatusResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r PostReconcileStatusResponse) GetApplicationproblemJSON422() *Validation {
+	return r.ApplicationproblemJSON422
+}
+
+// GetBody returns the raw response body bytes
+func (r PostReconcileStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostReconcileStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostReconcileStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostReconcileStatusResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type PreviewScheduleResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -21268,6 +21755,51 @@ func (c *ClientWithResponses) CreateEnvironmentWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseCreateEnvironmentResponse(rsp)
+}
+
+// GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
+//
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
+func (c *ClientWithResponses) GetDesiredStateWithResponse(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*GetDesiredStateResponse, error) {
+	rsp, err := c.GetDesiredState(ctx, cellPathParam, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetDesiredStateResponse(rsp)
+}
+
+// PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+//
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+func (c *ClientWithResponses) PostReconcileStatusWithBodyWithResponse(ctx context.Context, cellPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostReconcileStatusResponse, error) {
+	rsp, err := c.PostReconcileStatusWithBody(ctx, cellPathParam, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostReconcileStatusResponse(rsp)
+}
+
+// PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
+//
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /reconcile/{cell}/status (the `PostReconcileStatus` operationId).
+func (c *ClientWithResponses) PostReconcileStatusWithResponse(ctx context.Context, cellPathParam string, body PostReconcileStatusJSONRequestBody, reqEditors ...RequestEditorFn) (*PostReconcileStatusResponse, error) {
+	rsp, err := c.PostReconcileStatus(ctx, cellPathParam, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostReconcileStatusResponse(rsp)
 }
 
 // PreviewScheduleWithResponse ?cron= → next 3 runs in tz (U4's next-runs preview)
@@ -24415,6 +24947,119 @@ func ParseCreateEnvironmentResponse(rsp *http.Response) (*CreateEnvironmentRespo
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetDesiredStateResponse parses an HTTP response from a GetDesiredStateWithResponse call
+func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetDesiredStateResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Services []DesiredService `json:"services"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Validation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostReconcileStatusResponse parses an HTTP response from a PostReconcileStatusWithResponse call
+func ParsePostReconcileStatusResponse(rsp *http.Response) (*PostReconcileStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostReconcileStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			ObservedGeneration int64  `json:"observed_generation"`
+			ServiceId          string `json:"service_id"`
+			Status             string `json:"status"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Validation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case rsp.StatusCode == 503:
+		break // No content-type
 
 	}
 

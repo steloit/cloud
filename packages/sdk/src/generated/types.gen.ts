@@ -5,6 +5,42 @@ export type ClientOptions = {
 };
 
 /**
+ * One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
+ */
+export type DesiredService = {
+    id: string;
+    cell_id: string;
+    /**
+     * bumps on every desired-state edit
+     */
+    generation: number;
+    /**
+     * how far the agent has converged; observed < generation means work outstanding
+     */
+    observed_generation?: number;
+    /**
+     * ADR-024 vocabulary
+     */
+    status: string;
+    product: Product;
+    intent?: string;
+    name?: string;
+    env_id?: string;
+    /**
+     * the full desired document the agent renders from
+     */
+    desired: {
+        [key: string]: unknown;
+    };
+    shape?: {
+        [key: string]: unknown;
+    };
+    scaling?: {
+        [key: string]: unknown;
+    };
+};
+
+/**
  * RFC 9457 problem+json. remediation is REQUIRED product-wide: every error names a next step.
  */
 export type Problem = {
@@ -4197,3 +4233,123 @@ export type ApplyProposalResponses = {
 };
 
 export type ApplyProposalResponse = ApplyProposalResponses[keyof ApplyProposalResponses];
+
+export type GetDesiredStateData = {
+    body?: never;
+    path: {
+        /**
+         * cell id, e.g. cell-0
+         */
+        cell: string;
+    };
+    query?: {
+        /**
+         * return only services whose generation exceeds this; omit for a full sweep
+         */
+        since_generation?: number;
+        limit?: number;
+    };
+    url: '/reconcile/{cell}/desired';
+};
+
+export type GetDesiredStateErrors = {
+    /**
+     * auth_failed — not a reconciler-scoped token
+     */
+    401: Problem;
+    /**
+     * Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)
+     */
+    404: Problem;
+    /**
+     * Field validation errors (inline under field)
+     */
+    422: Problem;
+    /**
+     * No reconciler secret configured — the plane is visibly closed, never silently open
+     */
+    503: Problem;
+};
+
+export type GetDesiredStateError = GetDesiredStateErrors[keyof GetDesiredStateErrors];
+
+export type GetDesiredStateResponses = {
+    /**
+     * Desired state for the cell
+     */
+    200: {
+        services: Array<DesiredService>;
+    };
+};
+
+export type GetDesiredStateResponse = GetDesiredStateResponses[keyof GetDesiredStateResponses];
+
+export type PostReconcileStatusData = {
+    body: {
+        service_id: string;
+        /**
+         * the generation the cell converged; a report for any generation other than the one desired holds now is rejected (409)
+         */
+        observed_generation: number;
+        /**
+         * ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+         */
+        status?: 'provisioning' | 'ready' | 'degraded' | 'failed' | 'suspended' | 'deleting' | 'gone';
+        /**
+         * reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
+         */
+        conditions?: Array<{
+            type: string;
+            status: 'True' | 'False' | 'Unknown';
+            reason?: string;
+            message?: string;
+        }>;
+        /**
+         * optional one-line note recorded on the spine event
+         */
+        event?: string;
+    };
+    path: {
+        cell: string;
+    };
+    query?: never;
+    url: '/reconcile/{cell}/status';
+};
+
+export type PostReconcileStatusErrors = {
+    /**
+     * auth_failed — not a reconciler-scoped token
+     */
+    401: unknown;
+    /**
+     * Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)
+     */
+    404: Problem;
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+    /**
+     * Field validation errors (inline under field)
+     */
+    422: Problem;
+    /**
+     * No reconciler secret configured — the plane is visibly closed, never silently open
+     */
+    503: unknown;
+};
+
+export type PostReconcileStatusError = PostReconcileStatusErrors[keyof PostReconcileStatusErrors];
+
+export type PostReconcileStatusResponses = {
+    /**
+     * Writeback accepted
+     */
+    200: {
+        service_id: string;
+        status: string;
+        observed_generation: number;
+    };
+};
+
+export type PostReconcileStatusResponse = PostReconcileStatusResponses[keyof PostReconcileStatusResponses];
