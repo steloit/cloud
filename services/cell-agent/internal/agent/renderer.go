@@ -23,8 +23,17 @@ func NewAckRenderer(log *slog.Logger) *AckRenderer { return &AckRenderer{log: lo
 // gone; everything else converges to ready. Idempotent by construction — it
 // holds no state and derives its answer purely from the input.
 func (r *AckRenderer) Converge(_ context.Context, svc DesiredService) (string, error) {
-	if deleting, _ := svc.Desired["deleting"].(bool); deleting {
+	// A service being torn down converges to gone, NOT ready. This reads the
+	// status the poll already carries, so it works before deletes write a
+	// desired.deleting flag (US-1.3a) — without it, a cancel-the-create
+	// (status=deleting, still outstanding) would report "ready", the illegal
+	// deleting→ready edge would 409, and the row would hot-loop every tick.
+	if svc.Status == "deleting" {
 		r.log.Info("converged (ack): teardown acknowledged", "service", svc.ID, "generation", svc.Generation)
+		return "gone", nil
+	}
+	if deleting, _ := svc.Desired["deleting"].(bool); deleting {
+		r.log.Info("converged (ack): teardown acknowledged (desired flag)", "service", svc.ID, "generation", svc.Generation)
 		return "gone", nil
 	}
 	r.log.Info("converged (ack): desired acknowledged", "service", svc.ID, "product", svc.Product, "generation", svc.Generation)

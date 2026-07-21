@@ -317,3 +317,31 @@ func TestConcurrentWritebackAppliesOnceAgainstRealPostgres(t *testing.T) {
 		t.Fatalf("the provisioning→ready edge fired %d times under concurrency, want exactly 1", events)
 	}
 }
+
+// The founder-gated guard lives in TWO places now: a Go pre-check in Writeback
+// AND the SQL WHERE generation = $2 in MarkObserved. The pre-check shadows the
+// SQL in the Writeback path, so this drives MarkObserved DIRECTLY to keep the
+// SQL half mutation-live — deleting `AND generation = $2` must make THIS fail.
+func TestMarkObservedSQLGuardDirectAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_sql") // generation 1, observed 0
+	if _, err := q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: "svc_sql", Desired: []byte(`{"v":2}`)}); err != nil {
+		t.Fatal(err) // now generation 2
+	}
+	// Behind (1) and ahead (9) must both be rejected by the SQL guard alone.
+	for _, bad := range []int64{1, 9} {
+		_, err := q.MarkObserved(ctx, store.MarkObservedParams{ID: "svc_sql", ObservedGeneration: bad})
+		if err == nil {
+			t.Fatalf("MarkObserved SQL guard accepted generation %d (current is 2) — WHERE generation = $2 is not enforcing", bad)
+		}
+	}
+	// The current generation (2) is accepted and advances observed.
+	row, err := q.MarkObserved(ctx, store.MarkObservedParams{ID: "svc_sql", ObservedGeneration: 2})
+	if err != nil {
+		t.Fatalf("MarkObserved rejected the current generation: %v", err)
+	}
+	if row.ObservedGeneration != 2 {
+		t.Fatalf("observed_generation not advanced to 2: %d", row.ObservedGeneration)
+	}
+}

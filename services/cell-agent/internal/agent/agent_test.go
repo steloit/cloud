@@ -204,20 +204,21 @@ func TestBatchIsolationOneFailureDoesNotBlockOthers(t *testing.T) {
 	}
 }
 
-// End-to-end through the real Tick and HTTP client: desired bumps between the
-// agent's poll and its report, the control plane 409s the now-behind report, and
-// the NEXT tick converges the current generation and succeeds. Drives the real
-// network path, not the fake.
+// End-to-end through the real Tick and HTTP client: the agent polls generation
+// 1, but desired has bumped to 2 by the time it reports, so the report 409s; the
+// NEXT tick polls generation 2 and succeeds. The 409 path is genuinely driven.
 func TestAgentRecoversFromGenerationMismatch(t *testing.T) {
 	var (
-		mu       sync.Mutex
-		gen      int64 = 1
-		accepted []int64
+		mu         sync.Mutex
+		pollGen    int64 = 1 // what /desired serves
+		currentGen int64 = 2 // what /status accepts (desired has already moved)
+		conflicts  int
+		accepted   []int64
 	)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/reconcile/{cell}/desired", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		g := gen
+		g := pollGen
 		mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"services": []DesiredService{{ID: "svc_a", CellID: "cell-0", Product: "postgres", Generation: g, Desired: map[string]any{}}},
@@ -228,10 +229,10 @@ func TestAgentRecoversFromGenerationMismatch(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&rep)
 		mu.Lock()
 		defer mu.Unlock()
-		if rep.ObservedGeneration != gen {
-			w.WriteHeader(http.StatusConflict) // exact-match guard: behind/ahead rejected
+		if rep.ObservedGeneration != currentGen {
+			conflicts++
+			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{"remediation": "re-poll"})
-			// desired had bumped on the first poll → simulate the race by leaving gen as-is
 			return
 		}
 		accepted = append(accepted, rep.ObservedGeneration)
@@ -239,19 +240,29 @@ func TestAgentRecoversFromGenerationMismatch(t *testing.T) {
 	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
-
 	a := New("cell-0", NewHTTPControlPlane(ts.URL, "tok"), &countingRenderer{}, quietLog())
-	// Desired is at gen 2; the agent polls 2 and reports 2 → accepted. (The 409
-	// branch is exercised by any report whose generation != current, proving the
-	// agent surfaces the mismatch and re-polls rather than wedging.)
+
+	// Tick 1: polls gen 1, reports gen 1, /status holds gen 2 → 409.
+	a.Tick(context.Background())
 	mu.Lock()
-	gen = 2
+	if conflicts != 1 {
+		mu.Unlock()
+		t.Fatalf("tick 1 must produce exactly one 409 (the mismatch path); got %d", conflicts)
+	}
+	if len(accepted) != 0 {
+		mu.Unlock()
+		t.Fatalf("nothing should be accepted after a mismatch; got %v", accepted)
+	}
+	// desired settles: the poll now serves gen 2 too.
+	pollGen = 2
 	mu.Unlock()
+
+	// Tick 2: polls gen 2, reports gen 2 → accepted.
 	a.Tick(context.Background())
 	mu.Lock()
 	defer mu.Unlock()
 	if len(accepted) != 1 || accepted[0] != 2 {
-		t.Fatalf("agent did not converge the current generation after a mismatch: accepted=%v", accepted)
+		t.Fatalf("tick 2 must converge the current generation; accepted=%v", accepted)
 	}
 }
 
@@ -293,5 +304,20 @@ func TestAckRendererLiveConvergesToReady(t *testing.T) {
 		DesiredService{ID: "svc_l", Product: "postgres", Desired: map[string]any{}})
 	if got != "ready" {
 		t.Fatalf("a live desired must converge to ready, got %q", got)
+	}
+}
+
+func TestAckRendererDeletingStatusConvergesToGone(t *testing.T) {
+	r := NewAckRenderer(quietLog())
+	// A service whose STATUS is deleting (cancel-the-create) converges to gone,
+	// even before deletes write a desired.deleting flag — otherwise it would
+	// report ready and hot-loop on the illegal deleting→ready edge.
+	got, err := r.Converge(context.Background(),
+		DesiredService{ID: "svc_c", Product: "postgres", Status: "deleting", Desired: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gone" {
+		t.Fatalf("a deleting service must converge to gone, got %q", got)
 	}
 }
