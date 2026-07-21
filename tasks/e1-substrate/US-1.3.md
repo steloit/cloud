@@ -2,7 +2,7 @@
 id: US-1.3
 title: "Reconciler protocol: desired state written, cell agent converges actual"
 epic: E1
-status: ready
+status: in-progress
 phase: MVP
 priority: critical
 sprint: 2
