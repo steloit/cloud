@@ -113,12 +113,13 @@ if (existsSync(AGENTS_DIR)) {
   // order must be deterministic so output stays diffable.
   const dirents = readdirSync(AGENTS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
 
-  // Fail closed on subdirectories. The scan is deliberately non-recursive, so a nested
-  // .claude/agents/<sub>/qa.md would otherwise escape agents-readonly entirely while still
-  // being a plausible place to put an agent.
+  // Fail closed on subdirectories AND symlinks. The scan is deliberately non-recursive, so a
+  // nested .claude/agents/<sub>/qa.md would otherwise escape agents-readonly entirely. isDirectory()
+  // is false for a symlink, so a symlinked subdir (or file) pointing outside the repo would slip
+  // through the same hole; one predicate closes both.
   for (const d of dirents)
-    if (d.isDirectory())
-      errors.push(`agents-table-sync: .claude/agents/${d.name}/ is a subdirectory — agent files must sit directly in .claude/agents/`);
+    if (d.isDirectory() || d.isSymbolicLink())
+      errors.push(`agents-table-sync: .claude/agents/${d.name} is a ${d.isSymbolicLink() ? "symlink" : "subdirectory"} — agent files must be regular files directly in .claude/agents/`);
 
   // Extension matched case-INsensitively: on a case-sensitive filesystem (Linux CI) a QA.MD
   // would otherwise be skipped silently, which is the same escape the name fold closes.

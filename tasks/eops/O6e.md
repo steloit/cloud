@@ -29,7 +29,7 @@ a fault-injection suite so its own checks cannot regress silently.
 
 ## Why
 
-O6c added four checks (≈75 lines, doubling the file's rule surface) and verified each by
+O6c added four checks (+147 lines, taking validate.mjs from 72 to 213 — roughly tripling its rule surface) and verified each by
 hand-injecting its fault once. That evidence is real but not repeatable: the next edit to
 `validate.mjs` can neuter all four and CI stays green.
 
@@ -53,12 +53,12 @@ Both were found by review, not by any test, and both are exactly what a suite pi
   prefix **and the offending file or agent name** — `agents-table-sync` alone carries eight
   distinct faults and `agents-readonly` four, so a prefix-only assertion lets a deleted
   branch be masked by a sibling branch's error.
-  The 19 fault classes O6c verified by hand: symlink replaced / `./AGENTS.md` accepted /
+  The 21 fault classes O6c verified by hand: symlink replaced / `./AGENTS.md` accepted /
   `CLAUDE.md` missing; README moved; `tools:` deleted, emptied, widened; case-variant
   reviewer name; either reviewer absent; unlisted agent; malformed fence; stem mismatch;
-  table File-column drift; table casing drift; `AGENTS.md` missing; **nested subdirectory**;
-  **case-fold duplicate names**; **uppercase `.MD` extension**; **prose line containing
-  pipes not parsed as a table row**.
+  table File-column drift; table casing drift; `AGENTS.md` missing; nested subdirectory;
+  **symlinked subdirectory**; **symlinked agent file**; case-fold duplicate names;
+  uppercase `.MD` extension; prose line containing pipes not parsed as a table row.
 - [ ] **Case-sensitivity is detected at setup, never assumed.** Three of those classes
   (case-fold duplicate, `.MD` extension, case-variant name) cannot execute on a
   case-insensitive filesystem — the injected file silently *overwrites* its lowercase twin

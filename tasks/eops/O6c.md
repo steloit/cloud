@@ -120,7 +120,7 @@ ADR-0008 · O6 · scripts/spec-sync/validate.mjs
 
 ## Outcome
 
-Four checks added to `validate.mjs` (+66 lines, still fs-only, no
+Four checks added to `validate.mjs` (+147/-7 lines, 72 → 213, still fs-only, no
 `child_process`, no rule registry). Every one was verified by *causing* its
 failure and restoring, not by asserting it would fire:
 
@@ -173,7 +173,12 @@ together collapsed into one map entry, letting the second escape the
 unlisted-agent check; `.MD` was skipped on a case-sensitive filesystem; and
 ordinary prose containing a pipe parsed as a table row.
 
-19 fault classes verified in total, each injected and restored. Three of them
+A fourth round narrowed that guard further: `isDirectory()` is false for a
+symlink, so `.claude/agents/pipeline -> /elsewhere` — and equally a symlinked
+`rogue.md` — walked straight past the check whose comment claimed to fail closed.
+One predicate (`d.isDirectory() || d.isSymbolicLink()`) closes both.
+
+21 fault classes verified in total, each injected and restored. Three of them
 are filesystem-dependent and were re-run on a **case-sensitive volume**
 (`hdiutil create -fs "Case-sensitive APFS"`) after APFS silently folded
 `Docs.md` onto `docs.md` and destroyed it — the first attempt "passed" while
