@@ -14,10 +14,11 @@ module: Engineering OS
 contexts: []
 files:
   - .claude/hooks/protect-authority.sh
+  - .claude/hooks/protect-authority.test.sh
   - .claude/settings.json
   - AGENTS.md
   - docs/adr/0008-mandatory-review-pipeline.md
-  - .githooks/**
+  - .github/workflows/ci.yml
 verify:
   - "a Bash redirect writing docs/product/18-philosophy/decisions.md is blocked (or, only if every mechanism is rejected with recorded evidence, AGENTS.md stops claiming hook enforcement)"
   - "an Edit/Write to the same path is still blocked (no regression)"
@@ -103,43 +104,55 @@ O6d (same root cause, prose fix) · ADR-0002 · AGENTS.md hard rules ·
 
 ## Outcome
 
-The hook now sees `Bash`. `.claude/settings.json`'s matcher gains `Bash`, and
-`protect-authority.sh` inspects `.tool_input.command` when no `file_path` is
-present. **Option 1 shipped; the prose-only escape hatch was not taken.**
+Two controls, because one was not enough and the review proved it.
 
-Matching is target-aware rather than mention-based, because reading these files
-is legitimate and constant — a hook that fires on `cat decisions.md` is a hook
-someone disables, which is worse than no hook. 16 cases verified:
+**CI `authority-paths` is the control that binds.** It reads the PR diff, so no
+call-shape trick reaches it and `--no-verify` does not apply. A PR touching the
+protected paths fails unless `FOUNDER-RATIFIED` appears in its title or body —
+which puts the approval in the permanent record rather than in someone's memory.
+This was **not** in the original plan: the first draft dismissed Option 3 by
+considering only the *local* pre-commit variant (advisory, `--no-verify`-able)
+and never the CI variant, which is neither. The reviewer caught that the
+dismissal reasoning did not support its conclusion, and that AGENTS.md was
+meanwhile pointing at "review and git history" as the real control while
+**nothing in CI asserted it** — narrative, not mechanical.
 
-| Blocked | Allowed |
-|---|---|
-| `echo ratified >> …/decisions.md` | `cat …/decisions.md` |
-| `echo x > …/00-sources/GOV-002.md` | `grep -n ADR …/decisions.md` |
-| `… \| tee …/decisions.md` | `git log --oneline …/decisions.md` |
-| `sed -i s/a/b/ …/decisions.md` | `go build ./... && go vet ./...` |
-| `rm` / `mv` over a protected path | `echo x > /tmp/scratch.md` |
-| `python3 -c "open('…decisions.md','w')"` | `echo x > tasks/eops/O6f.md` |
-| Edit/Write to either path *(no regression)* | Edit/Write elsewhere |
+**The PreToolUse hook is an accident floor.** `settings.json`'s matcher gains
+`Bash`; the hook inspects `.tool_input.command` when no `file_path` is present.
+The first implementation was badly wrong in both directions and adversarial
+review found it:
 
-AGENTS.md's claim is corrected in the same change: "hook-enforced" became "a
-hook blocks the direct edit and the obvious shell write, but it stops accidents,
-not intent — the real control is review and git history." That wording is the
-point of the task as much as the code is. The whole O6 family kept finding the
-same defect — a document asserting a guarantee no mechanism provides — and
-shipping a *partial* mechanism under an *absolute* claim would have recreated it
-one layer down.
+- *False positives that would have got the hook disabled.* `rg openapi
+  docs/product/00-sources/` was blocked — `open` was an unanchored substring and
+  `openapi` is this repo's central noun. `grep -n 'rm' decisions.md` was blocked
+  because `rm` appeared inside a search term. **`cp decisions.md /tmp/backup.md`
+  was blocked though it is a read** — and worse, so was the reverse `cp`, which
+  is the *founder's documented ratification fallback* (`consistency-audit`
+  records the founder's `!` stamp failing twice and an explicit `cp` applying the
+  stamped copy). I would have broken the ratification path this task exists to
+  protect. Fixed: verbs match only in command position, `cp`/`mv`/`ln` only when
+  the protected path is the destination, `open` requires a call shape, heredoc
+  bodies are stripped (you could not previously *document* this hook without
+  tripping it), and `STELOIT_RATIFY=1` is an explicit, auditable founder bypass.
+- *Bypasses of the most obvious shapes.* `rm -rf docs/product/00-sources` —
+  no trailing slash, the most natural spelling of the most destructive
+  operation — was allowed. So were `git checkout HEAD~5 -- decisions.md` (the
+  highest-value way to revert a founder decision), `>|`, `perl -pi`,
+  `Path(...).write_text(...)`, and `cd 18-philosophy && echo >> decisions.md`.
+- *Fail-open.* With `jq` absent the hook exited 127, which is non-blocking — a
+  missing dependency silently disabled the control. It now fails closed.
 
-The residual bypass surface is enumerated in the hook file itself: variable
-indirection, an interpreter taking the path from argv or stdin, a script written
-elsewhere then executed, symlink and `../` aliasing, and any future tool shape.
-None of these are closed, and the header says so in the first comment block so
-that the next reader cannot mistake the hook for a sandbox.
+**41 regression tests** in `protect-authority.test.sh`, wired into CI. Every case
+came from a review finding rather than imagination: the BLOCK cases are bypasses
+the first version allowed, the ALLOW cases are false positives it produced. Both
+reviewers independently called the absence of tests the load-bearing gap for a
+hand-tuned security control, and they were right — five regexes with no pinning
+test is the same "guarantee nothing checks" pattern this whole task family exists
+to close.
 
-Not pursued: Option 2 (deny `Bash` to reviewers) is now unnecessary for this
-boundary — the hook covers every agent, not just the two reviewers, which is
-strictly broader than what Option 2 would have bought. Option 3 (a git
-pre-commit assertion) remains the only control that survives obfuscation, since
-it checks the outcome rather than the call; it is not filed as a task because
-`--no-verify` makes it advisory too, and stacking a second advisory control has
-no evidence behind it yet. If a protected file is ever modified without
-authorization, that evidence exists and Option 3 becomes the answer.
+AGENTS.md now says what is true: a hook stops common accidental writes, **CI is
+what binds**. The residual surface the hook cannot reach — variable indirection,
+interpreter argv/stdin, script-then-execute, symlink and `../` aliasing, xargs
+splitting, future tool shapes, and the deliberate `STELOIT_RATIFY=1` — is
+enumerated in the hook header, because the honesty of the claim rests on that
+list being complete, and the first version's list was not.
