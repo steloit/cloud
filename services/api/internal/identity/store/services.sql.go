@@ -56,8 +56,8 @@ func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
 
 const insertService = `-- name: InsertService :one
 
-INSERT INTO services (id, env_id, name, product, intent, shape, scaling, provisioning_steps, monthly_estimate_cents, estimate_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO services (id, env_id, name, product, intent, shape, scaling, provisioning_steps, monthly_estimate_cents, estimate_id, desired)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
@@ -72,10 +72,14 @@ type InsertServiceParams struct {
 	ProvisioningSteps    []byte
 	MonthlyEstimateCents int64
 	EstimateID           pgtype.Text
+	Desired              []byte
 }
 
 // T3.3: services — desired state. Status writes go through the guarded
 // machine in Go; SetServiceStatus enforces the FROM state in SQL too.
+// desired is the reconciler's input (US-1.3a): populated at creation from the
+// shape so the agent has a real document to render from. generation defaults to
+// 1, observed_generation to 0, so a fresh service is immediately outstanding.
 func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) (Service, error) {
 	row := q.db.QueryRow(ctx, insertService,
 		arg.ID,
@@ -88,6 +92,7 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) (S
 		arg.ProvisioningSteps,
 		arg.MonthlyEstimateCents,
 		arg.EstimateID,
+		arg.Desired,
 	)
 	var i Service
 	err := row.Scan(
@@ -156,6 +161,47 @@ func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Servi
 	return items, nil
 }
 
+const markServiceDeleting = `-- name: MarkServiceDeleting :one
+UPDATE services SET desired = $2, generation = generation + 1
+WHERE id = $1
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+`
+
+type MarkServiceDeletingParams struct {
+	ID      string
+	Desired []byte
+}
+
+// Delete's desired-state half (US-1.3a): set the deleting desired doc and bump
+// generation so the service becomes outstanding and the cell converges the
+// teardown, reporting gone. The status transition to 'deleting' is separate
+// (SetServiceStatus, via the guarded machine).
+func (q *Queries) MarkServiceDeleting(ctx context.Context, arg MarkServiceDeletingParams) (Service, error) {
+	row := q.db.QueryRow(ctx, markServiceDeleting, arg.ID, arg.Desired)
+	var i Service
+	err := row.Scan(
+		&i.ID,
+		&i.EnvID,
+		&i.Name,
+		&i.Product,
+		&i.Intent,
+		&i.Status,
+		&i.Shape,
+		&i.Scaling,
+		&i.Override,
+		&i.ProvisioningSteps,
+		&i.MonthlyEstimateCents,
+		&i.EstimateID,
+		&i.CellID,
+		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
+	)
+	return i, err
+}
+
 const orgForService = `-- name: OrgForService :one
 SELECT p.org_id FROM services s
 JOIN environments e ON e.id = s.env_id
@@ -219,7 +265,9 @@ UPDATE services SET
     shape = coalesce($2, shape),
     scaling = coalesce($3, scaling),
     override = $4,
-    monthly_estimate_cents = coalesce($5, monthly_estimate_cents)
+    monthly_estimate_cents = coalesce($5, monthly_estimate_cents),
+    desired = coalesce($6, desired),
+    generation = generation + 1
 WHERE id = $1
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
@@ -230,8 +278,12 @@ type UpdateServiceShapeParams struct {
 	Scaling              []byte
 	Override             []byte
 	MonthlyEstimateCents pgtype.Int8
+	Desired              []byte
 }
 
+// A desired-state edit (US-1.3a): rewrite desired and BUMP generation so the
+// service becomes outstanding (observed_generation < generation) and the cell
+// re-reconciles. Without the bump a converged service would never see the edit.
 func (q *Queries) UpdateServiceShape(ctx context.Context, arg UpdateServiceShapeParams) (Service, error) {
 	row := q.db.QueryRow(ctx, updateServiceShape,
 		arg.ID,
@@ -239,6 +291,7 @@ func (q *Queries) UpdateServiceShape(ctx context.Context, arg UpdateServiceShape
 		arg.Scaling,
 		arg.Override,
 		arg.MonthlyEstimateCents,
+		arg.Desired,
 	)
 	var i Service
 	err := row.Scan(

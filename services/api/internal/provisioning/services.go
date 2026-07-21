@@ -102,6 +102,34 @@ func CanTransition(from, to string) bool {
 	return false
 }
 
+// desiredDoc builds the reconciler's desired-state document (US-1.3a) — what the
+// cell-agent renders from (e1-substrate-design.md §2: product + intent + shape +
+// lifecycle flags). Substrate names never appear here (D8); this is grammar
+// only. `deleting` marks a teardown so the cell converges the service to gone.
+func desiredDoc(product, intent string, shape, scaling []byte, deleting bool) []byte {
+	doc := map[string]any{"product": product}
+	if intent != "" {
+		doc["intent"] = intent
+	}
+	if len(shape) > 0 {
+		var sh any
+		if json.Unmarshal(shape, &sh) == nil {
+			doc["shape"] = sh
+		}
+	}
+	if len(scaling) > 0 {
+		var sc any
+		if json.Unmarshal(scaling, &sc) == nil {
+			doc["scaling"] = sc
+		}
+	}
+	if deleting {
+		doc["deleting"] = true
+	}
+	b, _ := json.Marshal(doc)
+	return b
+}
+
 // provisioningSteps is the C4 timeline, born with the row.
 func provisioningSteps() []byte {
 	steps := []map[string]string{
@@ -192,6 +220,9 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		ProvisioningSteps:    provisioningSteps(),
 		MonthlyEstimateCents: line.MonthlyCents,
 		EstimateID:           pgtype.Text{String: in.EstimateID, Valid: true},
+		// US-1.3a: desired populated at creation; the row is outstanding
+		// (observed 0 < generation 1) so the cell picks it up on the next poll.
+		Desired: desiredDoc(in.Product, line.Intent, shapeJSON, nil, false),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -324,6 +355,18 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	}
 	params.Scaling = scaling
 	params.Override = override
+	// US-1.3a: rebuild desired from the effective post-edit state and let the
+	// query bump generation, so the cell re-reconciles. Effective shape/scaling
+	// = the edit if present, else the current row.
+	effShape := svc.Shape
+	if params.Shape != nil {
+		effShape = params.Shape
+	}
+	effScaling := svc.Scaling
+	if scaling != nil {
+		effScaling = scaling
+	}
+	params.Desired = desiredDoc(svc.Product, svc.Intent.String, effShape, effScaling, false)
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
 		return store.Service{}, err
@@ -355,6 +398,16 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 		}
 		return problemError{p: problem.Conflict(reasons,
 			"Unbind the listed services first — deleting would knowingly break them (U6).")}
+	}
+	// US-1.3a: write the deleting desired doc and bump generation so the service
+	// becomes outstanding and the cell converges the teardown (→ reports gone).
+	// Then transition status to deleting through the guarded machine. Two writes,
+	// not one transaction — the atomicity hardening is tracked in US-1.3a's own
+	// carried findings; a crash between them leaves the row outstanding at
+	// deleting-desired, which the next poll reconciles, so it self-heals.
+	del := desiredDoc(svc.Product, svc.Intent.String, svc.Shape, svc.Scaling, true)
+	if _, err := s.q.MarkServiceDeleting(ctx, store.MarkServiceDeletingParams{ID: svc.ID, Desired: del}); err != nil {
+		return err
 	}
 	_, err = s.Transition(ctx, svc, "deleting", "user", actorID, orgID)
 	return err

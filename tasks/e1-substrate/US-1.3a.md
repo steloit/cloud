@@ -2,7 +2,7 @@
 id: US-1.3a
 title: "Desired-state writers: edits and deletes bump generation and reach the cell"
 epic: E1
-status: in-progress
+status: done
 phase: MVP
 priority: high
 sprint: 2
@@ -15,7 +15,9 @@ contexts: [provisioning]
 files:
   - services/api/internal/provisioning/services.go
   - services/api/internal/provisioning/services_test.go
-  - services/api/db/queries/reconcile.sql
+  - services/api/db/queries/services.sql
+  - services/api/internal/identity/store/services.sql.go
+  - services/api/internal/reconcile/wiring_integration_test.go
 apis: []
 tables: [services]
 events: []
@@ -63,13 +65,17 @@ scope. This task is that wiring.
 
 ## Acceptance criteria
 
-- [ ] A shape edit bumps `generation`, making the service outstanding again;
-  `Desired(cell, 0)` returns it. Proven against real Postgres.
-- [ ] A delete writes a `deleting` desired flag and bumps generation; the
-  AckRenderer returns `gone` for it (integration-level).
-- [ ] `createService` populates `desired` (non-empty) from the shape.
-- [ ] No customer-facing leak of the desired document (the D8 guard in
-  `TestServiceViewDoesNotLeakReconcilerColumns` stays green).
+- [x] A shape edit bumps `generation`, making the service outstanding again;
+  `Desired(cell, 0)` returns it. Proven against real Postgres
+  (`TestShapeEditBumpsGenerationAndBecomesOutstanding`).
+- [x] A delete writes a `deleting` desired flag and bumps generation; the poll
+  carries `status=deleting` which the AckRenderer maps to `gone`
+  (`TestDeleteWritesDeletingDesiredAndBecomesOutstanding` +
+  `TestAckRendererDeletingStatusConvergesToGone`, cell-agent).
+- [x] `createService` populates `desired` (non-empty) from the shape
+  (`TestCreateServicePopulatesDesired`).
+- [x] No customer-facing leak of the desired document —
+  `TestServiceViewDoesNotLeakReconcilerColumns` stays green.
 
 ## Also carry these US-1.3 review findings (recorded, not yet fixed)
 
@@ -107,3 +113,39 @@ land here so they are not lost:
 
 US-1.3 (the protocol) · T3.3 (service writers) · US-3.5 (deletion + final backup)
 · `docs/plan/e1-substrate-design.md` §2
+
+## Outcome
+
+The producing half of the reconciler protocol, end to end against real Postgres.
+
+- **`desiredDoc` helper** builds the §2 desired document (product + intent +
+  shape + scaling + a `deleting` lifecycle flag) — grammar only, no substrate
+  names (D8, pinned by `TestDesiredDocShape`).
+- **createService** populates `desired` at `InsertService` (was the `'{}'`
+  default). A fresh service is outstanding (observed 0 < generation 1) and the
+  cell picks it up — no separate wiring needed for creation.
+- **updateService** rewrites `desired` from the effective post-edit shape/scaling
+  and the query bumps `generation`, so an edited service becomes outstanding
+  again; without the bump a converged service would never see the edit.
+- **deleteService** writes the deleting desired doc + bumps generation
+  (`MarkServiceDeleting`), then transitions status to `deleting`. The service
+  becomes outstanding, the poll carries `status=deleting`, and the AckRenderer
+  converges it to `gone` — closing the delete-hot-loop US-1.3 flagged.
+
+Deferred, still recorded here (the carried-findings list above): full
+transactional atomicity (the two writes in deleteService self-heal via the
+outstanding poll on a crash, but are not one transaction), page-starvation past
+the poll LIMIT, and persistent-converge-failure visibility. These are genuinely
+downstream of a real renderer (T1.4/T3.4) or a larger provisioning-side tx
+refactor, and are not silently absorbed into this task.
+
+Files-glob note: the desired-writer queries live in `services.sql` (not the
+`reconcile.sql` the original glob guessed), and the end-to-end tests reuse the
+reconcile package's real-Postgres harness rather than standing up a second one —
+so the glob is widened to match what the wiring actually touches. No behavior
+outside the producing path changed.
+
+Verified: `TestCreateServicePopulatesDesired`,
+`TestShapeEditBumpsGenerationAndBecomesOutstanding`,
+`TestDeleteWritesDeletingDesiredAndBecomesOutstanding` all pass against real
+Postgres; `desiredDoc` unit test and the D8 guard green.
