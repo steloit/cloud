@@ -51,8 +51,9 @@ Merge
   there is currently **no reliable detector** for it: reading the PR diff catches
   a review that left changes behind, but not a mutate-then-restore, which is the
   shape actually observed (a reviewer reproducing a fault in the working tree).
-  Reviewers are therefore instructed to work in a temp copy and to state plainly
-  when they have mutated the tree.
+  Reviewers are therefore instructed (`.claude/agents/reviewer.md`, `qa.md` — the
+  operative source; this is a description of it) to reproduce faults in a temp copy
+  and to state plainly when they have mutated the tree.
 - **Reviewer identity is fixed and repo-native.** The two reviewers are exactly
   the Phase-2 support agents in this repo: the **Architecture Reviewer** is
   `.claude/agents/reviewer.md` (`subagent_type: "reviewer"`) and the
