@@ -2,7 +2,7 @@
 id: O6f
 title: "\"hook-enforced\" is false: a Bash redirect writes the human-only authority files"
 epic: EOPS
-status: ready
+status: in-progress
 phase: V1
 priority: high
 sprint: 1
