@@ -50,6 +50,14 @@ type Budget struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type Cell struct {
+	ID              string
+	Region          string
+	Status          string
+	AgentLastSeenAt pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type Dashboard struct {
 	ID         string
 	OrgID      string
@@ -345,6 +353,10 @@ type Service struct {
 	EstimateID           pgtype.Text
 	CellID               string
 	CreatedAt            pgtype.Timestamptz
+	Desired              []byte
+	Generation           int64
+	ObservedGeneration   int64
+	LastReconciledAt     pgtype.Timestamptz
 }
 
 type Session struct {

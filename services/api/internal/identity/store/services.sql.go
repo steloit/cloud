@@ -25,7 +25,7 @@ func (q *Queries) CountServicesForEnvs(ctx context.Context, projectID string) (i
 }
 
 const getService = `-- name: GetService :one
-SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at FROM services WHERE id = $1
+SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services WHERE id = $1
 `
 
 func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
@@ -46,6 +46,10 @@ func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
 		&i.EstimateID,
 		&i.CellID,
 		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
 	)
 	return i, err
 }
@@ -54,7 +58,7 @@ const insertService = `-- name: InsertService :one
 
 INSERT INTO services (id, env_id, name, product, intent, shape, scaling, provisioning_steps, monthly_estimate_cents, estimate_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
 type InsertServiceParams struct {
@@ -101,12 +105,16 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) (S
 		&i.EstimateID,
 		&i.CellID,
 		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
 	)
 	return i, err
 }
 
 const listServicesForEnv = `-- name: ListServicesForEnv :many
-SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at FROM services WHERE env_id = $1 ORDER BY created_at
+SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services WHERE env_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Service, error) {
@@ -133,6 +141,10 @@ func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Servi
 			&i.EstimateID,
 			&i.CellID,
 			&i.CreatedAt,
+			&i.Desired,
+			&i.Generation,
+			&i.ObservedGeneration,
+			&i.LastReconciledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -161,7 +173,7 @@ func (q *Queries) OrgForService(ctx context.Context, id string) (string, error) 
 const setServiceStatus = `-- name: SetServiceStatus :one
 UPDATE services SET status = $3, provisioning_steps = coalesce($4, provisioning_steps)
 WHERE id = $1 AND status = $2
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
 type SetServiceStatusParams struct {
@@ -194,6 +206,10 @@ func (q *Queries) SetServiceStatus(ctx context.Context, arg SetServiceStatusPara
 		&i.EstimateID,
 		&i.CellID,
 		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
 	)
 	return i, err
 }
@@ -205,7 +221,7 @@ UPDATE services SET
     override = $4,
     monthly_estimate_cents = coalesce($5, monthly_estimate_cents)
 WHERE id = $1
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
 type UpdateServiceShapeParams struct {
@@ -240,6 +256,10 @@ func (q *Queries) UpdateServiceShape(ctx context.Context, arg UpdateServiceShape
 		&i.EstimateID,
 		&i.CellID,
 		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
 	)
 	return i, err
 }

@@ -327,6 +327,30 @@ func (e DeploymentState) Valid() bool {
 	}
 }
 
+// Defines values for DesiredServiceProduct.
+const (
+	DesiredServiceProductPostgres DesiredServiceProduct = "postgres"
+	DesiredServiceProductValkey   DesiredServiceProduct = "valkey"
+	DesiredServiceProductWeb      DesiredServiceProduct = "web"
+	DesiredServiceProductWorker   DesiredServiceProduct = "worker"
+)
+
+// Valid indicates whether the value is a known member of the DesiredServiceProduct enum.
+func (e DesiredServiceProduct) Valid() bool {
+	switch e {
+	case DesiredServiceProductPostgres:
+		return true
+	case DesiredServiceProductValkey:
+		return true
+	case DesiredServiceProductWeb:
+		return true
+	case DesiredServiceProductWorker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DnsRecordType.
 const (
 	CNAME DnsRecordType = "CNAME"
@@ -815,22 +839,22 @@ func (e Plan) Valid() bool {
 
 // Defines values for Product.
 const (
-	Postgres Product = "postgres"
-	Valkey   Product = "valkey"
-	Web      Product = "web"
-	Worker   Product = "worker"
+	ProductPostgres Product = "postgres"
+	ProductValkey   Product = "valkey"
+	ProductWeb      Product = "web"
+	ProductWorker   Product = "worker"
 )
 
 // Valid indicates whether the value is a known member of the Product enum.
 func (e Product) Valid() bool {
 	switch e {
-	case Postgres:
+	case ProductPostgres:
 		return true
-	case Valkey:
+	case ProductValkey:
 		return true
-	case Web:
+	case ProductWeb:
 		return true
-	case Worker:
+	case ProductWorker:
 		return true
 	default:
 		return false
@@ -1572,6 +1596,60 @@ func (e CreateEnvironmentJSONBodyData) Valid() bool {
 	}
 }
 
+// Defines values for PostReconcileStatusJSONBodyConditionsStatus.
+const (
+	PostReconcileStatusJSONBodyConditionsStatusFalse   PostReconcileStatusJSONBodyConditionsStatus = "False"
+	PostReconcileStatusJSONBodyConditionsStatusTrue    PostReconcileStatusJSONBodyConditionsStatus = "True"
+	PostReconcileStatusJSONBodyConditionsStatusUnknown PostReconcileStatusJSONBodyConditionsStatus = "Unknown"
+)
+
+// Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyConditionsStatus enum.
+func (e PostReconcileStatusJSONBodyConditionsStatus) Valid() bool {
+	switch e {
+	case PostReconcileStatusJSONBodyConditionsStatusFalse:
+		return true
+	case PostReconcileStatusJSONBodyConditionsStatusTrue:
+		return true
+	case PostReconcileStatusJSONBodyConditionsStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PostReconcileStatusJSONBodyStatus.
+const (
+	PostReconcileStatusJSONBodyStatusDegraded     PostReconcileStatusJSONBodyStatus = "degraded"
+	PostReconcileStatusJSONBodyStatusDeleting     PostReconcileStatusJSONBodyStatus = "deleting"
+	PostReconcileStatusJSONBodyStatusFailed       PostReconcileStatusJSONBodyStatus = "failed"
+	PostReconcileStatusJSONBodyStatusGone         PostReconcileStatusJSONBodyStatus = "gone"
+	PostReconcileStatusJSONBodyStatusProvisioning PostReconcileStatusJSONBodyStatus = "provisioning"
+	PostReconcileStatusJSONBodyStatusReady        PostReconcileStatusJSONBodyStatus = "ready"
+	PostReconcileStatusJSONBodyStatusSuspended    PostReconcileStatusJSONBodyStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyStatus enum.
+func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostReconcileStatusJSONBodyStatusDegraded:
+		return true
+	case PostReconcileStatusJSONBodyStatusDeleting:
+		return true
+	case PostReconcileStatusJSONBodyStatusFailed:
+		return true
+	case PostReconcileStatusJSONBodyStatusGone:
+		return true
+	case PostReconcileStatusJSONBodyStatusProvisioning:
+		return true
+	case PostReconcileStatusJSONBodyStatusReady:
+		return true
+	case PostReconcileStatusJSONBodyStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateBindingJSONBodyScope.
 const (
 	CreateBindingJSONBodyScopeReadOnly  CreateBindingJSONBodyScope = "read_only"
@@ -1911,6 +1989,33 @@ type DeploymentList struct {
 	Data       *[]Deployment `json:"data,omitempty"`
 	NextCursor *string       `json:"next_cursor,omitempty"`
 }
+
+// DesiredService One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
+type DesiredService struct {
+	CellId string `json:"cell_id"`
+
+	// Desired the full desired document the agent renders from
+	Desired map[string]interface{} `json:"desired"`
+	EnvId   *string                `json:"env_id,omitempty"`
+
+	// Generation bumps on every desired-state edit
+	Generation int64   `json:"generation"`
+	Id         string  `json:"id"`
+	Intent     *string `json:"intent,omitempty"`
+	Name       *string `json:"name,omitempty"`
+
+	// ObservedGeneration how far the agent has converged; observed < generation means work outstanding
+	ObservedGeneration *int64                  `json:"observed_generation,omitempty"`
+	Product            DesiredServiceProduct   `json:"product"`
+	Scaling            *map[string]interface{} `json:"scaling,omitempty"`
+	Shape              *map[string]interface{} `json:"shape,omitempty"`
+
+	// Status ADR-024 vocabulary
+	Status string `json:"status"`
+}
+
+// DesiredServiceProduct defines model for DesiredService.Product.
+type DesiredServiceProduct string
 
 // DnsRecord defines model for DnsRecord.
 type DnsRecord struct {
@@ -3332,6 +3437,37 @@ type CreateEnvironmentJSONBody struct {
 // CreateEnvironmentJSONBodyData defines parameters for CreateEnvironment.
 type CreateEnvironmentJSONBodyData string
 
+// GetDesiredStateParams defines parameters for GetDesiredState.
+type GetDesiredStateParams struct {
+	// SinceGenerationParam return only services whose generation exceeds this; omit for a full sweep
+	SinceGenerationParam *int64 `form:"since_generation,omitempty" json:"since_generation,omitempty"`
+	LimitParam           *int   `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBody struct {
+	Conditions *[]struct {
+		Message *string                                     `json:"message,omitempty"`
+		Reason  *string                                     `json:"reason,omitempty"`
+		Status  PostReconcileStatusJSONBodyConditionsStatus `json:"status"`
+		Type    string                                      `json:"type"`
+	} `json:"conditions,omitempty"`
+
+	// Event optional one-line note recorded on the spine event
+	Event              *string `json:"event,omitempty"`
+	ObservedGeneration int64   `json:"observed_generation"`
+	ServiceId          string  `json:"service_id"`
+
+	// Status ADR-024 vocabulary; gone reports a completed teardown
+	Status PostReconcileStatusJSONBodyStatus `json:"status"`
+}
+
+// PostReconcileStatusJSONBodyConditionsStatus defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBodyConditionsStatus string
+
+// PostReconcileStatusJSONBodyStatus defines parameters for PostReconcileStatus.
+type PostReconcileStatusJSONBodyStatus string
+
 // PreviewScheduleParams defines parameters for PreviewSchedule.
 type PreviewScheduleParams struct {
 	Cron string  `form:"cron" json:"cron"`
@@ -3502,6 +3638,9 @@ type CreateAlertRuleJSONRequestBody = AlertRuleInput
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody CreateEnvironmentJSONBody
+
+// PostReconcileStatusJSONRequestBody defines body for PostReconcileStatus for application/json ContentType.
+type PostReconcileStatusJSONRequestBody PostReconcileStatusJSONBody
 
 // UpdateServiceJSONRequestBody defines body for UpdateService for application/json ContentType.
 type UpdateServiceJSONRequestBody UpdateServiceJSONBody
