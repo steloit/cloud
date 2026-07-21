@@ -17,7 +17,7 @@ files:
   - AGENTS.md
 verify:
   - "CLAUDE.md step 5a names subagent_type 'reviewer' and 'qa' explicitly"
-  - "git ls-files -s CLAUDE.md shows mode 120000 — the symlink to AGENTS.md is intact, so both entry points carry the edit"
+  - "git ls-files -s CLAUDE.md shows mode 120000 — the index is the right authority here, since this task only needs to know the edit was committed to both entry points; O6c's standing check reads the working tree instead, because that is what a session actually loads"
   - "a session reading only CLAUDE.md invokes the pipeline by name without re-deriving it"
 owner: agent
 ---

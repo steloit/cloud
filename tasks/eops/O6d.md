@@ -17,7 +17,7 @@ files:
   - AGENTS.md
 verify:
   - "ADR-0008 states read-only as a behavioral constraint, naming the Bash caveat"
-  - "AGENTS.md step 5a carries the same qualification — grep -c 'read-only and independent' AGENTS.md returns 0"
+  - "AGENTS.md step 5a carries the same qualification: 'read-only and independent' no longer appears unqualified — grep -q 'read-only and independent' AGENTS.md exits non-zero"
   - "no living file restates read-only as an enforced property"
 owner: agent
 ---
