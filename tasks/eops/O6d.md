@@ -14,8 +14,10 @@ module: Engineering OS
 contexts: []
 files:
   - docs/adr/0008-mandatory-review-pipeline.md
+  - AGENTS.md
 verify:
   - "ADR-0008 states read-only as a behavioral constraint, naming the Bash caveat"
+  - "AGENTS.md step 5a carries the same qualification — grep -c 'read-only and independent' AGENTS.md returns 0"
   - "no living file restates read-only as an enforced property"
 owner: agent
 ---
@@ -54,6 +56,12 @@ rather than qualifying a policy claim from a steering file.
   invites reviewers to start writing.
 - [ ] The ADR says what a reader should therefore *not* do: cite an absent
   `Write` tool as evidence of a sandbox.
+- [ ] **AGENTS.md step 5a is amended in the same PR.** It still reads "The two
+  reviewers are read-only and independent" — the identical unqualified claim.
+  O6b deliberately left it rather than qualifying an ADR-owned policy from a
+  steering file; amending the ADR is exactly what licenses the steering-file
+  edit, so the two belong in one change. Editing the ADR alone would leave the
+  repo contradicting itself in the more-read file.
 - [ ] No change to review POLICY. Reviewers must still not write; the amendment
   changes what the repo *claims about enforcement*, not what is required.
 - [ ] `.claude/agents/README.md` and `tasks/eops/O6c.md` are checked for

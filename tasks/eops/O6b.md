@@ -91,8 +91,15 @@ order, hard rules, and task protocol — silently, with no error. So the criteri
 is `[~]`, not closed: the real check is a git-mode assertion in `validate.mjs`,
 outside this task's glob, and O6c now owns it.
 
-Follow-ups: **O6c** gains `entrypoint-symlink` (the mode assertion above) and
-`agents-readme-exists`, since step 5a now points at a file no gate protects.
+Follow-ups: **O6c** gains `entrypoint-symlink` and `agents-readme-exists`, since
+step 5a now points at a file no gate protects. Two corrections came out of the
+re-review and are worth carrying: the check must assert the **working tree**
+(`lstatSync`/`readlinkSync`, verified working) not `git ls-files -s`, because the
+index stays `120000` under `core.symlinks=false` while the working tree holds the
+9-byte file — the mechanism I first specified missed the exact outage that
+justified it. And the delegated checks were added to O6c's *acceptance criteria*
+only, while Done is defined as its `verify:` block passing, so O6c could have
+closed green with the work unwritten; its `verify:` block now gates all of it.
 **O6d** filed for the root of it — ADR-0008 still asserts reviewers are read-only
 as unqualified fact, which O6 disproved; the ADR is the source every restatement
 inherits, and step 5a's pre-existing "read-only" wording was left untouched here
