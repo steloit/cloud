@@ -2,7 +2,7 @@
 id: O6c
 title: Pin the agent directory's load-bearing properties in validate.mjs
 epic: EOPS
-status: in-progress
+status: done
 phase: V1
 priority: medium
 sprint: 1
@@ -53,18 +53,18 @@ prefixed `agents-readonly:`, `agents-table-sync:`, `entrypoint-symlink:`, and
 not shell out to `git` — a subprocess has no precedent here and would break
 validation wherever there is no git binary or work tree.
 
-- [ ] `agents-readonly`: parse each `.claude/agents/*.md` frontmatter; assert
+- [x] `agents-readonly`: parse each `.claude/agents/*.md` frontmatter; assert
   `reviewer` and `qa` declare `tools ⊆ {Read, Grep, Glob, Bash}`. Failure cites
   ADR-0008's reviewer-identity clause.
-- [ ] `agents-table-sync`: the set of frontmatter `name`s equals the README
+- [x] `agents-table-sync`: the set of frontmatter `name`s equals the README
   table's `subagent_type` column, and each `name` matches its filename stem.
   **Exclude `README.md` by filename**, not by "has no frontmatter" — `lib.mjs`
   `parseFrontmatter` throws the same `missing frontmatter` error for absent and
   malformed blocks, so those two cases are indistinguishable at the parser and a
   content-based discriminator would silently skip a typo'd agent file.
-- [ ] A file with a malformed frontmatter block fails loudly rather than being
+- [x] A file with a malformed frontmatter block fails loudly rather than being
   skipped — test with a `notes.md` carrying a typo'd `---` fence.
-- [ ] `entrypoint-symlink`: assert **on the working tree**, not the index —
+- [x] `entrypoint-symlink`: assert **on the working tree**, not the index —
   `lstatSync("CLAUDE.md").isSymbolicLink()` is true *and*
   `readlinkSync("CLAUDE.md") === "AGENTS.md"`. Remediation: "CLAUDE.md must stay
   a symlink to AGENTS.md; edit AGENTS.md instead." Both calls are verified
@@ -73,12 +73,12 @@ validation wherever there is no git binary or work tree.
   under a `core.symlinks=false` checkout while the working tree holds the 9-byte
   regular file, so it misses the exact outage this check exists for. This is the
   highest-severity check of the four. **Added from O6b's review.**
-- [ ] `agents-readme-exists`: assert `.claude/agents/README.md` is present, since
+- [x] `agents-readme-exists`: assert `.claude/agents/README.md` is present, since
   AGENTS.md step 5a now points at it and a rename would dangle silently. Keep it
   separate from `agents-table-sync` even though that check must also read the
   file — the value is a clean `err()` with remediation instead of an unhandled
   `ENOENT`, so run it first and skip the table check if it fails.
-- [ ] All checks run in the existing `validate.mjs` invocation — no new command.
+- [x] All checks run in the existing `validate.mjs` invocation — no new command.
 
 ## Why `entrypoint-symlink` is the urgent one
 
@@ -117,3 +117,39 @@ proposed and deferred — ceremony not yet justified by an observed failure.
 ## Related
 
 ADR-0008 · O6 · scripts/spec-sync/validate.mjs
+
+## Outcome
+
+Four checks added to `validate.mjs` (+66 lines, still fs-only, no
+`child_process`, no rule registry). Every one was verified by *causing* its
+failure and restoring, not by asserting it would fire:
+
+| Check | Injected fault | Result |
+|---|---|---|
+| `entrypoint-symlink` | `rm CLAUDE.md && echo forked > CLAUDE.md` | fails; passes again on restore |
+| `agents-readme-exists` | README moved aside | fails with remediation, not an `ENOENT` trace |
+| `agents-readonly` | `Edit` added to `reviewer.md` `tools:` | fails, citing ADR-0008 and the allowed set |
+| `agents-table-sync` | new `rogue.md` with no table row | fails |
+| (malformed fence) | `--` instead of `---` | fails loudly, not skipped |
+| (stem mismatch) | `notmatching.md` declaring `name: mismatched` | fails, 2 problems |
+
+This is what O6 and O6b could only document. The chain is now: O6 wrote the
+contract, O6b made it discoverable, O6c makes it enforced — the first two are
+prose a session can miss, this one fails CI.
+
+The `entrypoint-symlink` check is the highest-value of the four and nearly
+shipped broken. O6b originally specified `git ls-files -s`, which reads the
+**index** — under a `core.symlinks=false` checkout the index still reads
+`120000` while the working tree holds a 9-byte regular file containing the
+string `AGENTS.md`. A session auto-loading `CLAUDE.md` would get those nine
+bytes instead of the authority order, hard rules, and task protocol, silently,
+and the check would have printed `OK`. QA caught it; the implementation asserts
+the working tree via `lstatSync`/`readlinkSync`.
+
+Deviation: `agents-readonly` pins the **declared** grant only, and must not be
+read as making the reviewers read-only. O6 verified `reviewer` holds `Bash` and
+`echo x > file` executes with no prompt. This check stops a careless frontmatter
+edit; it does not close the hole. **O6d** carries the wording fix, and whether
+to constrain `Bash` at all remains explicitly undecided — it would cost the
+reviewers `git diff`, `go test`, and `grep`, which is most of how they gather
+evidence.
