@@ -95,11 +95,19 @@ that belongs in the PR as a finding.
 
 - [ ] **kill the control plane; customer test pod keeps running.** The agent's poll fails, converge
   is skipped, nothing panics, and no state is mutated — the drill in `verify:`. This is the
-  task's headline criterion and the reason the protocol exists.
+  task's headline criterion and the reason the protocol exists. Founder-confirmed as a gate
+  (2026-07-21): customer workloads must be *proven* to keep running while the control plane is
+  unavailable — an assertion that they would is not the criterion.
 - [ ] Desired-poll is cell-scoped and token-scoped; a foreign cell id returns 404.
 - [ ] `since_generation` returns only rows whose `generation` exceeds it.
 - [ ] Writeback advances `observed_generation`; a **stale** generation is rejected; repeating the
   same writeback is a no-op (idempotent); concurrent writebacks apply exactly once.
+- [ ] **The `generation >= $2` guard is proven against real PostgreSQL, not a fake.** Founder-set
+  gate (2026-07-21), not a nice-to-have. The unit tests mirror the guard in an in-memory
+  `MarkObserved` — precisely the shape of test that stays green while the real query is wrong.
+  The integration test must drive a genuine stale report (agent reports generation N while
+  desired has moved to N+1) against Postgres and assert the row is unchanged. Green unit tests
+  are not evidence for this criterion.
 - [ ] Every status edge emits an event; metering starts at `ready`, never before.
 - [ ] No imperative provisioning anywhere — a handler that provisions is a defect (D9). The only
   write path to the cell is desired-state rows.
@@ -134,8 +142,10 @@ Remaining, in this order:
 4. Build `services/cell-agent` (new Go module): poll → converge → writeback,
    level-triggered, renderer behind a seam.
 5. Integration test against real Postgres — the SQL guard `generation >= $2` is
-   currently mirrored by a fake, not exercised.
-6. The outage drill — the headline acceptance criterion.
+   currently mirrored by a fake, not exercised. **This is an acceptance
+   criterion, not a step.**
+6. The outage drill — **an acceptance criterion, not a step.** Prove customer
+   workloads keep running while the control plane is down.
 7. Two-reviewer pipeline (`reviewer`, `qa` by name), **fix everything found
    before opening the PR.** Founder: "Do not shortcut the review process."
 
