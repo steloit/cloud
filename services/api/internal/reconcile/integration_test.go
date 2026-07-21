@@ -1,10 +1,15 @@
 package reconcile_test
 
 // US-1.3 step 5 (founder-gated): the generation guard proven against REAL
-// PostgreSQL, not a fake. The unit tests mirror `MarkObserved`'s
-// `WHERE generation >= $2` in an in-memory store — exactly the test shape that
-// stays green while the real query is wrong. This drives the actual SQL through
-// real migrations in a throwaway Postgres container.
+// PostgreSQL, not a fake. The unit tests mirror `MarkObserved`'s exact-match
+// guard in an in-memory store — exactly the test shape that stays green while
+// the real query is wrong. These drive the actual SQL through real migrations
+// in a throwaway Postgres container. Both directions of the guard are covered:
+// a BEHIND report (the AC's literal scenario) and an impossible AHEAD report.
+//
+// Runs in CI (Docker present). Locally it needs a reachable daemon —
+// DOCKER_HOST set for colima. It t.Skipf's when no runtime is found; a skip is
+// NOT a pass, so the gated evidence is a CI green or a local run with Docker.
 
 import (
 	"context"
@@ -61,7 +66,7 @@ func seedService(t *testing.T, pool *pgxpool.Pool, id string) {
 			t.Fatalf("seed %q: %v", sql, err)
 		}
 	}
-	ex(`INSERT INTO orgs (id, name) VALUES ('org_it', 'itco') ON CONFLICT DO NOTHING`)
+	ex(`INSERT INTO orgs (id, name, slug) VALUES ('org_it', 'itco', 'itco') ON CONFLICT DO NOTHING`)
 	ex(`INSERT INTO projects (id, org_id, name, cell_id) VALUES ('prj_it', 'org_it', 'p', 'cell-0') ON CONFLICT DO NOTHING`)
 	ex(`INSERT INTO environments (id, project_id, name) VALUES ('env_it', 'prj_it', 'prod') ON CONFLICT DO NOTHING`)
 	ex(`INSERT INTO services (id, env_id, name, product, status, cell_id, desired)
@@ -82,8 +87,69 @@ func newReconciler(pool *pgxpool.Pool, q *store.Queries) (*reconcile.Service, er
 	return reconcile.New(q, prov), nil
 }
 
-// The founder-gated criterion: a stale report is REJECTED by real Postgres.
-func TestGuardRejectsStaleAgainstRealPostgres(t *testing.T) {
+// The founder-gated criterion, the AC's LITERAL scenario: the agent reports
+// generation N while desired has moved to N+1 (it converged the old desired),
+// against REAL Postgres. Must be rejected and the row left unchanged.
+func TestBehindReportRejectedAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_behind") // generation 1, observed 0
+	// Desired moves to generation 2 while the agent is still converging gen 1.
+	if _, err := q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: "svc_behind", Desired: []byte(`{"v":2}`)}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent reports observed_generation=1 (the old desired it converged).
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_behind", ObservedGeneration: 1, Status: "ready"}); err == nil {
+		t.Fatal("real Postgres accepted a BEHIND report — the exact-match guard is not enforcing")
+	}
+	row, err := q.GetService(ctx, "svc_behind")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.ObservedGeneration != 0 {
+		t.Fatalf("a behind report advanced observed_generation to %d", row.ObservedGeneration)
+	}
+	if row.Status != "provisioning" {
+		t.Fatalf("a behind report drove status to %q off stale desired", row.Status)
+	}
+}
+
+// The poll returns OUTSTANDING work only — a service whose report has landed
+// drops out (proven against real Postgres, not the fake).
+func TestOutstandingWorkPollAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_ow") // gen 1, observed 0 → outstanding
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Desired(ctx, "cell-0", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "svc_ow" {
+		t.Fatalf("a fresh service (observed 0 < gen 1) must be outstanding, got %+v", got)
+	}
+	// Report it converged; observed advances to 1; it must drop out.
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_ow", ObservedGeneration: 1, Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = svc.Desired(ctx, "cell-0", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a reported service must drop out of the outstanding set, got %+v", got)
+	}
+}
+
+// An impossible AHEAD report is also rejected by real Postgres.
+func TestAheadReportRejectedAgainstRealPostgres(t *testing.T) {
 	pool, q := realDB(t)
 	ctx := context.Background()
 	seedService(t, pool, "svc_real")
@@ -102,9 +168,9 @@ func TestGuardRejectsStaleAgainstRealPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A report ahead of desired (gen 9 > 3) is stale — the guard rejects it.
+	// A report ahead of desired (gen 9 > 3) is impossible — the exact-match guard rejects it.
 	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_real", ObservedGeneration: 9, Status: "ready"}); err == nil {
-		t.Fatal("real Postgres accepted a stale generation — the WHERE generation >= $2 guard is not enforcing")
+		t.Fatal("real Postgres accepted an ahead generation — the WHERE generation = $2 guard is not enforcing")
 	}
 	// The row must be untouched: observed_generation still 0, status unchanged.
 	row, err := q.GetService(ctx, "svc_real")

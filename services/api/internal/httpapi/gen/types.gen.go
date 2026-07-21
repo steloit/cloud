@@ -3446,6 +3446,7 @@ type GetDesiredStateParams struct {
 
 // PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
 type PostReconcileStatusJSONBody struct {
+	// Conditions reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
 	Conditions *[]struct {
 		Message *string                                     `json:"message,omitempty"`
 		Reason  *string                                     `json:"reason,omitempty"`
@@ -3454,12 +3455,14 @@ type PostReconcileStatusJSONBody struct {
 	} `json:"conditions,omitempty"`
 
 	// Event optional one-line note recorded on the spine event
-	Event              *string `json:"event,omitempty"`
-	ObservedGeneration int64   `json:"observed_generation"`
-	ServiceId          string  `json:"service_id"`
+	Event *string `json:"event,omitempty"`
 
-	// Status ADR-024 vocabulary; gone reports a completed teardown
-	Status PostReconcileStatusJSONBodyStatus `json:"status"`
+	// ObservedGeneration the generation the cell converged; a report for any generation other than the one desired holds now is rejected (409)
+	ObservedGeneration int64  `json:"observed_generation"`
+	ServiceId          string `json:"service_id"`
+
+	// Status ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+	Status *PostReconcileStatusJSONBodyStatus `json:"status,omitempty"`
 }
 
 // PostReconcileStatusJSONBodyConditionsStatus defines parameters for PostReconcileStatus.

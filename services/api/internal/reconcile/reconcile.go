@@ -40,11 +40,13 @@ type Service struct {
 
 func New(q Querier, trans Transitioner) *Service { return &Service{q: q, trans: trans} }
 
-// ErrStaleGeneration is a writeback reporting on desired state that has since
-// moved on. It is REJECTED rather than applied: a slow agent must never mark
-// newer desired state as converged, or the control plane would believe work is
-// done that no cell has performed.
-var ErrStaleGeneration = errors.New("reconcile: stale generation")
+// ErrStaleGeneration is a writeback whose reported generation is not the one
+// desired holds right now — either BEHIND (the agent converged an older desired
+// that has since bumped) or, impossibly, ahead. Both are REJECTED by the
+// exact-match guard: a converge of stale desired must never mark the current
+// desired as done or drive its status. The agent re-polls (the row is still
+// outstanding) and converges the current generation.
+var ErrStaleGeneration = errors.New("reconcile: generation mismatch")
 
 // ErrUnknownCell covers both "no such cell" and "not your cell" — the caller
 // renders 404 for each, so a reconciler token cannot enumerate cells.
@@ -128,12 +130,14 @@ type Report struct {
 // Order matters and is deliberate:
 //  1. heartbeat first — an agent that is alive but reporting something invalid
 //     must still count as alive, or a bad report would look like a dead cell.
-//  2. MarkObserved, which REJECTS a stale generation (the SQL guard).
+//  2. MarkObserved, whose exact-match guard REJECTS any report not on the
+//     current generation (behind or ahead) — see ErrStaleGeneration.
 //  3. the status edge, through the existing Transition (events + metering).
 //
-// Repeating an identical writeback is a no-op: MarkObserved uses GREATEST, and
-// an already-current status skips the transition. Concurrency is handled by
-// Transition's own FROM-guard, so two agents reporting the same edge apply once.
+// Repeating an identical writeback is a no-op: MarkObserved re-sets observed to
+// the same value, and an already-current status skips the transition.
+// Concurrency is handled by Transition's own FROM-guard, so two agents
+// reporting the same edge apply once.
 func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store.Service, error) {
 	if _, err := s.q.GetCell(ctx, cell); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -163,7 +167,7 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.Service{}, fmt.Errorf("%w: reported %d, desired is newer",
+			return store.Service{}, fmt.Errorf("%w: reported %d, desired holds a different generation",
 				ErrStaleGeneration, rep.ObservedGeneration)
 		}
 		return store.Service{}, err

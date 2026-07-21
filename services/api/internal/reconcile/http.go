@@ -95,11 +95,16 @@ func (h *Handlers) desired(w http.ResponseWriter, r *http.Request) {
 
 // statusBody mirrors the contract's request schema. Decoded strictly: an
 // unknown field is a defect in the agent, not something to ignore quietly.
+//
+// Conditions is RESERVED (US-1.3): it is decoded so the wire format is stable,
+// validated for shape by the strict decoder, and acknowledged — but not yet
+// persisted (no column). Condition storage is a follow-up; accepting the field
+// now means the agent's writeback format does not change when it lands.
 type statusBody struct {
 	ServiceID          string          `json:"service_id"`
 	ObservedGeneration *int64          `json:"observed_generation"`
 	Status             string          `json:"status"`
-	Conditions         json.RawMessage `json:"conditions"`
+	Conditions         json.RawMessage `json:"conditions"` // reserved; see above
 	Event              string          `json:"event"`
 }
 

@@ -1,0 +1,77 @@
+---
+id: US-1.3a
+title: "Desired-state writers: edits and deletes bump generation and reach the cell"
+epic: E1
+status: ready
+phase: MVP
+priority: high
+sprint: 2
+estimate: 0.5ew
+deps: [US-1.3, T3.3]
+issue: 0
+labels: [Platform, Backend]
+module: M1 Substrate
+contexts: [provisioning]
+files:
+  - services/api/internal/provisioning/services.go
+  - services/api/internal/provisioning/services_test.go
+  - services/api/db/queries/reconcile.sql
+apis: []
+tables: [services]
+events: []
+tests: [TestShapeEditBumpsGeneration, TestShapeEditBecomesOutstanding, TestDeleteWritesDeletingDesired, TestDeleteConvergesToGone]
+verify:
+  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go test ./internal/provisioning/ ./internal/reconcile/"
+owner: agent
+---
+
+## Goal
+
+Wire the desired-state WRITERS so shape/scaling edits and deletes actually reach
+the cell. US-1.3 landed the reconciler protocol and the read/writeback path;
+this closes the producing half beyond creation.
+
+## Why — a real gap US-1.3's review surfaced, recorded not hidden
+
+US-1.3's poll returns OUTSTANDING work (`observed_generation < generation`), so a
+freshly **created** service is picked up automatically (observed 0 < generation
+1) — creation reaches the cell today. But:
+
+- `updateService` (shape/scaling edit) writes `shape` and never bumps
+  `generation`, so an edit leaves `observed == generation` and the cell never
+  re-reconciles it.
+- `deleteService` transitions status but never sets a `desired` deletion flag,
+  so the AckRenderer's `desired["deleting"]` → `gone` branch is unreachable from
+  real data.
+- `desired` is `'{}'` at creation; the real renderer (T1.4/T3.4) needs the
+  desired document populated from product + shape.
+
+`BumpServiceGeneration` exists (US-1.3) with no production caller — that was left
+deliberately, because the writers are provisioning-side and outside US-1.3's file
+scope. This task is that wiring.
+
+## Scope
+
+- `updateService`: after a shape/scaling edit, call `BumpServiceGeneration` with
+  the new desired document (product + shape + scaling + lifecycle flags) in the
+  same transaction as the edit.
+- `deleteService`: write `desired` with a `deleting: true` flag and bump
+  generation, so the cell converges the teardown and reports `gone`. Coordinate
+  with US-3.5's final-backup contract — deletion is not just a status flip.
+- `createService`: populate `desired` from the created shape (not `'{}'`), so the
+  renderer has a real document from birth.
+
+## Acceptance criteria
+
+- [ ] A shape edit bumps `generation`, making the service outstanding again;
+  `Desired(cell, 0)` returns it. Proven against real Postgres.
+- [ ] A delete writes a `deleting` desired flag and bumps generation; the
+  AckRenderer returns `gone` for it (integration-level).
+- [ ] `createService` populates `desired` (non-empty) from the shape.
+- [ ] No customer-facing leak of the desired document (the D8 guard in
+  `TestServiceViewDoesNotLeakReconcilerColumns` stays green).
+
+## Related
+
+US-1.3 (the protocol) · T3.3 (service writers) · US-3.5 (deletion + final backup)
+· `docs/plan/e1-substrate-design.md` §2

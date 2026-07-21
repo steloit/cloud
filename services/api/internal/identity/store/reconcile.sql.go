@@ -23,9 +23,12 @@ type BumpServiceGenerationParams struct {
 	Desired []byte
 }
 
-// Every desired-state edit bumps the generation so the agent notices. Callers
-// are the desired-state writers (createService, shape/scaling edits), never a
-// reconciler endpoint.
+// Every desired-state EDIT bumps the generation so the agent re-reconciles.
+// A freshly created service is already outstanding (observed 0 < generation 1),
+// so creation needs no bump. Wiring this into updateService/deleteService (so
+// shape edits and deletes reach the cell) is provisioning-side and OUT of
+// US-1.3's scope — tracked as a follow-up (US-1.3a). Reconciler endpoints never
+// call this; only desired-state writers do.
 func (q *Queries) BumpServiceGeneration(ctx context.Context, arg BumpServiceGenerationParams) (Service, error) {
 	row := q.db.QueryRow(ctx, bumpServiceGeneration, arg.ID, arg.Desired)
 	var i Service
@@ -79,7 +82,7 @@ const listDesiredForCell = `-- name: ListDesiredForCell :many
 SELECT id, env_id, name, product, intent, status, shape, scaling,
        desired, generation, observed_generation, cell_id, last_reconciled_at
 FROM services
-WHERE cell_id = $1 AND generation > $2
+WHERE cell_id = $1 AND observed_generation < generation AND generation > $2
 ORDER BY generation, id
 LIMIT $3
 `
@@ -106,9 +109,13 @@ type ListDesiredForCellRow struct {
 	LastReconciledAt   pgtype.Timestamptz
 }
 
-// The agent's poll: every service in this cell whose desired state has moved
-// past what the agent last observed. Level-triggered — the full desired doc is
-// returned every time, so the agent never diffs by memory (§2 step 2).
+// The agent's poll: every service in this cell with OUTSTANDING work — desired
+// has moved ahead of what the cell has converged (observed_generation <
+// generation). This is the level-triggered controller shape: the control plane
+// knows what needs reconciling, so the agent needs no client-side cursor (a
+// per-row generation cannot be a cell-wide cursor — that starves new services).
+// The full desired doc rides every row, so the agent never diffs by memory.
+// since_generation ($2) is an optional additional lower bound (0 = all work).
 func (q *Queries) ListDesiredForCell(ctx context.Context, arg ListDesiredForCellParams) ([]ListDesiredForCellRow, error) {
 	rows, err := q.db.Query(ctx, listDesiredForCell, arg.CellID, arg.Generation, arg.Limit)
 	if err != nil {
@@ -145,9 +152,9 @@ func (q *Queries) ListDesiredForCell(ctx context.Context, arg ListDesiredForCell
 
 const markObserved = `-- name: MarkObserved :one
 UPDATE services
-SET observed_generation = GREATEST(observed_generation, $2),
+SET observed_generation = $2,
     last_reconciled_at  = now()
-WHERE id = $1 AND generation >= $2
+WHERE id = $1 AND generation = $2
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
@@ -156,10 +163,17 @@ type MarkObservedParams struct {
 	ObservedGeneration int64
 }
 
-// Status writeback's bookkeeping half: advance observed_generation and stamp
-// last_reconciled_at. The guard `generation >= $2` rejects a STALE report — a
-// slow agent reporting on an older generation must not mark newer desired
-// state as converged. Returns no row when the report is stale.
+// Status writeback's bookkeeping half: record that the cell has converged the
+// CURRENT generation. The guard `generation = $2` is exact — it rejects a
+// report for any generation other than the one desired holds right now:
+//   - behind (agent converged an older desired that has since bumped): rejected,
+//     so a stale converge never marks newer desired as done or drives status;
+//   - ahead (impossible; a replay/bug reporting a generation desired never had):
+//     rejected.
+//
+// Returns no row on rejection — the agent re-polls (the row is still outstanding)
+// and converges the current generation. Idempotent: a duplicate report for the
+// current generation re-sets observed to the same value.
 func (q *Queries) MarkObserved(ctx context.Context, arg MarkObservedParams) (Service, error) {
 	row := q.db.QueryRow(ctx, markObserved, arg.ID, arg.ObservedGeneration)
 	var i Service

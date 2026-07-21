@@ -52,14 +52,13 @@ func (f *fakeQ) MarkObserved(_ context.Context, a store.MarkObservedParams) (sto
 	if !ok {
 		return store.Service{}, pgx.ErrNoRows
 	}
-	// mirrors the SQL guard: WHERE generation >= $2
-	if svc.Generation < a.ObservedGeneration {
+	// mirrors the SQL guard: WHERE generation = $2 (exact). A report for any
+	// generation other than the one desired holds now is rejected.
+	if svc.Generation != a.ObservedGeneration {
 		return store.Service{}, pgx.ErrNoRows
 	}
 	f.observed++
-	if a.ObservedGeneration > svc.ObservedGeneration {
-		svc.ObservedGeneration = a.ObservedGeneration // GREATEST
-	}
+	svc.ObservedGeneration = a.ObservedGeneration
 	f.services[a.ID] = svc
 	return svc, nil
 }
@@ -172,19 +171,52 @@ func TestStatusWritebackAdvancesObservedGeneration(t *testing.T) {
 	}
 }
 
-func TestStaleGenerationWritebackIsRejected(t *testing.T) {
+func TestAheadGenerationWritebackIsRejected(t *testing.T) {
 	s, q, tr := newFixture()
-	// desired has moved to generation 3; the agent reports on 9 — impossible,
-	// it is ahead of desired, so the guard rejects it.
+	// svc_a is at generation 3; the agent reports 9 — impossible (ahead of
+	// desired, a replay/bug). Rejected.
 	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 9, Status: "ready"})
 	if !errors.Is(err, ErrStaleGeneration) {
 		t.Fatalf("want ErrStaleGeneration, got %v", err)
 	}
-	if tr.calls != 0 {
-		t.Fatal("a rejected writeback must not drive the status machine")
+	if tr.calls != 0 || q.services["svc_a"].Status != "provisioning" {
+		t.Fatal("a rejected writeback must not drive the machine or mutate status")
 	}
-	if q.services["svc_a"].Status != "provisioning" {
-		t.Fatal("a rejected writeback must not mutate status")
+}
+
+// The AC's literal scenario: the agent reports generation N while desired has
+// moved to N+1 (it converged the OLD desired). Must be rejected, row unchanged.
+func TestBehindGenerationWritebackIsRejected(t *testing.T) {
+	s, q, tr := newFixture()
+	// svc_a is at generation 3, observed 0. The agent converged an older gen 2
+	// and reports 2 — behind the current desired. Must NOT advance or transition.
+	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 2, Status: "ready"})
+	if !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("a behind report must be rejected, got %v", err)
+	}
+	if tr.calls != 0 {
+		t.Fatal("a behind report must not drive the status machine off stale desired")
+	}
+	if q.services["svc_a"].ObservedGeneration != 0 || q.services["svc_a"].Status != "provisioning" {
+		t.Fatal("a behind report must leave the row unchanged")
+	}
+}
+
+// A delayed OLD report cannot regress status: report gen 3/ready, then a stale
+// gen 2/degraded arrives late. The exact-match guard rejects gen 2 (current is 3
+// after... actually generation stays 3, observed advances). Ensure status holds.
+func TestDelayedOldReportCannotRegressStatus(t *testing.T) {
+	s, q, _ := newFixture()
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3, Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	// A late report on generation 2 (a slow duplicate) — rejected, cannot regress.
+	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 2, Status: "degraded"})
+	if !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("a late old-generation report must be rejected, got %v", err)
+	}
+	if q.services["svc_a"].Status != "ready" {
+		t.Fatalf("status regressed to %q via a stale report", q.services["svc_a"].Status)
 	}
 }
 
@@ -220,11 +252,23 @@ func TestConcurrentWritebackAppliesOnce(t *testing.T) {
 	}
 }
 
-func TestHeartbeatUpdatesAgentLastSeen(t *testing.T) {
+func TestHeartbeatFiresEvenOnRejectedReport(t *testing.T) {
 	s, q, _ := newFixture()
-	// Heartbeat rides the status call (§2 step 4) — including when the report
-	// carries no status change, otherwise a quiet cell would look dead.
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 1}); err != nil {
+	// The heartbeat rides the status call (§2 step 4) and must fire BEFORE the
+	// generation guard: a cell reporting a stale generation is still alive, and
+	// must not be counted dead just because its report was rejected.
+	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 1})
+	if !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("gen 1 vs desired 3 should be rejected, got %v", err)
+	}
+	if q.heartbeat != 1 {
+		t.Fatalf("heartbeat must fire even on a rejected report (%d)", q.heartbeat)
+	}
+}
+
+func TestHeartbeatOnCurrentGenerationObservation(t *testing.T) {
+	s, q, _ := newFixture()
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if q.heartbeat != 1 {
@@ -234,7 +278,8 @@ func TestHeartbeatUpdatesAgentLastSeen(t *testing.T) {
 
 func TestObservationOnlyWritebackSkipsTransition(t *testing.T) {
 	s, _, tr := newFixture()
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 2}); err != nil {
+	// Current generation (3), no status → observation only, accepted, no edge.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3}); err != nil {
 		t.Fatal(err)
 	}
 	if tr.calls != 0 {

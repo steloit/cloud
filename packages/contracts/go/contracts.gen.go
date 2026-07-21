@@ -3455,6 +3455,7 @@ type GetDesiredStateParams struct {
 
 // PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
 type PostReconcileStatusJSONBody struct {
+	// Conditions reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
 	Conditions *[]struct {
 		Message *string                                     `json:"message,omitempty"`
 		Reason  *string                                     `json:"reason,omitempty"`
@@ -3463,12 +3464,14 @@ type PostReconcileStatusJSONBody struct {
 	} `json:"conditions,omitempty"`
 
 	// Event optional one-line note recorded on the spine event
-	Event              *string `json:"event,omitempty"`
-	ObservedGeneration int64   `json:"observed_generation"`
-	ServiceId          string  `json:"service_id"`
+	Event *string `json:"event,omitempty"`
 
-	// Status ADR-024 vocabulary; gone reports a completed teardown
-	Status PostReconcileStatusJSONBodyStatus `json:"status"`
+	// ObservedGeneration the generation the cell converged; a report for any generation other than the one desired holds now is rejected (409)
+	ObservedGeneration int64  `json:"observed_generation"`
+	ServiceId          string `json:"service_id"`
+
+	// Status ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+	Status *PostReconcileStatusJSONBodyStatus `json:"status,omitempty"`
 }
 
 // PostReconcileStatusJSONBodyConditionsStatus defines parameters for PostReconcileStatus.
@@ -4586,7 +4589,7 @@ type ClientInterface interface {
 
 	// PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -4595,7 +4598,7 @@ type ClientInterface interface {
 
 	// PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -7085,7 +7088,7 @@ func (c *Client) GetDesiredState(ctx context.Context, cellPathParam string, para
 
 // PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 //
 // Takes any type of body and a specified content type.
 //
@@ -7104,7 +7107,7 @@ func (c *Client) PostReconcileStatusWithBody(ctx context.Context, cellPathParam 
 
 // PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -14178,7 +14181,7 @@ type ClientWithResponsesInterface interface {
 
 	// PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -14187,7 +14190,7 @@ type ClientWithResponsesInterface interface {
 
 	// PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -18820,10 +18823,14 @@ type GetDesiredStateResponse struct {
 	JSON200 *struct {
 		Services []DesiredService `json:"services"`
 	}
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Problem
 	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
 	ApplicationproblemJSON404 *Problem
 	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
 	ApplicationproblemJSON422 *Validation
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Problem
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -18831,6 +18838,11 @@ func (r GetDesiredStateResponse) GetJSON200() *struct {
 	Services []DesiredService `json:"services"`
 } {
 	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON401() *Problem {
+	return r.ApplicationproblemJSON401
 }
 
 // GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
@@ -18841,6 +18853,11 @@ func (r GetDesiredStateResponse) GetApplicationproblemJSON404() *Problem {
 // GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
 func (r GetDesiredStateResponse) GetApplicationproblemJSON422() *Validation {
 	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON503() *Problem {
+	return r.ApplicationproblemJSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -21782,7 +21799,7 @@ func (c *ClientWithResponses) GetDesiredStateWithResponse(ctx context.Context, c
 
 // PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -21797,7 +21814,7 @@ func (c *ClientWithResponses) PostReconcileStatusWithBodyWithResponse(ctx contex
 
 // PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report on a stale generation is rejected (409) rather than applied, so a slow agent cannot clobber newer desired state. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -24984,8 +25001,12 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 		}
 		response.JSON200 = &dest
 
-	case rsp.StatusCode == 401:
-		break // No content-type
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest Problem
@@ -25001,8 +25022,12 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 		}
 		response.ApplicationproblemJSON422 = &dest
 
-	case rsp.StatusCode == 503:
-		break // No content-type
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
 
 	}
 
