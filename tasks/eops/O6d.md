@@ -15,6 +15,9 @@ contexts: []
 files:
   - docs/adr/0008-mandatory-review-pipeline.md
   - AGENTS.md
+  - .claude/agents/README.md
+  - .claude/agents/reviewer.md
+  - .claude/agents/qa.md
 verify:
   - "ADR-0008 states read-only as a behavioral constraint, naming the Bash caveat"
   - "AGENTS.md step 5a carries the same qualification: 'read-only and independent' no longer appears unqualified — grep -q 'read-only and independent' AGENTS.md exits non-zero"
@@ -69,13 +72,15 @@ rather than qualifying a policy claim from a steering file.
 
 ## Open question — do not decide silently
 
-Whether to *make* the constraint technical (deny `Bash` to `reviewer`/`qa`, or
-constrain it) is **out of scope and genuinely undecided**. It trades the
-reviewers' ability to run `git diff`, `go test`, and `grep` — which is most of
-how they gather evidence — against a guarantee. Both reviewers used `Bash`
-substantively in every O6/O6b round. If pursued it needs its own task and its
-own ADR, with the DX cost measured rather than assumed (ADR-040 review order:
-developer experience first). This task only makes the written claim honest.
+Whether to *make* the constraint technical is **out of scope and genuinely
+undecided**. It is a choice among three options, not a binary — see the Outcome,
+which corrects this section's original framing and its evidence. Denying `Bash`
+costs the reviewers `git diff`/`go test`/`grep`; a `PreToolUse` hook inspecting
+`.tool_input.command` constrains writes without that cost; a git pre-commit hook
+catches the outcome instead of the call. **O6f** carries all three, alongside a
+strictly more serious instance of the same root cause. If pursued it needs its
+own ADR, with the DX cost measured rather than assumed (ADR-040: developer
+experience first). This task only makes the written claim honest.
 
 ## Related
 
@@ -102,10 +107,32 @@ correct it. With the ADR amended the quotation became a misquote, so the repo
 would have contradicted itself in the file most likely to be read first. The
 repo-wide scan is now clean — no living file restates read-only as enforced.
 
-Deliberately NOT decided: whether to make the constraint technical. Denying
-`Bash` would cost the reviewers `git diff`, `go test`, and `grep`, which is most
-of how they gather evidence — both reviewers used `Bash` substantively in every
-round of O6, O6b, and O6c, and O6c's real bypass was found by a reviewer running
-injections. Per ADR-040's review order, DX first: the cost is concrete and the
-benefit is a guarantee against a failure never observed. Left open, with the
-trade-off written down rather than resolved by default.
+**The first draft of this Outcome overstated its own evidence, and QA's review
+corrected it. The corrected version is recorded here because a future task will
+otherwise cite the deferral as settled.** Three claims did not survive:
+
+- *"Both reviewers used `Bash` substantively in every round"* — over-stated.
+  O6b records exactly one clear instance (QA's `rm`/`echo >`/`git add`
+  reproduction); O6c's round 2–3 findings were code-*reading* findings.
+- *"O6c's bypass was found by a reviewer running injections"* — false. O6c
+  attributes the injections to the implementer; round 3's bypass was a
+  consistency finding against `lib.mjs`'s recursive walk.
+- *"a guarantee against a failure never observed"* — **contradicted.** The one
+  clearly-recorded reviewer `Bash` use *was a reviewer writing to the primary
+  checkout*. The failure has been observed, once, inside this task family.
+
+Counter-evidence the draft ignored: `docs/plan/kernel-workflow-review.md:10-12`
+records a **shell-free** reviewer (`Read`/`Grep`/`Glob` only) catching real
+blockers in production — a datapoint directly against "denying `Bash` costs most
+of how they gather evidence."
+
+Deliberately NOT decided, on corrected evidence: whether to make the constraint
+technical. The draft framed this as a binary (deny `Bash` or accept the gap),
+which was the rationalization. The ADR text this task added names the actual
+defect — the hook inspects only `file_path` — which points at a **cheaper third
+option the draft never surfaced: a `PreToolUse` hook that also inspects
+`.tool_input.command`**, constraining writes without denying `Bash`. That is
+filed as **O6f**, together with a strictly more serious instance of the same
+root cause. Deferral is now a choice among three named options rather than a
+foregone conclusion; the DX cost of denying `Bash` is real but thinner than
+claimed, and the observed-failure count is one, not zero.

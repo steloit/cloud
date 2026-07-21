@@ -66,8 +66,8 @@ well, which is precisely the retired workaround. Check the two things prompt tex
   agent cannot write: `reviewer` holds `Bash`, and `echo x > file` was verified to execute
   with no prompt. ADR-0008 states the constraint accordingly — the reviewers **must not
   write**, behaviorally, and no layer enforces it. Do not cite the absent `Write` tool as
-  if it were a sandbox. `validate.mjs` (`agents-readonly`) pins the declared grant, which
-  is all that can be pinned.
+  if it were a sandbox. `validate.mjs` (`agents-readonly`) pins the declared grant — all a
+  frontmatter check can pin, though not all that is pinnable (see O6f).
 - **Fail-fast** — request near-miss names where a substitution would plausibly occur.
   `reviewers` (plural) and `code-reviewer` (semantic neighbor) must hard-error and list the
   available agents. `Reviewer` (case) is the exception: matching is **case-insensitive**, so

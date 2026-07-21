@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Post-PR review agent — architecture, security, performance, API consistency, contract drift, ADR compliance. Read-only; runs on every PR diff before merge.
+description: Post-PR review agent — architecture, security, performance, API consistency, contract drift, ADR compliance. Reports findings; never edits files. Runs on every PR diff before merge.
 tools: Read, Grep, Glob, Bash
 ---
 
