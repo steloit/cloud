@@ -48,9 +48,10 @@ never hand-written · demo data from `19-canon` only.
    Architecture Reviewer → Security/QA Reviewer → CI → Merge. Invoke the two **by name** —
    `subagent_type: "reviewer"` and `subagent_type: "qa"` (`.claude/agents/README.md`); never a
    `kernel:*`/plugin agent, and never a generic runner fed their prompts — that workaround is
-   retired, though older task Outcomes still show it. The two reviewers are read-only and
-   independent, run on the branch diff *before* merge; blocking findings are fixed and re-verified,
-   non-blocking ones recorded. Only pure typo/comment/doc edits are exempt.
+   retired, though older task Outcomes still show it. The two are independent and must not write
+   (behavioral — they hold `Bash`; ADR-0008), and run on the branch diff *before* merge; blocking
+   findings are fixed and re-verified, non-blocking ones recorded. Only pure typo/comment/doc edits
+   are exempt.
 6. PR title `<id>: <title>`. Flip `status: done` and append the task's `## Outcome` (5–10 lines) in the same PR.
 7. Spec conflicts you discover are **findings**: record them in the PR and file a follow-up task — never resolve silently.
 8. Lessons that should outlive the task go to a *living file* — the domain pack's mistake bank, the nearest

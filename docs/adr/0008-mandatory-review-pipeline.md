@@ -35,7 +35,14 @@ Merge
 ```
 
 - The **Implementation Agent** is the sole writer; the two reviewers are
-  read-only and independent.
+  independent and **must not write**. That is a behavioral constraint they
+  observe, not a technical control: they hold `Bash`, which writes files
+  (verified — `echo x > file` executes with no prompt), and the `protect-authority`
+  hook inspects only a tool's `file_path`, so a shell redirect never reaches it.
+  Their frontmatter withholds `Write`/`Edit`, and `validate.mjs` pins that
+  (`agents-readonly`), but **an absent `Write` tool is not a sandbox and must
+  never be cited as one.** A review that edited files is a process violation to
+  catch by reading the diff, not something the harness prevents.
 - **Reviewer identity is fixed and repo-native.** The two reviewers are exactly
   the Phase-2 support agents in this repo: the **Architecture Reviewer** is
   `.claude/agents/reviewer.md` (`subagent_type: "reviewer"`) and the

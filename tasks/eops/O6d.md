@@ -2,7 +2,7 @@
 id: O6d
 title: ADR-0008 asserts reviewers are read-only; nothing enforces it
 epic: EOPS
-status: in-progress
+status: done
 phase: V1
 priority: medium
 sprint: 1
@@ -51,20 +51,20 @@ rather than qualifying a policy claim from a steering file.
 
 ## Acceptance criteria
 
-- [ ] ADR-0008's reviewer bullet states read-only as a behavioral constraint and
+- [x] ADR-0008's reviewer bullet states read-only as a behavioral constraint and
   names the `Bash` caveat in one clause — not a section, and not a hedge that
   invites reviewers to start writing.
-- [ ] The ADR says what a reader should therefore *not* do: cite an absent
+- [x] The ADR says what a reader should therefore *not* do: cite an absent
   `Write` tool as evidence of a sandbox.
-- [ ] **AGENTS.md step 5a is amended in the same PR.** It still reads "The two
+- [x] **AGENTS.md step 5a is amended in the same PR.** It still reads "The two
   reviewers are read-only and independent" — the identical unqualified claim.
   O6b deliberately left it rather than qualifying an ADR-owned policy from a
   steering file; amending the ADR is exactly what licenses the steering-file
   edit, so the two belong in one change. Editing the ADR alone would leave the
   repo contradicting itself in the more-read file.
-- [ ] No change to review POLICY. Reviewers must still not write; the amendment
+- [x] No change to review POLICY. Reviewers must still not write; the amendment
   changes what the repo *claims about enforcement*, not what is required.
-- [ ] `.claude/agents/README.md` and `tasks/eops/O6c.md` are checked for
+- [x] `.claude/agents/README.md` and `tasks/eops/O6c.md` are checked for
   consistency with the new wording (they already carry it; confirm no drift).
 
 ## Open question — do not decide silently
@@ -80,3 +80,32 @@ developer experience first). This task only makes the written claim honest.
 ## Related
 
 ADR-0008 · O6 (evidence) · O6c (pins declared grants, cannot close this)
+
+## Outcome
+
+Amended ADR-0008's reviewer bullet from "the two reviewers are read-only and
+independent" to "independent and **must not write**", stating plainly that this
+is a behavioral constraint rather than a technical control, with the evidence
+inline: they hold `Bash`, `echo x > file` executes with no prompt, and
+`protect-authority` inspects only a tool's `file_path` so a shell redirect never
+reaches it. It names what `validate.mjs` does pin (`agents-readonly`, the
+declared grant) and states the rule that motivated the whole amendment — **an
+absent `Write` tool is not a sandbox and must never be cited as one.**
+
+AGENTS.md step 5a carries the same qualification in one clause, which is what
+O6b deliberately deferred rather than qualifying an ADR-owned claim from a
+steering file. Amending the source is what licensed the steering-file edit.
+
+A third restatement surfaced during verification and would have outlived the
+fix: `.claude/agents/README.md` *quoted* the old ADR sentence in order to
+correct it. With the ADR amended the quotation became a misquote, so the repo
+would have contradicted itself in the file most likely to be read first. The
+repo-wide scan is now clean — no living file restates read-only as enforced.
+
+Deliberately NOT decided: whether to make the constraint technical. Denying
+`Bash` would cost the reviewers `git diff`, `go test`, and `grep`, which is most
+of how they gather evidence — both reviewers used `Bash` substantively in every
+round of O6, O6b, and O6c, and O6c's real bypass was found by a reviewer running
+injections. Per ADR-040's review order, DX first: the cost is concrete and the
+benefit is a guarantee against a failure never observed. Left open, with the
+trade-off written down rather than resolved by default.
