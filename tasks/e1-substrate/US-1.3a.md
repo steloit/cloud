@@ -2,7 +2,7 @@
 id: US-1.3a
 title: "Desired-state writers: edits and deletes bump generation and reach the cell"
 epic: E1
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 2
