@@ -21,10 +21,10 @@ files:
 apis: []
 tables: [services]
 events: []
-tests: [TestCreateServicePopulatesDesired, TestShapeEditBumpsGenerationAndBecomesOutstanding, TestDeleteWritesDeletingDesiredAndBecomesOutstanding, TestUpdateOnDeletingServiceIsRejected, TestNoOpUpdateStillBumpsGeneration, TestDesiredDocShape, TestDesiredDocEdgeCases]
+tests: [TestCreateServicePopulatesDesired, TestShapeEditBumpsGenerationAndBecomesOutstanding, TestDeleteWritesDeletingDesiredAndBecomesOutstanding, TestUpdateOnDeletingServiceIsRejected, TestNoOpUpdateStillBumpsGeneration, TestOverrideEditReachesCell, TestDesiredDocShape, TestDesiredDocEdgeCases]
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./...   # FULL suite — a narrow subset hid a NOT-NULL regression in internal/identity"
-  - "make gen-go && git diff --exit-code -- services packages   # contract drift"
+  - "make gen-go && make gen-sql && git diff --exit-code -- services packages   # contract + sqlc drift (gen-go alone misses sqlc — see O7)"
 owner: agent
 ---
 
@@ -162,6 +162,25 @@ duplicate of `BumpServiceGeneration`, now reused; the deleteService crash commen
 was corrected (retry-recoverable, not poll-self-healing); and `desiredDoc` edge
 cases (nil/malformed shape, empty product) and the no-op-bump behavior are pinned.
 
+Review round 2 found two more issues I'd introduced, both fixed here rather than
+deferred:
+- **`override` (the manual instance-pin) was dropped from `desired`** — an
+  override edit re-outstanded the row but the pin never reached the cell, the
+  exact inert-desired defect this task closes, left open for one field. Now
+  `desiredDoc` embeds override and `TestOverrideEditReachesCell` pins it.
+- **The edit-on-deleting guard had a TOCTOU** — status was read
+  non-transactionally, so a delete racing in after the Go check could still
+  clobber. Closed with a SQL fence (`UpdateServiceShape ... WHERE status <>
+  'deleting'`), mapped to the same Conflict; the Go check stays as the fast path.
+
+Review round 3 caught that the fence was in the source `.sql` but the **generated
+`services.sql.go` was stale** — the runtime query had no fence, so the close was
+dead code. Root cause: my drift check (and CI's) ran `make gen-go`, which does
+**not** regenerate sqlc. Regenerated with `make gen-sql`; the fence is now in the
+generated const. The verify block now runs `make gen-sql` in its drift line, and
+**O7** is filed because CI has the identical gap — a `.sql` edit without
+regeneration would ship stale and pass CI.
+
 Verified: the **full** `go test ./...` for the api module passes (real Postgres,
-no skips), including `internal/identity`; `desiredDoc` unit + edge tests and the
-D8 guard green; contract drift clean.
+no skips), including `internal/identity` (exit 0); `desiredDoc` unit + edge tests
+and the D8 guard green; contract drift clean.

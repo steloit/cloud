@@ -40,7 +40,7 @@ UPDATE services SET
     monthly_estimate_cents = coalesce(sqlc.narg('monthly_estimate_cents'), monthly_estimate_cents),
     desired = coalesce(sqlc.narg('desired'), desired),
     generation = generation + 1
-WHERE id = $1
+WHERE id = $1 AND status <> 'deleting'
 RETURNING *;
 
 -- name: OrgForService :one

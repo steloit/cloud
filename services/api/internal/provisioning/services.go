@@ -106,23 +106,24 @@ func CanTransition(from, to string) bool {
 // cell-agent renders from (e1-substrate-design.md §2: product + intent + shape +
 // lifecycle flags). Substrate names never appear here (D8); this is grammar
 // only. `deleting` marks a teardown so the cell converges the service to gone.
-func desiredDoc(product, intent string, shape, scaling []byte, deleting bool) []byte {
+func desiredDoc(product, intent string, shape, scaling, override []byte, deleting bool) []byte {
 	doc := map[string]any{"product": product}
 	if intent != "" {
 		doc["intent"] = intent
 	}
-	if len(shape) > 0 {
-		var sh any
-		if json.Unmarshal(shape, &sh) == nil {
-			doc["shape"] = sh
+	embed := func(key string, raw []byte) {
+		if len(raw) > 0 {
+			var v any
+			if json.Unmarshal(raw, &v) == nil && v != nil {
+				doc[key] = v
+			}
 		}
 	}
-	if len(scaling) > 0 {
-		var sc any
-		if json.Unmarshal(scaling, &sc) == nil {
-			doc["scaling"] = sc
-		}
-	}
+	embed("shape", shape)
+	embed("scaling", scaling)
+	// override is the manual instance-pin {instances, reason, expires_at} — a
+	// load-bearing capacity input (count), so the cell must render from it.
+	embed("override", override)
 	if deleting {
 		doc["deleting"] = true
 	}
@@ -222,7 +223,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		EstimateID:           pgtype.Text{String: in.EstimateID, Valid: true},
 		// US-1.3a: desired populated at creation; the row is outstanding
 		// (observed 0 < generation 1) so the cell picks it up on the next poll.
-		Desired: desiredDoc(in.Product, line.Intent, shapeJSON, nil, false),
+		Desired: desiredDoc(in.Product, line.Intent, shapeJSON, nil, nil, false),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -375,9 +376,20 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	if scaling != nil {
 		effScaling = scaling
 	}
-	params.Desired = desiredDoc(svc.Product, svc.Intent.String, effShape, effScaling, false)
+	effOverride := svc.Override
+	if override != nil {
+		effOverride = override
+	}
+	params.Desired = desiredDoc(svc.Product, svc.Intent.String, effShape, effScaling, effOverride, false)
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
+		// The SQL fence `status <> 'deleting'` is the atomic backstop for the Go
+		// guard above: a delete that raced in after the read returns zero rows.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"the service is being deleted"},
+				"Wait for deletion to complete; a deleting service cannot be edited.")}
+		}
 		return store.Service{}, err
 	}
 	s.record(ctx, events.Input{
@@ -418,7 +430,7 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 	// yet `deleting`, so a second DeleteService passes the guard above and
 	// completes the transition. Ordered desired-first deliberately: the reverse
 	// (status-first) would strand a row that the guard then refuses to retry.
-	del := desiredDoc(svc.Product, svc.Intent.String, svc.Shape, svc.Scaling, true)
+	del := desiredDoc(svc.Product, svc.Intent.String, svc.Shape, svc.Scaling, svc.Override, true)
 	if _, err := s.q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: svc.ID, Desired: del}); err != nil {
 		return err
 	}

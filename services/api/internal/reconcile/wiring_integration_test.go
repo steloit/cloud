@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/steloit/cloud/services/api/internal/billing"
@@ -210,3 +211,60 @@ func TestNoOpUpdateStillBumpsGeneration(t *testing.T) {
 		t.Fatalf("a no-op update is expected to still bump generation (idempotent re-converge): %d → %d", svc.Generation, edited.Generation)
 	}
 }
+
+// An override (manual instance-pin) edit must reach the cell via desired — it is
+// load-bearing capacity state. Regression for the review finding that override
+// was dropped from the desired doc.
+func TestOverrideEditReachesCell(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db6")
+	rec := reconcile.New(q, prov)
+	if _, err := rec.Writeback(context.Background(), "cell-0", reconcile.Report{ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	// Pin instances via override.
+	edited, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, nil, []byte(`{"instances":5,"reason":"load"}`))
+	if err != nil {
+		t.Fatalf("UpdateService(override): %v", err)
+	}
+	if edited.Generation <= svc.Generation {
+		t.Fatal("override edit did not bump generation")
+	}
+	// The desired doc the cell renders from must carry the pin.
+	var d map[string]any
+	_ = json.Unmarshal(edited.Desired, &d)
+	ov, ok := d["override"].(map[string]any)
+	if !ok || ov["instances"] != float64(5) {
+		t.Fatalf("override pin did not reach desired (the cell would ignore it): %s", edited.Desired)
+	}
+	if !outstanding(t, rec, svc.ID) {
+		t.Fatal("an override edit must make the service outstanding")
+	}
+}
+
+// The SQL fence in UpdateServiceShape (not just the Go pre-check) must reject an
+// edit to a deleting row — this is the atomic backstop for the TOCTOU. Drives
+// the generated query DIRECTLY so a stale (unfenced) generated const fails here.
+func TestUpdateServiceShapeSQLFenceRejectsDeleting(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db7")
+	rec := reconcile.New(q, prov)
+	if _, err := rec.Writeback(context.Background(), "cell-0", reconcile.Report{ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := prov.DeleteService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w"); err != nil {
+		t.Fatal(err)
+	}
+	// Call the generated query directly, bypassing UpdateService's Go guard: the
+	// SQL fence WHERE status <> 'deleting' must return zero rows for a deleting row.
+	_, err := q.UpdateServiceShape(context.Background(), store.UpdateServiceShapeParams{
+		ID: svc.ID, Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
+	})
+	if !errorsIsNoRows(err) {
+		t.Fatalf("the SQL fence must reject an edit to a deleting row (zero rows), got %v", err)
+	}
+}
+
+func errorsIsNoRows(err error) bool { return err != nil && err.Error() == pgx.ErrNoRows.Error() }

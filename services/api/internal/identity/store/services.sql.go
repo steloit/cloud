@@ -231,7 +231,7 @@ UPDATE services SET
     monthly_estimate_cents = coalesce($5, monthly_estimate_cents),
     desired = coalesce($6, desired),
     generation = generation + 1
-WHERE id = $1
+WHERE id = $1 AND status <> 'deleting'
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
