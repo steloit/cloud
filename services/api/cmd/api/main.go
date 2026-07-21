@@ -28,6 +28,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
+	"github.com/steloit/cloud/services/api/internal/reconcile"
 	"github.com/steloit/cloud/services/api/internal/secrets"
 	"github.com/steloit/cloud/services/api/internal/subscription"
 )
@@ -235,6 +236,12 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	github.NewHandler(queries, recorder, cfg.GithubWebhookSecret).Mount(mux)
+	// US-1.3: the internal reconcile plane — pre-strict (own principal; the
+	// strict middleware resolves user tokens, which must never reach it).
+	reconcile.NewHandlers(
+		reconcile.New(queries, prov),
+		reconcile.NewAuth(cfg.ReconcilerSecret, cfg.ReconcilerCells),
+	).Mount(mux)
 	idHandlers := identity.NewHandlers(svc, sessions, authz, events.NewReader(queries), envs, metering.NewEmitter(queries), router, subs)
 	// One strict server, module handler sets composed by embedding (§15).
 	idHandlers.Mount(mux, &apiServer{

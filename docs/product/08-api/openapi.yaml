@@ -1222,6 +1222,8 @@ paths:
                     items: {$ref: "#/components/schemas/DesiredService"}
         "401": {description: "auth_failed — not a reconciler-scoped token"}
         "404": {description: "Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "422": {$ref: "#/components/responses/Validation"}
+        "503": {description: "No reconciler secret configured — the plane is visibly closed, never silently open"}
   /reconcile/{cell}/status:
     post:
       tags: [reconcile]
@@ -1267,6 +1269,8 @@ paths:
         "401": {description: "auth_failed — not a reconciler-scoped token"}
         "404": {description: "Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Validation"}
+        "503": {description: "No reconciler secret configured — the plane is visibly closed, never silently open"}
 
 components:
   securitySchemes:

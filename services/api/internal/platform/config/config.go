@@ -28,6 +28,13 @@ type Config struct {
 	// app isn't registered yet (P2) and the ingress refuses with 503.
 	GithubWebhookSecret string `env:"GITHUB_WEBHOOK_SECRET"`
 
+	// ReconcilerSecret guards the internal reconcile plane (US-1.3). Empty =
+	// no cell-agent is enrolled yet and the endpoints answer 503 — the
+	// fail-closed shape; absent config must never mean open.
+	ReconcilerSecret string `env:"RECONCILER_SECRET"`
+	// ReconcilerCells is the comma-separated cell list that secret may act on.
+	ReconcilerCells []string `env:"RECONCILER_CELLS" envSeparator:"," envDefault:"cell-0"`
+
 	ArgonMemoryKiB uint32 `env:"ARGON_MEMORY_KIB" envDefault:"19456"`
 	ArgonTime      uint32 `env:"ARGON_TIME" envDefault:"2"`
 	ArgonThreads   uint8  `env:"ARGON_THREADS" envDefault:"1"`

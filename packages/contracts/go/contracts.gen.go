@@ -18822,6 +18822,8 @@ type GetDesiredStateResponse struct {
 	}
 	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
 	ApplicationproblemJSON404 *Problem
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Validation
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -18834,6 +18836,11 @@ func (r GetDesiredStateResponse) GetJSON200() *struct {
 // GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
 func (r GetDesiredStateResponse) GetApplicationproblemJSON404() *Problem {
 	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetDesiredStateResponse) GetApplicationproblemJSON422() *Validation {
+	return r.ApplicationproblemJSON422
 }
 
 // GetBody returns the raw response body bytes
@@ -18878,6 +18885,8 @@ type PostReconcileStatusResponse struct {
 	ApplicationproblemJSON404 *Problem
 	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
 	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Validation
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -18897,6 +18906,11 @@ func (r PostReconcileStatusResponse) GetApplicationproblemJSON404() *Problem {
 // GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
 func (r PostReconcileStatusResponse) GetApplicationproblemJSON409() *Conflict {
 	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r PostReconcileStatusResponse) GetApplicationproblemJSON422() *Validation {
+	return r.ApplicationproblemJSON422
 }
 
 // GetBody returns the raw response body bytes
@@ -24980,6 +24994,16 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 		}
 		response.ApplicationproblemJSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Validation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case rsp.StatusCode == 503:
+		break // No content-type
+
 	}
 
 	return response, nil
@@ -25026,6 +25050,16 @@ func ParsePostReconcileStatusResponse(rsp *http.Response) (*PostReconcileStatusR
 			return nil, err
 		}
 		response.ApplicationproblemJSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Validation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case rsp.StatusCode == 503:
+		break // No content-type
 
 	}
 
