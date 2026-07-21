@@ -45,7 +45,10 @@ never hand-written · demo data from `19-canon` only.
 4. Implement on the branch (worktree recommended). Touch only paths in the task's `files:` globs.
 5. **Done** = every command in the task's `verify:` block passes. Put evidence (output) in the PR — assertions don't count.
 5a. **Review pipeline (MANDATORY for every significant PR — ADR-0008):** Implementation Agent →
-   Architecture Reviewer → Security/QA Reviewer → CI → Merge. The two reviewers are read-only and
+   Architecture Reviewer → Security/QA Reviewer → CI → Merge. Invoke the two **by name** —
+   `subagent_type: "reviewer"` and `subagent_type: "qa"` (`.claude/agents/README.md`); never a
+   `kernel:*`/plugin agent, and never a generic runner fed their prompts — that workaround is
+   retired, though older task Outcomes still show it. The two reviewers are read-only and
    independent, run on the branch diff *before* merge; blocking findings are fixed and re-verified,
    non-blocking ones recorded. Only pure typo/comment/doc edits are exempt.
 6. PR title `<id>: <title>`. Flip `status: done` and append the task's `## Outcome` (5–10 lines) in the same PR.
