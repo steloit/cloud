@@ -19,6 +19,9 @@ verify:
   - "node scripts/spec-sync/validate.mjs"
   - "adding Edit to reviewer.md frontmatter makes validate.mjs fail, citing ADR-0008"
   - "adding an agent file without a README table row makes validate.mjs fail"
+  - "replacing the CLAUDE.md symlink with a regular file makes validate.mjs fail (rm CLAUDE.md && echo forked > CLAUDE.md), and restoring the symlink makes it pass"
+  - "moving .claude/agents/README.md aside makes validate.mjs fail with a remediation, not an ENOENT stack trace"
+  - "a .claude/agents/*.md with a typo'd frontmatter fence makes validate.mjs fail rather than being skipped"
 owner: agent
 ---
 
@@ -42,10 +45,13 @@ the re-derivation cost O6 exists to remove.
 
 ## Acceptance criteria
 
-`validate.mjs` is 72 flat lines with a single `err(file, msg)` helper and no rule
-registry — add two checks in that style, with failure messages prefixed
-`agents-readonly:` and `agents-table-sync:`. Do not refactor to introduce a rule
-abstraction for two checks.
+`validate.mjs` is 72 flat lines with a single `err(file, msg)` helper, no rule
+registry, and **no `child_process`** — it imports only `node:fs` and `./lib.mjs`
+("No dependencies", line 3). Add four checks in that style, with failure messages
+prefixed `agents-readonly:`, `agents-table-sync:`, `entrypoint-symlink:`, and
+`agents-readme-exists:`. Do not refactor to introduce a rule abstraction, and do
+not shell out to `git` — a subprocess has no precedent here and would break
+validation wherever there is no git binary or work tree.
 
 - [ ] `agents-readonly`: parse each `.claude/agents/*.md` frontmatter; assert
   `reviewer` and `qa` declare `tools ⊆ {Read, Grep, Glob, Bash}`. Failure cites
@@ -58,7 +64,36 @@ abstraction for two checks.
   content-based discriminator would silently skip a typo'd agent file.
 - [ ] A file with a malformed frontmatter block fails loudly rather than being
   skipped — test with a `notes.md` carrying a typo'd `---` fence.
-- [ ] Both checks run in the existing `validate.mjs` invocation — no new command.
+- [ ] `entrypoint-symlink`: assert **on the working tree**, not the index —
+  `lstatSync("CLAUDE.md").isSymbolicLink()` is true *and*
+  `readlinkSync("CLAUDE.md") === "AGENTS.md"`. Remediation: "CLAUDE.md must stay
+  a symlink to AGENTS.md; edit AGENTS.md instead." Both calls are verified
+  working (`isSymbolicLink: true`, `readlink: "AGENTS.md"`).
+  **Do not use `git ls-files -s`** — it reads the index, which stays `120000`
+  under a `core.symlinks=false` checkout while the working tree holds the 9-byte
+  regular file, so it misses the exact outage this check exists for. This is the
+  highest-severity check of the four. **Added from O6b's review.**
+- [ ] `agents-readme-exists`: assert `.claude/agents/README.md` is present, since
+  AGENTS.md step 5a now points at it and a rename would dangle silently. Keep it
+  separate from `agents-table-sync` even though that check must also read the
+  file — the value is a clean `err()` with remediation instead of an unhandled
+  `ENOENT`, so run it first and skip the table check if it fails.
+- [ ] All checks run in the existing `validate.mjs` invocation — no new command.
+
+## Why `entrypoint-symlink` is the urgent one
+
+`CLAUDE.md` is a symlink to `AGENTS.md` (mode `120000`), which is why the two
+entry points cannot fork — but **nothing asserts the mode**, so the guarantee is
+one careless commit from evaporating. O6b's QA review reproduced it:
+`rm CLAUDE.md && echo forked > CLAUDE.md && git add` flips the mode to `100644`
+and forks the content, and `validate.mjs` still prints `OK`.
+
+The degraded form is not a fork but silent content loss. Under a checkout with
+`core.symlinks=false`, `CLAUDE.md` materializes as a **9-byte regular file whose
+entire content is the string `AGENTS.md`**. A session auto-loading it receives
+nine bytes in place of the authority order, hard rules, and task protocol — with
+no error anywhere. That is a whole-Engineering-OS outage that presents as a
+working repo, which makes it worth more than the two agent-directory checks.
 
 ## What this cannot check — read before assuming it closes ADR-0008
 
