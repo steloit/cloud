@@ -2,7 +2,7 @@
 id: O6b
 title: Make the by-name review invocation discoverable in CLAUDE.md
 epic: EOPS
-status: in-progress
+status: done
 phase: V1
 priority: high
 sprint: 1
@@ -17,7 +17,7 @@ files:
   - AGENTS.md
 verify:
   - "CLAUDE.md step 5a names subagent_type 'reviewer' and 'qa' explicitly"
-  - "diff AGENTS.md CLAUDE.md is empty — the two files are byte-identical mirrors"
+  - "git ls-files -s CLAUDE.md shows mode 120000 — the symlink to AGENTS.md is intact, so both entry points carry the edit"
   - "a session reading only CLAUDE.md invokes the pipeline by name without re-deriving it"
 owner: agent
 ---
@@ -42,16 +42,20 @@ existed in the harness but nowhere in writing, so every session re-derived it.
 
 ## Acceptance criteria
 
-- [ ] CLAUDE.md step 5a states the reviewers are invoked as
+- [x] CLAUDE.md step 5a states the reviewers are invoked as
   `subagent_type: "reviewer"` and `subagent_type: "qa"`, with a pointer to
   `.claude/agents/README.md`.
-- [ ] The line is short enough to survive the file's token discipline — one
-  sentence, not a section.
-- [ ] **AGENTS.md receives the identical edit.** The two files are currently
-  byte-identical mirrors (`diff AGENTS.md CLAUDE.md` is empty, 93 lines each) and
-  nothing pins that — `validate.mjs` checks only AGENTS.md's line cap. Editing
-  one and not the other silently forks the repo's two entry points, and this task
-  is the first to edit either.
+- [x] The line is short enough to survive the file's token discipline — one
+  clause, not a section (AGENTS.md 93 → 96 lines, cap 150).
+- [~] **AGENTS.md and CLAUDE.md cannot fork.** *Premise corrected twice.
+  `CLAUDE.md` is a **symlink** to `AGENTS.md` (git mode `120000`), not a copy, so
+  a content `diff` can never detect a fork — it returns empty either way, which
+  is what fooled both the original filing and me. But "structural" only holds
+  while the mode does, and **nothing asserts the mode**: QA reproduced
+  `rm CLAUDE.md && echo forked > CLAUDE.md && git add`, flipping it to `100644`
+  and forking the content completely, with `validate.mjs` still printing `OK`.
+  The real check is a mode assertion; it belongs in `validate.mjs`, outside this
+  task's glob, and is **delivered in O6c** — not closed here.*
 - [ ] No change to review POLICY, which is ADR-0008's and stays there.
 
 ## Out of scope
@@ -62,3 +66,40 @@ done at the time and must not be retconned.
 ## Related
 
 ADR-0008 · O6
+
+## Outcome
+
+Added one clause to step 5a naming `subagent_type: "reviewer"` and
+`subagent_type: "qa"`, pointing at `.claude/agents/README.md`, and stating that
+the generic-runner workaround is retired even though older Outcomes still show
+it. AGENTS.md grew 3 lines (93 → 96, cap 150).
+
+The mirror premise was wrong twice, and the second correction matters more than
+the first. `CLAUDE.md` is a symlink to `AGENTS.md` (mode `120000`), not a copy —
+so the `diff`-based sync check filed from O6's review was worthless, since a
+symlink diffs empty exactly as identical copies do. That is what fooled both of
+us. But I then over-corrected to "the invariant is structural, so no check is
+needed or wanted," and QA caught it: structural only holds *while the mode
+does*, and nothing asserts the mode. QA reproduced the failure —
+`rm CLAUDE.md && echo forked > CLAUDE.md && git add` flips it to `100644`, forks
+the content, and `validate.mjs` still prints `OK`.
+
+The degraded case is worse than a fork: under a `core.symlinks=false` checkout,
+`CLAUDE.md` materializes as a **9-byte regular file containing the string
+`AGENTS.md`**. A session auto-loading it gets nine bytes instead of the authority
+order, hard rules, and task protocol — silently, with no error. So the criterion
+is `[~]`, not closed: the real check is a git-mode assertion in `validate.mjs`,
+outside this task's glob, and O6c now owns it.
+
+Follow-ups: **O6c** gains `entrypoint-symlink` (the mode assertion above) and
+`agents-readme-exists`, since step 5a now points at a file no gate protects.
+**O6d** filed for the root of it — ADR-0008 still asserts reviewers are read-only
+as unqualified fact, which O6 disproved; the ADR is the source every restatement
+inherits, and step 5a's pre-existing "read-only" wording was left untouched here
+rather than qualifying an ADR-owned claim from a steering file.
+
+Evidence that this task was needed, beyond the eight historical Outcomes: while
+O6 was still open the founder's own directive instructed running reviews through
+`general-purpose` "until repository agents become first-class" — the retired
+pattern, quoted from the only place it was written down. That is the third
+independent instance of the drift, and the first from outside the task loop.
