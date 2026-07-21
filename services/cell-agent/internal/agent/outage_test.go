@@ -82,14 +82,16 @@ func TestOutageDrill(t *testing.T) {
 			converges.n.Load()-convergesAtOutage)
 	}
 
-	// And the agent is still alive: bring a fresh control plane back and confirm
-	// it resumes (an outage must be recoverable, not terminal).
+	// And THE SAME agent resumes when the control plane recovers — an outage must
+	// be recoverable, not terminal, and the agent holds no state that a poll
+	// failure could have corrupted. Point it at a fresh server (same handlers)
+	// by swapping its control plane; the agent object is unchanged.
 	ts2 := httptest.NewServer(mux)
 	defer ts2.Close()
-	a2 := New("cell-0", NewHTTPControlPlane(ts2.URL, "tok"), converges, quietLog())
-	a2.Tick(ctx)
+	a.cp = NewHTTPControlPlane(ts2.URL, "tok")
+	a.Tick(ctx)
 	if converges.n.Load() != convergesAtOutage+1 {
-		t.Fatal("the agent did not resume converging after the control plane recovered")
+		t.Fatal("the same agent did not resume converging after the control plane recovered")
 	}
 }
 

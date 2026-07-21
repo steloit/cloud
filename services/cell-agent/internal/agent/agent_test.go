@@ -240,3 +240,24 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+func TestAckRendererDeletingConvergesToGone(t *testing.T) {
+	r := NewAckRenderer(quietLog())
+	got, err := r.Converge(context.Background(),
+		DesiredService{ID: "svc_d", Product: "postgres", Desired: map[string]any{"deleting": true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gone" {
+		t.Fatalf("a deleting desired must converge to gone, got %q", got)
+	}
+}
+
+func TestAckRendererLiveConvergesToReady(t *testing.T) {
+	r := NewAckRenderer(quietLog())
+	got, _ := r.Converge(context.Background(),
+		DesiredService{ID: "svc_l", Product: "postgres", Desired: map[string]any{}})
+	if got != "ready" {
+		t.Fatalf("a live desired must converge to ready, got %q", got)
+	}
+}

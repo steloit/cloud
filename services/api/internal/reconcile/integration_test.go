@@ -13,6 +13,7 @@ package reconcile_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -272,5 +273,42 @@ func TestHeartbeatPersistsAgainstRealPostgres(t *testing.T) {
 	}
 	if !cell.AgentLastSeenAt.Valid || cell.AgentLastSeenAt.Time.Before(before) {
 		t.Fatal("heartbeat did not update agent_last_seen_at")
+	}
+}
+
+// Concurrent identical writebacks apply the status edge EXACTLY ONCE against
+// real Postgres — the guarantee rests on SetServiceStatus's WHERE status = $2
+// FROM-guard, which the unit-test fake only approximates. Fire N reports of the
+// same edge; exactly one drives it, and exactly one spine event is appended.
+func TestConcurrentWritebackAppliesOnceAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_conc") // gen 1, observed 0, provisioning
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_conc", ObservedGeneration: 1, Status: "ready"})
+		}()
+	}
+	wg.Wait()
+	row, err := q.GetService(ctx, "svc_conc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "ready" {
+		t.Fatalf("final status %q, want ready", row.Status)
+	}
+	var events int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE subject='svc_conc' AND action='service.ready'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("the provisioning→ready edge fired %d times under concurrency, want exactly 1", events)
 	}
 }

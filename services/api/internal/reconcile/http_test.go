@@ -171,3 +171,21 @@ func TestHTTPForeignServiceIs404(t *testing.T) {
 		t.Fatalf("foreign-cell service must be 404 (no probing), got %d", r.StatusCode)
 	}
 }
+
+func TestHTTPGoneOnLiveServiceLeavesStatusUnchanged(t *testing.T) {
+	ts, q, tr := mount(t)
+	// svc_a is provisioning (a live, non-deleting service). An agent reporting
+	// "gone" for it is a bug; the control plane must not mutate customer-visible
+	// status off it (gone → observation-only).
+	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_a","observed_generation":3,"status":"gone"}`)
+	if r.StatusCode != 200 {
+		t.Fatalf("want 200, got %d", r.StatusCode)
+	}
+	if tr.calls != 0 {
+		t.Fatal("gone must never drive the status machine")
+	}
+	if q.services["svc_a"].Status != "provisioning" {
+		t.Fatalf("gone on a live service changed status to %q", q.services["svc_a"].Status)
+	}
+}
