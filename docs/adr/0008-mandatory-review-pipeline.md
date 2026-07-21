@@ -1,6 +1,12 @@
 # ADR-0008 — The three-stage review pipeline is mandatory for every significant PR
 
-**Status:** Accepted (founder-ratified 2026-07-19)
+**Status:** Accepted (founder-ratified 2026-07-19) · **Amended 2026-07-21 (O6d, agent):** the
+reviewer bullet described the two reviewers as "read-only" as though enforced; corrected to a
+behavioral constraint with the evidence. **No decision changed** — who reviews, when, and what
+blocks are untouched, and the reviewers must still not write. The amendment does add one
+**working-practice instruction** (reproduce faults in a temp copy; disclose any tree mutation),
+carried into `reviewer.md`/`qa.md` in the same change; flagged here because it is an obligation,
+not a description. Open for founder revision.
 **Deciders:** Founder
 **Relates to:** ADR-0002 (AI-native engineering OS), the Phase-2 support agents (`.claude/agents/`)
 
@@ -35,7 +41,19 @@ Merge
 ```
 
 - The **Implementation Agent** is the sole writer; the two reviewers are
-  read-only and independent.
+  independent and **must not write**. That is a behavioral constraint they
+  observe, not a technical control: they hold `Bash`, which writes files
+  (verified — `echo x > file` executes with no prompt), and the `protect-authority`
+  hook inspects only a tool's `file_path`, so a shell redirect never reaches it.
+  Their frontmatter withholds `Write`/`Edit`, and `validate.mjs` pins that
+  (`agents-readonly`), but **an absent `Write` tool is not a sandbox and must
+  never be cited as one.** A review that edited files is a process violation, and
+  there is currently **no reliable detector** for it: reading the PR diff catches
+  a review that left changes behind, but not a mutate-then-restore, which is the
+  shape actually observed (a reviewer reproducing a fault in the working tree).
+  Reviewers are therefore instructed (`.claude/agents/reviewer.md`, `qa.md` — the
+  operative source; this is a description of it) to reproduce faults in a temp copy
+  and to state plainly when they have mutated the tree.
 - **Reviewer identity is fixed and repo-native.** The two reviewers are exactly
   the Phase-2 support agents in this repo: the **Architecture Reviewer** is
   `.claude/agents/reviewer.md` (`subagent_type: "reviewer"`) and the
