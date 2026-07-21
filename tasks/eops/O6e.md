@@ -48,12 +48,25 @@ Both were found by review, not by any test, and both are exactly what a suite pi
 
 - [ ] `scripts/spec-sync/validate.test.mjs` using `node:test` (already available; no new
   dependency, consistent with the "No dependencies" header).
-- [ ] Each check has at least one **positive** case (fault injected → non-zero exit, error
-  names the check prefix) and the suite has one **negative** case (clean repo → exit 0).
-  At minimum the 15 fault classes O6c verified by hand: symlink replaced / `./AGENTS.md`
-  accepted / `CLAUDE.md` missing; README moved; `tools:` deleted, emptied, widened;
-  case-variant reviewer name; either reviewer absent; unlisted agent; malformed fence;
-  stem mismatch; table File-column drift; table casing drift; `AGENTS.md` missing.
+- [ ] Each check has at least one **positive** case (fault injected → non-zero exit) and the
+  suite has one **negative** case (clean repo → exit 0). Assertions must match the check
+  prefix **and the offending file or agent name** — `agents-table-sync` alone carries eight
+  distinct faults and `agents-readonly` four, so a prefix-only assertion lets a deleted
+  branch be masked by a sibling branch's error.
+  The 19 fault classes O6c verified by hand: symlink replaced / `./AGENTS.md` accepted /
+  `CLAUDE.md` missing; README moved; `tools:` deleted, emptied, widened; case-variant
+  reviewer name; either reviewer absent; unlisted agent; malformed fence; stem mismatch;
+  table File-column drift; table casing drift; `AGENTS.md` missing; **nested subdirectory**;
+  **case-fold duplicate names**; **uppercase `.MD` extension**; **prose line containing
+  pipes not parsed as a table row**.
+- [ ] **Case-sensitivity is detected at setup, never assumed.** Three of those classes
+  (case-fold duplicate, `.MD` extension, case-variant name) cannot execute on a
+  case-insensitive filesystem — the injected file silently *overwrites* its lowercase twin
+  and the test "passes" having proved nothing. This is not hypothetical: it happened during
+  O6c, where writing `Docs.md` destroyed `docs.md` on APFS and the run had to be redone on
+  a case-sensitive volume (`hdiutil create -fs "Case-sensitive APFS"`, which works and is
+  cheap). The suite must probe the temp dir, then either build on a case-sensitive volume
+  or `t.skip()` with the reason stated in the output — never silently pass.
 - [ ] Injection happens in a **temp copy of the repo**, never the working tree — the suite
   must leave `git status` clean even when it fails midway. O6c's manual runs mutated the
   real tree and depended on the operator restoring it correctly.

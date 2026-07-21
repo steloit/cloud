@@ -164,7 +164,20 @@ entrypoint check ran, which is precisely when a dangling symlink matters most;
 `fileURLToPath` rather than `.pathname`, which percent-encodes and breaks under a
 checkout path containing a space.
 
-15 fault classes verified in total, each injected and restored.
+Review round 3 found the one remaining **bypass**: the scan was non-recursive, so
+`.claude/agents/pipeline/qa.md` declaring `tools: Read, Write, Edit` validated
+clean while still being a plausible place to put an agent. `lib.mjs`'s
+`loadTasks` walks recursively, so the inconsistency was internal. The scan now
+fails closed on any subdirectory. Same round: two files whose names case-fold
+together collapsed into one map entry, letting the second escape the
+unlisted-agent check; `.MD` was skipped on a case-sensitive filesystem; and
+ordinary prose containing a pipe parsed as a table row.
+
+19 fault classes verified in total, each injected and restored. Three of them
+are filesystem-dependent and were re-run on a **case-sensitive volume**
+(`hdiutil create -fs "Case-sensitive APFS"`) after APFS silently folded
+`Docs.md` onto `docs.md` and destroyed it — the first attempt "passed" while
+proving nothing, which is exactly the vacuous-pass trap now written into O6e.
 
 Deviation: `agents-readonly` pins the **declared** grant only, and must not be
 read as making the reviewers read-only. O6 verified `reviewer` holds `Bash` and

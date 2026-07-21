@@ -7,11 +7,11 @@ import { loadTasks, parseFrontmatter } from "./lib.mjs";
 
 // fileURLToPath, not .pathname: the latter percent-encodes, so a checkout under a path
 // containing a space resolves to a directory that does not exist.
-const p = (rel) => fileURLToPath(new URL(rel, import.meta.url));
-const CONTEXTS_DIR = p("../../contexts/");
-const AGENTS_MD = p("../../AGENTS.md");
-const CLAUDE_MD = p("../../CLAUDE.md");
-const AGENTS_DIR = p("../../.claude/agents/");
+const repoPath = (rel) => fileURLToPath(new URL(rel, import.meta.url));
+const CONTEXTS_DIR = repoPath("../../contexts/");
+const AGENTS_MD = repoPath("../../AGENTS.md");
+const CLAUDE_MD = repoPath("../../CLAUDE.md");
+const AGENTS_DIR = repoPath("../../.claude/agents/");
 const AGENTS_README = `${AGENTS_DIR}README.md`;
 // ADR-0008 names these two as the mandatory pipeline reviewers. Compared case-insensitively
 // because harness name resolution is case-insensitive (verified: `Reviewer` folds to `reviewer`),
@@ -111,7 +111,20 @@ if (!agentsReadmeOk)
 if (existsSync(AGENTS_DIR)) {
   // sorted: readdirSync order is filesystem-dependent (APFS sorts, ext4 hashes), and error
   // order must be deterministic so output stays diffable.
-  const agentFiles = readdirSync(AGENTS_DIR).filter((f) => f.endsWith(".md") && f !== "README.md").sort();
+  const dirents = readdirSync(AGENTS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Fail closed on subdirectories. The scan is deliberately non-recursive, so a nested
+  // .claude/agents/<sub>/qa.md would otherwise escape agents-readonly entirely while still
+  // being a plausible place to put an agent.
+  for (const d of dirents)
+    if (d.isDirectory())
+      errors.push(`agents-table-sync: .claude/agents/${d.name}/ is a subdirectory — agent files must sit directly in .claude/agents/`);
+
+  // Extension matched case-INsensitively: on a case-sensitive filesystem (Linux CI) a QA.MD
+  // would otherwise be skipped silently, which is the same escape the name fold closes.
+  const agentFiles = dirents
+    .filter((d) => d.isFile() && /\.md$/i.test(d.name) && d.name.toLowerCase() !== "readme.md")
+    .map((d) => d.name);
   const declared = new Map(); // lowercased name -> { name, file }
 
   for (const f of agentFiles) {
@@ -125,9 +138,14 @@ if (existsSync(AGENTS_DIR)) {
     }
     const name = String(meta.name ?? "");
     if (!name) { errors.push(`agents-table-sync: .claude/agents/${f} has no frontmatter name`); continue; }
-    if (name !== f.replace(/\.md$/, ""))
+    if (name !== f.replace(/\.md$/i, ""))
       errors.push(`agents-table-sync: .claude/agents/${f} declares name "${name}" — must match its filename stem`);
-    declared.set(name.toLowerCase(), { name, file: f });
+    // Two files whose names case-fold together would collapse to one Map entry, letting the
+    // second escape the unlisted-agent check entirely.
+    const key = name.toLowerCase();
+    if (declared.has(key))
+      errors.push(`agents-table-sync: .claude/agents/${f} declares "${name}", which case-folds onto "${declared.get(key).name}" in ${declared.get(key).file} — agent names must be unique case-insensitively`);
+    else declared.set(key, { name, file: f });
 
     // agents-readonly (ADR-0008 reviewer identity). Case-insensitive: `subagent_type: qa` resolves
     // to a file declaring `name: QA`, so an exact-match filter would let it escape.
@@ -153,12 +171,17 @@ if (existsSync(AGENTS_DIR)) {
 
   // agents-table-sync: the README table is hand-maintained; keep it equal to the directory.
   if (agentsReadmeOk) {
+    // Only lines inside a real table block count. Matching "any line containing a pipe" made
+    // ordinary prose mentioning `reviewer.md` parse as a row.
     const tabled = new Map(); // lowercased subagent_type -> { name, fileCol }
+    let inTable = false;
     for (const line of readFileSync(AGENTS_README, "utf8").split("\n")) {
       const trimmed = line.trim();
-      if (!trimmed.includes("|")) continue;
+      if (!trimmed) { inTable = false; continue; }
+      if (/^\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$/.test(trimmed) && trimmed.includes("-")) { inTable = true; continue; }
+      if (!inTable) continue;
       const cols = trimmed.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim().replace(/`/g, ""));
-      if (cols.length < 2 || !cols[0].endsWith(".md")) continue; // header + separator rows
+      if (cols.length < 2 || !/\.md$/i.test(cols[0])) continue;
       tabled.set(cols[1].toLowerCase(), { name: cols[1], fileCol: cols[0] });
     }
     for (const [key, { name, file }] of declared) {
