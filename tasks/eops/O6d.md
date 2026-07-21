@@ -2,7 +2,7 @@
 id: O6d
 title: ADR-0008 asserts reviewers are read-only; nothing enforces it
 epic: EOPS
-status: ready
+status: in-progress
 phase: V1
 priority: medium
 sprint: 1
