@@ -160,7 +160,19 @@ to close.
 
 AGENTS.md now says what is true: a hook stops common accidental writes, CI flags
 any PR that touches these paths, and **nothing blocks a merge** — the real
-control is still the reviewer and the diff. The residual surface the hook cannot reach — variable indirection,
+control is still the reviewer and the diff. **CI caught a design flaw in itself, on this very PR.** The guarded set briefly
+included `.github/workflows/ci.yml` and `.claude/hooks/`, on the theory that a
+control should protect itself. It failed PR #292 — the PR that ships the
+controls — because maintaining a control necessarily edits it. Those files are
+engineering files under ADR-0008 review, not founder-authority files, and
+conflating the two meant every legitimate maintenance PR would demand a founder
+ratification marker, which is precisely how a marker becomes noise. It bought
+nothing either: the reviewer had already shown that a `pull_request` runs the
+workflow from the PR head, so a PR deleting the step never evaluates its own
+removal. Guarded set is now founder-authority paths only. Real self-protection
+needs a required check name under branch protection — O6g.
+
+The residual surface the hook cannot reach — variable indirection,
 interpreter argv/stdin, script-then-execute, symlink and `../` aliasing, xargs
 splitting, future tool shapes, and the deliberate `STELOIT_RATIFY=1` — is
 enumerated in the hook header, because the honesty of the claim rests on that

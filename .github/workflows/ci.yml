@@ -42,12 +42,14 @@ jobs:
           # Two statements, not one pipeline: a `gh` failure must fail the job, never produce
           # an empty changed-set that reads as "clean".
           files="$(gh pr diff "$PR" --name-only)"
-          changed="$(printf '%s\n' "$files" | grep -E '^(docs/product/00-sources/|docs/product/18-philosophy/decisions\.md$|\.github/workflows/ci\.yml$|\.claude/hooks/)' || true)"
+          changed="$(printf '%s\n' "$files" | grep -E '^(docs/product/00-sources/|docs/product/18-philosophy/decisions\.md$)' || true)"
           [ -z "$changed" ] && { echo "authority-paths: untouched"; exit 0; }
-          # ci.yml and .claude/hooks/ are in the guarded set so incidental edits to the controls
-          # are flagged. This is NOT self-protection: a pull_request runs the workflow from the
-          # PR head, so a PR that deletes this step simply runs without it. Real self-protection
-          # needs a required check name under branch protection — gated on O6g.
+          # The guarded set is FOUNDER-AUTHORITY paths only. ci.yml and .claude/hooks/ were in it
+          # briefly and had to come out: they are engineering files under ADR-0008 review, so
+          # guarding them made every legitimate maintenance PR require a founder marker (this
+          # check failed its own PR, #292). It bought nothing either — a pull_request runs the
+          # workflow from the PR head, so a PR deleting this step never evaluates its own
+          # removal. Real self-protection needs a required check name under branch protection: O6g.
           #
           # The marker must be the FIRST line of the body. Matching anywhere let the job's own
           # failure text arm it, because the house rules require pasting CI output into the PR.
