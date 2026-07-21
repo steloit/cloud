@@ -6,6 +6,9 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # authority-paths reads the PR diff via gh
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -15,6 +18,48 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Task files valid (schema, deps, caps)
         run: node scripts/spec-sync/validate.mjs
+      - name: protect-authority hook regression tests
+        run: bash .claude/hooks/protect-authority.test.sh
+      - name: Authority paths unchanged (human decision only — AGENTS.md hard rule)
+        if: github.event_name == 'pull_request'
+        shell: bash   # GitHub's default is `bash -e {0}` with NO pipefail; without this a
+                      # failing `gh pr diff` yields an empty changed-set and the step reports
+                      # "untouched" — failing OPEN exactly when it did not run.
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The PreToolUse hook is an accident floor a determined agent can talk around.
+          # This reads the PR diff, so no call-shape trick reaches it and --no-verify does
+          # not apply. It REPORTS reliably; whether it BLOCKS depends on branch protection,
+          # which this repo does not currently have — see O6g. Do not describe it as binding
+          # until that is true.  O6f.
+          #
+          # gh pr diff, not `git diff BASE HEAD`: the checkout is shallow (head.sha is absent
+          # -> "fatal: bad object"), and a two-dot range also re-reports paths that landed on
+          # main after the branch started, which trains people to bypass on unrelated PRs.
+          # Two statements, not one pipeline: a `gh` failure must fail the job, never produce
+          # an empty changed-set that reads as "clean".
+          files="$(gh pr diff "$PR" --name-only)"
+          changed="$(printf '%s\n' "$files" | grep -E '^(docs/product/00-sources/|docs/product/18-philosophy/decisions\.md$)' || true)"
+          [ -z "$changed" ] && { echo "authority-paths: untouched"; exit 0; }
+          # The guarded set is FOUNDER-AUTHORITY paths only. ci.yml and .claude/hooks/ were in it
+          # briefly and had to come out: they are engineering files under ADR-0008 review, so
+          # guarding them made every legitimate maintenance PR require a founder marker (this
+          # check failed its own PR, #292). It bought nothing either — a pull_request runs the
+          # workflow from the PR head, so a PR deleting this step never evaluates its own
+          # removal. Real self-protection needs a required check name under branch protection: O6g.
+          #
+          # The marker must be the FIRST line of the body. Matching anywhere let the job's own
+          # failure text arm it, because the house rules require pasting CI output into the PR.
+          if gh pr view "$PR" --json body -q .body | head -1 | grep -qE '^FOUNDER-RATIFIED\b'; then
+            echo "authority-paths: changed WITH founder marker — allowed, recorded:"; echo "$changed"; exit 0
+          fi
+          echo "::error::These paths change by human decision only (AGENTS.md hard rules):"
+          echo "$changed"
+          echo "A founder-ratified change carries the ratification marker on the PR body's first line."
+          exit 1
       - name: Client regeneration drift (type drift fails the build — Q3/§17)
         run: |
           make gen-ts
