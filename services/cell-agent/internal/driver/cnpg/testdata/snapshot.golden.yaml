@@ -1,0 +1,9 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: svc_db01-snap-1
+  namespace: proj--prod
+spec:
+  volumeSnapshotClassName: pd-cell-snapclass
+  source:
+    persistentVolumeClaimName: svc_db01-1

@@ -1,0 +1,24 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{.Target}}
+  namespace: {{.Namespace}}
+  labels:
+    steloit.dev/cell: {{.Cell}}
+    steloit.dev/pitr-of: {{.Source}}
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: {{.StorageSize}}
+  bootstrap:
+    recovery:
+      source: {{.Source}}
+      recoveryTarget:
+        targetTime: "{{.TargetTime}}"
+  externalClusters:
+    - name: {{.Source}}
+      barmanObjectStore:
+        destinationPath: gs://{{.WALBucket}}/{{.Source}}
+        googleCredentials:
+          gkeEnvironment: true

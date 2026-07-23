@@ -1,0 +1,36 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+  labels:
+    steloit.dev/cell: {{.Cell}}
+spec:
+  instances: {{.Instances}}
+  storage:
+    storageClass: pd-cell
+    size: {{.StorageSize}}
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: {{.GSAEmail}}
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+  postgresql:
+    parameters:
+      archive_timeout: "300s"
+  backup:
+    barmanObjectStore:
+      destinationPath: gs://{{.WALBucket}}/{{.Name}}
+      googleCredentials:
+        gkeEnvironment: true
+    retentionPolicy: 30d
