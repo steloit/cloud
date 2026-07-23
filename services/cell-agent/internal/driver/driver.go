@@ -58,12 +58,18 @@ type Driver interface {
 	Render(Spec) (Manifests, error)
 }
 
-// BranchSource identifies the origin of a branch (the D2 primitive).
+// BranchSource identifies the origin of a branch (the D2 primitive) and carries
+// the placement the branch inherits from its source (cell, WAL bucket, GSA) —
+// a branch/PITR cluster must land on the same pool and read the SOURCE's WAL,
+// so these are not optional.
 type BranchSource struct {
 	Name           string // source cluster
 	Namespace      string
+	Cell           string    // placement label, inherited from the source
 	SnapshotName   string    // for SnapshotBranch: the VolumeSnapshot to take/recover
 	Target         string    // the new (branch) cluster name
+	WALBucket      string    // the SOURCE's WAL bucket — PITR reads from source's archive path
+	GSAEmail       string    // workload-identity SA (PITR pod must read GCS WAL)
 	HasArchivedWAL bool      // PITR requires a real archived-WAL basis (ADR-0007 F4)
 	TargetTime     time.Time // PITR recovery target (derived from WAL, never wall-clock)
 }

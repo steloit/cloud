@@ -26,13 +26,13 @@ func TestValkeyDriverReusesInterfaceUnchanged(t *testing.T) {
 			t.Fatalf("driver.Product() = %q, want %q", d.Product(), product)
 		}
 		m, err := d.Render(driver.Spec{
-			Name: "svc_x", Namespace: "proj--prod", Product: product, Cell: "cell-0",
+			Name: "svcx", Namespace: "proj--prod", Product: product, Cell: "cell-0",
 			Shape: map[string]any{"size": "dev"}, Instances: 1,
 		})
 		if err != nil {
 			t.Fatalf("%s render: %v", product, err)
 		}
-		if len(m) == 0 || m[0].Name != "svc_x" {
+		if len(m) == 0 || m[0].Name != "svcx" {
 			t.Fatalf("%s produced no usable manifest: %+v", product, m)
 		}
 	}
@@ -54,7 +54,7 @@ func TestValkeyIsNotABranchingDriver(t *testing.T) {
 func TestNoSubstrateNamesRequireACustomerSurface(t *testing.T) {
 	// The Spec's grammar fields are product-level; a customer never types "cnpg".
 	// This is a structural assertion: Render takes a Spec (grammar), not a manifest.
-	s := driver.Spec{Name: "svc_x", Namespace: "proj--prod", Product: "postgres", Shape: map[string]any{"size": "dev"}}
+	s := driver.Spec{Name: "svcx", Namespace: "proj--prod", Product: "postgres", Shape: map[string]any{"size": "dev"}}
 	if _, err := cnpg.New().Render(s); err != nil {
 		t.Fatal(err)
 	}

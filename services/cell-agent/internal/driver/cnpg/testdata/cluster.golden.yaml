@@ -1,7 +1,7 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: svc_db01
+  name: svc-db01
   namespace: proj--prod
   labels:
     steloit.dev/cell: cell-0
@@ -30,7 +30,7 @@ spec:
       archive_timeout: "300s"
   backup:
     barmanObjectStore:
-      destinationPath: gs://steloit-dev-wal-customer/svc_db01
+      destinationPath: gs://steloit-dev-wal-customer/svc-db01
       googleCredentials:
         gkeEnvironment: true
     retentionPolicy: 30d

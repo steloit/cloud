@@ -18,6 +18,9 @@ spec:
       - key: storage
         operator: Exists
         effect: NoSchedule
+  postgresql:
+    parameters:
+      archive_timeout: "300s"
   bootstrap:
     recovery:
       volumeSnapshots:

@@ -11,6 +11,17 @@ spec:
   storage:
     storageClass: pd-cell
     size: {{.StorageSize}}
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: {{.GSAEmail}}
   bootstrap:
     recovery:
       source: {{.Source}}
