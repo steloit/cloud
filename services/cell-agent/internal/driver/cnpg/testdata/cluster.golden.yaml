@@ -1,0 +1,36 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: svc-db01
+  namespace: proj--prod
+  labels:
+    steloit.dev/cell: cell-0
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: 10Gi
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: ci-image-push@steloit-dev.iam.gserviceaccount.com
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+  postgresql:
+    parameters:
+      archive_timeout: "300s"
+  backup:
+    barmanObjectStore:
+      destinationPath: gs://steloit-dev-wal-customer/svc-db01
+      googleCredentials:
+        gkeEnvironment: true
+    retentionPolicy: 30d

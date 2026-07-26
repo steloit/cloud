@@ -1,0 +1,30 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{.Target}}
+  namespace: {{.Namespace}}
+  labels:
+    steloit.dev/cell: {{.Cell}}
+    steloit.dev/branch-of: {{.Source}}
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: {{.StorageSize}}
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  postgresql:
+    parameters:
+      archive_timeout: "300s"
+  bootstrap:
+    recovery:
+      volumeSnapshots:
+        storage:
+          name: {{.SnapshotName}}
+          kind: VolumeSnapshot
+          apiGroup: snapshot.storage.k8s.io

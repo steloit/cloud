@@ -1,0 +1,30 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: svc-db01-branch
+  namespace: proj--prod
+  labels:
+    steloit.dev/cell: cell-0
+    steloit.dev/branch-of: svc-db01
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: 10Gi
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  postgresql:
+    parameters:
+      archive_timeout: "300s"
+  bootstrap:
+    recovery:
+      volumeSnapshots:
+        storage:
+          name: svc-db01-snap-1
+          kind: VolumeSnapshot
+          apiGroup: snapshot.storage.k8s.io

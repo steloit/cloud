@@ -1,0 +1,35 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: svc-db01-pitr
+  namespace: proj--prod
+  labels:
+    steloit.dev/cell: cell-0
+    steloit.dev/pitr-of: svc-db01
+spec:
+  instances: 1
+  storage:
+    storageClass: pd-cell
+    size: 10Gi
+  affinity:
+    nodeSelector:
+      pool: db-storage
+    tolerations:
+      - key: storage
+        operator: Exists
+        effect: NoSchedule
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        iam.gke.io/gcp-service-account: ci-image-push@steloit-dev.iam.gserviceaccount.com
+  bootstrap:
+    recovery:
+      source: svc-db01
+      recoveryTarget:
+        targetTime: "2026-07-20T12:00:00Z"
+  externalClusters:
+    - name: svc-db01
+      barmanObjectStore:
+        destinationPath: gs://steloit-dev-wal-customer/svc-db01
+        googleCredentials:
+          gkeEnvironment: true
