@@ -18,14 +18,18 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (principal, endpoint, key) DO UPDATE
     SET body_sha256 = EXCLUDED.body_sha256,
         claim_token = EXCLUDED.claim_token,
-        status_code = NULL,
-        response    = NULL,
-        created_at  = now()
+        status_code          = NULL,
+        response_ciphertext  = NULL,
+        response_nonce       = NULL,
+        response_wrapped_dek = NULL,
+        response_dek_nonce   = NULL,
+        response_kek_id      = NULL,
+        created_at           = now()
     WHERE (idempotency_keys.status_code IS NOT NULL
              AND idempotency_keys.created_at < now() - interval '24 hours')
        OR (idempotency_keys.status_code IS NULL
              AND idempotency_keys.created_at < now() - interval '5 minutes')
-RETURNING principal, endpoint, key, body_sha256, claim_token, status_code, response, created_at
+RETURNING principal, endpoint, key, body_sha256, claim_token, status_code, created_at, response_ciphertext, response_nonce, response_wrapped_dek, response_dek_nonce, response_kek_id
 `
 
 type ClaimIdempotencyKeyParams struct {
@@ -74,14 +78,59 @@ func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyK
 		&i.BodySha256,
 		&i.ClaimToken,
 		&i.StatusCode,
-		&i.Response,
 		&i.CreatedAt,
+		&i.ResponseCiphertext,
+		&i.ResponseNonce,
+		&i.ResponseWrappedDek,
+		&i.ResponseDekNonce,
+		&i.ResponseKekID,
 	)
 	return i, err
 }
 
+const discardUnreadableIdempotencyKey = `-- name: DiscardUnreadableIdempotencyKey :execrows
+DELETE FROM idempotency_keys
+WHERE principal = $1 AND endpoint = $2 AND key = $3
+  AND claim_token = $4 AND status_code IS NOT NULL
+`
+
+type DiscardUnreadableIdempotencyKeyParams struct {
+	Principal  string
+	Endpoint   string
+	Key        string
+	ClaimToken string
+}
+
+// Drop a COMPLETED record that cannot be decrypted (KEK rotated, or the row was
+// tampered with / copied from another key so its AAD no longer authenticates).
+// Such a record can never be replayed by anyone, so keeping it only strands the
+// client on a key it cannot use until the TTL expires — US-3.6's "a failure must
+// never strand state" applies to the replay cache too.
+//
+// FENCED on claim_token, like every other destructive statement here. Without
+// the fence: C reads an unreadable row and fails to open it; A discards the same
+// row first, re-claims, runs the handler and records a fresh READABLE response;
+// C's delete then still matches (status_code is non-NULL again) and wipes A's
+// valid record, so C re-claims and the handler runs a SECOND time — the exact
+// double-provision the other fences exist to prevent. Passing the claim_token
+// of the row we actually failed to open makes a successor's record unmatchable.
+//
+// `status_code IS NOT NULL` additionally keeps a live in-flight claim safe.
+func (q *Queries) DiscardUnreadableIdempotencyKey(ctx context.Context, arg DiscardUnreadableIdempotencyKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, discardUnreadableIdempotencyKey,
+		arg.Principal,
+		arg.Endpoint,
+		arg.Key,
+		arg.ClaimToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getIdempotencyKey = `-- name: GetIdempotencyKey :one
-SELECT principal, endpoint, key, body_sha256, claim_token, status_code, response, created_at FROM idempotency_keys
+SELECT principal, endpoint, key, body_sha256, claim_token, status_code, created_at, response_ciphertext, response_nonce, response_wrapped_dek, response_dek_nonce, response_kek_id FROM idempotency_keys
 WHERE principal = $1 AND endpoint = $2 AND key = $3
   AND created_at >= now() - interval '24 hours'
 `
@@ -103,8 +152,12 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 		&i.BodySha256,
 		&i.ClaimToken,
 		&i.StatusCode,
-		&i.Response,
 		&i.CreatedAt,
+		&i.ResponseCiphertext,
+		&i.ResponseNonce,
+		&i.ResponseWrappedDek,
+		&i.ResponseDekNonce,
+		&i.ResponseKekID,
 	)
 	return i, err
 }
@@ -143,17 +196,27 @@ func (q *Queries) ReleaseIdempotencyKey(ctx context.Context, arg ReleaseIdempote
 }
 
 const saveIdempotentResponse = `-- name: SaveIdempotentResponse :execrows
-UPDATE idempotency_keys SET status_code = $5, response = $6
+UPDATE idempotency_keys
+SET status_code          = $5,
+    response_ciphertext  = $6,
+    response_nonce       = $7,
+    response_wrapped_dek = $8,
+    response_dek_nonce   = $9,
+    response_kek_id      = $10
 WHERE principal = $1 AND endpoint = $2 AND key = $3 AND claim_token = $4
 `
 
 type SaveIdempotentResponseParams struct {
-	Principal  string
-	Endpoint   string
-	Key        string
-	ClaimToken string
-	StatusCode pgtype.Int4
-	Response   []byte
+	Principal          string
+	Endpoint           string
+	Key                string
+	ClaimToken         string
+	StatusCode         pgtype.Int4
+	ResponseCiphertext []byte
+	ResponseNonce      []byte
+	ResponseWrappedDek []byte
+	ResponseDekNonce   []byte
+	ResponseKekID      pgtype.Text
 }
 
 // Record the original response so a replay returns it verbatim. FENCED on
@@ -166,7 +229,11 @@ func (q *Queries) SaveIdempotentResponse(ctx context.Context, arg SaveIdempotent
 		arg.Key,
 		arg.ClaimToken,
 		arg.StatusCode,
-		arg.Response,
+		arg.ResponseCiphertext,
+		arg.ResponseNonce,
+		arg.ResponseWrappedDek,
+		arg.ResponseDekNonce,
+		arg.ResponseKekID,
 	)
 	if err != nil {
 		return 0, err

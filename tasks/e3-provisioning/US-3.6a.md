@@ -2,7 +2,7 @@
 id: US-3.6a
 title: "Idempotency on credential-bearing responses: signup and createWebhook cannot replay as they stand"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -12,6 +12,12 @@ labels: [Backend, Security]
 module: M4 Provisioning
 contexts: [api-conventions, provisioning]
 files:
+  - docs/adr/0013-idempotent-replay-of-credential-bearing-responses.md
+  - services/api/cmd/api/main.go
+  - services/api/internal/identity/identity_integration_test.go
+  - services/api/internal/identity/session/session.go
+  - services/api/internal/identity/store/**
+  - services/api/internal/reconcile/idempotency_integration_test.go
   - services/api/internal/platform/idempotency/**
   - services/api/db/queries/idempotency.sql
   - services/api/internal/platform/db/migrations/*_idempotency*.sql
@@ -72,21 +78,69 @@ owner-level call, not an implementation detail.
 
 ## Acceptance criteria
 
-- [ ] A decision is recorded (ADR or an amendment to the S7 ruling) covering
-  what a replay of a credential-bearing response returns.
-- [ ] `signup` and `createWebhook` either enforce idempotency under that
-  decision, or lose the `idempotencyKey` declaration in `openapi.yaml`.
-- [ ] Whatever ships, no plaintext credential is written to `idempotency_keys`.
-  Pin it with a test that asserts the stored response for these operations
-  contains no secret material.
-- [ ] If replay is enabled for `signup`, the replayed response carries the same
-  `Set-Cookie` the original did (US-3.6 records status + body only — response
-  headers are dropped today, which is why signup could not simply be turned on).
-- [ ] The `deferredRoutes` table in `internal/platform/idempotency/middleware.go`
-  is emptied or updated, and `TestRouteTableMatchesOpenAPI` still passes.
+- [x] A decision is recorded — **ADR-0013**, founder-ratified, covering Option 3,
+  the two consequences decided beyond it (seal-everything, discard-on-unopenable),
+  the KEK-rotation blast radius and its runbook obligation, and the session-token
+  widening.
+- [x] `signup` and `createWebhook` enforce idempotency under that decision; the
+  `deferredRoutes` category is deleted and `TestRouteTableMatchesOpenAPI` now
+  requires enforced == declared.
+- [x] No plaintext credential is written to `idempotency_keys` —
+  `TestIdempotencyRecordedSecretIsNeverRecoverableAtRest` scans the raw stored
+  row for both the webhook secret and the session token; bypassing the seal
+  fails it (mutation-verified).
+- [x] A replayed `signup` carries the same `Set-Cookie` the original did, and
+  that cookie is a **working** session —
+  `TestIdempotentSignupReplaysTheSameSessionCookie` (real Postgres, real chain).
+- [x] The `deferredRoutes` table is gone and the drift test still passes.
+
+## Beyond the stated criteria
+
+- The AAD binds each record to `(principal, endpoint, key)`; unbinding it lets a
+  copied row decrypt into another key's response (mutation-verified).
+- A record under a retired KEK degrades to "expired" and is **discarded** so the
+  key is re-claimable, rather than 500-ing or stranding the client.
+- The discard is fenced on `claim_token`: unfenced, a late discard wipes a
+  successor's valid record and the request executes twice (mutation-verified).
+- Replay is byte-exact for empty, non-UTF8 and 256KB bodies, and preserves every
+  value of a multi-valued `Set-Cookie` (mutation-verified).
+
+## Findings filed
+
+Two ADRs share the number 0007, so "ADR-0007" does not identify a document —
+found while citing prior art for ADR-0013. Filed as **O8**, not fixed here
+(renumbering rewrites citations and is not this task's scope).
 
 ## Related
 
 US-3.6 (shipped the two enforceable routes; `deferredRoutes` documents the
 exclusion inline) · S7 ruling (openapi.yaml:23) ·
 `internal/identity/webhooks_http.go` · `internal/secrets` (envelope encryption)
+
+## Outcome
+
+Envelope-encrypting the whole recorded response — headers and body as one sealed
+payload — lets S7 replay and reveal-once credential semantics hold at once,
+which neither plaintext storage nor header-dropping could do alone. All four
+declared routes are now enforced, closing the spec conflict US-3.6 recorded
+rather than carrying it.
+
+Two decisions went beyond the ratified text and are recorded in ADR-0013: every
+response is sealed rather than only those classified as secret-bearing (a
+per-route "does this contain a credential?" judgement is exactly what drifted
+into the original plaintext bug), and an unopenable record is discarded rather
+than erroring (this is a TTL-bounded cache, not authoritative state).
+
+The accepted cost is that a KEK rotation invalidates the whole cache at once —
+lazy re-wrap is impossible when you cannot open the record — so for up to 24h
+afterwards requests that would have been deduped execute again. ADR-0013 carries
+the runbook obligation (truncate at rotation) and the discard logs at Error.
+
+Review caught a race I introduced: the discard was the only destructive
+statement not fenced on `claim_token`, so a late discard could wipe a
+successor's freshly-written valid record and cause the double-provision every
+other statement is fenced against.
+
+Evidence: `services/api` 22 packages RC=0, `services/cell-agent` 5 packages RC=0
+under `-race`, zero failures, zero skips, Postgres-backed tests against real
+Postgres.

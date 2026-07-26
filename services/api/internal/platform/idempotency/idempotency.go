@@ -15,15 +15,18 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
 
 // Store is the persistence this package needs.
@@ -32,12 +35,19 @@ type Store interface {
 	GetIdempotencyKey(ctx context.Context, arg store.GetIdempotencyKeyParams) (store.IdempotencyKey, error)
 	SaveIdempotentResponse(ctx context.Context, arg store.SaveIdempotentResponseParams) (int64, error)
 	ReleaseIdempotencyKey(ctx context.Context, arg store.ReleaseIdempotencyKeyParams) (int64, error)
+	DiscardUnreadableIdempotencyKey(ctx context.Context, arg store.DiscardUnreadableIdempotencyKeyParams) (int64, error)
 	SweepExpiredIdempotencyKeys(ctx context.Context) (int64, error)
 }
 
-type Service struct{ q Store }
+type Service struct {
+	q   Store
+	kek secrets.KEK
+}
 
-func New(q Store) *Service { return &Service{q: q} }
+// New builds the service. kek is REQUIRED: a recorded response may contain
+// credential material (US-3.6a), and there is no mode in which it is stored in
+// plaintext — so the dependency is constructor-level, not a toggle.
+func New(q Store, kek secrets.KEK) *Service { return &Service{q: q, kek: kek} }
 
 // ErrLostClaim reports that this request no longer owns the key when it tried
 // to RECORD its response: a successor took the claim over, so the response was
@@ -51,10 +61,29 @@ var ErrLostClaim = errors.New("idempotency: the claim was taken over by another 
 // question, so it is refused (409) rather than silently mis-answered.
 var ErrBodyMismatch = errors.New("idempotency: key reused with a different request body")
 
-// Replay is a previously-recorded response.
+// Replay is a previously-recorded response, reconstructed in full: status,
+// headers and body. Headers matter as much as the body — a replayed signup
+// without its Set-Cookie returns an identical body while leaving the client
+// convinced it is signed in with no session.
 type Replay struct {
 	StatusCode int
+	Header     http.Header
 	Body       []byte
+}
+
+// sealedResponse is what gets encrypted. Body is []byte, which JSON encodes as
+// base64 and decodes byte-exact — the "replay the ORIGINAL response" promise
+// survives the round trip.
+type sealedResponse struct {
+	Header http.Header `json:"header"`
+	Body   []byte      `json:"body"`
+}
+
+// aadFor binds a sealed record to the exact key it belongs to, so a row copied
+// to another principal, endpoint, or key fails authentication instead of
+// decrypting into someone else's response.
+func aadFor(principal, endpoint, key string) []byte {
+	return []byte("idem:" + principal + "\x1f" + endpoint + "\x1f" + key)
 }
 
 // Begin claims the key for this request.
@@ -119,14 +148,68 @@ func (s *Service) Begin(ctx context.Context, principal, endpoint, key string, bo
 		if existing.StatusCode.Valid {
 			r.StatusCode = int(existing.StatusCode.Int32)
 		}
-		if len(existing.Response) > 0 {
-			r.Body = existing.Response
+		// A row marked complete with NO payload is UNREADABLE, not a replay:
+		// answering with the original status and a nil body — stamped
+		// Idempotent-Replay — would be a lie sustained until the TTL. The
+		// down/up migration cycle produces exactly this shape.
+		if existing.StatusCode.Valid && len(existing.ResponseCiphertext) == 0 {
+			err = fmt.Errorf("idempotency: record is marked complete but carries no payload")
+		}
+		if err == nil && len(existing.ResponseCiphertext) > 0 {
+			resp, oerr := s.open(existing, principal, endpoint, key)
+			err = oerr
+			if err == nil {
+				r.Header, r.Body = resp.Header, resp.Body
+			}
+		}
+		if err != nil {
+			// A record we cannot open (KEK rotated, or a row copied from
+			// another key so its AAD no longer authenticates) is treated as
+			// ABSENT. This is a TTL-bounded replay cache, not authoritative
+			// state: erroring would 500 a legal retry, and returning the
+			// status without its body would be a lie.
+			//
+			// It is DISCARDED rather than merely ignored, because nobody
+			// can ever replay it — leaving it in place would strand the
+			// client on a key it cannot use until the TTL expires, which is
+			// exactly the stranding US-3.6 exists to prevent. The next loop
+			// iteration then claims the key cleanly.
+			// ERROR, not warn: every occurrence means a request that should
+			// have been deduped will execute again. After a KEK rotation
+			// this fires for every record in the table (see ADR-0013).
+			slog.ErrorContext(ctx, "idempotency: recorded response is unreadable; discarding it so the key can be re-claimed — this request will re-execute",
+				"endpoint", endpoint, "err", err)
+			if _, derr := s.q.DiscardUnreadableIdempotencyKey(ctx, store.DiscardUnreadableIdempotencyKeyParams{
+				Principal: principal, Endpoint: endpoint, Key: key,
+				ClaimToken: existing.ClaimToken,
+			}); derr != nil {
+				return nil, "", derr
+			}
+			continue
 		}
 		return r, "", nil
 	}
 	// The key was released twice under us; treat it as in-flight rather than
 	// executing, so a pathological loop can never double-provision.
 	return &Replay{}, "", nil
+}
+
+// open decrypts a recorded response.
+func (s *Service) open(row store.IdempotencyKey, principal, endpoint, key string) (sealedResponse, error) {
+	sealed := secrets.Sealed{
+		Ciphertext: row.ResponseCiphertext, Nonce: row.ResponseNonce,
+		WrappedDEK: row.ResponseWrappedDek, DEKNonce: row.ResponseDekNonce,
+		KEKID: row.ResponseKekID.String,
+	}
+	raw, err := secrets.Open(s.kek, sealed, aadFor(principal, endpoint, key))
+	if err != nil {
+		return sealedResponse{}, err
+	}
+	var out sealedResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return sealedResponse{}, fmt.Errorf("idempotency: decode recorded response: %w", err)
+	}
+	return out, nil
 }
 
 // newClaimToken identifies THIS claim so only its owner can record or release
@@ -147,7 +230,7 @@ func newClaimToken() (string, error) {
 // raw is the response body VERBATIM, not a value to re-marshal: S7 says a
 // replay returns the original response, and re-marshalling could differ from
 // what the client first received.
-func (s *Service) Complete(ctx context.Context, principal, endpoint, key, claim string, status int, raw []byte) error {
+func (s *Service) Complete(ctx context.Context, principal, endpoint, key, claim string, status int, header http.Header, raw []byte) error {
 	if key == "" || claim == "" {
 		return nil
 	}
@@ -177,9 +260,20 @@ func (s *Service) Complete(ctx context.Context, principal, endpoint, key, claim 
 		}
 		return err
 	}
+	payload, err := json.Marshal(sealedResponse{Header: header, Body: raw})
+	if err != nil {
+		return fmt.Errorf("idempotency: encode response: %w", err)
+	}
+	sealed, err := secrets.Seal(s.kek, payload, aadFor(principal, endpoint, key))
+	if err != nil {
+		return fmt.Errorf("idempotency: seal response: %w", err)
+	}
 	n, err := s.q.SaveIdempotentResponse(ctx, store.SaveIdempotentResponseParams{
 		Principal: principal, Endpoint: endpoint, Key: key, ClaimToken: claim,
-		StatusCode: pgInt4(status), Response: raw,
+		StatusCode:         pgInt4(status),
+		ResponseCiphertext: sealed.Ciphertext, ResponseNonce: sealed.Nonce,
+		ResponseWrappedDek: sealed.WrappedDEK, ResponseDekNonce: sealed.DEKNonce,
+		ResponseKekID: pgText(sealed.KEKID),
 	})
 	if err != nil {
 		return err
@@ -195,6 +289,8 @@ func (s *Service) Complete(ctx context.Context, principal, endpoint, key, claim 
 }
 
 func pgInt4(v int) pgtype.Int4 { return pgtype.Int4{Int32: int32(v), Valid: true} }
+
+func pgText(v string) pgtype.Text { return pgtype.Text{String: v, Valid: true} }
 
 // RunSweeper deletes entries past the 24h window. The window is a PROMISE in
 // the ruling, not merely a read filter: without this the table grows without
