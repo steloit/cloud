@@ -19,7 +19,8 @@ if a task requires violating an invariant, STOP and surface it (§8).
 - **Reconciler (D9/A2.5):** control plane writes desired state to its DB; the cell-agent converges
   actual state and reports back. No imperative provisioning, ever. DR = restore desired, reconcile actual.
 - **Tenancy (D7, as amended A4):** every resource row carries `cell_id` (even while it's always cell-0);
-  project → exactly one cell; environment → namespace `proj--env` with default-deny NetworkPolicies +
+  project → exactly one cell; environment → namespace `env-<environment_id>` (ADR-0012: name-derived
+  `proj--env` collided across orgs) with default-deny NetworkPolicies +
   quotas; **customer code always under gVisor**; **one CNPG cluster per project-environment**;
   branch = ZFS CoW volume snapshot → CNPG-recovered cluster, hibernated by default. Branching is a
   **product** capability orchestrated by our control plane — never exposed as a database feature.

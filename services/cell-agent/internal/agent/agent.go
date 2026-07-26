@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -31,6 +32,11 @@ type DesiredService struct {
 	ObservedGeneration int64          `json:"observed_generation"`
 	Desired            map[string]any `json:"desired"`
 }
+
+// ErrNotConverged is returned by a Renderer whose apply succeeded but whose
+// resource has not reached a terminal state yet. The loop treats it as "come
+// back next tick", never as a failure, and never reports a transient status.
+var ErrNotConverged = errors.New("agent: not converged yet")
 
 // Report is one status writeback.
 type Report struct {
@@ -131,9 +137,16 @@ func (a *Agent) Tick(ctx context.Context) {
 	for _, svc := range services {
 		observed, err := a.render.Converge(ctx, svc)
 		if err != nil {
-			// This service did not converge. It stays outstanding server-side
-			// (its report never lands), so the next tick retries it; other
-			// services in the batch still proceed.
+			// ErrNotConverged is NOT a failure: the apply landed and the
+			// resource is still becoming ready. Skipping the writeback keeps
+			// the row outstanding server-side so the next tick re-observes it —
+			// reporting a transient status here would drop it from the
+			// outstanding set and it would never reach ready.
+			if errors.Is(err, ErrNotConverged) {
+				a.log.Info("converging", "service", svc.ID, "generation", svc.Generation, "detail", err)
+				continue
+			}
+			// A real failure. Also stays outstanding, retried next tick.
 			a.log.Error("converge failed", "service", svc.ID, "generation", svc.Generation, "err", err)
 			continue
 		}

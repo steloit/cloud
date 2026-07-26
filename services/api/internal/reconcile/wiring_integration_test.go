@@ -268,3 +268,105 @@ func TestUpdateServiceShapeSQLFenceRejectsDeleting(t *testing.T) {
 }
 
 func errorsIsNoRows(err error) bool { return err != nil && err.Error() == pgx.ErrNoRows.Error() }
+
+// US-3.3: createService resolves and embeds the cell namespace (proj--env) in
+// desired, so the cell-agent renders into the right namespace.
+func TestCreateServiceResolvesNamespace(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db-ns")
+	var d map[string]any
+	_ = json.Unmarshal(svc.Desired, &d)
+	ns, _ := d["namespace"].(string)
+	// Derived from the ENV ID, not names: project/env names are unique only per
+	// ORG, so a name-derived namespace would put two orgs' api/prod in the same
+	// namespace — sharing D7's tenant isolation boundary. seedGraph uses env_w.
+	if ns != "env-w" {
+		t.Fatalf("namespace must derive from the immutable env id (want env-w): %q in %s", ns, svc.Desired)
+	}
+}
+
+// The security regression: two DIFFERENT orgs may each have project "api" with
+// env "prod" (projects are UNIQUE (org_id, name), not globally unique). A
+// name-derived namespace would put both in the SAME Kubernetes namespace,
+// sharing D7's tenant isolation boundary — default-deny NetworkPolicy,
+// ResourceQuota, and CNPG's generated <cluster>-app credential Secrets.
+func TestNamespacesDoNotCollideAcrossOrgs(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	ex := func(sql string, args ...any) {
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	// two orgs, each with project "api" / env "prod" — the DEFAULT case, not an edge
+	for i, org := range []string{"org_x", "org_y"} {
+		ex(`INSERT INTO orgs (id, name, slug) VALUES ($1,$1,$1) ON CONFLICT DO NOTHING`, org)
+		ex(`INSERT INTO projects (id, org_id, name, cell_id) VALUES ($1,$2,'api','cell-0') ON CONFLICT DO NOTHING`,
+			"prj_"+org, org)
+		ex(`INSERT INTO environments (id, project_id, name) VALUES ($1,$2,'prod') ON CONFLICT DO NOTHING`,
+			"env_"+org, "prj_"+org)
+		_ = i
+	}
+	nsX, err := prov.ResolveNamespaceForTest(ctx, "env_org_x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsY, err := prov.ResolveNamespaceForTest(ctx, "env_org_y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nsX == nsY {
+		t.Fatalf("two orgs' api/prod collided into one namespace %q — cross-tenant isolation breach", nsX)
+	}
+}
+
+// US-3.3's headline control-plane AC, against real Postgres: a service walks
+// provisioning → ready through the RECONCILER, and the metering span opens at
+// ready — never before. (D10: metering starts at ready.)
+func TestMeteringStartsAtReadyE2E(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-meter")
+	rec := reconcile.New(q, prov)
+
+	// BEFORE ready: the service exists and is outstanding — no usage event yet.
+	var before int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM usage_events WHERE service_id=$1`, svc.ID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 0 {
+		t.Fatalf("metering opened BEFORE ready (%d events) — D10 says never before", before)
+	}
+
+	// The agent reports ready (what CNPGRenderer returns once the cluster is
+	// healthy — the live drill proved that mapping on a real operator).
+	if _, err := rec.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AT ready: exactly one span opened.
+	var edges []string
+	rows, err := pool.Query(ctx, `SELECT edge FROM usage_events WHERE service_id=$1 ORDER BY at`, svc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		edges = append(edges, e)
+	}
+	if len(edges) != 1 || edges[0] != "open" {
+		t.Fatalf("expected exactly one edge='open' at ready, got %v", edges)
+	}
+	if mustGet(t, q, svc.ID).Status != "ready" {
+		t.Fatal("service did not reach ready")
+	}
+}

@@ -20,7 +20,7 @@ import "time"
 // only — no substrate detail leaks in.
 type Spec struct {
 	Name      string         // service id → cluster/object name
-	Namespace string         // proj--env
+	Namespace string         // env-<environment_id> (ADR-0012)
 	Product   string         // postgres | valkey | web | worker
 	Intent    string         // app | database | cache | …
 	Shape     map[string]any // size, etc. (priced grammar)
