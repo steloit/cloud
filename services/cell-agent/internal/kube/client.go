@@ -33,8 +33,14 @@ import (
 // Auth is the in-cluster ServiceAccount (projected token + CA), the same
 // identity the workload-identity binding grants. No kubeconfig, no static keys.
 type Client struct {
-	base       string // https://kubernetes.default.svc
-	token      string
+	base string // https://kubernetes.default.svc
+	// tokenFile is re-read per request: GKE projected ServiceAccount tokens
+	// expire (~1h) and are ROTATED IN PLACE in the file. Caching the value once
+	// at boot means every apply 401s after the TTL and never recovers without a
+	// restart — the concrete cost of not taking client-go (whose
+	// rest.InClusterConfig installs a reloader), paid here directly.
+	tokenFile  string
+	token      string // static token, tests only
 	hc         *http.Client
 	fieldOwner string
 }
@@ -61,9 +67,10 @@ func NewInCluster() (*Client, error) {
 	if !pool.AppendCertsFromPEM(ca) {
 		return nil, fmt.Errorf("kube: cluster CA is not valid PEM")
 	}
+	_ = token // presence checked above; the value is re-read per request
 	return &Client{
 		base:       fmt.Sprintf("https://%s:%s", host, port),
-		token:      strings.TrimSpace(string(token)),
+		tokenFile:  saDir + "/token",
 		fieldOwner: "steloit-cell-agent",
 		hc: &http.Client{
 			Timeout:   30 * time.Second,
@@ -190,9 +197,17 @@ func (c *Client) Delete(ctx context.Context, namespace, name string) error {
 	return nil
 }
 
+// auth attaches the bearer, re-reading the projected token each request so a
+// rotated token is picked up without a restart.
 func (c *Client) auth(req *http.Request) {
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	tok := c.token
+	if c.tokenFile != "" {
+		if b, err := os.ReadFile(c.tokenFile); err == nil {
+			tok = strings.TrimSpace(string(b))
+		}
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
 
@@ -224,7 +239,6 @@ var plurals = map[string]string{
 	"ScheduledBackup": "scheduledbackups",
 	"VolumeSnapshot":  "volumesnapshots",
 	"Backup":          "backups",
-	"Namespace":       "namespaces",
 	"Secret":          "secrets",
 	"StatefulSet":     "statefulsets",
 }

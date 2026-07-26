@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -22,6 +23,7 @@ type fakeApplier struct {
 	mu         sync.Mutex
 	applied    map[string][][]byte // namespace/name → objects
 	deleted    []string
+	live       map[string]bool // ns/name → exists, like an API server
 	phase      string
 	applyErr   error
 	observeErr error
@@ -32,6 +34,10 @@ func newFakeApplier(phase string) *fakeApplier {
 	return &fakeApplier{applied: map[string][][]byte{}, phase: phase}
 }
 
+// Apply records objects BY NAME, exactly like an API server: whatever name the
+// manifest carries is the only name Observe/Delete can find. The original fake
+// ignored names, which is precisely why it could not see the renderer asking for
+// `svc_x` while the driver had created `svc-x`.
 func (f *fakeApplier) Apply(_ context.Context, ns string, m [][]byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -40,18 +46,44 @@ func (f *fakeApplier) Apply(_ context.Context, ns string, m [][]byte) error {
 	}
 	f.applies++
 	f.applied[ns] = m
+	if f.live == nil {
+		f.live = map[string]bool{}
+	}
+	for _, obj := range m {
+		f.live[ns+"/"+nameOf(obj)] = true
+	}
 	return nil
 }
-func (f *fakeApplier) Observe(_ context.Context, _, _ string) (string, error) {
+
+// nameOf extracts metadata.name from a rendered manifest (good enough for the
+// two-space-indented YAML the driver emits).
+func nameOf(obj []byte) string {
+	for _, line := range strings.Split(string(obj), "\n") {
+		if strings.HasPrefix(line, "  name: ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "  name: "))
+		}
+	}
+	return ""
+}
+
+func (f *fakeApplier) Observe(_ context.Context, ns, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.observeErr != nil {
 		return "", f.observeErr
 	}
+	// A name that was never applied does not exist — "" like a real 404.
+	if !f.live[ns+"/"+name] {
+		return "", nil
+	}
 	return f.phase, nil
 }
+
 func (f *fakeApplier) Delete(_ context.Context, ns, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, ns+"/"+name)
+	delete(f.live, ns+"/"+name)
 	return nil
 }
 
@@ -93,13 +125,11 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 }
 
 func TestConvergeObservesClusterStatus(t *testing.T) {
-	cases := map[string]string{
-		"Cluster in healthy state": "ready",
-		"":                         "provisioning",
-		"Setting up primary":       "provisioning",
-		"Failed to create primary": "failed",
-	}
-	for phase, want := range cases {
+	// Terminal phases surface as a status; transient ones signal ErrNotConverged.
+	// The three phase strings a REAL CNPG operator emitted during the US-3.3 live
+	// drill are included verbatim.
+	terminalCases := map[string]string{"Cluster in healthy state": "ready"}
+	for phase, want := range terminalCases {
 		a := newFakeApplier(phase)
 		got, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
 		if err != nil {
@@ -109,16 +139,26 @@ func TestConvergeObservesClusterStatus(t *testing.T) {
 			t.Fatalf("phase %q → want %q, got %q", phase, want, got)
 		}
 	}
+	for _, phase := range []string{"", "Setting up primary", "Waiting for the instances to become active"} {
+		a := newFakeApplier(phase)
+		if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); !errors.Is(err, agent.ErrNotConverged) {
+			t.Fatalf("transient phase %q must signal ErrNotConverged, got %v", phase, err)
+		}
+	}
 }
 
-func TestConvergeReturnsProvisioningUntilReady(t *testing.T) {
-	a := newFakeApplier("") // not created yet
-	got, _ := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
-	if got != "provisioning" {
-		t.Fatalf("a cluster with no status yet must read provisioning, got %q", got)
+// A cluster that is applied but not yet healthy must NOT report a transient
+// status: it returns ErrNotConverged so the agent leaves the row outstanding.
+// Reporting "provisioning" would advance observed_generation and the service
+// would never be re-polled to reach ready (the blocker this test now pins).
+func TestNotYetReadyDoesNotReportTransientStatus(t *testing.T) {
+	a := newFakeApplier("Setting up primary")
+	_, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
+	if !errors.Is(err, agent.ErrNotConverged) {
+		t.Fatalf("a still-converging cluster must signal ErrNotConverged, got %v", err)
 	}
 	if a.applies != 1 {
-		t.Fatal("converge must apply the manifests even while provisioning")
+		t.Fatal("converge must still apply the manifests while converging")
 	}
 }
 
@@ -131,8 +171,19 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 	if got != "gone" {
 		t.Fatalf("a deleting service must converge to gone, got %q", got)
 	}
-	if len(a.deleted) != 1 || a.deleted[0] != "acme--prod/svc_db01" {
-		t.Fatalf("teardown not applied to the cluster: %v", a.deleted)
+	// The objects must be deleted under the DRIVER's sanitized names, not the raw
+	// service id — addressing the wrong name 404s and silently reports gone while
+	// a real cluster keeps running (the blocker this pins).
+	if len(a.deleted) == 0 {
+		t.Fatal("teardown deleted nothing")
+	}
+	for _, d := range a.deleted {
+		if strings.Contains(d, "svc_db01") {
+			t.Fatalf("teardown addressed the RAW service id %q — the driver named it svc-db01", d)
+		}
+	}
+	if a.deleted[0] != "acme--prod/svc-db01" {
+		t.Fatalf("teardown must delete the cluster by its driver name: %v", a.deleted)
 	}
 	if a.applies != 0 {
 		t.Fatal("a deleting service must not apply create manifests")

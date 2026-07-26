@@ -2,7 +2,7 @@
 id: US-3.3
 title: "Accepted service provisions via the reconciler; metering starts at ready"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: critical
 sprint: 4
@@ -175,3 +175,51 @@ the chain was individually proven on real infrastructure.
 - **A fresh cell cannot be applied in one pass** — `kubernetes_manifest` needs
   CRDs at plan time, so the apply that installs them cannot plan the CRs that use
   them. Required a targeted apply. Filed as **T1.4a**.
+
+## Review round 1 — four blockers, three of which my live drill could not see
+
+The architecture reviewer found four blockers. This is the important part: **the
+live cell run passed while three of them were present**, because the fake applier
+ignored object names and the drill used a hand-picked id that made the bug
+invisible. Strengthening the fake was the highest-leverage fix.
+
+1. **Name mismatch — teardown would leave customer data running.** The driver
+   names objects `dnsName(id)` (`svc_x` → `svc-x`); the renderer called
+   `Observe`/`Delete` with the RAW `svc.ID`. Delete would 404 → "already gone" →
+   report `gone` **while a live Postgres cluster and its PVCs kept running**,
+   unbilled and undeleted. My live drill used `svc-e2e01` (already dash-form), so
+   `dnsName` was a no-op and the bug hid. Fixed: address objects by the driver's
+   canonical names. **Mutation-verified** — re-introducing it fails 4 tests.
+2. **Cross-tenant namespace collision (security).** `proj--env` looked unique but
+   projects are `UNIQUE (org_id, name)` — unique *per org*. Two orgs each with
+   `api`/`prod` landed in the SAME namespace, sharing D7's isolation boundary
+   (default-deny NetworkPolicy, ResourceQuota, and CNPG's `<cluster>-app`
+   credential Secrets). This was the DEFAULT case, not an edge. Fixed: derive
+   from the globally-unique, immutable `env_id` — which also removes the
+   project-rename hazard (a rename would have orphaned a running cluster).
+   `TestNamespacesDoNotCollideAcrossOrgs` pins it.
+3. **Transient status dropped services out of the reconcile set forever.** The
+   Renderer contract requires a TERMINAL status; `CNPGRenderer` returned
+   `provisioning`, which advances `observed_generation`, and
+   `WHERE observed_generation < generation` then excludes the row **permanently**
+   — on a real cell the ~45s of convergence I measured would have become "never
+   ready, no metering", i.e. the headline AC silently failing. Fixed:
+   `ErrNotConverged` — the agent skips the writeback and the row stays outstanding.
+4. **A ticked AC cited a test that did not exist.** `TestMeteringStartsAtReadyE2E`
+   was named in `tests:` and the AC was `[x]`. It now exists and passes against
+   real Postgres: no `usage_events` before ready, exactly one `edge='open'` at
+   the ready transition.
+
+Majors also fixed: the CNPG phase heuristic (`{failed,failure,error}` substrings
+caught almost NONE of CNPG's real terminal-bad phases — "Cluster is unrecoverable
+and needs manual intervention" contains none of those words; replaced with an
+explicit phase table that fails CLOSED to `degraded` on unknown); the
+ServiceAccount token was cached at boot and would 401 forever after GKE's ~1h
+rotation (now re-read per request — the concrete cost of not taking client-go,
+paid directly); teardown now deletes every rendered object, so the
+ScheduledBackup cannot outlive its cluster; the cluster-scoped `Namespace` entry
+was removed from the plural map (it built an invalid path).
+
+**On stdlib vs client-go the reviewer agreed** the reading is defensible and did
+not block it — while noting the bill it came with (token rotation, a
+hand-maintained plural map). Both are now paid explicitly.

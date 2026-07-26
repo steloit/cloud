@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
@@ -68,11 +67,15 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	}
 
 	// Teardown: a deleting service (status or desired flag) is deleted and
-	// reported gone — the same terminal the AckRenderer used, now with a real
-	// delete behind the seam.
+	// reported gone. The objects are addressed by the names the DRIVER chose
+	// (dnsName-sanitized), never the raw service id — they differ whenever an id
+	// contains characters k8s rejects, and addressing the wrong name makes Delete
+	// 404 → "already gone" → report gone while a real cluster keeps running.
 	if svc.Status == "deleting" || asBool(svc.Desired["deleting"]) {
-		if err := r.applier.Delete(ctx, namespace, svc.ID); err != nil {
-			return "", fmt.Errorf("render: delete %s: %w", svc.ID, err)
+		for _, name := range r.objectNames(svc) {
+			if err := r.applier.Delete(ctx, namespace, name); err != nil {
+				return "", fmt.Errorf("render: delete %s: %w", name, err)
+			}
 		}
 		r.log.Info("converged: teardown applied", "service", svc.ID, "namespace", namespace)
 		return "gone", nil
@@ -95,39 +98,94 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	if err := r.applier.Apply(ctx, namespace, objs); err != nil {
 		return "", fmt.Errorf("render: apply %s: %w", svc.ID, err)
 	}
-	phase, err := r.applier.Observe(ctx, namespace, svc.ID)
+	// Observe the CLUSTER by the name the driver gave it (manifests[0] is the
+	// Cluster; see driver.Manifests ordering).
+	phase, err := r.applier.Observe(ctx, namespace, manifests[0].Name)
 	if err != nil {
-		return "", fmt.Errorf("render: observe %s: %w", svc.ID, err)
+		return "", fmt.Errorf("render: observe %s: %w", manifests[0].Name, err)
 	}
-	return statusFromPhase(phase), nil
+	status := statusFromPhase(phase)
+	// BLOCKER: the Renderer contract requires a TERMINAL status. Reporting a
+	// transient `provisioning` would advance observed_generation, drop the row
+	// out of the outstanding set (observed < generation), and the service would
+	// never be re-polled to later report ready — on a real cell that is ~45s of
+	// convergence turning into "never ready, no metering". Signal not-yet
+	// instead: the agent skips the writeback and the row stays outstanding.
+	if !terminal(status) {
+		return "", fmt.Errorf("%w: %s is %q (phase %q)", ErrNotConverged, manifests[0].Name, status, phase)
+	}
+	return status, nil
 }
 
-// statusFromPhase maps CNPG's cluster phase to the ADR-024 reconciler vocabulary.
-// CNPG reports "Cluster in healthy state" when primary is accepting connections;
-// anything else (empty/absent, setting up, failover) is still provisioning. A
-// failed phase maps to failed so the control plane and metering see the truth.
-func statusFromPhase(phase string) string {
-	switch phase {
-	case "Cluster in healthy state":
-		return "ready"
-	case "":
-		return "provisioning" // not created yet / no status
-	default:
-		if isFailure(phase) {
-			return "failed"
-		}
-		return "provisioning"
-	}
-}
+// ErrNotConverged aliases the agent's sentinel so the loop can errors.Is it:
+// the apply succeeded but the resource has not reached a terminal state yet.
+var ErrNotConverged = agent.ErrNotConverged
 
-func isFailure(phase string) bool {
-	p := strings.ToLower(phase)
-	for _, f := range []string{"failed", "failure", "error"} {
-		if strings.Contains(p, f) {
-			return true
-		}
+func terminal(status string) bool {
+	switch status {
+	case "ready", "failed", "gone", "degraded":
+		return true
 	}
 	return false
+}
+
+// objectNames returns the driver-canonical names for a service's objects, so
+// Observe/Delete address exactly what Apply created.
+func (r *CNPGRenderer) objectNames(svc agent.DesiredService) []string {
+	m, err := r.pg.Render(driver.Spec{
+		Name: svc.ID, Namespace: "x", Product: "postgres", Shape: asMap(svc.Desired["shape"]),
+	})
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for _, o := range m {
+		out = append(out, o.Name)
+	}
+	return out
+}
+
+// statusFromPhase maps a CNPG cluster phase to the ADR-024 vocabulary using an
+// EXPLICIT table of the operator's phase constants (api/v1/cluster_types.go).
+//
+// A substring heuristic ({failed,failure,error}) was tried and is unsound: it
+// catches almost none of CNPG's real terminal-bad phases — "Cluster is
+// unrecoverable and needs manual intervention", "Invalid cluster definition",
+// "Unable to create required cluster objects" contain none of those words, so a
+// permanently broken cluster read as `provisioning` and retried forever with no
+// signal. Unknown phases fail CLOSED to `degraded` (visible, actionable) rather
+// than to `provisioning` (invisible, retried forever).
+var phaseStatus = map[string]string{
+	// terminal-good
+	"Cluster in healthy state": "ready",
+	// transient (converging) — never terminal, never reported
+	"":                   "provisioning",
+	"Setting up primary": "provisioning",
+	"Waiting for the instances to become active":   "provisioning",
+	"Creating a new replica":                       "provisioning",
+	"Primary instance is being restarted in-place": "provisioning",
+	"Switchover in progress":                       "provisioning",
+	"Failing over":                                 "provisioning",
+	"Upgrading cluster":                            "provisioning",
+	"Waiting for user action":                      "degraded",
+	// terminal-bad (manual intervention or a definition error)
+	"Cluster is unrecoverable and needs manual intervention":                                  "failed",
+	"Invalid cluster definition":                                                              "failed",
+	"Unable to create required cluster objects":                                               "failed",
+	"Cluster has incomplete or invalid image catalog":                                         "failed",
+	"Cluster cannot proceed to reconciliation due to an unknown plugin being required":        "failed",
+	"Cluster cannot execute instance online upgrade due to missing architecture binary":       "failed",
+	"Cluster cannot proceed to reconciliation due to an error while interacting with plugins": "failed",
+}
+
+func statusFromPhase(phase string) string {
+	if st, ok := phaseStatus[phase]; ok {
+		return st
+	}
+	// Unknown phase: fail closed. `degraded` is terminal in the reconciler
+	// vocabulary, so the control plane SEES it instead of the row silently
+	// retrying forever under a transient status.
+	return "degraded"
 }
 
 // --- small, panic-free extractors from the untyped desired map ---

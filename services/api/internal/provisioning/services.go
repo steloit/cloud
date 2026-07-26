@@ -136,28 +136,33 @@ func desiredDoc(product, intent, namespace string, shape, scaling, override []by
 	return b
 }
 
-// projectName returns the project's name for namespace derivation; on lookup
-// error it falls back to the id so a create is never blocked on a naming detail.
-func projectName(ctx context.Context, s *Service, projectID string) string {
-	if p, err := s.q.GetProject(ctx, projectID); err == nil {
-		return p.Name
+// resolveNamespace derives the cell namespace for an environment.
+//
+// It is derived from the environment's ID, NOT from project/env NAMES. Names are
+// unique only PER ORG (projects: UNIQUE (org_id, name)), so `proj--env` puts two
+// different orgs' `api`/`prod` in the SAME namespace — sharing the tenant
+// isolation boundary D7 defines (default-deny NetworkPolicy, ResourceQuota, and
+// CNPG's generated `<cluster>-app` credential Secrets). Ids are globally unique
+// AND immutable, so a project rename cannot orphan a running cluster either.
+//
+// Readability is preserved by keeping the env id recognizable (env_<hex> →
+// env-<hex>); a human maps it back with one lookup, which is the right trade
+// against cross-tenant namespace collision.
+func (s *Service) resolveNamespace(ctx context.Context, envID string) (string, error) {
+	if envID == "" {
+		return "", fmt.Errorf("provisioning: cannot resolve a namespace without an environment id")
 	}
-	return projectID
+	return namespaceForEnv(envID), nil
 }
 
-// resolveNamespace derives the cell namespace `proj--env` from the service's
-// environment → project (US-3.3). Sanitized to a valid k8s namespace label. A
-// missing project is an error, not a guessed namespace.
-func (s *Service) resolveNamespace(ctx context.Context, envID string) (string, error) {
-	env, err := s.q.GetEnvironment(ctx, envID)
-	if err != nil {
-		return "", err
+// namespaceForEnv maps an environment id to its RFC1123 namespace. Deterministic,
+// immutable, and ≤63 chars by construction (env ids are short).
+func namespaceForEnv(envID string) string {
+	ns := k8sNamespace(envID)
+	if len(ns) > 63 {
+		ns = strings.Trim(ns[:63], "-")
 	}
-	proj, err := s.q.GetProject(ctx, env.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	return k8sNamespace(proj.Name) + "--" + k8sNamespace(env.Name), nil
+	return ns
 }
 
 var nsInvalid = regexp.MustCompile(`[^a-z0-9-]`)
@@ -255,7 +260,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
 	}
-	namespace := k8sNamespace(projectName(ctx, s, env.ProjectID)) + "--" + k8sNamespace(env.Name)
+	namespace := namespaceForEnv(env.ID)
 	row, err := s.q.InsertService(ctx, store.InsertServiceParams{
 		ID: ids.New("svc"), EnvID: env.ID, Name: in.Name, Product: in.Product,
 		Intent:               pgtype.Text{String: line.Intent, Valid: true},
