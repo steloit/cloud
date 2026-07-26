@@ -2,7 +2,7 @@
 id: US-3.7
 title: "The estimate gate matches on PRICE, so a colliding shape provisions something you did not price"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
