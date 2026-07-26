@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/cnpg"
+	"github.com/steloit/cloud/services/cell-agent/internal/kube"
+	"github.com/steloit/cloud/services/cell-agent/internal/render"
 )
 
 func main() {
@@ -32,7 +35,24 @@ func main() {
 	}
 
 	cp := agent.NewHTTPControlPlane(base, token)
-	a := agent.New(cell, cp, agent.NewAckRenderer(log), log)
+
+	// Renderer selection (US-3.3): in a cell, converge for real via the
+	// Kubernetes API; outside one, fall back to the Ack renderer and SAY SO —
+	// a silent fallback would look like a working agent that provisions nothing.
+	var renderer agent.Renderer
+	if kc, err := kube.NewInCluster(); err == nil {
+		gsa, wal := os.Getenv("CELL_GSA_EMAIL"), os.Getenv("CELL_WAL_BUCKET")
+		if gsa == "" || wal == "" {
+			log.Error("boot failed: CELL_GSA_EMAIL and CELL_WAL_BUCKET are required in-cluster (customer DB pods need workload identity + a WAL bucket)")
+			os.Exit(1)
+		}
+		renderer = render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, log)
+		log.Info("renderer: CNPG (in-cluster, real apply)", "cell", cell, "wal_bucket", wal)
+	} else {
+		renderer = agent.NewAckRenderer(log)
+		log.Warn("renderer: ACK (no cluster — desired state is acknowledged, NOTHING is provisioned)", "reason", err)
+	}
+	a := agent.New(cell, cp, renderer, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
