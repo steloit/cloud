@@ -1,0 +1,14 @@
+# T1.2: the canonical dev/alpha storage class (ADR-0007 / INF-001 A6 — ratified
+# 2026-07-19). Parameters are the T1.0 spike's proven values VERBATIM
+# (infra/spike/manifests/pd-storageclass.yaml): pd-balanced, WaitForFirstConsumer
+# so the disk is born in the pod's zone. Measured on these exact parameters:
+# branch e2e 52.4s, snapshot 34.6s, restore-to-new 55.2s (ADR-0007 §2).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-cell
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-balanced
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

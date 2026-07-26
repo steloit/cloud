@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Topology — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/topology.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "topology", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+
+  window.renderPage = function (ctx) {
+    const env = ctx.e;
+    content.innerHTML = `
+      <div class="page-head">
+        <h1>Topology</h1>
+        <span class="sub">${env.services.length} services · ${(env.bindings || []).length} bindings · <span class="u-mono">${ctx.env}</span></span>
+        <span class="u-right u-12 u-faint">Same project, same drawing — the layout never reshuffles.</span>
+      </div>
+      <div id="topo"></div>`;
+    Topology(document.getElementById("topo"), ctx, { embed: false });
+  };
+
+  Shell.protoStates([
+    { label: "Empty state (C-25)", fn: () => {
+        const c = Shell.ctx(); const saved = c.e.services;
+        c.e = { ...c.e, services: [], bindings: [] };
+        renderPage(c); c.e.services = saved;
+      } },
+    { label: "Provisioning edge (dashed)", fn: () => {
+        const c = Shell.ctx();
+        const clone = JSON.parse(JSON.stringify(c.e));
+        clone.services.push({ id: "search", type: "valkey", state: "provisioning", size: "cache-s", mtd: 0, detail: "provisioning…", spark: [1,1,1,1,1,1,1,1,1,1,1,1] });
+        clone.bindings.push({ id: "bx", from: "app", to: "search", scope: "read-write", age: "pending", by: "priya" });
+        renderPage({ ...c, e: clone });
+        Shell.toast("A provisioning service: accent ring + dashed edge until ready.");
+      } },
+  ]);
+
+  renderPage(Shell.ctx());
+})();
+</script>
+</body>
+</html>

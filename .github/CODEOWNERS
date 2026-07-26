@@ -1,0 +1,6 @@
+# Human-decision-only paths — founder review required (agent PRs cannot self-merge these).
+/docs/product/00-sources/           @hashirventhodi
+/docs/product/18-philosophy/        @hashirventhodi
+/docs/adr/                          @hashirventhodi
+/AGENTS.md                          @hashirventhodi
+/.github/                           @hashirventhodi

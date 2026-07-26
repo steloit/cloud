@@ -1,0 +1,8 @@
+# T1.2: the branch primitive's snapshot class (ADR-0007) — PD incremental
+# snapshots, delta-priced (measured: ~62MB per 10%-divergence Dev branch).
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: pd-cell-snapclass
+driver: pd.csi.storage.gke.io
+deletionPolicy: Delete

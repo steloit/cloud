@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>New project — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const svcMode = params.get("mode") === "service"; // J3 single-service mode
+  const ctx0 = Shell.init({ section: "", scope: svcMode ? "project" : "org" });
+  const content = document.getElementById("content");
+
+  const W = { // wizard state
+    step: svcMode ? "select" : "name",
+    name: "", region: "iad",
+    selected: svcMode ? {} : { postgres: true },
+    cfg: { pgSize: "starter-1", pgVer: "16", pgBranch: true, vkSize: "cache-s", stRegionNote: true, qRetention: "7d" },
+    proposal: null, describeText: "",
+    failDemo: false,
+  };
+  // PDS-TPL: a template is a saved answer to this wizard — same steps, same estimate gate.
+  const tplId = params.get("template");
+  if (tplId && !svcMode) {
+    (params.get("services") || "").split(",").filter(Boolean).forEach(s => { if (DATA.svcTypes[s]) W.selected[s] = true; });
+    const tpl = (DATA.templates || []).find(t => t.id === tplId);
+    W.name = tplId === "saas" ? "my-saas" : tplId;
+    W.step = "select";
+    setTimeout(() => Shell.toast(`Template <b>${tpl ? tpl.name : tplId}</b> applied \u2014 services preselected. Review and adjust freely; the estimate gate is unchanged.`), 350);
+  }
+  const STEPS = svcMode
+    ? [["select", "Choose service"], ["configure", "Configure"], ["review", "Review"], ["done", "Done"]]
+    : [["name", "Name it"], ["select", "Choose services"], ["configure", "Configure"], ["review", "Review"], ["done", "Done"]];
+
+  const price = () => Object.keys(W.selected).filter(k => W.selected[k]).map(k => {
+    const t = DATA.svcTypes[k];
+    let amount = t.price, note = t.priceNote;
+    if (k === "postgres") { amount = W.cfg.pgSize === "starter-1" ? 12 : W.cfg.pgSize === "dev-1" ? 5 : 29; note = W.cfg.pgSize; }
+    if (k === "valkey") { amount = W.cfg.vkSize === "cache-s" ? 7 : 15; note = W.cfg.vkSize; }
+    return { k, t, amount, note, fixed: t.fixed };
+  });
+  const totals = () => {
+    const rows = price();
+    return { rows, fixed: rows.filter(r => r.fixed).reduce((s, r) => s + r.amount, 0), usage: rows.some(r => !r.fixed) };
+  };
+
+  function crumb() {
+    const idx = STEPS.findIndex(s => s[0] === W.step || (W.step === "describe" && s[0] === "select") || ((W.step === "provisioning" || W.step === "connect") && s[0] === "done"));
+    return `<nav class="wiz-crumb" aria-label="Progress">${STEPS.map((s, i) => `
+      <span class="wc ${i === idx ? "is-on" : i < idx ? "is-done" : ""}">${i < idx ? Shell.icon("check", "ic--s") : ""}${s[1]}</span>
+      ${i < STEPS.length - 1 ? '<span class="sep">\u2192</span>' : ""}`).join("")}</nav>`;
+  }
+
+  function render() {
+    content.innerHTML = `<div class="wiz">${crumb()}<div id="wiz-body"></div></div>`;
+    const body = document.getElementById("wiz-body");
+    ({ name: stepName, select: stepSelect, describe: stepDescribe, configure: stepConfigure, review: stepReview, provisioning: stepProvisioning, connect: stepConnect }[W.step])(body);
+    const h = body.querySelector("h1"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); } // §10.4
+  }
+
+  /* ---------- SH-08: Name & region ---------- */
+  function stepName(el) {
+    el.innerHTML = `
+      <h1>Name your project</h1>
+      <p class="wiz-sub">A project holds everything one application needs.</p>
+      <div class="field"><label for="w-name">Project name</label>
+        <input id="w-name" class="input input--mono" value="${Shell.esc(W.name)}" placeholder="ecommerce" autocomplete="off" spellcheck="false" style="max-width:340px">
+        <div class="help">Lowercase letters, numbers, and dashes. This becomes your project's address.</div>
+        <div class="slug-preview" id="slug-prev"></div>
+        <div class="err u-hide" id="w-name-err"></div></div>
+      <div class="field"><label for="w-region">Production region</label>
+        <select id="w-region" class="select" style="max-width:340px">${DATA.regions.map(r => `<option value="${r.id}" ${r.id === W.region ? "selected" : ""}>${r.name}</option>`).join("")}</select>
+        <div class="help">All services in an environment share its region. You can add more environments later.</div></div>
+      <div class="wiz-foot">
+        <a class="btn btn--ghost" href="index.html">Cancel</a>
+        <button class="btn btn--primary u-right" id="w-next">Continue</button>
+      </div>`;
+    const input = el.querySelector("#w-name"), prev = el.querySelector("#slug-prev"), err = el.querySelector("#w-name-err");
+    const paint = () => { const v = input.value.trim(); prev.innerHTML = v ? `app.steloit.com/acme/<b>${Shell.esc(v)}</b>` : ""; };
+    input.addEventListener("input", () => { err.classList.add("u-hide"); input.removeAttribute("aria-invalid"); paint(); }); paint();
+    el.querySelector("#w-next").addEventListener("click", () => {
+      const v = input.value.trim();
+      if (!/^[a-z][a-z0-9-]*$/.test(v)) { err.textContent = "Names use lowercase letters, numbers, dashes; start with a letter."; err.classList.remove("u-hide"); input.setAttribute("aria-invalid", "true"); input.focus(); return; }
+      if (DB.project(v)) { err.textContent = `${v} already exists in acme. Try ${v}-2.`; err.classList.remove("u-hide"); input.setAttribute("aria-invalid", "true"); return; }
+      W.name = v; W.region = el.querySelector("#w-region").value; W.step = "select"; render();
+    });
+    input.focus();
+  }
+
+  /* ---------- SH-09: Select services ---------- */
+  function stepSelect(el) {
+    el.innerHTML = `
+      <h1>${svcMode ? "Add a service" : "What does it need?"}</h1>
+      <p class="wiz-sub">${svcMode ? `New service in <span class="u-mono">${ctx0.project}/${ctx0.env}</span>.` : "Only what you select gets created. Add or remove services anytime."}</p>
+      <div class="svc-cards" role="group" aria-label="Services">
+        ${Object.entries(DATA.svcTypes).filter(([k, t]) => !t.v2).map(([k, t]) => `
+          <label class="svc-card ${W.selected[k] ? "is-on" : ""}">
+            <input type="checkbox" data-svc="${k}" ${W.selected[k] ? "checked" : ""}>
+            <span class="u-grow"><span class="u-row">${Shell.icon(t.icon)}<b>${t.label}</b>${k !== "postgres" ? '<span class="tag-ver">v0.5</span>' : ""}</span>
+              <span class="u-12 u-dim" style="display:block;margin-top:4px">${t.desc}</span>
+              <span class="sc-price">${t.fixed ? `from $${t.price}/mo` : `~$${t.price}/mo ${t.priceNote}`}</span></span>
+          </label>`).join("")}
+      </div>
+      <p style="margin-top:16px"><button class="btn btn--ghost" id="w-ai">${Shell.icon("ai", "ic--s")} Describe your app instead <span class="tag-ver">v0.5</span></button></p>
+      <div class="wiz-foot">
+        ${svcMode ? `<a class="btn btn--ghost" href="services.html${Shell.q()}">Cancel</a>` : `<button class="btn btn--ghost" id="w-back">Back</button>`}
+        <button class="btn btn--primary u-right" id="w-next">Continue</button>
+      </div>`;
+    el.querySelectorAll("[data-svc]").forEach(c => c.addEventListener("change", () => {
+      W.selected[c.dataset.svc] = c.checked;
+      c.closest(".svc-card").classList.toggle("is-on", c.checked);
+    }));
+    const back = el.querySelector("#w-back"); if (back) back.addEventListener("click", () => { W.step = "name"; render(); });
+    el.querySelector("#w-ai").addEventListener("click", () => { W.step = "describe"; render(); });
+    el.querySelector("#w-next").addEventListener("click", () => {
+      if (!Object.values(W.selected).some(Boolean)) return Shell.toast("Select at least one service \u2014 or describe your app.");
+      W.step = "configure"; render();
+    });
+  }
+
+  /* ---------- SH-10: Describe (AI path, AIC-SHELL-1) ---------- */
+  function stepDescribe(el) {
+    el.innerHTML = `
+      <h1>Describe what you're building</h1>
+      <p class="wiz-sub">The assistant proposes services \u2014 you choose. Nothing is created yet.</p>
+      <div class="field">
+        <textarea id="w-desc" class="textarea" placeholder="e.g. A SaaS tool with user accounts, file uploads, and a weekly email digest">${Shell.esc(W.describeText)}</textarea>
+      </div>
+      <div id="w-prop"></div>
+      <div class="wiz-foot">
+        <button class="btn btn--ghost" id="w-back">Pick manually instead</button>
+        <button class="btn btn--primary u-right" id="w-analyze">Analyze</button>
+      </div>`;
+    const prop = el.querySelector("#w-prop");
+    el.querySelector("#w-back").addEventListener("click", () => { W.step = "select"; render(); });
+    el.querySelector("#w-analyze").addEventListener("click", () => {
+      W.describeText = el.querySelector("#w-desc").value.trim();
+      if (!W.describeText) return Shell.toast("Describe your app in a sentence or two first.");
+      prop.innerHTML = `<div class="thinking"><span class="th-dot"></span><span>Analyzing your description\u2026</span>
+        <button class="btn btn--ghost btn--s u-right" onclick="this.closest('.thinking').remove()">Cancel</button></div>`;
+      setTimeout(() => renderProposal(prop), 1400);
+    });
+    if (W.proposal) renderProposal(prop);
+  }
+  function analyze(text) {
+    const low = text.toLowerCase();
+    const hit = (words) => words.filter(w => low.includes(w));
+    const recs = [];
+    const pgEv = hit(["user", "account", "saas", "record", "order", "auth", "profile", "data"]);
+    recs.push({ k: "postgres", on: true, reason: "user data", ev: pgEv.length ? pgEv : ["your application's records"], sure: true });
+    const stEv = hit(["upload", "file", "image", "photo", "media", "document", "video"]);
+    if (stEv.length) recs.push({ k: "storage", on: true, reason: "file uploads", ev: stEv, sure: true });
+    const qEv = hit(["email", "digest", "job", "background", "notification", "weekly", "report", "webhook"]);
+    if (qEv.length) recs.push({ k: "queue", on: true, reason: "background work", ev: qEv, sure: true });
+    const vkEv = hit(["session", "cache", "fast", "realtime", "rate limit", "leaderboard"]);
+    recs.push({ k: "valkey", on: vkEv.length > 0, reason: vkEv.length ? "sessions & caching" : "caching \u2014 not clearly needed yet", ev: vkEv, sure: vkEv.length > 0 });
+    return { recs, evidence: [...new Set(recs.flatMap(r => r.ev))].slice(0, 5) };
+  }
+  function renderProposal(host) {
+    if (!W.proposal) W.proposal = analyze(W.describeText);
+    const p = W.proposal;
+    host.innerHTML = `
+      <div class="proposal" style="margin-top:8px">
+        <div class="prop-h"><span class="ai-badge">${Shell.icon("ai", "ic--s")} Suggested by Steloit Assistant</span>
+          <button class="u-right u-12" style="color:var(--text-link)" id="prop-why">why?</button></div>
+        ${p.recs.map((r, i) => {
+          const t = DATA.svcTypes[r.k];
+          return `<div class="prop-item">
+            ${Shell.icon(t.icon)}
+            <span class="u-grow"><b>${t.label}</b> <span class="reason">\u2014 ${r.reason}</span>
+              ${!r.sure ? `<span class="u-12" style="display:block;color:var(--status-degraded)">Not sure about this one \u2014 left off by default.</span>` : ""}</span>
+            <span class="u-mono u-12 u-dim">${t.fixed ? `$${t.price}/mo` : `~$${t.price}/mo`}</span>
+            <span class="switch"><input type="checkbox" data-rec="${i}" ${r.on ? "checked" : ""} aria-label="Include ${t.label}"><span class="tr"></span></span></div>`;
+        }).join("")}
+        <div class="prop-evidence">Based on: ${p.evidence.map(e => `<q>${Shell.esc(e)}</q>`).join(", ")}</div>
+        <div class="prop-f"><span class="u-grow">You choose \u2014 nothing is created yet.</span>
+          <button class="btn btn--primary" id="prop-accept">Use this selection</button></div>
+      </div>`;
+    host.querySelectorAll("[data-rec]").forEach(c => c.addEventListener("change", () => { p.recs[+c.dataset.rec].on = c.checked; }));
+    host.querySelector("#prop-why").addEventListener("click", () => Shell.dialog({
+      title: "About this suggestion",
+      body: `<p>The assistant reads only the description you typed, maps stated needs to service types, and quotes the exact words it relied on. It never creates anything \u2014 accepting routes you into the normal configure step, identical to picking by hand.</p><p class="u-12 u-faint">Capability AIC-SHELL-1 \u00b7 governed by PRD-012 \u00b7 can be disabled org-wide in Policies.</p>`,
+      confirmLabel: "Got it", onConfirm: c => c(),
+    }));
+    host.querySelector("#prop-accept").addEventListener("click", () => {
+      Object.keys(W.selected).forEach(k => delete W.selected[k]);
+      p.recs.forEach(r => { if (r.on) W.selected[r.k] = true; });
+      W.step = "configure"; render();
+    });
+  }
+
+  /* ---------- SH-11: Configure ---------- */
+  function stepConfigure(el) {
+    const chosen = Object.keys(W.selected).filter(k => W.selected[k]);
+    el.innerHTML = `
+      <h1>Configure</h1>
+      <p class="wiz-sub">Defaults fit a new app. Everything here can change later without recreating the service.</p>
+      ${chosen.map(k => cfgSection(k)).join("")}
+      <div class="wiz-foot">
+        <button class="btn btn--ghost" id="w-back">Back</button>
+        <button class="btn btn--primary u-right" id="w-next">Continue to review</button>
+      </div>`;
+    el.querySelector("#w-back").addEventListener("click", () => { W.step = "select"; render(); });
+    el.querySelector("#w-next").addEventListener("click", () => { W.step = "review"; render(); });
+    el.querySelectorAll("[data-cfg]").forEach(c => c.addEventListener("change", () => { W.cfg[c.dataset.cfg] = c.type === "checkbox" ? c.checked : c.value; }));
+    el.querySelectorAll("[data-cli]").forEach(b => b.addEventListener("click", () => {
+      const t = document.getElementById("cli-" + b.dataset.cli); t.classList.toggle("u-hide");
+      b.textContent = t.classList.contains("u-hide") ? "View as CLI" : "Hide CLI";
+    }));
+  }
+  function cfgSection(k) {
+    const t = DATA.svcTypes[k];
+    const bodies = {
+      postgres: `
+        <div class="field"><label>Size</label>
+          <select class="select" data-cfg="pgSize" style="max-width:260px">
+            <option value="dev-1" ${W.cfg.pgSize === "dev-1" ? "selected" : ""}>dev-1 \u00b7 shared \u00b7 $5/mo</option>
+            <option value="starter-1" ${W.cfg.pgSize === "starter-1" ? "selected" : ""}>starter-1 \u00b7 1 vCPU / 2 GB \u00b7 $12/mo</option>
+            <option value="pro-1" ${W.cfg.pgSize === "pro-1" ? "selected" : ""}>pro-1 \u00b7 2 vCPU / 8 GB \u00b7 $29/mo</option>
+          </select></div>
+        <details class="adv"><summary>${Shell.icon("chevR", "ic--s")} Advanced</summary><div class="adv-body">
+          <div class="field"><label>Version</label>
+            <select class="select" data-cfg="pgVer" style="max-width:180px"><option>16</option><option>15</option></select>
+            <span class="default-badge">default: 16</span></div>
+          <label class="check"><input type="checkbox" data-cfg="pgBranch" ${W.cfg.pgBranch ? "checked" : ""}> Enable branching <span class="u-dim">(dev/preview copies; branch costs are shown when a branch is created)</span></label>
+        </div></details>
+        <p class="u-12 u-faint" style="margin-top:8px">Deeper PostgreSQL options (extensions, pooling, pgvector) live on the service page \u2014 PDS-001.</p>`,
+      valkey: `
+        <div class="field"><label>Size</label>
+          <select class="select" data-cfg="vkSize" style="max-width:260px">
+            <option value="cache-s" ${W.cfg.vkSize === "cache-s" ? "selected" : ""}>cache-s \u00b7 512 MB \u00b7 $7/mo</option>
+            <option value="cache-m">cache-m \u00b7 2 GB \u00b7 $15/mo</option>
+          </select></div>`,
+      storage: `
+        <p class="u-12 u-dim">One bucket, created as <span class="u-mono">${(W.name || "project")}-media</span>. Pay for stored bytes and requests \u2014 no fixed fee.</p>
+        <details class="adv" style="margin-top:10px"><summary>${Shell.icon("chevR", "ic--s")} Advanced</summary><div class="adv-body">
+          <label class="check"><input type="checkbox" checked> Block public access <span class="default-badge">default</span></label>
+        </div></details>`,
+      queue: `
+        <div class="field"><label>Message retention</label>
+          <select class="select" data-cfg="qRetention" style="max-width:200px">
+            <option value="7d" ${W.cfg.qRetention === "7d" ? "selected" : ""}>7 days (default)</option><option value="14d">14 days</option></select></div>`,
+    };
+    const clis = {
+      postgres: `steloit db create postgres --size ${W.cfg.pgSize} --version 16`,
+      valkey: `steloit db create valkey --size ${W.cfg.vkSize}`,
+      storage: `steloit storage create ${(W.name || "project")}-media`,
+      queue: `steloit queue create jobs --retention 7d`,
+    };
+    return `<section class="cfg-sec">
+      <div class="cfg-h">${Shell.icon(t.icon)}<h3>${t.label}</h3><span class="default-badge">defaults applied</span>
+        <button class="btn btn--ghost btn--s u-right" data-cli="${k}">View as CLI</button></div>
+      <div class="cfg-b">${bodies[k]}<div id="cli-${k}" class="code-block u-hide" style="margin-top:12px"><span class="cm"># the same thing, on your terms</span>\n${clis[k]}</div></div>
+    </section>`;
+  }
+
+  /* ---------- SH-12: Review & estimate (P-3) ---------- */
+  function stepReview(el) {
+    const { rows, fixed, usage } = totals();
+    const estimateOk = !el.dataset.estFail;
+    el.innerHTML = `
+      <h1>Review</h1>
+      <p class="wiz-sub">${svcMode ? `Adding to <b class="u-mono">${ctx0.project}/${ctx0.env}</b>` : `<b class="u-mono">${W.name}</b> \u00b7 production \u00b7 ${W.region}`}</p>
+      <div class="estimate" id="est">
+        ${rows.map(r => `<div class="est-row">
+          <span>${DATA.svcTypes[r.k].label}</span><span class="u-mono u-12 u-faint">${r.note}</span>
+          <span class="u-grow" style="text-align:right"><a href="#" data-edit>${"edit"}</a></span>
+          <span class="est-cost">${r.fixed ? "" : "~"}$${r.amount.toFixed(2)} /mo${r.fixed ? "" : ` <span class="u-faint u-11">at typical use</span>`}</span></div>`).join("")}
+        <div class="est-total"><span class="u-grow">Estimated monthly total</span>
+          <span class="est-cost">$${fixed.toFixed(2)}${usage ? " + usage" : ""}</span></div>
+        <div class="est-note">Fixed prices exact; ~usage items estimated at typical use. Free-plan credit applied first. Nothing bills until you confirm.</div>
+      </div>
+      <div id="est-fail" class="u-hide sec-error" style="margin-top:12px">${Shell.icon("warn", "ic--s")}
+        <span class="u-grow">Can't fetch the estimate right now \u2014 creation is paused so you're never billed blind. <span class="u-mono u-faint">E-EST-503</span></span></div>
+      <label class="check" style="margin-top:16px"><input type="checkbox" id="w-faildemo"> <span class="u-12 u-dim">Prototype: simulate a provisioning step failure</span></label>
+      <div class="wiz-foot">
+        <button class="btn btn--ghost" id="w-back">Back</button>
+        <button class="btn btn--primary u-right" id="w-create">${svcMode ? "Add service" : "Create project"} \u00b7 $${fixed.toFixed(2)}/mo${usage ? " + usage" : ""}</button>
+        <button class="btn u-right u-hide" id="w-retry-est">Retry estimate</button>
+      </div>`;
+    el.querySelectorAll("[data-edit]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); W.step = "configure"; render(); }));
+    el.querySelector("#w-back").addEventListener("click", () => { W.step = "configure"; render(); });
+    el.querySelector("#w-create").addEventListener("click", () => {
+      W.failDemo = el.querySelector("#w-faildemo").checked;
+      W.step = "provisioning"; render();
+    });
+    Shell.protoStates([
+      { label: "Estimate unavailable (E-EST-503)", fn: () => { // G4: no estimate → no create
+          el.querySelector("#est").style.opacity = ".35";
+          el.querySelector("#est-fail").classList.remove("u-hide");
+          el.querySelector("#w-create").classList.add("u-hide");
+          el.querySelector("#w-retry-est").classList.remove("u-hide");
+          el.querySelector("#w-retry-est").addEventListener("click", () => render());
+        } },
+    ]);
+  }
+
+  /* ---------- SH-13: Provisioning (P-8) ---------- */
+  function stepProvisioning(el) {
+    const chosen = Object.keys(W.selected).filter(k => W.selected[k]);
+    const steps = svcMode ? [] : [["Create project", 700], ["Create production environment (" + W.region + ")", 900]];
+    chosen.forEach(k => steps.push(["Provision " + DATA.svcTypes[k].label, k === "postgres" ? 2600 : 1400]));
+    steps.push(["Issue credentials & bindings", 900]);
+    el.innerHTML = `
+      <h1>Creating${svcMode ? " service" : " " + `<span class="u-mono">${W.name}</span>`}\u2026</h1>
+      <p class="wiz-sub">From the first provisioning step on, resources exist and may bill. You can leave \u2014 this continues.</p>
+      <div class="steps" id="steps">
+        ${steps.map((s, i) => `<div class="step" data-i="${i}">
+          <span class="st-ic">${i + 1}</span>
+          <span><span class="st-name">${s[0]}</span><span class="st-sub u-hide" data-sub></span></span>
+          <span class="st-time" data-time></span></div>`).join("")}
+      </div>
+      <div id="prov-done"></div>`;
+    const els = Array.from(el.querySelectorAll(".step"));
+    const failAt = W.failDemo ? Math.min(2, steps.length - 2) : -1;
+    let i = 0;
+    const t0 = Date.now();
+    function runStep() {
+      if (i >= steps.length) return done();
+      const st = els[i]; st.classList.add("is-running");
+      Shell.announce(steps[i][0] + " started");
+      const started = Date.now();
+      setTimeout(() => {
+        st.classList.remove("is-running");
+        st.querySelector("[data-time]").textContent = ((Date.now() - started) / 1000).toFixed(0) + "s";
+        if (i === failAt) return fail(st);
+        st.classList.add("is-done"); st.querySelector(".st-ic").innerHTML = Shell.icon("check", "ic--s");
+        Shell.announce(steps[i][0] + " done");
+        i++; runStep();
+      }, steps[i][1]);
+    }
+    function fail(st) {
+      st.classList.add("is-failed"); st.querySelector(".st-ic").innerHTML = Shell.icon("x", "ic--s");
+      const sub = st.querySelector("[data-sub]"); sub.classList.remove("u-hide");
+      sub.innerHTML = `This step failed \u2014 everything already created is safe. Retry when ready. <span class="u-mono u-faint">E-OP-STEP \u00b7 ref 4d1x-88</span>`;
+      st.insertAdjacentHTML("afterend", `<div style="margin:8px 0 0 36px"><button class="btn btn--primary btn--s" id="retry-step">Retry step</button></div>`);
+      Shell.announce("A provisioning step failed. Everything already created is safe.");
+      document.getElementById("retry-step").addEventListener("click", () => {
+        st.classList.remove("is-failed"); st.querySelector(".st-ic").textContent = i + 1; sub.classList.add("u-hide");
+        document.getElementById("retry-step").parentElement.remove();
+        W.failDemo = false; runStep();
+      });
+    }
+    function done() { // celebration ①
+      document.getElementById("prov-done").innerHTML = `
+        <div class="celebrate">
+          <svg class="cel-ring" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30"/><path d="M20 33.5 28.5 42 45 24"/></svg>
+          <h2>${svcMode ? `<span class="u-mono">${Object.keys(W.selected).find(k => W.selected[k])}</span> is live.` : `<span class="u-mono">${W.name}</span> is live.`}</h2>
+          <p class="u-dim">Provisioned in ${((Date.now() - t0) / 1000).toFixed(0)}s. One thing left: connect your code.</p>
+        </div>`;
+      Shell.announce((svcMode ? "Service" : W.name) + " is live.");
+      setTimeout(() => { W.step = "connect"; render(); }, 1600);
+    }
+    runStep();
+  }
+
+  /* ---------- SH-19: Connect (P-9) ---------- */
+  function stepConnect(el) {
+    const chosen = Object.keys(W.selected).filter(k => W.selected[k]);
+    el.innerHTML = `
+      <h1>Connect your app</h1>
+      <p class="wiz-sub">Your services are ready. Get their settings into your code \u2014 pick the way that fits.</p>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="cli">CLI</button>
+        <button role="tab" aria-selected="false" data-tab="sync">Platform sync <span class="tag-ver">v0.5</span></button>
+        <button role="tab" aria-selected="false" data-tab="manual">Manual</button>
+      </div>
+      <div id="tab-body"></div>
+      <div class="card" style="margin-top:20px" id="wait-card">
+        <div class="u-row"><span class="badge badge--provisioning"><span class="dot"></span>waiting</span>
+          <span class="u-dim u-12">Listening for your app's first connection\u2026</span></div>
+      </div>
+      <div class="wiz-foot">
+        <a class="btn btn--ghost" href="index.html">Go to projects</a>
+        <a class="btn u-right" href="overview.html?project=ecommerce&env=production">Open a live project \u2192</a>
+      </div>
+      <p class="u-11 u-faint">Prototype note: the created project isn't persisted \u2014 the live link opens the sample.</p>`;
+    const body = el.querySelector("#tab-body");
+    const tabs = {
+      cli: `<p class="u-dim" style="margin-bottom:8px">Run this in your app's directory:</p>
+        <div class="code-block"><button class="btn btn--ghost btn--s copy" data-copy>${Shell.icon("copy", "ic--s")} Copy</button><span class="kw">steloit</span> env pull</div>
+        <p class="u-12 u-dim" style="margin-top:8px">Writes <span class="u-mono">.env.steloit</span> with your connection settings. Add it to <span class="u-mono">.gitignore</span>. Re-run any time \u2014 rotated credentials update automatically.</p>`,
+      sync: `<div class="u-row" style="gap:12px;flex-wrap:wrap">
+        <div class="card u-grow"><b>Vercel</b><p class="u-12 u-dim" style="margin:6px 0 10px">Push env vars to a Vercel project; stays in sync on rotation.</p><button class="btn btn--s" onclick="Shell.toast('Platform sync connects in v0.5.')">Connect</button></div>
+        <div class="card u-grow"><b>Netlify</b><p class="u-12 u-dim" style="margin:6px 0 10px">Same, for Netlify sites.</p><button class="btn btn--s" onclick="Shell.toast('Platform sync connects in v0.5.')">Connect</button></div></div>`,
+      manual: chosen.map(k => {
+        const names = { postgres: ["DATABASE_URL", "postgres://app:\u2022\u2022\u2022\u2022\u2022\u2022@db.acme-" + (W.name || "proj") + ".steloit.app:5432/main"], valkey: ["VALKEY_URL", "valkey://\u2022\u2022\u2022\u2022\u2022\u2022@cache.acme.steloit.app:6379"], storage: ["STORAGE_ACCESS_KEY", "stl_\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"], queue: ["QUEUE_URL", "queue://\u2022\u2022\u2022\u2022\u2022\u2022@jobs.acme.steloit.app"] };
+        const [n, v] = names[k];
+        return `<div class="code-block" style="margin-bottom:10px"><button class="btn btn--ghost btn--s copy" data-reveal>${Shell.icon("eye", "ic--s")} Reveal</button><span class="cm"># ${DATA.svcTypes[k].label}</span>\n${n}=<span class="reveal-val is-hidden">${v}</span></div>`;
+      }).join("") + `<div class="banner" style="border-color:var(--status-degraded);background:var(--status-degraded-soft)">${Shell.icon("warn", "ic--s")}<span>Manually copied credentials won't update when rotated. Prefer <b class="u-mono">env pull</b> or platform sync.</span></div>`,
+    };
+    function paint(name) {
+      body.innerHTML = tabs[name];
+      el.querySelectorAll("[role=tab]").forEach(t => t.setAttribute("aria-selected", t.dataset.tab === name));
+      body.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => { try { navigator.clipboard.writeText("steloit env pull"); } catch (e) {} Shell.toast("Copied."); }));
+      body.querySelectorAll("[data-reveal]").forEach(b => b.addEventListener("click", () => {
+        const v = b.parentElement.querySelector(".reveal-val"); v.classList.toggle("is-hidden");
+        b.innerHTML = v.classList.contains("is-hidden") ? Shell.icon("eye", "ic--s") + " Reveal" : Shell.icon("eye", "ic--s") + " Hide";
+      }));
+    }
+    el.querySelectorAll("[role=tab]").forEach(t => t.addEventListener("click", () => paint(t.dataset.tab)));
+    paint("cli");
+    setTimeout(() => { // celebration ② — first-use event
+      const w = document.getElementById("wait-card"); if (!w) return;
+      w.innerHTML = `<div class="celebrate" style="padding:12px 0">
+        <svg class="cel-ring" viewBox="0 0 64 64" style="width:44px;height:44px"><circle cx="32" cy="32" r="30"/><path d="M20 33.5 28.5 42 45 24"/></svg>
+        <h2 style="font-size:1.1rem">Connected. You're building. \u2192</h2>
+        <p class="u-12 u-dim">First connection from <span class="u-mono">db-main</span> client \u00b7 just now</p></div>`;
+      Shell.announce("Connected. Your app made its first connection.");
+    }, 6000);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

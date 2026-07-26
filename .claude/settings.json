@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * +main*)",
+      "Bash(git -C * push --force*)",
+      "Bash(git -C * push -f*)"
+    ],
+    "ask": [
+      "Bash(git push origin main*)",
+      "Bash(git push * HEAD:main*)",
+      "Bash(git -C * push origin main*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect-authority.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,153 @@
+frame_id,family,kind,title_and_purpose
+W1,W,page,Projects home — the org’s front door
+W2,W,page,"Create project — AI recommends with reasons, cost shown before anything exists"
+W3,W,page,"Project overview · canvas rework — vitals, environments, full-width topology with the incident path, attention + event spine"
+DB1,DB,page,"Dashboards · Overview — the landing under Home: pinned, pre-built (generated, always current), filters that apply to every widget; views not files."
+DB2,DB,page,"Dashboards · pre-built fleet — PostgreSQL Health: every instance across projects &amp; envs, one screen; depth stays on product pages (Open →)."
+DB3,DB,page,Dashboards · pre-built — Infrastructure Overview: golden signals across services with deploy markers (#143) on every chart; ends tab-jumping.
+DB4,DB,page,"Dashboards · pre-built — Cost &amp; Usage: spend as telemetry (MTD $171.42 → $482, egress 87%); the ledger stays in Billing — this watches it."
+DB5,DB,page,"Dashboards · My &amp; shared — personal by default, org/restricted like templates; shared edits are live for everyone and audited; duplicate to riff."
+DB6,DB,page,"Dashboards · layout templates — arrangements only, bound to your services at create; five personas, honestly labeled; distinct from Settings → Templates."
+DB7,DB,overlay-drawer,Dashboards · edit mode — checkout-health: cross-plane widgets (metrics + billing + deploys — why this isn’t under Observe) with the add-widget drawer; ⚑ lands here too.
+DB8,DB,overlay-modal,"Dashboards · new-dashboard modal (the interaction tiers apply here too): name, visibility, scope (org-wide vs project — born filtered) is a separate axis from visibility (who sees it)."
+D1,D,page,Chosen shell — product rail + product sidebar · PostgreSQL → SQL Editor
+D2,D,page,Chosen shell · PostgreSQL → Table Viewer
+D3,D,page,"Chosen shell · Valkey → Data Browser — same grammar, different product"
+D4,D,page,PostgreSQL · Query Insights — where the 642 ms story is found
+D5,D,page,"PostgreSQL · Backups — PITR with restore-to-branch, never in place"
+S1,S,page,"Valkey · Overview — same grammar, calm state: keyspace shape as the Right-now panel"
+D6,D,page,"Valkey · CLI Console — read-only by default, writes unlock + audit"
+S2,S,page,Object Storage · Overview — activity feed as the Right-now panel; usage-based cost cell
+D7,D,page,"Object Storage · Object Browser — prefixes, preview, signed URLs"
+S3,S,page,Queue · Overview — DLQ attention card; delivery contract in chips
+D8,D,page,"Queue · Messages &amp; dead letters — inspect payload, redrive after the fix"
+S4,S,page,Web service · Overview — live deploy + regression as the Right-now panel; rollback at hand
+S5,S,page,Worker · Overview — schedules and consumption as the Right-now panel
+S6,S,page,"PostgreSQL · Overview (fresh instance) — the empty state: honest zeros, next steps, and the promise of when amber appears"
+D9,D,page,"PostgreSQL · Metrics — the observability grammar: categories, deltas, thresholds, markers, brush"
+D10,D,page,"PostgreSQL · Logs — query tokens, volume histogram, facets, structured expansion"
+D11,D,page,"PostgreSQL · Bindings — mint, rotate, revoke; consumers never see a password"
+D12,D,page,"PostgreSQL · Settings — resize with stated blast radius, dependency-blocked delete"
+D13,D,page,"Valkey · Metrics — same observability grammar, cache-shaped categories and thresholds"
+D14,D,page,"Valkey · Settings — mode switch with stated cost, policy-locked TLS, guarded FLUSHALL"
+D15,D,page,Object Storage · Lifecycle rules — composer with dry-run counts
+D16,D,page,"Object Storage · Settings — public is an approval, delete is drain-first"
+D17,D,page,"Queue · Schedules — cron publishes; a missed run is an alert, not a silence"
+D18,D,page,Queue · Settings — the delivery contract is immutable; purge requires a reason
+D19,D,page,"Web service · Deployments — service-level history, warm rollback targets, instance strip"
+D20,D,page,"Web service · Shell — identity-based, masked secrets, fully audited"
+D21,D,page,"Web service · Domains — DNS verify, auto-TLS, preview subdomains for free"
+D22,D,page,"Web service · Scaling — strategy, range, cost and behavior in one flow; override quarantined with an expiry"
+D23,D,page,Web service · Settings — custom vars refuse secrets; live-traffic delete guarded
+M1,M,page,"Resource model — the rail is the project’s shape: internal-tools uses two products, so it shows two"
+M2,M,page,"Resource model — several instances of one product: badge on the rail, list on landing, switcher in the header"
+M4,M,page,Valkey · instance landing — the M2 grammar as it appears when this product reaches ×2 (illustrative second instance; canon today: PG only)
+M5,M,page,Object Storage · instance landing — the M2 grammar as it appears when this product reaches ×2 (illustrative second instance; canon today: PG only)
+M6,M,page,Queue · instance landing — the M2 grammar as it appears when this product reaches ×2 (illustrative second instance; canon today: PG only)
+M7,M,page,Web service · instance landing — the M2 grammar as it appears when this product reaches ×2 (illustrative second instance; canon today: PG only)
+M8,M,page,Worker · instance landing — the M2 grammar as it appears when this product reaches ×2 (illustrative second instance; canon today: PG only)
+X1,X,page,"Extensibility · AI Gateway — a capability-shaped Service proving the rail generalizes: no ×n badge, no instance switcher, sidebar holds routes/models not instances"
+X2,X,page,"BYOC · Cells — org-level: connect AWS/GCP/Azure as deployment targets; prerequisites → cross-account trust → provision → health; a cell is infrastructure, not a product"
+X3,X,page,"BYOC · environment creation — managed regions and customer cells in ONE combined selector; after the target, creation is identical. The only place a developer meets BYOC."
+M3,M,page,"Resource model — environments stay a filter, not a container: the parity matrix makes shape vs. presence visible"
+SW1,SW,page,Switchers · Organization — the billing &amp; policy boundary; switching lands on the org’s projects home
+SW2,SW,page,Switchers · Project — status dots and cost in the menu itself; switching preserves your surface class
+SW3,SW,page,"Switchers · Instance — appears only when n&gt;1, together with the rail badge; the ▾ lives in the product header"
+C1,C,page,"Create · one surface, selection state — the + rail destination owns a page now, not a dialog; ⌘K deep-links preselect"
+AI1,AI,page,"AI · describe-to-provision — intent → explainable suggestions with per-service “Why”, toggles, live estimate; approve to create."
+AI2,AI,page,"AI · Assistant · Ask — conversation history, an evidence-cited thread, and a sources rail; built on the standard sidebar + pgpad grammar like the rest of the console."
+AI4,AI,page,AI · access — top-nav Assistant button (⌘J) opens a context-aware right drawer; expands to the full page. Not a floating chatbot.
+AI5,AI,page,"AI · first-run coachmark — introduces the top-nav Assistant button on a new user’s first screen: spotlight + one-time popover, ⌘J hint, dismissible, and it names the Policies opt-out."
+AI6,AI,page,"AI · Valkey — cache optimization: eviction-policy & memory proposal from live pressure, applied through Settings"
+AI7,AI,page,"AI · Object Storage — lifecycle & cost proposal from object age/access, applied via the Lifecycle composer"
+AI8,AI,page,"AI · Queue — dead-letter analysis: correlates the 2 order.paid failures to deploy #142; fix ships via Deploy, then replay"
+AI9,AI,page,AI · continue from an insight — “Ask a follow-up” opens the Assistant seeded with that proposal (evidence + reasoning loaded); the insight stays attached and the conversation never replaces the approval.
+AI10,AI,page,"AI · Assistant · Insights — the recommendations inbox as a hub section: metric summary, filters, ranked cards; standard components throughout."
+AI11,AI,page,"AI · Assistant · Activity — the audit ledger in the standard table grammar: actor, action, evidence, timestamp for every AI event."
+AI12,AI,page,"AI · Assistant · Capabilities — a directory of what the AI does and where, with the safety boundary and org-wide off-switch."
+AI3,AI,page,"AI · the disable switch (Law 4) — the ai-assistant Org policy as a full page: enforcement (Enabled / Opt-in only / Disabled), the exact surfaces it hides, what it never touches, impact, per-project overrides and audit."
+C2,C,page,"Create · one surface, PostgreSQL selected — the type block is what changes; the skeleton never does"
+C3,C,page,"Create · one surface, Valkey selected — the type block is what changes; the skeleton never does"
+C9,C,page,"Create · one surface, Web selected — the type block is what changes; the skeleton never does"
+C10,C,page,"Create · one surface, Storage selected — the type block is what changes; the skeleton never does"
+C11,C,page,"Create · one surface, Queue selected — the type block is what changes; the skeleton never does"
+C12,C,page,"Create · one surface, Worker selected — the type block is what changes; the skeleton never does"
+C4,C,page,"Provisioning — the honest in-between: steps visible, tools gated, billing not yet started"
+C5,C,page,Templates — the delivery vehicle for best practices
+C6,C,page,"Template detail · store — review everything, rename, then it feeds the guided flow (W2)"
+T1,T,overlay-modal,"Templates · management — the home for saved templates (Settings → Organization): browse, filter, edit, duplicate, delete via centered modal (copy-semantics stated); consumption stays in the create flows and gallery (C5)."
+T2,T,page,"Templates · detail — store-baseline: contents editable per service, what’s captured vs never (secrets), where-used as information (copies, not links), instantiation estimate."
+T3,T,page,"Templates · save-as-template — the capture flow (from W2’s button, gear-lit creation canvas): pick services, placeholder bindings, the secrets-never-captured contract, estimate from birth."
+U1,U,overlay-modal,"Interactions · centered modal — Invite member over G6: two fields, seat-aware, done. Simple actions get modals; the page context stays visible but isn’t needed."
+U2,U,overlay-drawer,"Interactions · drawer — Create binding from api: pick target (db-reports), scope read-only, env-var preview, credentials minted at bind. Complex forms get the right sheet (AI4’s grammar)."
+U3,U,overlay-drawer,Interactions · drawer — Add lifecycle rule on assets: prefix + action + dry-run preview; the manual path to the same rule the assistant proposed (AI7).
+U4,U,overlay-drawer,"Interactions · drawer — New schedule on jobs (S3’s button): cron with next-runs preview, {{date}} payload template (D17), missed runs fail loudly."
+U5,U,overlay-drawer,"Interactions · drawer, async state — Add custom domain mid-verification: DNS records, live dig checks, “close this — we keep checking”; cert issues automatically. TLS never optional."
+U6,U,overlay-modal,"Interactions · typed-confirm modal — Delete db-main: dependents named (api, worker), final backup + 30-day restore, billing stops, button enabled only when the name matches."
+U7,U,overlay-modal,"Interactions · modal, reveal state — token created (P5’s and G8’s Create): the secret shown once with a hash-only promise; carries your roles and shrinks with them."
+U8,U,overlay-drawer,"Interactions · drawer — New alert rule (O5’s button): query pre-filled from ⚑, condition + window, routes, and a 7-day backtest that finds the 431 ms incident."
+C7,C,page,"Region exception — the product isn’t in the home region: pick from where it exists, with the physics priced"
+C8,C,page,"New environment — the US-client answer: the whole stack moves near the client, with its own home region"
+W4,W,page,"PostgreSQL · Overview — the shared Overview grammar: identity chips, vitals + cost, Right now, Connect, Act"
+W5,W,page,PostgreSQL · Branches — the signature feature
+O1,O,page,"Observe · Health — service grid, the shared timeline made literal, SLOs as rules, cost as a signal, firing alerts in reach"
+O2,O,page,"Observe · Metrics — cross-service explorer: split-by-route finds the regression, Cost is a category, every pane is a query"
+O3,O,page,"Observe · Logs — unified stream: one trace id stitches three services, the histogram is the navigation, facets are computed truths"
+O4,O,page,"Observe · Events — the spine behind every chart marker; ops grain here, compliance grain in Audit; two-event correlation overlay"
+O5,O,page,"Observe · Alerts — rules speak the query language verbatim; firing state, SLO burn, cost anomaly; the ⚑ loop closes here"
+O6,O,page,"Observe · Traces — the waterfall proves what the metrics implied: 79% of the request is one span, and the span links to its fix"
+W7,W,page,⌘K — jump · act · ask; nothing is more than one palette away
+DP1,DP,page,"Deploy · Deployments — promotion lane with the fix in flight, cross-env history where rollbacks state their reasons"
+DP2,DP,page,"Deploy · Rollout — #143 promoting through health gates: canary vs baseline live, auto-abort contract stated, the incident’s resolution visible"
+DP3,DP,page,"Deploy · Previews — a preview is an environment: policy exclusions per service, the bot comment closes the loop in GitHub"
+W10,W,page,"AI proposal — evidence, reasoning, a reviewable diff; the apply button belongs to the human"
+B1,B,page,"Billing · Overview — MTD, forecast with budget markers, per-project rollup that reconciles to the sidebars, change feed"
+B2,B,page,"Billing · Usage — the meter behind the invoice: included allotments, open unit prices, scale-to-zero honesty, API parity"
+B3,B,page,"Billing · Invoices — split view; an invoice is data (PDF/CSV/JSON), GST handled, lines expand to usage rows"
+B4,B,page,"Billing · Payment &amp; plan — plan limits with honest blocked-downgrade, backup card, and the dunning contract printed up front"
+B5,B,page,"Billing · Plans — four tiers of the hybrid model: subscription gates capabilities, infra is pay-as-you-go, quotas overage; current plan marked; safety never gated."
+B6,B,page,"Billing · Feature gating — both sides of a gate on one page: SSO enabled (Business, in use) and audit export locked (Enterprise) — visible, explained, priced, never a dead end; same grammar from card to button."
+B7,B,page,"Billing · Quotas &amp; limits — every allowance with soft/hard type, overage price, and exactly what happens at the line."
+B8,B,page,"Billing · Limit warnings — fired at 80% with the math in the open; recommendations are calculators, not sales (“do nothing” is a valid answer)."
+B9,B,page,"Billing · Trial — Pro trial with the end-state contract written up front: choose Pro, or drop to Free with nothing deleted; usage bills either way; no dark patterns."
+B10,B,page,"Billing · Failed payment — the dunning policy lived: grace with services running, provisioning paused day 7–21, your exact position marked; payment clears everything instantly."
+B11,B,page,"Billing · Plan change — trial→Pro confirm: charge, anchor, and the mid-cycle proration rules stated once, plainly."
+B12,B,page,"Billing · Cancellation &amp; reactivation — what stops, what keeps running (and billing), over-limit honesty, one optional question, and a one-click way back."
+W12,W,page,"Org audit log — who decided, in plain language; humans, tokens, and “via assistant”"
+G1,G,page,"Settings · Project General — identity, transfer, dependency-blocked delete"
+G2,G,page,"Settings · Project Members &amp; roles — inheritance visible, roles explained by their consequences"
+G3,G,page,"Settings · Git integration — one org app, per-service repo mapping, safe disconnect"
+G4,G,page,"Settings · Project Policies — tighten-only inheritance, versioned, audited"
+G5,G,page,"Settings · Organization General — identity, region prefill, consent-based ownership transfer"
+G6,G,page,"Settings · Organization Members — seats, MFA posture, removal semantics stated"
+G7,G,page,Settings · Organization Policies — the rulebook with a live approval request (N1’s thread resolves here)
+G8,G,page,"Settings · API keys — org automation, reveal-once, stale-key hygiene"
+G9,G,page,"New policy · configure — structured rule, warn-first enforcement, live impact preview in the rail"
+G10,G,page,"New policy · review — plain language, what people will see at each stage, governance stated"
+G11,G,page,"New policy · validation &amp; conflict — name collision, policy conflict with resolutions, dry-run finding with a human default"
+G12,G,page,"New policy · success — back on the rulebook: highlighted row, promotion schedule, warn-mode telemetry, undo in reach"
+N1,N,page,"Notifications · panel — needs-action pinned on top, then time; every item is a door back into the story"
+N2,N,page,"Notifications · inbox — split view: filterable list, full detail with correlated context and actions"
+N3,N,page,Notifications · empty state — caught up is a real state; it says what would break the silence
+A1,A,page,Auth · Sign in
+A2,A,page,"Auth · Sign up — free tier, no card"
+A3,A,page,Auth · Forgot password — form + sent state
+A4,A,page,Auth · Reset password
+A5,A,page,"Onboarding · step 1 — organization: just identity now (name, home region). Team invites are their own step (A11). Continues to First project (A8) and Connect (A9)."
+A11,A,page,"Onboarding · step 2 — invite your team: split out of Create Organization into its own step (email + role, bulk paste, seat-aware), skippable."
+A8,A,page,"Onboarding · step 2 — first project: blank is the highlighted default, templates carry their price before anything exists"
+A9,A,page,"Onboarding · step 3 — connect: CLI with live verification, Git, or honestly none; nothing gates"
+A10,A,page,"Welcome · post-setup feedback — a corner widget, not a modal: the console stays fully usable; one question at a time with progress, per-question skip and a whole-widget dismiss"
+A6,A,page,"Invitation · accept / decline — the role explained before you take it, what accepting does, decline that notifies, and the wrong-account path."
+A7,A,page,"Invitation · failure states — expired (request-new notifies the inviter), already used / invalid (“just sign in” first, security honesty kept), and wrong account."
+P1,P,page,Profile menu — the entry to Account settings
+P2,P,page,"Account settings — the human’s settings, separate from org &amp; project"
+P3,P,page,"Account · Security &amp; MFA — factors, recovery, org-policy interplay, recent events"
+P4,P,page,Account · Sessions — the unrecognized-session row gets a one-flow “revoke &amp; secure”
+P5,P,page,Account · Personal tokens — these are you; org keys are the org’s robots
+P6,P,page,"Account · Notifications — routing is yours, firing is the org’s; the 3 a.m. boundary stated"
+E1,E,page,Empty states — every one teaches the CLI and shows cost before commitment
+E2,E,page,Error pages — 404 &amp; 500
+E3,E,page,"Failure states — permission denied · API failure · network loss, one grammar"
+E4,E,page,"Edge case — signed in, but not in any organization"
+E5,E,page,"Edge case — organization exists, zero projects (adaptive rail: just “+” until something exists)"

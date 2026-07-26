@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Overview — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/topology.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "overview", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+
+  window.renderPage = function (ctx) {
+    const env = ctx.e;
+    const worst = DB.worstState(env.services);
+    const mtd = env.services.reduce((s, x) => s + x.mtd, 0);
+    const events = DB.events(ctx.project, ctx.env);
+
+    content.innerHTML = `
+      <div class="page-head">
+        <h1 class="u-mono">${ctx.project}</h1>
+        <span class="sub">${env.production ? `<span class="tag-prod">production</span> \u00b7 ` : ""}${env.region} \u00b7 created ${ctx.p.created}</span>
+        <div class="u-right u-row">
+          <span class="cost-chip" title="Month-to-date, all services in ${ctx.env}">$${mtd.toFixed(2)} <span class="u-faint u-12">mtd</span></span>
+          ${env.appConnected ? "" : `<a class="btn" href="connect.html${Shell.q()}">${Shell.icon("key", "ic--s")} Connect your app</a>`}
+          <a class="btn" href="wizard.html${Shell.q({ mode: "service" })}">${Shell.icon("plus", "ic--s")} Add service</a>
+        </div>
+      </div>
+
+      <div class="health-strip" role="status">
+        <span class="hs-dot" style="background:var(--status-${worst})" aria-hidden="true"></span>
+        <span>${DB.healthSentence(env)}</span>
+        ${worst !== "ready" ? `<a class="u-12 u-right" href="services.html${Shell.q()}">View services \u2192</a>` : ""}
+      </div>
+
+      <div class="ov-grid">
+        <section aria-label="Topology">
+          <div id="topo"></div>
+        </section>
+        <aside aria-label="Recent activity" class="card" style="padding:16px">
+          <div class="u-row" style="margin-bottom:8px"><h3>Recent activity</h3>
+            <span class="u-right u-11 u-faint">${ctx.env}</span></div>
+          <div class="ev-list" id="ev-list">
+            ${events.length ? events.slice(0, 8).map(e => `
+              <div class="ev-item"><span class="ev-ic">${Shell.icon(e.ic, "ic--s")}</span>
+                <span class="u-grow">${e.text}</span><time>${e.t}</time></div>`).join("")
+              : `<p class="u-dim u-12">No recent activity in ${ctx.env}.</p>`}
+          </div>
+          <a class="u-12" href="observe.html${Shell.q()}" style="display:inline-block;margin-top:10px">Open Observe <span class="tag-ver">v0.5</span></a>
+        </aside>
+      </div>`;
+
+    Topology(document.getElementById("topo"), ctx, { embed: true, maxNodes: 8 });
+  };
+
+  Shell.protoStates([
+    { label: "Empty environment", fn: () => {
+        const fake = { ...Shell.ctx(), e: { slug: Shell.ctx().env, region: "iad", production: false, services: [], bindings: [] } };
+        const env = fake.e;
+        content.innerHTML = `<div class="page-head"><h1 class="u-mono">${fake.project}</h1><span class="sub">${env.region}</span></div>
+          <div class="empty"><div class="empty-art">${Shell.icon("layers")}</div>
+          <h2>Nothing here yet</h2><p>This environment has no services. Add one to bring it to life \u2014 it shares nothing with your other environments.</p>
+          <a class="btn btn--primary" href="wizard.html${Shell.q({ mode: "service" })}">${Shell.icon("plus", "ic--s")} Add service</a></div>
+          <p class="u-12 u-faint" style="text-align:center"><button class="btn btn--s" onclick="renderPage(Shell.ctx())">Back to ready</button></p>`;
+      } },
+    { label: "Partial failure (events down)", fn: () => {
+        renderPage(Shell.ctx());
+        document.getElementById("ev-list").innerHTML = `<div class="sec-error">${Shell.icon("warn", "ic--s")}<span class="u-grow">Couldn't load activity.</span><button class="btn btn--s" onclick="renderPage(Shell.ctx())">Retry</button></div>`;
+      } },
+    { label: "Page-level error (B-0)", fn: () => {
+        content.innerHTML = `<div class="error-frame"><div class="err-code">E-OV-500</div>
+          <h2>Couldn't load this overview</h2>
+          <p><b>What happened:</b> the overview queries timed out.</p>
+          <p><b>Why:</b> a transient backend issue \u2014 your services are unaffected.</p>
+          <p><b>Next:</b> retry, or jump elsewhere with <span class="kbd">\u2318K</span>.</p>
+          <div class="u-row" style="margin-top:12px"><button class="btn btn--primary" onclick="renderPage(Shell.ctx())">Retry</button></div>
+          <div class="err-ref">ref: 9f3k-22ab</div></div>`;
+      } },
+  ]);
+
+  renderPage(ctx0 && Shell.ctx());
+})();
+</script>
+</body>
+</html>

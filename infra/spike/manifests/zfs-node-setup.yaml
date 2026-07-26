@@ -1,0 +1,63 @@
+# T1.0 spike — the MISSING node prerequisite for ZFS-LocalPV: a GKE node ships
+# no ZFS and no zpool, so ZFS-LocalPV cannot provision until a zpool exists on
+# the node's raw local NVMe SSD. This privileged DaemonSet installs zfsutils on
+# the (Ubuntu) host, loads the module, and creates the `zfspv-pool` the
+# StorageClass names — the exact operational cost the spike is measuring
+# (GKE-node ZFS setup is the "unnecessary complexity" the founder flagged).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: zfs-node-setup
+  namespace: openebs
+  labels: { app: zfs-node-setup, spike: t1-0 }
+spec:
+  selector:
+    matchLabels: { app: zfs-node-setup }
+  template:
+    metadata:
+      labels: { app: zfs-node-setup }
+    spec:
+      # CELL-1 RE-EVALUATION KIT — never apply to a production cell. The
+      # nodeSelector is an explicit opt-in: a stray apply schedules NOTHING
+      # unless a node is deliberately labeled steloit.io/zfs-node=true.
+      nodeSelector:
+        steloit.io/zfs-node: "true"
+      hostPID: true
+      hostNetwork: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: setup
+          image: ubuntu:22.04
+          securityContext:
+            privileged: true
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "[zfs-setup] entering host namespace…"
+              nsenter --target 1 --mount --uts --ipc --net --pid -- bash -c '
+                set -euo pipefail
+                if zpool list zfspv-pool >/dev/null 2>&1; then
+                  echo "[zfs-setup] zpool zfspv-pool already present"; exit 0
+                fi
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update -y
+                apt-get install -y zfsutils-linux
+                modprobe zfs
+                # GKE local-nvme-ssd-block exposes a stable by-id symlink.
+                DEV=""
+                for c in /dev/disk/by-id/google-local-nvme-ssd-0 /dev/disk/by-id/google-local-ssd-block0; do
+                  [ -e "$c" ] && DEV="$c" && break
+                done
+                if [ -z "$DEV" ]; then
+                  DEV="/dev/$(lsblk -dn -o NAME,TYPE | awk "/nvme/ && \$2==\"disk\"{print \$1; exit}")"
+                fi
+                echo "[zfs-setup] creating zpool zfspv-pool on ${DEV}"
+                zpool create -f -o ashift=12 zfspv-pool "${DEV}"
+                zfs set compression=on zfspv-pool
+                zpool status zfspv-pool
+                echo "[zfs-setup] zpool ready"
+              '
+              echo "[zfs-setup] done; holding."
+              sleep infinity

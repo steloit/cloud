@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Service — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const svcId = params.get("id") || "db-main";
+  const ctx0 = Shell.init({
+    section: "services", scope: "project",
+    envRouteCheck: (env) => !!DB.service((new URLSearchParams(location.search)).get("project") || "ecommerce", env, svcId),
+    missingName: svcId,
+  });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+  let tab = params.get("tab") || "overview";
+
+  const TABS = {
+    postgres: ["overview", "branches", "backups", "connection", "logs", "settings"],
+    valkey: ["overview", "keyspaces", "connection", "logs", "settings"],
+    storage: ["overview", "buckets", "connection", "logs", "settings"],
+    queue: ["overview", "queues", "connection", "logs", "settings"],
+  };
+  const TL = { overview: "Overview", branches: "Branches", backups: "Backups", connection: "Connection", logs: "Logs", settings: "Settings", keyspaces: "Keyspaces", buckets: "Buckets", queues: "Queues" };
+
+  function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+  function badge(state){return `<span class="badge badge--${state}">${state}</span>`;}
+
+  window.renderPage = function (cx) {
+    const s = DB.service(cx.project, cx.env, svcId);
+    if (!s) { location.replace(`services.html${Shell.q()}&missing=${encodeURIComponent(svcId)}`); return; }
+    const t = DATA.svcTypes[s.type];
+    const tabs = TABS[s.type] || TABS.postgres;
+    if (!tabs.includes(tab)) tab = "overview";
+
+    content.innerHTML = `
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="services.html${Shell.q()}">Services</a> <span aria-hidden="true">/</span> <span class="u-mono">${esc(svcId)}</span></nav>
+      <div class="svc-head">
+        <span class="svc-glyph">${Shell.icon(t.icon, "ic--l")}</span>
+        <div>
+          <div class="svc-title">${esc(svcId)}</div>
+          <div class="svc-meta"><span>${t.label}</span><span>·</span><span class="u-mono">${esc(s.size !== "—" ? s.size : t.priceNote)}</span><span>·</span><span>${esc(cx.e.region)}</span><span>·</span><span class="cost-chip">$${s.mtd.toFixed(2)} <span class="u-faint u-12">mtd</span></span></div>
+        </div>
+        <span style="margin-left:6px">${badge(s.state)}</span>
+        <div class="svc-actions">
+          <button class="btn btn--ghost" id="act-restart">${Shell.icon("arrow","ic--s")} Restart</button>
+          <button class="btn btn--ghost" id="act-suspend">${s.state === "suspended" ? "Resume" : "Suspend"}</button>
+        </div>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Service sections">
+        ${tabs.map(x => `<button class="tab ${x === tab ? "is-on" : ""}" role="tab" aria-selected="${x === tab}" data-tab="${x}">${TL[x]}</button>`).join("")}
+      </div>
+      <div id="tabbody"></div>`;
+
+    content.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
+      tab = b.dataset.tab;
+      const u = new URL(location.href); u.searchParams.set("tab", tab);
+      try { history.replaceState(null, "", u); } catch (e) {}
+      renderPage(Shell.ctx());
+    }));
+
+    document.getElementById("act-restart").addEventListener("click", () => {
+      Shell.dialog({ title: `Restart ${svcId}`, body: `Connections drop for a few seconds while <b class="u-mono">${esc(svcId)}</b> restarts. Bindings reconnect automatically.`, confirmLabel: "Restart", onConfirm: (close) => { close(); Shell.toast(`<b class="u-mono">${esc(svcId)}</b> restarting — back in a few seconds.`); } });
+    });
+    document.getElementById("act-suspend").addEventListener("click", () => {
+      const resume = s.state === "suspended";
+      Shell.dialog({ title: `${resume ? "Resume" : "Suspend"} ${svcId}`, body: resume ? "Compute resumes and billing restarts at the prior rate." : `Stops compute and compute billing for <b class="u-mono">${esc(svcId)}</b>. Data is kept. Apps bound to it will fail to connect until resumed.`, confirmLabel: resume ? "Resume" : "Suspend", onConfirm: (close) => { close(); Shell.toast(resume ? "Resuming…" : "Suspended. Compute billing stopped."); } });
+    });
+
+    renderTab(cx, s, t);
+  };
+
+  function renderTab(cx, s, t) {
+    const body = document.getElementById("tabbody");
+    const fns = { overview: tabOverview, branches: tabBranches, backups: tabBackups, connection: tabConnection, logs: tabLogs, settings: tabSettings, keyspaces: tabKeyspaces, buckets: tabBuckets, queues: tabQueues };
+    (fns[tab] || tabOverview)(body, cx, s, t);
+  }
+
+  /* ---------------- Overview ---------------- */
+  function tabOverview(body, cx, s) {
+    const m = DB.metrics(cx.project, cx.env)[svcId] || [];
+    const detail = pgd(cx) || vkd(cx) || std(cx) || qd(cx) || {};
+    body.innerHTML = `
+      <div class="two-col">
+        <div>
+          <div class="metric-grid" id="mgrid">${m.map(() => `<div class="ch-card"></div>`).join("") || `<div class="empty-inline">No metrics yet for this service.</div>`}</div>
+          <section class="card" style="margin-top:16px"><h3 class="card-title">Recent events</h3>
+            <ul class="ev-list">${DB.events(cx.project, cx.env).filter(e => e.text.includes(svcId)).slice(0, 5).map(e => `<li><span class="ev-dot ev--${e.kind || "info"}" aria-hidden="true"></span><span>${e.text}</span><time>${e.time}</time></li>`).join("") || `<li class="u-faint">No recent events for ${esc(svcId)} in ${esc(cx.env)}.</li>`}</ul>
+          </section>
+        </div>
+        <aside class="card"><h3 class="card-title">Configuration</h3>
+          <dl class="kv">${Object.entries(cfgOf(cx, s, detail)).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>
+          ${s.state === "degraded" && detail.degradedNote ? `<div class="banner banner--warn" style="margin-top:12px">${esc(detail.degradedNote)}</div>` : ""}
+        </aside>
+      </div>`;
+    const grid = body.querySelector("#mgrid");
+    if (grid) [...grid.children].forEach((el, i) => m[i] && Charts.line(el, { title: m[i].name, unit: m[i].unit, series: [{ name: "last 24h", s: m[i].s }], h: 110 }));
+  }
+  function cfgOf(cx, s, d) {
+    if (s.type === "postgres") return { Engine: esc(d.version || "PostgreSQL 16"), Size: esc(d.size || s.size), Storage: esc(d.storage || "—"), Availability: esc(d.ha || "—"), Extensions: esc((d.params || {}).extensions || "—") };
+    if (s.type === "valkey") return { Engine: esc(d.version || "Valkey 8"), Size: esc(d.size || s.size), "Eviction policy": esc(d.policy || "—"), "Hit rate": esc(d.hit || "—"), Memory: esc(d.mem || "—") };
+    if (s.type === "storage") return { Endpoint: `<span class="u-12">${esc(d.endpoint || "—")}</span>`, Region: esc(cx.e.region), Versioning: esc(d.versioning || "off"), "Public read (account)": d.publicRead ? "on" : "off — per-bucket below" };
+    if (s.type === "queue") return { Engine: esc(d.engine || "Steloit Queue"), Delivery: esc(d.delivery || "at-least-once"), Retention: esc(d.retention || "—"), Queues: String((d.queues || []).length) };
+    return {};
+  }
+  const pgd = (cx) => DB.pg(cx.project, cx.env, svcId);
+  const vkd = (cx) => DB.valkey(cx.project, cx.env, svcId);
+  const std = (cx) => DB.storageOf(cx.project, cx.env, svcId);
+  const qd = (cx) => DB.queueOf(cx.project, cx.env, svcId);
+
+  /* ---------------- PostgreSQL: Branches (PRD-001 flagship) ---------------- */
+  function tabBranches(body, cx) {
+    const d = pgd(cx); if (!d) return notype(body);
+    body.innerHTML = `
+      <div class="tbl-toolbar"><p class="mini-note" style="max-width:62ch">Branches are copy-on-write copies of your database — instant to create, isolated to write to, priced by their data delta. Preview environments (v2) attach one per pull request automatically.</p>
+        <button class="btn btn--primary" id="new-branch">${Shell.icon("plus","ic--s")} New branch</button></div>
+      <table class="tbl"><thead><tr><th>Branch</th><th>Parent</th><th>Created</th><th>Size</th><th>Cost</th><th></th></tr></thead><tbody>
+        ${d.branches.map(b => `<tr>
+          <td class="u-mono">${esc(b.name)} ${b.primary ? `<span class="primary-tag">primary</span>` : ""}</td>
+          <td class="u-mono u-12">${esc(b.parent)}</td><td>${esc(b.created)}</td><td class="u-mono">${esc(b.size)}</td>
+          <td><span class="cost-chip">~$${b.costDay.toFixed(2)}/day</span></td>
+          <td class="tbl-actions">${b.primary ? "" : `<button class="btn btn--s btn--ghost" data-connect="${esc(b.name)}">Connect</button><button class="btn btn--s btn--danger-o" data-del="${esc(b.name)}">Delete</button>`}</td>
+        </tr>`).join("")}
+      </tbody></table>
+      <p class="mini-note">CLI parity: <span class="u-mono">steloit db branch create --from main@now</span> · <span class="u-mono">steloit db branch list</span></p>`;
+    body.querySelector("#new-branch").addEventListener("click", () => {
+      Shell.dialog({ title: "New branch", body: `
+        <label class="field"><span class="field-label">Branch name</span><input class="input u-mono" id="br-name" value="feature-gift-cards"></label>
+        <label class="field"><span class="field-label">From</span><select class="input u-mono"><option>main @ now</option><option>main @ point in time…</option><option>snap-pre-migrate</option></select></label>
+        <div class="estimate-inline">Estimated <b class="u-mono">~$0.11/day</b> at the current delta size — grows only with divergence. Shown before creation, always (G4).</div>`,
+        confirmLabel: "Create branch · ~$0.11/day", onConfirm: (close) => { close(); Shell.toast(`Branch <b class="u-mono">${esc(document.getElementById("br-name").value || "branch")}</b> created — copy-on-write, ready now.`); Shell.announce("Branch created"); } });
+    });
+    body.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => {
+      Shell.dialog({ title: `Delete branch ${b.dataset.del}`, danger: true, typed: b.dataset.del, body: `Deletes this branch and its <b class="u-mono">8.1 GB</b> delta. The parent is untouched. This cannot be undone.`, confirmLabel: "Delete branch", onConfirm: (close) => { close(); Shell.toast(`Branch <b class="u-mono">${esc(b.dataset.del)}</b> deleted.`); } });
+    }));
+    body.querySelectorAll("[data-connect]").forEach(b => b.addEventListener("click", () => { location.href = "connect.html" + Shell.q({ branch: b.dataset.connect }); }));
+  }
+
+  /* ---------------- PostgreSQL: Backups (PDS-006) ---------------- */
+  function tabBackups(body, cx) {
+    const d = pgd(cx); if (!d) return notype(body);
+    body.innerHTML = `
+      <div class="two-col"><div>
+        <div class="tbl-toolbar"><h3 class="card-title" style="margin:0">Snapshots</h3><button class="btn btn--ghost" id="snap-now">${Shell.icon("archive","ic--s")} Snapshot now</button></div>
+        <table class="tbl"><thead><tr><th>Snapshot</th><th>Taken</th><th>Kind</th><th>Size</th><th>Kept</th><th></th></tr></thead><tbody>
+          ${d.backups.snapshots.map(sn => `<tr><td class="u-mono">${esc(sn.id)}</td><td>${esc(sn.taken)}</td><td>${esc(sn.kind)}</td><td class="u-mono">${esc(sn.size)}</td><td>${esc(sn.keep)}</td>
+            <td class="tbl-actions"><button class="btn btn--s btn--ghost" data-restore="${esc(sn.id)}">Restore…</button></td></tr>`).join("")}
+        </tbody></table></div>
+        <aside class="card"><h3 class="card-title">Point-in-time recovery</h3>
+          <dl class="kv"><dt>PITR window</dt><dd>${esc(d.backups.pitrWindow)}</dd><dt>Last base backup</dt><dd>${esc(d.backups.lastBase)}</dd></dl>
+          <p class="mini-note" style="margin-top:10px">Restores never overwrite: they create a <b>new branch</b> at the chosen moment, so the current database is untouched until you decide to switch over. Irreversible things stay slow (GOV-002 §5).</p>
+        </aside></div>`;
+    body.querySelector("#snap-now").addEventListener("click", () => Shell.toast("Manual snapshot started — you'll get a Lifecycle notification when it completes."));
+    body.querySelectorAll("[data-restore]").forEach(b => b.addEventListener("click", () => {
+      Shell.dialog({ title: `Restore from ${b.dataset.restore}`, body: `Creates a new branch <b class="u-mono">restore-${b.dataset.restore}</b> from this snapshot. Nothing about <b class="u-mono">main</b> changes. Estimated <b class="u-mono">~$0.12/day</b> while the branch exists.`, confirmLabel: "Restore to new branch", onConfirm: (close) => { close(); Shell.toast(`Restoring to branch <b class="u-mono">restore-${esc(b.dataset.restore)}</b>… (Lifecycle notification on completion)`); } });
+    }));
+  }
+
+  /* ---------------- Valkey: Keyspaces ---------------- */
+  function tabKeyspaces(body, cx) {
+    const d = vkd(cx); if (!d) return notype(body);
+    body.innerHTML = `
+      ${d.degradedNote ? `<div class="banner banner--warn" style="margin-bottom:14px">${esc(d.degradedNote)} <span class="mini-note">Fix options: raise size one step (estimate shown first) or add TTLs to the untTL'd keyspace below.</span></div>` : ""}
+      <table class="tbl"><thead><tr><th>Pattern</th><th>Keys</th><th>TTL</th><th>Memory</th><th></th></tr></thead><tbody>
+        ${d.keyspaces.map(k => `<tr><td class="u-mono">${esc(k.pattern)}</td><td class="u-mono">${esc(k.keys)}</td><td>${k.ttl === "—" ? `<span class="chip-pill chip-pill--warn">no TTL</span>` : `<span class="u-mono">${esc(k.ttl)}</span>`}</td><td class="u-mono">${esc(k.mem)}</td>
+          <td class="tbl-actions"><button class="btn btn--s btn--danger-o" data-flush="${esc(k.pattern)}">Flush…</button></td></tr>`).join("")}
+      </tbody></table>
+      <p class="mini-note">CLI parity: <span class="u-mono">steloit valkey keyspaces</span> · <span class="u-mono">steloit valkey flush "sess:*"</span></p>`;
+    body.querySelectorAll("[data-flush]").forEach(b => b.addEventListener("click", () => {
+      Shell.dialog({ title: `Flush ${b.dataset.flush}`, danger: true, typed: b.dataset.flush.replace(":*",""), body: `Deletes every key matching <b class="u-mono">${esc(b.dataset.flush)}</b> in <b class="u-mono">${esc(cx.env)}</b>. Apps will rebuild from source; expect a cold-cache period.`, confirmLabel: "Flush keys", onConfirm: (close) => { close(); Shell.toast(`Flushed <b class="u-mono">${esc(b.dataset.flush)}</b>.`); } });
+    }));
+  }
+
+  /* ---------------- Storage: Buckets ---------------- */
+  function tabBuckets(body, cx) {
+    const d = std(cx); if (!d) return notype(body);
+    body.innerHTML = `
+      <div class="tbl-toolbar"><p class="mini-note">S3-compatible. Endpoint: <span class="u-mono u-12">${esc(d.endpoint)}</span></p>
+        <button class="btn btn--primary" id="new-bucket">${Shell.icon("plus","ic--s")} New bucket</button></div>
+      <table class="tbl"><thead><tr><th>Bucket</th><th>Objects</th><th>Size</th><th>Access</th><th></th></tr></thead><tbody>
+        ${d.buckets.map(b => `<tr><td class="u-mono">${esc(b.name)}</td><td class="u-mono">${esc(b.objects)}</td><td class="u-mono">${esc(b.size)}</td>
+          <td>${b.public ? `<span class="chip-pill chip-pill--warn">public read</span>` : `<span class="chip-pill">private</span>`}</td>
+          <td class="tbl-actions"><button class="btn btn--s btn--ghost" data-browse="${esc(b.name)}">Browse</button></td></tr>`).join("")}
+      </tbody></table>
+      <section class="card" style="margin-top:16px"><h3 class="card-title">Recent objects</h3>
+        <table class="tbl tbl--flat"><tbody>${d.topObjects.map(o => `<tr><td class="u-mono u-12">${esc(o.key)}</td><td class="u-mono">${esc(o.size)}</td><td class="u-faint">${esc(o.modified)}</td><td class="tbl-actions"><button class="btn btn--s btn--ghost">${Shell.icon("copy","ic--s")} Copy URL</button></td></tr>`).join("")}</tbody></table>
+      </section>`;
+    body.querySelector("#new-bucket").addEventListener("click", () => {
+      Shell.dialog({ title: "New bucket", body: `<label class="field"><span class="field-label">Bucket name</span><input class="input u-mono" value="invoices"></label>
+        <label class="field field--row"><input type="checkbox" id="bk-pub"><span>Public read <span class="mini-note">— anyone with the URL can read objects. You'll see this warning again if you enable it.</span></span></label>`,
+        confirmLabel: "Create bucket", onConfirm: (close) => { close(); Shell.toast("Bucket created."); } });
+    });
+    body.querySelectorAll("[data-browse]").forEach(b => b.addEventListener("click", () => Shell.toast(`Object browser for <b class="u-mono">${esc(b.dataset.browse)}</b> — depth beyond the prototype's mock data.`)));
+  }
+
+  /* ---------------- Queue: Queues + DLQ ---------------- */
+  function tabQueues(body, cx) {
+    const d = qd(cx); if (!d) return notype(body);
+    body.innerHTML = `
+      <table class="tbl"><thead><tr><th>Queue</th><th>Depth</th><th>Rate</th><th>Consumers</th><th>DLQ</th><th></th></tr></thead><tbody>
+        ${d.queues.map(qq => `<tr><td class="u-mono">${esc(qq.name)}</td><td class="u-mono">${qq.depth}</td><td class="u-mono">${esc(qq.rate)}</td><td class="u-mono">${qq.consumers}</td>
+          <td>${qq.dlq ? `<span class="chip-pill chip-pill--fire">${qq.dlq} dead</span>` : `<span class="chip-pill chip-pill--ok">0</span>`}</td>
+          <td class="tbl-actions"><button class="btn btn--s btn--danger-o" data-purge="${esc(qq.name)}">Purge…</button></td></tr>`).join("")}
+      </tbody></table>
+      <section class="card" style="margin-top:16px"><div class="tbl-toolbar"><h3 class="card-title" style="margin:0">Dead letters · webhooks</h3>
+        <button class="btn btn--ghost" id="redrive">${Shell.icon("arrow","ic--s")} Redrive all</button></div>
+        <table class="tbl tbl--flat"><tbody>${d.dlqPeek.map(m => `<tr><td class="u-mono">${esc(m.id)}</td><td class="u-mono u-12">${esc(m.queue)}</td><td>${esc(m.reason)}</td><td class="u-faint">${esc(m.age)}</td></tr>`).join("")}</tbody></table>
+        <p class="mini-note">Delivery is at-least-once — make handlers idempotent before redriving.</p>
+      </section>`;
+    body.querySelector("#redrive").addEventListener("click", () => {
+      Shell.dialog({ title: "Redrive 4 dead letters", body: "Re-enqueues all 4 messages to <b class=\"u-mono\">webhooks</b>. They'll be delivered at-least-once; failures return here.", confirmLabel: "Redrive 4 messages", onConfirm: (close) => { close(); Shell.toast("4 messages redriven to <b class=\"u-mono\">webhooks</b>."); } });
+    });
+    body.querySelectorAll("[data-purge]").forEach(b => b.addEventListener("click", () => {
+      Shell.dialog({ title: `Purge ${b.dataset.purge}`, danger: true, typed: b.dataset.purge, body: `Deletes every pending message in <b class="u-mono">${esc(b.dataset.purge)}</b>. Consumers keep running; in-flight messages finish.`, confirmLabel: "Purge queue", onConfirm: (close) => { close(); Shell.toast(`<b class="u-mono">${esc(b.dataset.purge)}</b> purged.`); } });
+    }));
+  }
+
+  /* ---------------- Connection / Logs / Settings (all types) ---------------- */
+  function tabConnection(body, cx, s) {
+    body.innerHTML = `
+      <div class="two-col"><div class="card">
+        <h3 class="card-title">Connect with the CLI <span class="chip-pill chip-pill--ok">recommended</span></h3>
+        <div class="code-block"><code>steloit env pull</code><button class="btn btn--s btn--ghost" data-copy="steloit env pull">${Shell.icon("copy","ic--s")} Copy</button></div>
+        <p class="mini-note">Writes <span class="u-mono">.env.steloit</span> with <span class="u-mono">${esc(svcId.toUpperCase().replace(/-/g,"_"))}_URL</span> and friends. Rotations update on next pull. Add it to .gitignore.</p>
+        <h3 class="card-title" style="margin-top:18px">Manual</h3>
+        <div class="code-block"><code id="cred">••••••••••••••••••••••••••</code><button class="btn btn--s btn--ghost" id="reveal">Reveal</button></div>
+        <div class="banner banner--warn" style="margin-top:10px">Manually copied credentials won't update when rotated. Prefer <span class="u-mono">env pull</span> or platform sync. <span class="mini-note">(C-41 — revealing is audit-logged.)</span></div>
+      </div>
+      <aside class="card"><h3 class="card-title">Bindings</h3>
+        <ul class="ev-list">${(cx.e.bindings || []).filter(b => b.to === svcId).map(b => `<li><span class="ev-dot" aria-hidden="true"></span><span><b class="u-mono">${esc(b.from)}</b> → <b class="u-mono">${esc(b.to)}</b> · ${esc(b.scope)}</span><time>${esc(b.age)}</time></li>`).join("") || `<li class="u-faint">No bindings yet — connect your app or another service.</li>`}</ul>
+      </aside></div>`;
+    body.querySelector("#reveal").addEventListener("click", (e) => {
+      const c = body.querySelector("#cred");
+      c.textContent = `postgres://app:s3l0…@${svcId}.${cx.project}-${cx.env}.steloit.dev:5432/app`;
+      e.target.outerHTML = `<button class="btn btn--s btn--ghost" data-copy="${c.textContent}">${Shell.icon("copy","ic--s")} Copy</button>`;
+      Shell.toast("Credential revealed — this was recorded in the audit log (SEC-003).");
+      bindCopies(body);
+    });
+    bindCopies(body);
+  }
+  function bindCopies(scope) {
+    scope.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => { try { navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy); } catch (e) {} b.innerHTML = Shell.icon("check", "ic--s") + " Copied"; Shell.announce("Copied"); setTimeout(() => { b.innerHTML = Shell.icon("copy", "ic--s") + " Copy"; }, 1200); }));
+  }
+  function tabLogs(body, cx) {
+    const rows = DB.logs(cx.project, cx.env).filter(r => r.svc === svcId);
+    body.innerHTML = `
+      <div class="log-bar">
+        <span class="live-pill" id="lv"><span class="live-dot"></span><span>live tail</span></span>
+        <select class="input input--s" id="lf-lvl" aria-label="Level"><option value="all">All levels</option><option>info</option><option>warn</option><option>error</option></select>
+        <input class="input input--s" id="lf-q" placeholder="Filter…" aria-label="Filter logs" style="max-width:220px">
+        <span class="mini-note">Full search across services lives in Observe →</span>
+      </div><div class="log-list" id="loglist" role="log" aria-label="Service logs"></div>`;
+    const paint = () => Charts.logRows(body.querySelector("#loglist"), rows, { lvl: body.querySelector("#lf-lvl").value, q: body.querySelector("#lf-q").value });
+    body.querySelector("#lf-lvl").addEventListener("change", paint);
+    body.querySelector("#lf-q").addEventListener("input", paint);
+    body.querySelector("#lv").addEventListener("click", (e) => e.currentTarget.classList.toggle("is-paused"));
+    paint();
+  }
+  function tabSettings(body, cx, s, t) {
+    const sizes = { postgres: ["dev-1 · $4/mo", "starter-1 · $12/mo", "starter-2 · $24/mo"], valkey: ["cache-s · $7/mo", "cache-m · $14/mo"], storage: [], queue: [] };
+    const cur = { postgres: 1, valkey: 0 }[s.type] ?? 0;
+    body.innerHTML = `
+      <div class="set-frame" style="grid-template-columns:1fr">
+      <section class="set-sec"><h3 class="card-title">General</h3>
+        ${sizes[s.type].length ? `
+        <div class="set-row"><div><b>Size</b><div class="mini-note">Changing size restarts the service. The new monthly price is shown before you confirm.</div></div>
+          <select class="input" id="sz">${sizes[s.type].map((x, i) => `<option ${i === cur ? "selected" : ""}>${x}</option>`).join("")}</select></div>` : `<div class="set-row"><div><b>Size</b><div class="mini-note">Usage-based — no fixed size. You pay for stored/processed volume.</div></div><span class="u-mono u-faint">n/a</span></div>`}
+        <div class="set-row"><div><b>View as CLI</b><div class="mini-note">Everything on this page has a command.</div></div><code class="u-mono u-12">steloit ${s.type === "postgres" ? "db" : s.type} config ${esc(svcId)}</code></div>
+      </section>
+      <section class="set-sec danger-zone"><h3 class="card-title">Danger zone</h3>
+        <div class="set-row"><div><b>Destroy ${esc(svcId)}</b><div class="mini-note">Deletes the service and its data in <b class="u-mono">${esc(cx.env)}</b> after a 72-hour grace window. Bindings break immediately.</div></div>
+          <button class="btn btn--danger-o" id="destroy">Destroy…</button></div>
+      </section></div>`;
+    const sz = body.querySelector("#sz");
+    if (sz) sz.addEventListener("change", () => {
+      Shell.dialog({ title: "Change size", body: `New size: <b class="u-mono">${esc(sz.value)}</b>. The service restarts (a few seconds). Billing changes from the moment the resize completes.`, confirmLabel: `Resize · ${sz.value.split("·")[1].trim()}`, onConfirm: (close) => { close(); Shell.toast("Resizing — restart in progress."); } });
+    });
+    body.querySelector("#destroy").addEventListener("click", () => {
+      Shell.dialog({ title: `Destroy ${svcId}`, danger: true, typed: svcId, body: `This deletes <b class="u-mono">${esc(svcId)}</b> and its data in <b class="u-mono">${esc(cx.env)}</b>. It stays restorable for <b>72 hours</b>, then it's gone permanently.`, confirmLabel: "Destroy in 72 hours", onConfirm: (close) => { close(); Shell.toast(`<b class="u-mono">${esc(svcId)}</b> scheduled for deletion — restorable for 72h.`); } });
+    });
+  }
+  function notype(body) { body.innerHTML = `<div class="empty-inline">No detail data mocked for this service in this environment — switch to <b class="u-mono">ecommerce/production</b> for the full experience.</div>`; }
+
+  /* Proto panel states */
+  Shell.protoStates([
+    { label: "Loading (skeleton)", fn: () => { content.querySelector("#tabbody").innerHTML = `<div class="sk sk--table" aria-hidden="true">${"<div class=\"sk-row\"></div>".repeat(6)}</div>`; } },
+    { label: "Section error (G6)", fn: () => { content.querySelector("#tabbody").innerHTML = `<div class="err-frame err--section"><b>Couldn't load this section.</b><span class="mini-note">Upstream metrics query timed out. · ref <span class="u-mono">stl_req_9f2a1c</span></span><button class="btn btn--ghost" onclick="renderPage(Shell.ctx())">Retry</button></div>`; } },
+    { label: "Reset", fn: () => renderPage(Shell.ctx()) },
+  ]);
+
+  renderPage(ctx0);
+})();
+</script>
+</body>
+</html>

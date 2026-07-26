@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Steloit task frontmatter",
+  "type": "object",
+  "required": ["id", "title", "epic", "status", "phase", "priority"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "title": { "type": "string", "minLength": 8, "maxLength": 120 },
+    "epic": { "type": "string", "pattern": "^E(QA|OPS|[0-9]{1,2})$" },
+    "status": { "enum": ["stub", "ready", "in-progress", "in-review", "done", "blocked"] },
+    "phase": { "enum": ["MVP", "V1", "Future"] },
+    "priority": { "enum": ["critical", "high", "medium", "low"] },
+    "sprint": { "type": ["integer", "null"], "minimum": 0, "maximum": 16 },
+    "estimate": { "type": ["string", "number", "null"] },
+    "deps": { "type": "array", "items": { "type": "string" } },
+    "issue": { "type": ["integer", "null"] },
+    "labels": { "type": "array", "items": { "type": "string" } },
+    "module": { "type": "string" },
+    "contexts": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" } },
+    "files": { "type": "array", "items": { "type": "string" } },
+    "apis": { "type": "array", "items": { "type": "string" } },
+    "tables": { "type": "array", "items": { "type": "string" } },
+    "events": { "type": "array", "items": { "type": "string" } },
+    "tests": { "type": "array", "items": { "type": "string" } },
+    "verify": { "type": "array", "items": { "type": "string" } },
+    "owner": { "type": "string" }
+  }
+}

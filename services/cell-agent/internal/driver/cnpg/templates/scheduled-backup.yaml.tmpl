@@ -1,0 +1,12 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{.Name}}-nightly
+  namespace: {{.Namespace}}
+spec:
+  cluster:
+    name: {{.Name}}
+  method: barmanObjectStore
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  immediate: true

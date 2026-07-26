@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+
+  window.renderPage = function (ctx) {
+    const env = ctx.e;
+    content.innerHTML = `
+      <div class="wiz">
+        <h1>Connect your app</h1>
+        <p class="wiz-sub">Get <b class="u-mono">${ctx.project}/${ctx.env}</b>'s connection settings into your code — pick the way that fits. Same screen the wizard ends on (SH-19).</p>
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="cli">CLI</button>
+          <button role="tab" aria-selected="false" data-tab="sync">Platform sync <span class="tag-ver">v0.5</span></button>
+          <button role="tab" aria-selected="false" data-tab="manual">Manual</button>
+        </div>
+        <div id="tab-body"></div>
+        <div class="card" style="margin-top:20px">
+          <div class="u-row">
+            ${env.appConnected
+              ? `<span class="badge badge--ready"><span class="dot"></span>connected</span><span class="u-dim u-12">Your app connects regularly — last seen 4m ago via <span class="u-mono">db-main</span>.</span>`
+              : `<span class="badge badge--provisioning"><span class="dot"></span>waiting</span><span class="u-dim u-12">Listening for your app's first connection…</span>`}
+          </div>
+        </div>
+        <div class="wiz-foot"><a class="btn btn--ghost" href="overview.html${Shell.q()}">Back to overview</a></div>
+      </div>`;
+
+    const body = document.getElementById("tab-body");
+    const svcList = env.services.map(s => s.id);
+    const names = {
+      postgres: ["DATABASE_URL", "postgres://app:••••••@db." + ctx.project + ".steloit.app:5432/main"],
+      valkey: ["VALKEY_URL", "valkey://••••••@cache." + ctx.project + ".steloit.app:6379"],
+      storage: ["STORAGE_ACCESS_KEY", "stl_••••••••••"],
+      queue: ["QUEUE_URL", "queue://••••••@jobs." + ctx.project + ".steloit.app"],
+    };
+    const tabs = {
+      cli: `<p class="u-dim" style="margin-bottom:8px">Run this in your app's directory:</p>
+        <div class="code-block"><button class="btn btn--ghost btn--s copy" data-copy>${Shell.icon("copy", "ic--s")} Copy</button><span class="kw">steloit</span> env pull</div>
+        <p class="u-12 u-dim" style="margin-top:8px">Writes <span class="u-mono">.env.steloit</span> with settings for ${svcList.map(s => `<span class="u-mono">${s}</span>`).join(", ")}. Add it to <span class="u-mono">.gitignore</span>. Re-run any time — rotated credentials update automatically.</p>`,
+      sync: `<div class="u-row" style="gap:12px;flex-wrap:wrap">
+        <div class="card u-grow"><b>Vercel</b><p class="u-12 u-dim" style="margin:6px 0 10px">Push env vars to a Vercel project; stays in sync on rotation.</p><button class="btn btn--s" onclick="Shell.toast('Platform sync connects in v0.5.')">Connect</button></div>
+        <div class="card u-grow"><b>Netlify</b><p class="u-12 u-dim" style="margin:6px 0 10px">Same, for Netlify sites.</p><button class="btn btn--s" onclick="Shell.toast('Platform sync connects in v0.5.')">Connect</button></div></div>`,
+      manual: env.services.map(s => {
+        const [n, v] = names[s.type];
+        return `<div class="code-block" style="margin-bottom:10px"><button class="btn btn--ghost btn--s copy" data-reveal>${Shell.icon("eye", "ic--s")} Reveal</button><span class="cm"># ${DATA.svcTypes[s.type].label} · ${s.id}</span>\n${n}=<span class="reveal-val is-hidden">${v}</span></div>`;
+      }).join("") + `<div class="banner" style="border-color:var(--status-degraded);background:var(--status-degraded-soft)">${Shell.icon("warn", "ic--s")}<span>Manually copied credentials won't update when rotated. Prefer <b class="u-mono">env pull</b> or platform sync.</span></div>`,
+    };
+    function paint(name) {
+      body.innerHTML = tabs[name];
+      content.querySelectorAll("[role=tab]").forEach(t => t.setAttribute("aria-selected", t.dataset.tab === name));
+      body.querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => { try { navigator.clipboard.writeText("steloit env pull"); } catch (e) {} Shell.toast("Copied."); }));
+      body.querySelectorAll("[data-reveal]").forEach(b => b.addEventListener("click", () => {
+        const v = b.parentElement.querySelector(".reveal-val"); v.classList.toggle("is-hidden");
+        b.innerHTML = v.classList.contains("is-hidden") ? Shell.icon("eye", "ic--s") + " Reveal" : Shell.icon("eye", "ic--s") + " Hide";
+      }));
+    }
+    content.querySelectorAll("[role=tab]").forEach(t => t.addEventListener("click", () => paint(t.dataset.tab)));
+    paint("cli");
+  };
+  renderPage(Shell.ctx());
+})();
+</script>
+</body>
+</html>

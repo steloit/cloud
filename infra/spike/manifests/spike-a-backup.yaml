@@ -1,0 +1,9 @@
+# F3: WAL archiving alone is NOT restorable — a recovery bootstrap needs a base
+# backup in the object store. This on-demand Backup is the load-bearing step the
+# original runbook omitted (took seconds at 331MB).
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: {name: spike-a-base, namespace: spike}
+spec:
+  cluster: {name: spike-a}
+  method: barmanObjectStore

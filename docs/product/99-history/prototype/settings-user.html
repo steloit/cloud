@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>User settings — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  Shell.init({ section: "", scope: "user" });
+  const content = document.getElementById("content");
+  const cats = ["Alerts", "Backups", "Billing", "Membership", "Lifecycle", "System"];
+  const defaults = { Alerts: [1, 1], Backups: [1, 0], Billing: [1, 1], Membership: [1, 0], Lifecycle: [1, 0], System: [1, 0] };
+
+  content.innerHTML = `
+    <div class="page-head"><h1>User settings</h1><span class="sub">${DATA.user.name} · applies to you across organizations</span></div>
+    <div class="settings">
+      <nav class="set-rail" aria-label="Settings sections">
+        <a href="#profile" class="is-on">Profile</a><a href="#appearance">Appearance</a>
+        <a href="#notifications">Notifications</a><a href="#sessions">Sessions</a></nav>
+      <div>
+        <section class="set-sec" id="profile"><h2>Profile</h2>
+          <div class="set-row"><div class="set-info"><div class="set-name">Name</div></div>
+            <input class="input" value="Priya Sharma" style="width:220px" aria-label="Name"><button class="btn" onclick="Shell.toast('Saved (prototype).')">Save</button></div>
+          <div class="set-row"><div class="set-info"><div class="set-name">Email</div>
+            <div class="set-desc">Sign-in and notification address.</div></div>
+            <span class="u-dim">priya@acme.dev</span></div>
+        </section>
+        <section class="set-sec" id="appearance"><h2>Appearance</h2>
+          <div class="set-row"><div class="set-info"><div class="set-name">Theme</div>
+            <div class="set-desc">Dark is first-class; light is not an afterthought.</div></div>
+            <div class="radio-row" role="radiogroup" aria-label="Theme">
+              <label class="check"><input type="radio" name="theme" value="dark" checked> Dark</label>
+              <label class="check"><input type="radio" name="theme" value="light"> Light</label>
+            </div></div>
+        </section>
+        <section class="set-sec" id="notifications"><h2>Notifications</h2>
+          <p class="u-12 u-dim" style="margin-bottom:10px">Quiet by default: only action-required events interrupt. Everything else accumulates in the inbox.</p>
+          <div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>Category</th><th>In-app</th><th>Email</th><th>Slack <span class="tag-ver">v0.5</span></th></tr></thead>
+            <tbody>${cats.map(c => `<tr><td>${c}</td>
+              <td><span class="switch"><input type="checkbox" ${defaults[c][0] ? "checked" : ""} aria-label="${c} in-app"><span class="tr"></span></span></td>
+              <td><span class="switch"><input type="checkbox" ${defaults[c][1] ? "checked" : ""} aria-label="${c} email"><span class="tr"></span></span></td>
+              <td><span class="switch"><input type="checkbox" disabled aria-label="${c} Slack, arrives in v0.5"><span class="tr"></span></span></td></tr>`).join("")}
+            </tbody></table></div>
+        </section>
+        <section class="set-sec" id="sessions"><h2>Sessions</h2>
+          <div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>Session</th><th>Last used</th><th></th></tr></thead><tbody>
+            <tr><td>Console · Chrome on macOS <span class="chip" style="margin-left:6px">this session</span></td><td class="u-dim">now</td><td></td></tr>
+            <tr><td class="u-mono u-12">CLI token · steloit@macbook</td><td class="u-dim">2h ago</td>
+              <td style="text-align:right"><button class="btn btn--danger-outline btn--s" data-revoke>Revoke</button></td></tr>
+            <tr><td class="u-mono u-12">CLI token · ci@github-actions</td><td class="u-dim">1d ago</td>
+              <td style="text-align:right"><button class="btn btn--danger-outline btn--s" data-revoke>Revoke</button></td></tr>
+            </tbody></table></div>
+        </section>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('input[name="theme"]').forEach(r => r.addEventListener("change", () => {
+    document.documentElement.setAttribute("data-theme", r.value);
+  }));
+  document.querySelectorAll("[data-revoke]").forEach(b => b.addEventListener("click", () => { // T1
+    Shell.dialog({
+      title: "Revoke this token?",
+      body: "<p>The CLI signed in with it stops working immediately. Sign in again with <b class='u-mono'>steloit login</b>.</p>",
+      confirmLabel: "Revoke", confirmClass: "btn--danger",
+      onConfirm: (close) => { close(); b.closest("tr").remove(); Shell.toast("Token revoked."); },
+    });
+  }));
+})();
+</script>
+</body>
+</html>

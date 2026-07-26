@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Environment settings — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css"><link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css"><link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app"><main class="main" id="main"><div class="content" id="content"></div></main></div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const ctx0 = Shell.init({ section: "env-settings", scope: "project" });
+  if (!ctx0) return;
+  const content = document.getElementById("content");
+
+  window.renderPage = function (ctx) {
+    const env = ctx.e; const prod = env.production;
+    const region = DATA.regions.find(r => r.id === env.region);
+    content.innerHTML = `
+      <div class="page-head"><h1>Environment settings</h1>
+        <span class="sub"><span class="u-mono">${ctx.project}/${ctx.env}</span>${prod ? ' · <span class="tag-prod">production</span>' : ""}</span></div>
+      <div class="settings">
+        <nav class="set-rail" aria-label="Settings sections">
+          <a href="#general" class="is-on">General</a><a href="#secrets">Secrets</a><a href="#danger">Danger zone</a></nav>
+        <div>
+          <section class="set-sec" id="general"><h2>General</h2>
+            <div class="set-row"><div class="set-info"><div class="set-name">Name</div>
+              <div class="set-desc">${prod ? "<b>production</b> keeps its name — tools and policies depend on it." : "Lowercase letters, numbers, dashes."}</div></div>
+              <input class="input input--mono" value="${ctx.env}" style="width:200px" ${prod ? "disabled" : ""} aria-label="Environment name">
+              <button class="btn" ${prod ? "disabled" : ""} onclick="Shell.toast('Renamed (prototype).')">Rename</button></div>
+            <div class="set-row"><div class="set-info"><div class="set-name">Region</div>
+              <div class="set-desc">Region is set when an environment is created. Need another region? Create a new environment.</div></div>
+              <span class="u-mono u-dim">${region ? region.name : env.region}</span></div>
+          </section>
+          <section class="set-sec" id="secrets"><h2>Secrets</h2>
+            <div class="set-row"><div class="set-info"><div class="set-name">Environment secrets</div>
+              <div class="set-desc">Per-environment values injected into bindings and <span class="u-mono">env pull</span>.</div></div>
+              <a class="btn" href="secrets.html${Shell.q()}">Open Secrets <span class="tag-ver">v0.5</span></a></div>
+          </section>
+          <section class="set-sec" id="danger"><h2>Danger zone</h2>
+            <div class="danger-zone">
+              <div class="set-row"><div class="set-info"><div class="set-name">Destroy environment</div>
+                <div class="set-desc">${prod ? "Production can't be deleted while the project exists. Destroy the project instead." : "Deletes this environment's services and data after a 72-hour grace period."}</div></div>
+                ${prod ? `<a class="u-12" href="settings-project.html${Shell.q()}#danger">Project danger zone →</a>
+                  <button class="btn btn--danger-outline" disabled title="Blocked for production">Destroy…</button>`
+                : `<button class="btn btn--danger-outline" id="btn-destroy-env">Destroy…</button>`}</div>
+            </div>
+          </section>
+        </div>
+      </div>`;
+    const b = document.getElementById("btn-destroy-env");
+    if (b) b.addEventListener("click", () => { // SH-24, T2
+      Shell.dialog({
+        title: `Destroy ${ctx.env}?`, danger: true, typed: ctx.env,
+        body: `<p>Deletes <b class="u-mono">${ctx.project}/${ctx.env}</b> — ${env.services.length} service${env.services.length !== 1 ? "s" : ""} and their data — after a <b>72-hour</b> grace period. Other environments are untouched.</p>`,
+        confirmLabel: "Delete in 72 hours", confirmClass: "btn--danger",
+        onConfirm: (close) => { close(); Shell.toast(`<b class="u-mono">${ctx.env}</b> deletes in 72h — restorable until then (prototype).`); },
+      });
+    });
+  };
+  renderPage(Shell.ctx());
+})();
+</script>
+</body>
+</html>

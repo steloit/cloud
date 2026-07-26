@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Projects · Acme — Steloit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/shell.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <main class="main" id="main"><div class="content" id="content"></div></main>
+</div>
+<script src="js/data.js"></script>
+<script src="js/data-ext.js"></script>
+<script src="js/shell.js"></script>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const firstrun = params.get("firstrun") === "1";
+  const ctx = Shell.init({ section: "projects", scope: "org" });
+  const content = document.getElementById("content");
+  let view = "grid", filter = params.get("filter") || "active", label = "";
+
+  function sentence(p) {
+    if (p.archived) return "";
+    const env = p.envs[0];
+    return DB.healthSentence(env);
+  }
+  function worst(p) { return p.archived ? "archived" : DB.worstState(p.envs[0].services); }
+
+  function render() {
+    if (firstrun) return renderFirstRun();
+    const all = DATA.projects;
+    const labels = [...new Set(all.flatMap(p => p.labels))];
+    let list = all.filter(p => filter === "archived" ? p.archived : !p.archived);
+    if (label) list = list.filter(p => p.labels.includes(label));
+    const archivedCount = all.filter(p => p.archived).length;
+
+    content.innerHTML = `
+      <div class="page-head">
+        <h1>Projects</h1><span class="sub">${DATA.org.name} \u00b7 ${DATA.plan} plan</span>
+        <div class="u-right u-row">
+          ${labels.map(l => `<button class="chip chip--btn ${label === l ? "chip--on" : ""}" data-label="${l}">${l}</button>`).join("")}
+          <button class="chip chip--btn ${filter === "archived" ? "chip--on" : ""}" data-archived>${Shell.icon("archive", "ic--s")} Archived (${archivedCount})</button>
+          <button class="icon-btn" data-view aria-label="Toggle table view">${Shell.icon(view === "grid" ? "list" : "grid")}</button>
+          <a class="btn btn--primary" href="wizard.html">${Shell.icon("plus", "ic--s")} New project</a>
+        </div>
+      </div>
+      ${list.length ? (view === "grid" ? grid(list) : table(list)) : `
+        <div class="empty"><div class="empty-art">${Shell.icon("archive")}</div>
+          <h2>${filter === "archived" ? "Nothing archived" : "No projects match"}</h2>
+          <p>${filter === "archived" ? "Archived projects stop billing but keep their data, ready to restore." : "Try clearing the filters."}</p></div>`}
+    `;
+    bind();
+  }
+
+  function grid(list) {
+    return `<div class="proj-grid">` + list.map(p => {
+      const st = worst(p);
+      const mtd = p.archived ? 0 : DB.projectMtd(p);
+      const n = p.archived ? 0 : p.envs[0].services.length;
+      return `<a class="card card--hover card--link proj-card" href="${p.archived ? "#" : "overview.html?project=" + p.slug}" ${p.archived ? 'data-restore="' + p.slug + '"' : ""}>
+        <div class="pc-top"><span class="pc-name">${p.slug}</span>
+          <span class="u-right badge badge--${st}"><span class="dot"></span>${st}</span></div>
+        ${p.archived
+          ? `<div class="pc-meta"><span>Archived \u00b7 data kept</span></div>
+             <div class="pc-cost"><span class="cost-chip">$0.00</span><span class="u-12 u-faint">compute stopped</span></div>
+             <div style="margin-top:12px"><span class="btn btn--s">Restore\u2026</span></div>`
+          : `<div class="pc-meta"><span>${n} service${n !== 1 ? "s" : ""}</span><span>\u00b7</span>
+               <span>${p.envs.map(e => e.slug === "production" ? "prod" : e.slug).join(" + ")}</span>
+               ${p.labels.length ? `<span>\u00b7</span><span class="u-faint">${p.labels[0]}</span>` : ""}</div>
+             <div class="pc-cost"><span class="cost-chip">$${mtd.toFixed(2)}</span><span class="u-12 u-faint">month to date</span></div>`}
+      </a>`;
+    }).join("") + `</div>`;
+  }
+
+  function table(list) {
+    return `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Project</th><th>Status</th><th>Services</th><th>Environments</th><th style="text-align:right">Cost mtd</th></tr></thead>
+      <tbody>${list.map(p => {
+        const st = worst(p);
+        return `<tr class="is-clickable" data-href="${p.archived ? "" : "overview.html?project=" + p.slug}">
+          <td class="u-mono">${p.slug}</td>
+          <td><span class="badge badge--${st}"><span class="dot"></span>${st}</span></td>
+          <td>${p.archived ? "\u2014" : p.envs[0].services.length}</td>
+          <td class="u-dim">${p.archived ? "\u2014" : p.envs.map(e => e.slug).join(", ")}</td>
+          <td class="u-num">$${(p.archived ? 0 : DB.projectMtd(p)).toFixed(2)}</td></tr>`;
+      }).join("")}</tbody></table></div>`;
+  }
+
+  function renderFirstRun() { // SH-03
+    content.innerHTML = `
+      <div class="empty" style="margin-top:80px;max-width:520px">
+        <div class="empty-art" style="width:64px;height:64px">${Shell.icon("hex", "ic--l")}</div>
+        <h2>Create your first project</h2>
+        <p>A <strong>project</strong> holds everything one application needs \u2014 its services, environments, and settings. Create one and Steloit will help you provision what it needs.</p>
+        <div class="u-row" style="justify-content:center;gap:12px">
+          <a class="btn btn--primary btn--l" href="wizard.html?firstrun=1">${Shell.icon("plus", "ic--s")} Create your first project</a>
+          <button class="btn btn--l" onclick="Shell.toast('The sample project ships in v0.5 (open question Q-2).')">Explore a sample <span class="tag-ver">v0.5</span></button>
+        </div>
+        <div class="card" style="margin-top:24px;text-align:left;width:100%">
+          <div class="u-row" style="gap:14px;justify-content:center;flex-wrap:wrap">
+            <span class="chip">${Shell.icon("hex", "ic--s")} org</span><span class="u-faint">\u2192</span>
+            <span class="chip">${Shell.icon("grid", "ic--s")} project</span><span class="u-faint">\u2192</span>
+            <span class="chip">${Shell.icon("layers", "ic--s")} environment</span><span class="u-faint">\u2192</span>
+            <span class="chip">${Shell.icon("db", "ic--s")} service</span>
+          </div>
+          <p class="u-12 u-dim" style="text-align:center;margin-top:10px">One org. Projects for each app. Environments to keep prod safe. Services inside.</p>
+        </div>
+        <a class="u-12" href="docs.html#organized">How Steloit is organized \u2192</a>
+      </div>`;
+  }
+
+  function bind() {
+    content.querySelectorAll("[data-label]").forEach(b => b.addEventListener("click", e => { e.preventDefault(); label = label === b.dataset.label ? "" : b.dataset.label; render(); }));
+    const arch = content.querySelector("[data-archived]");
+    if (arch) arch.addEventListener("click", () => { filter = filter === "archived" ? "active" : "archived"; render(); });
+    const v = content.querySelector("[data-view]");
+    if (v) v.addEventListener("click", () => { view = view === "grid" ? "table" : "grid"; render(); });
+    content.querySelectorAll("tr[data-href]").forEach(r => r.addEventListener("click", () => { if (r.dataset.href) location.href = r.dataset.href; }));
+    content.querySelectorAll("[data-restore]").forEach(c => c.addEventListener("click", e => {
+      e.preventDefault();
+      Shell.dialog({
+        title: "Restore legacy-crm?",
+        body: `<p>Services resume and billing restarts at the project's previous rate (<b class="u-mono">$4.10/mo</b> at archive time).</p>`,
+        confirmLabel: "Restore project",
+        onConfirm: (close) => { close(); Shell.toast("<b class='u-mono'>legacy-crm</b> restoring \u2014 services resuming (prototype)."); },
+      });
+    }));
+  }
+
+  Shell.protoStates([
+    { label: "First-run state (SH-03)", fn: () => location.href = "index.html?firstrun=1" },
+    { label: "Loading skeletons", fn: () => {
+        content.innerHTML = `<div class="page-head"><div class="sk" style="width:120px;height:22px"></div></div>
+        <div class="proj-grid">` + Array(3).fill(`<div class="card"><div class="sk" style="width:100px;height:16px;margin-bottom:14px"></div><div class="sk" style="width:70%;height:12px;margin-bottom:8px"></div><div class="sk" style="width:40%;height:12px"></div></div>`).join("") + `</div>
+        <p class="u-12 u-faint" style="margin-top:16px">Skeletons match the known layout; shown only past the 200ms budget (G10). <button class="btn btn--s" onclick="location.reload()">Back to ready</button></p>`;
+      } },
+    { label: "Partial failure (billing down)", fn: () => {
+        render();
+        content.querySelectorAll(".pc-cost").forEach(el => el.innerHTML = `<span class="cost-chip u-faint">\u2014</span><span class="u-12 u-faint" title="billing data delayed">billing data delayed</span>`);
+        Shell.toast("Cost query failed \u2014 health still renders (degradation order: health > money).");
+      } },
+  ]);
+
+  render();
+})();
+</script>
+</body>
+</html>

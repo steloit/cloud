@@ -1,0 +1,25 @@
+{
+  "$note": "Pricing as DATA (T3.1). Sources: the C2/C3 create frames (PostgreSQL Dev $19 / Standard $58 / Performance $112, storage $0.50/GB, HA +$19) and the canon fixtures this table must reproduce exactly (db-reports dev+10GB=$24, jobs dev+4GB=$21, db-main standard+50GB=$58, cache 1GB=$22, api web standard-1 x3=$61, worker standard-1 x2=$22). Two decompositions are DERIVED to satisfy canon and carried as S9 findings: (1) included_gb on standard/performance (db-main's $58 total with 50GB storage requires Standard to include 50 GB; Dev includes none — db-reports pays $5 for 10GB); (2) web standard-1 split into service_base + per_instance ($10 + 3x$17 = $61).",
+  "postgres": {
+    "sizes": {
+      "dev":         {"base_cents": 1900,  "included_gb": 0},
+      "standard":    {"base_cents": 5800,  "included_gb": 50},
+      "performance": {"base_cents": 11200, "included_gb": 50}
+    },
+    "storage_cents_per_gb": 50,
+    "ha_cents": 1900
+  },
+  "valkey": {
+    "memory_cents_per_gb": 2200
+  },
+  "web": {
+    "sizes": {
+      "standard-1": {"service_base_cents": 1000, "instance_cents": 1700}
+    }
+  },
+  "worker": {
+    "sizes": {
+      "standard-1": {"service_base_cents": 0, "instance_cents": 1100}
+    }
+  }
+}

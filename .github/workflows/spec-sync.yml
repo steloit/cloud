@@ -1,0 +1,23 @@
+name: spec-sync
+on:
+  push:
+    branches: [main]
+    paths: ["tasks/**", "scripts/spec-sync/**"]
+  workflow_dispatch:
+permissions:
+  issues: write
+  contents: read
+concurrency:
+  group: spec-sync
+  cancel-in-progress: false
+jobs:
+  project-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Sync tasks → issues (one-way, overwrite-always)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/spec-sync/sync.mjs

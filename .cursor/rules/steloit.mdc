@@ -1,0 +1,12 @@
+---
+description: Steloit cloud repo — canonical agent contract
+alwaysApply: true
+---
+
+Read `AGENTS.md` at the repo root before any work — it is the canonical agent contract
+(map, commands, authority order, task protocol, hard rules).
+
+- Work items live in `tasks/**.md`; only `status: ready` tasks may be started.
+- Load the task's `contexts:` packs from `contexts/` before implementing.
+- Never edit `docs/product/00-sources/**`, `docs/product/18-philosophy/decisions.md`,
+  or GitHub issue bodies (issues are generated views).
