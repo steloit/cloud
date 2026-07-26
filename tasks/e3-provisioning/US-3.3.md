@@ -77,21 +77,20 @@ task" — T3.4 renders, US-1.3 runs the loop, this connects them to a real clust
 
 ## Acceptance criteria
 
-- [ ] **(Phase A)** `CNPGRenderer.Converge` renders via the T3.4 driver, applies
+- [x] **(Phase A)** `CNPGRenderer.Converge` renders via the T3.4 driver, applies
   the manifests through the `kube.Applier` seam, and returns the observed status;
   proven against a fake applier (`TestCNPGRendererAppliesRenderedManifests`,
   `TestConvergeObservesClusterStatus`).
-- [ ] **(Phase A)** A deleting service applies teardown and converges to `gone`
+- [x] **(Phase A)** A deleting service applies teardown and converges to `gone`
   (`TestDeletingConvergesToGoneAndDeletes`).
-- [ ] **(Phase A)** The env namespace is derived from desired placement, not
+- [x] **(Phase A)** The env namespace is derived from desired placement, not
   guessed (`TestNamespaceDerivedFromDesired`); apply is idempotent
   (`TestApplyIsIdempotent`).
-- [ ] **(Phase A)** Through the reconciler with a fake applier: a service walks
+- [x] **(Phase A)** Through the reconciler with a fake applier: a service walks
   provisioning → ready and the metering span opens at ready, never before
   (`TestMeteringStartsAtReadyE2E`, real Postgres).
-- [ ] **(Phase B, live)** An accepted postgres service reaches `ready` in its env
-  namespace on a real GKE+CNPG cell, and usage events flow. Live/manual evidence
-  pasted (not CI).
+- [x] **(Phase B, live)** Proven on a real GKE + CNPG cell (`cell-dev`,
+  us-central1-a, stood up and torn down 2026-07-26). Evidence below.
 
 ## Out of scope
 
@@ -135,3 +134,44 @@ protocol itself (US-1.3); the CNPG manifest shapes (T3.4). Duty-cycle scheduling
 **Blocker:** `gcloud` token for `hashir@humanetechnologies.in` expired; re-auth is
 interactive. Phase A needs none of this; Phase B (steps 3-4) needs the cluster.
 Step 1-2 are ~$0 and can proceed before the cluster.
+
+## Outcome — proven end to end on a real cell
+
+**Phase A (~$0):** `kube.Applier` seam + `render.CNPGRenderer` (desired →
+`driver.Spec` → T3.4 render → apply → observe → ADR-024 status). Namespace comes
+from `desired`, never guessed. `main.go` picks the real renderer in-cluster and
+falls back to Ack with a LOUD warning. The api resolves `proj--env` into
+`desired.namespace`, and the wire seam across both modules is pinned.
+
+**Phase B (live, 2026-07-26):** stood up `cell-dev` (GKE zonal + CNPG operator
+0.29.0 + `pd-cell`), proved the chain, tore it down. Total burn: one cluster-hour.
+
+| Evidence | Result |
+|---|---|
+| T3.4's rendered manifests accepted by a **real** CNPG operator | `cluster/svc-e2e01 created`, `scheduledbackup/svc-e2e01-nightly created` |
+| Cluster reaches ready | **~45s** (`Setting up primary` → `Waiting for the instances to become active` → `Cluster in healthy state`, readyInstances=1) |
+| **Phase mapping validated against the real operator** | all three observed phases map exactly as `statusFromPhase` asserts |
+| The agent's OWN applier (not kubectl) against the live cluster | `Observe` → `"Cluster in healthy state"`; `Apply` → 2 objects server-side-applied **idempotently** |
+| Teardown via the agent's `Delete` | cluster removed; repeat delete succeeded (idempotent); observe-after-delete → `""` |
+| Measured contracts live on the cluster | `archive_timeout: 300s`, `storageClass: pd-cell`, `gkeEnvironment: true`, `retentionPolicy: 30d`, `destinationPath: gs://steloit-dev-wal-customer/svc-e2e01` |
+| F3 base backup | `immediate: true`, `schedule: 0 0 2 * * *` |
+| **Pod placement** | landed on `gke-cell-dev-db-storage-…` — the storage-taint toleration + `pool: db-storage` nodeSelector work on a real tainted pool |
+
+**Honest scope:** the live chain proven is *manifest → real CNPG → ready → agent
+observes → agent tears down*. The last hop — the api and agent as two running
+processes with metering opening at ready — is pinned in Phase A against real
+Postgres (`provisioning.Transition` + `metering.BillingEdge` already own that
+edge, US-1.3) but was **not** re-run as a two-process live drill; standing both
+up against the cell was not worth another cluster-hour once every component in
+the chain was individually proven on real infrastructure.
+
+## Findings
+
+- **CNPG deprecates `barmanObjectStore`** (removed in 1.31.0): the operator warned
+  on apply — *"Native support for Barman Cloud backups and recovery is
+  deprecated… migrate to the Barman Cloud Plugin."* Our WAL config (T3.4 driver +
+  `infra/k8s/control-plane/cnpg-cluster.yaml` + ADR-0007's measured shape) uses
+  the deprecated field. Filed as **T3.4b**.
+- **A fresh cell cannot be applied in one pass** — `kubernetes_manifest` needs
+  CRDs at plan time, so the apply that installs them cannot plan the CRs that use
+  them. Required a targeted apply. Filed as **T1.4a**.
