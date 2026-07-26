@@ -2,7 +2,9 @@ package idempotency
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/identity/session"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/secrets"
 )
 
 // TestRouteTableMatchesOpenAPI ties idempotentRoutes to the contract. openapi.yaml
@@ -97,59 +100,83 @@ func TestRouteTableMatchesOpenAPI(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("parsed zero idempotent operations from openapi.yaml — the test is not actually reading the contract")
 	}
-	// Every operation the contract declares must be accounted for: either
-	// ENFORCED here, or explicitly DEFERRED with a recorded reason. An
-	// operation that is in neither list would silently accept the header while
-	// nothing dedupes it.
-	got := append(append([]string(nil), idempotentRoutes...), deferredRoutes...)
+	// Every declared operation must be ENFORCED. US-3.6a removed the deferred
+	// set: sealing the recorded response resolved the credential problem at the
+	// storage layer, so "declared but unenforced" is no longer a category.
+	got := append([]string(nil), idempotentRoutes...)
 	sort.Strings(got)
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("the route tables have drifted from openapi.yaml\n enforced+deferred: %v\n declared in spec: %v", got, want)
 	}
-	// The two lists must be disjoint — a route cannot be both enforced and
-	// deferred, and an accidental duplicate would mask a missing entry above.
-	for _, e := range idempotentRoutes {
-		for _, d := range deferredRoutes {
-			if e == d {
-				t.Fatalf("%q is both enforced and deferred", e)
-			}
+}
+
+// The two routes deferred by US-3.6 are now enforced: sealing the recorded
+// response removed the reason they could not be.
+func TestPreviouslyDeferredRoutesAreNowEnforced(t *testing.T) {
+	for _, path := range []string{"/v1/auth/signup", "/v1/orgs/org_1/webhooks"} {
+		n := 0
+		h := newHarness(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n++
+			w.Header().Set("Set-Cookie", "sid=abc; HttpOnly")
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{"secret":"whsec_live"}`))
+		}))
+		first := post(t, h, path, "k1", `{}`)
+		second := post(t, h, path, "k1", `{}`)
+		if n != 1 {
+			t.Fatalf("%s: handler ran %d times — the route is not deduped", path, n)
+		}
+		if second.Header().Get("Idempotent-Replay") != "true" {
+			t.Fatalf("%s: the retry was not marked as a replay: %d", path, second.Code)
+		}
+		// Deduped is only half of "enforced": the ORIGINAL status and body,
+		// including the credential the route returns, must come back too.
+		if second.Code != first.Code || second.Body.String() != first.Body.String() {
+			t.Fatalf("%s: replay is not the original response: %d %s vs %d %s",
+				path, second.Code, second.Body.String(), first.Code, first.Body.String())
 		}
 	}
 }
 
-// Deferred routes DECLARE the parameter in openapi.yaml but cannot be enforced
-// yet (US-3.6a). The header must PASS THROUGH: refusing would turn a
-// spec-declared optional header into a hard failure and break signup for any
-// client that sets it globally. This test documents the gap in executable form
-// — when US-3.6a lands it should start failing.
-func TestDeferredRoutesPassTheHeaderThroughUnenforced(t *testing.T) {
-	n := 0
-	h, fs := newHarnessWithStore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n++
+// The header half of "replay the ORIGINAL response". A replayed signup without
+// its Set-Cookie returns an identical body while leaving the client convinced
+// it holds a session it does not have.
+func TestReplayReproducesTheOriginalHeaders(t *testing.T) {
+	h := newHarness(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Set-Cookie", "sid=abc123; HttpOnly; Secure")
+		w.Header().Set("Location", "/v1/orgs/org_1/webhooks/wbh_1")
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"id":"wbh_1"}`))
+	}))
+	first := post(t, h, "/v1/auth/signup", "k1", `{}`)
+	second := post(t, h, "/v1/auth/signup", "k1", `{}`)
+	for _, hdr := range []string{"Set-Cookie", "Location", "Content-Type"} {
+		if got, want := second.Header().Get(hdr), first.Header().Get(hdr); got != want {
+			t.Fatalf("replay dropped or changed %s: got %q, want %q", hdr, got, want)
+		}
+	}
+	if second.Body.String() != first.Body.String() {
+		t.Fatalf("replay body differs: %s vs %s", second.Body.String(), first.Body.String())
+	}
+}
+
+// Date and Content-Length describe THIS response, not the original — replaying
+// them would state something false about what is actually being sent.
+func TestReplayDoesNotReproduceVolatileHeaders(t *testing.T) {
+	h := newHarness(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Date", "Mon, 01 Jan 1990 00:00:00 GMT")
+		w.Header().Set("Content-Length", "999")
 		w.WriteHeader(201)
 		_, _ = w.Write([]byte(`{"id":"x"}`))
 	}))
-	for _, path := range []string{"/v1/auth/signup", "/v1/orgs/org_1/webhooks"} {
-		first := post(t, h, path, "k1", `{}`)
-		if first.Code != 201 {
-			t.Fatalf("%s: a key must not break a declared-but-unenforced route, got %d", path, first.Code)
-		}
-		second := post(t, h, path, "k1", `{}`)
-		if second.Header().Get("Idempotent-Replay") == "true" {
-			t.Fatalf("%s is marked as replayed, but its response carries credential material that is not stored — the marker would be a lie", path)
-		}
+	post(t, h, "/v1/estimates", "k1", `{}`)
+	second := post(t, h, "/v1/estimates", "k1", `{}`)
+	if second.Header().Get("Date") == "Mon, 01 Jan 1990 00:00:00 GMT" {
+		t.Fatal("the replay reproduced the ORIGINAL Date — it describes a response sent long ago")
 	}
-	if n != 4 {
-		t.Fatalf("deferred routes must execute normally; handler ran %d times, want 4", n)
-	}
-	// And nothing may be PERSISTED for a route we told the client we do not
-	// handle — storing a response we will never replay is the worst of both.
-	fs.mu.Lock()
-	stored := len(fs.rows)
-	fs.mu.Unlock()
-	if stored != 0 {
-		t.Fatalf("a deferred route persisted %d idempotency row(s)", stored)
+	if second.Header().Get("Content-Length") == "999" {
+		t.Fatal("the replay reproduced a stale Content-Length that does not match its body")
 	}
 }
 
@@ -167,7 +194,7 @@ type fakeRow struct {
 	fingerprint string
 	token       string
 	status      int
-	body        []byte
+	sealed      store.SaveIdempotentResponseParams
 	done        bool
 }
 
@@ -371,7 +398,17 @@ func TestInFlightDuplicateIsRefusedNotExecuted(t *testing.T) {
 
 // --- fake store: SQL semantics are proved against real Postgres elsewhere ---
 
-func newTestService(fs *fakeStore) *Service { return New(fs) }
+func newTestService(fs *fakeStore) *Service { return New(fs, testKEK()) }
+
+// testKEK is a REAL EnvKEK, so tests exercise the actual crypto path — a stub
+// would let a plaintext regression pass unnoticed.
+func testKEK() secrets.KEK {
+	k, err := secrets.NewEnvKEK("kek-test", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
 
 func (f *fakeStore) key(principal, endpoint, k string) string {
 	return principal + "\x00" + endpoint + "\x00" + k
@@ -398,7 +435,11 @@ func (f *fakeStore) GetIdempotencyKey(_ context.Context, a store.GetIdempotencyK
 	out := store.IdempotencyKey{Principal: a.Principal, Endpoint: a.Endpoint, Key: a.Key, BodySha256: row.fingerprint}
 	if row.done {
 		out.StatusCode = pgtype.Int4{Int32: int32(row.status), Valid: true}
-		out.Response = row.body
+		out.ResponseCiphertext = row.sealed.ResponseCiphertext
+		out.ResponseNonce = row.sealed.ResponseNonce
+		out.ResponseWrappedDek = row.sealed.ResponseWrappedDek
+		out.ResponseDekNonce = row.sealed.ResponseDekNonce
+		out.ResponseKekID = row.sealed.ResponseKekID
 	}
 	return out, nil
 }
@@ -418,7 +459,7 @@ func (f *fakeStore) SaveIdempotentResponse(ctx context.Context, a store.SaveIdem
 	if row.token != a.ClaimToken {
 		return 0, nil // fenced: not the current owner
 	}
-	row.status, row.body, row.done = int(a.StatusCode.Int32), a.Response, true
+	row.status, row.sealed, row.done = int(a.StatusCode.Int32), a, true
 	return 1, nil
 }
 
@@ -437,6 +478,17 @@ func (f *fakeStore) ReleaseIdempotencyKey(ctx context.Context, a store.ReleaseId
 }
 
 func (f *fakeStore) SweepExpiredIdempotencyKeys(context.Context) (int64, error) { return 0, nil }
+
+func (f *fakeStore) DiscardUnreadableIdempotencyKey(_ context.Context, a store.DiscardUnreadableIdempotencyKeyParams) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := f.key(a.Principal, a.Endpoint, a.Key)
+	if row, ok := f.rows[id]; ok && row.done && row.token == a.ClaimToken {
+		delete(f.rows, id)
+		return 1, nil
+	}
+	return 0, nil
+}
 
 // --- gaps QA measured as unpinned ---
 
@@ -835,12 +887,15 @@ func (e *errStore) ReleaseIdempotencyKey(context.Context, store.ReleaseIdempoten
 	return 1, nil
 }
 func (e *errStore) SweepExpiredIdempotencyKeys(context.Context) (int64, error) { return 0, nil }
+func (e *errStore) DiscardUnreadableIdempotencyKey(context.Context, store.DiscardUnreadableIdempotencyKeyParams) (int64, error) {
+	return 0, nil
+}
 
 // A claim can fail because someone holds the key, and that holder can RELEASE
 // it (a failed request) before the follow-up read runs. That legal sequence
 // must not surface to the client as a 500.
 func TestReleaseRacingARetryDoesNotError(t *testing.T) {
-	svc := New(&errStore{gets: []error{pgx.ErrNoRows, nil}})
+	svc := New(&errStore{gets: []error{pgx.ErrNoRows, nil}}, testKEK())
 	replay, claim, err := svc.Begin(context.Background(), "user:1", "POST /v1/estimates", "k", []byte(`{"a":1}`))
 	if err != nil {
 		t.Fatalf("a retry racing a release must not error: %v", err)
@@ -860,7 +915,7 @@ func TestReleaseRacingARetryDoesNotError(t *testing.T) {
 // If the key is released under us TWICE, Begin must report in-flight rather
 // than hand out ownership — a pathological loop must never double-provision.
 func TestRepeatedReleaseUnderUsNeverGrantsOwnership(t *testing.T) {
-	svc := New(&errStore{gets: []error{pgx.ErrNoRows, pgx.ErrNoRows}})
+	svc := New(&errStore{gets: []error{pgx.ErrNoRows, pgx.ErrNoRows}}, testKEK())
 	replay, claim, err := svc.Begin(context.Background(), "user:1", "POST /v1/estimates", "k", []byte(`{"a":1}`))
 	if err != nil {
 		t.Fatal(err)
@@ -892,6 +947,9 @@ func (s *sweepStore) SaveIdempotentResponse(context.Context, store.SaveIdempoten
 func (s *sweepStore) ReleaseIdempotencyKey(context.Context, store.ReleaseIdempotencyKeyParams) (int64, error) {
 	return 1, nil
 }
+func (s *sweepStore) DiscardUnreadableIdempotencyKey(context.Context, store.DiscardUnreadableIdempotencyKeyParams) (int64, error) {
+	return 0, nil
+}
 func (s *sweepStore) SweepExpiredIdempotencyKeys(context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -910,7 +968,7 @@ func (s *sweepStore) count() int { s.mu.Lock(); defer s.mu.Unlock(); return s.n 
 // the sweep — only the startup call can.
 func TestSweeperSweepsAtStartup(t *testing.T) {
 	st := &sweepStore{}
-	svc := New(st)
+	svc := New(st, testKEK())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.RunSweeper(ctx, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil))); close(done) }()
@@ -935,7 +993,7 @@ func TestSweeperSweepsAtStartup(t *testing.T) {
 // A failed sweep must not end the loop, and cancellation must stop it.
 func TestSweeperSurvivesAFailedSweepAndStops(t *testing.T) {
 	st := &sweepStore{}
-	svc := New(st)
+	svc := New(st, testKEK())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -960,5 +1018,61 @@ func TestSweeperSurvivesAFailedSweepAndStops(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunSweeper did not return when its context was cancelled")
+	}
+}
+
+// http.Header is MULTI-VALUED, and Set-Cookie is the header that actually uses
+// that in practice. A round trip that keeps only the first value silently drops
+// every cookie after the first.
+func TestReplayPreservesEveryValueOfAMultiValuedHeader(t *testing.T) {
+	h := newHarness(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "sid=abc; HttpOnly")
+		w.Header().Add("Set-Cookie", "csrf=xyz; Secure")
+		w.Header().Add("Set-Cookie", "pref=dark")
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"id":"x"}`))
+	}))
+	first := post(t, h, "/v1/auth/signup", "k1", `{}`)
+	second := post(t, h, "/v1/auth/signup", "k1", `{}`)
+
+	got, want := second.Header().Values("Set-Cookie"), first.Header().Values("Set-Cookie")
+	if len(got) != len(want) {
+		t.Fatalf("replay carried %d Set-Cookie values, the original had %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Set-Cookie[%d] differs: %q vs %q", i, got[i], want[i])
+		}
+	}
+}
+
+// The body is replayed as BYTES, so a non-UTF8 or empty body must survive the
+// JSON round trip unchanged — []byte encodes as base64 precisely so it does.
+func TestReplayIsByteExactForNonTextBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{"empty", []byte{}},
+		{"non-utf8", []byte{0x00, 0xff, 0xfe, 0x01, 0x80}},
+		{"large", bytes.Repeat([]byte{0xAB}, 256<<10)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(201)
+				_, _ = w.Write(tc.body)
+			}))
+			first := post(t, h, "/v1/estimates", "k1", `{}`)
+			second := post(t, h, "/v1/estimates", "k1", `{}`)
+			if second.Header().Get("Idempotent-Replay") != "true" {
+				t.Fatalf("not replayed: %d", second.Code)
+			}
+			if !bytes.Equal(second.Body.Bytes(), first.Body.Bytes()) {
+				t.Fatalf("replay is not byte-exact: got %d bytes, want %d", second.Body.Len(), first.Body.Len())
+			}
+			if !bytes.Equal(second.Body.Bytes(), tc.body) {
+				t.Fatal("replay does not match what the handler originally wrote")
+			}
+		})
 	}
 }

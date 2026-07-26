@@ -25,9 +25,13 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (principal, endpoint, key) DO UPDATE
     SET body_sha256 = EXCLUDED.body_sha256,
         claim_token = EXCLUDED.claim_token,
-        status_code = NULL,
-        response    = NULL,
-        created_at  = now()
+        status_code          = NULL,
+        response_ciphertext  = NULL,
+        response_nonce       = NULL,
+        response_wrapped_dek = NULL,
+        response_dek_nonce   = NULL,
+        response_kek_id      = NULL,
+        created_at           = now()
     WHERE (idempotency_keys.status_code IS NOT NULL
              AND idempotency_keys.created_at < now() - interval '24 hours')
        OR (idempotency_keys.status_code IS NULL
@@ -44,7 +48,13 @@ WHERE principal = $1 AND endpoint = $2 AND key = $3
 -- Record the original response so a replay returns it verbatim. FENCED on
 -- claim_token: a request that outran the abandonment window and returns late
 -- must not overwrite the record of the successor that took the claim over.
-UPDATE idempotency_keys SET status_code = $5, response = $6
+UPDATE idempotency_keys
+SET status_code          = $5,
+    response_ciphertext  = $6,
+    response_nonce       = $7,
+    response_wrapped_dek = $8,
+    response_dek_nonce   = $9,
+    response_kek_id      = $10
 WHERE principal = $1 AND endpoint = $2 AND key = $3 AND claim_token = $4;
 
 -- name: ReleaseIdempotencyKey :execrows
@@ -64,3 +74,23 @@ WHERE principal = $1 AND endpoint = $2 AND key = $3
 -- table grows without bound and every recorded response body is retained
 -- forever, long past the window the contract states.
 DELETE FROM idempotency_keys WHERE created_at < now() - interval '24 hours';
+
+-- name: DiscardUnreadableIdempotencyKey :execrows
+-- Drop a COMPLETED record that cannot be decrypted (KEK rotated, or the row was
+-- tampered with / copied from another key so its AAD no longer authenticates).
+-- Such a record can never be replayed by anyone, so keeping it only strands the
+-- client on a key it cannot use until the TTL expires — US-3.6's "a failure must
+-- never strand state" applies to the replay cache too.
+--
+-- FENCED on claim_token, like every other destructive statement here. Without
+-- the fence: C reads an unreadable row and fails to open it; A discards the same
+-- row first, re-claims, runs the handler and records a fresh READABLE response;
+-- C's delete then still matches (status_code is non-NULL again) and wipes A's
+-- valid record, so C re-claims and the handler runs a SECOND time — the exact
+-- double-provision the other fences exist to prevent. Passing the claim_token
+-- of the row we actually failed to open makes a successor's record unmatchable.
+--
+-- `status_code IS NOT NULL` additionally keeps a live in-flight claim safe.
+DELETE FROM idempotency_keys
+WHERE principal = $1 AND endpoint = $2 AND key = $3
+  AND claim_token = $4 AND status_code IS NOT NULL;

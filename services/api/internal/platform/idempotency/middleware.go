@@ -24,44 +24,21 @@ type PrincipalResolver interface {
 	PrincipalFromRequest(ctx context.Context, r *http.Request) (session.Principal, bool)
 }
 
-// idempotentRoutes is the set of operations this middleware ENFORCES: the
-// estimate-gated provisioning path US-3.6 exists to protect.
+// idempotentRoutes is the set of operations the contract declares as accepting
+// `Idempotency-Key` (openapi.yaml `parameters: [idempotencyKey]`).
 //
-// TestRouteTableMatchesOpenAPI parses openapi.yaml and checks this table
-// against the operations that declare `parameters: [idempotencyKey]`, so a new
-// declaration cannot silently go unenforced.
+// All four are enforced. `signup` and `createWebhook` were deferred when this
+// shipped (US-3.6) because their 2xx bodies carry credential material — a live
+// session cookie, the reveal-once webhook signing secret — and S7's "replay the
+// ORIGINAL response" meant storing that in plaintext for 24h. US-3.6a resolves
+// it at the storage layer instead of the routing layer: recorded responses are
+// envelope-encrypted, so both promises hold at once.
+//
+// TestRouteTableMatchesOpenAPI parses openapi.yaml and fails if the two drift,
+// so a new declaration cannot silently go unenforced.
 var idempotentRoutes = []string{
 	"POST /v1/estimates",
 	"POST /v1/envs/{env}/services",
-}
-
-// deferredRoutes DECLARE the parameter in openapi.yaml but are deliberately not
-// enforced here, because replaying their 2xx response would mean STORING A
-// CREDENTIAL at rest for the 24h replay window:
-//
-//   - createWebhook returns the reveal-once signing secret in its 201 body
-//     (`WebhookCreated.secret`), which the same handler envelope-encrypts before
-//     persisting. Recording the response verbatim would put that plaintext
-//     secret in `idempotency_keys.response`, defeating the reveal-once contract.
-//   - signup's 201 sets the session cookie through the carrier. Replaying it
-//     requires storing a live session credential; NOT replaying it returns a 201
-//     with no `Set-Cookie`, leaving the client convinced it is signed in when it
-//     holds no session. Both options are wrong, so neither is shipped.
-//
-// This is a SPEC CONFLICT, recorded rather than silently resolved (US-3.6a):
-// the ruling promises dedupe on operations whose responses cannot be stored as
-// they stand. Resolving it needs a redaction or credential-pointer design, not
-// a wiring change.
-//
-// Until then the header PASSES THROUGH on these routes rather than being
-// refused. Refusing was the first instinct — a client told nothing may believe
-// its retry is deduped — but openapi.yaml DECLARES the parameter here, so a
-// 422 breaks every spec-conformant client that sets the header globally, and
-// breaks signup outright. Passing through is exactly the behaviour these routes
-// have today; refusing would be a live regression traded for a warning. The
-// divergence belongs in the contract, which is an owner-level change (US-3.6a),
-// not in a status code that fails the first request.
-var deferredRoutes = []string{
 	"POST /v1/auth/signup",
 	"POST /v1/orgs/{org}/webhooks",
 }
@@ -84,10 +61,6 @@ func Middleware(svc *Service, principals PrincipalResolver) func(http.Handler) h
 	for _, pat := range idempotentRoutes {
 		matcher.HandleFunc(pat, func(http.ResponseWriter, *http.Request) {})
 	}
-	deferred := http.NewServeMux()
-	for _, pat := range deferredRoutes {
-		deferred.HandleFunc(pat, func(http.ResponseWriter, *http.Request) {})
-	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,14 +70,8 @@ func Middleware(svc *Service, principals PrincipalResolver) func(http.Handler) h
 				return
 			}
 			if _, pattern := matcher.Handler(r); pattern == "" {
-				if _, d := deferred.Handler(r); d != "" {
-					// DECLARED in the contract but not enforceable yet
-					// (US-3.6a). Pass through unchanged — see deferredRoutes.
-					next.ServeHTTP(w, r)
-					return
-				}
-				// Not declared at all: refuse rather than ignore, so a client
-				// cannot believe a retry is deduped when nothing dedupes it.
+				// Not declared: refuse rather than ignore, so a client cannot
+				// believe a retry is deduped when nothing dedupes it.
 				problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{{
 					Field:  "Idempotency-Key",
 					Detail: "this operation does not accept an idempotency key",
@@ -164,7 +131,18 @@ func Middleware(svc *Service, principals PrincipalResolver) func(http.Handler) h
 						"Retry in a few seconds with the same Idempotency-Key to receive the original response."))
 					return
 				}
-				w.Header().Set("Content-Type", "application/json")
+				// Replay the ORIGINAL headers, not just the body: a signup
+				// replayed without its Set-Cookie returns an identical body
+				// while leaving the client convinced it holds a session it
+				// does not have.
+				for k, vs := range replay.Header {
+					if skipOnReplay(k) {
+						continue
+					}
+					for _, v := range vs {
+						w.Header().Add(k, v)
+					}
+				}
 				w.Header().Set("Idempotent-Replay", "true")
 				w.WriteHeader(replay.StatusCode)
 				_, _ = w.Write(replay.Body)
@@ -195,7 +173,7 @@ func Middleware(svc *Service, principals PrincipalResolver) func(http.Handler) h
 				// span. The handler already committed; the record must follow it.
 				ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 				defer cancel()
-				if err := svc.Complete(ctx, principal, endpoint, key, claim, status, rec.body.Bytes()); err != nil {
+				if err := svc.Complete(ctx, principal, endpoint, key, claim, status, rec.Header().Clone(), rec.body.Bytes()); err != nil {
 					// The response is already written, so this cannot be turned
 					// into an error for the client — but it must never be
 					// silent: an unrecorded success is a latent duplicate.
@@ -228,6 +206,16 @@ func principalOf(r *http.Request, principals PrincipalResolver) string {
 	return "anon:" + clientIP(r)
 }
 
+// clientIP deliberately reads RemoteAddr ONLY, unlike identity's same-named
+// helper which honours X-Forwarded-For.
+//
+// The trade is asymmetric here. XFF is client-settable, so honouring it would
+// let a caller CHOOSE its own anon bucket — and since US-3.6a that bucket
+// guards a replayable session cookie. RemoteAddr instead collapses every
+// anonymous caller behind a proxy into one bucket, which is safe because the
+// actual defence is the request-body fingerprint: a replay requires reproducing
+// the original body byte-for-byte, and signup's body carries the password.
+// Sharing a bucket therefore cannot surrender another caller's response.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -280,6 +268,32 @@ func endpointKey(method, escapedPath string) string {
 		segs[i] = canonical
 	}
 	return method + " " + strings.Join(segs, "/")
+}
+
+// skipOnReplay names the headers the server MUST recompute rather than replay.
+//
+//   - Date and Content-Length describe THIS response: the time it is being sent
+//     and the body net/http is about to write. Replaying either states something
+//     false about the response actually going out.
+//   - Hop-by-hop headers describe the CONNECTION, not the payload, and are
+//     meaningless (net/http honours some of them from this map).
+//
+// NOTE TO FUTURE MIDDLEWARE AUTHORS: `rec.Header()` is the same map any
+// middleware ABOVE this one writes into, so a per-request header added there
+// (X-Request-Id, Access-Control-Allow-Origin/Vary: Origin, X-RateLimit-*) would
+// be recorded once and replayed stale to every later caller, with nothing
+// failing. Add such headers here when you add them to the chain. This is a
+// denylist because today's chain (problem.Recover → idem → sse → mux) sets no
+// per-request headers above this layer; if that changes materially, invert it
+// to an allowlist rather than extending this list indefinitely.
+func skipOnReplay(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Date", "Content-Length",
+		"Connection", "Keep-Alive", "Transfer-Encoding", "Trailer", "Upgrade",
+		"Proxy-Authenticate", "Proxy-Authorization", "Te":
+		return true
+	}
+	return false
 }
 
 // maxBodyBytes matches the platform's request-body cap.

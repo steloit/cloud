@@ -263,7 +263,7 @@ func main() {
 	// response"), and only a layer holding the raw request and response bodies
 	// can honor that literally. It engages only for a declared operation
 	// carrying an Idempotency-Key, so ordinary traffic (and SSE) is untouched.
-	idemSvc := idempotency.New(queries)
+	idemSvc := idempotency.New(queries, kek)
 	// The 24h window is a promise, not just a read filter: without a sweep the
 	// table grows without bound and recorded response bodies outlive the window.
 	go idemSvc.RunSweeper(ctx, time.Hour, logger)
