@@ -164,3 +164,189 @@ func TestServices(t *testing.T) {
 		t.Fatalf("re-delete: %d", resp.StatusCode)
 	}
 }
+
+// US-3.7: the estimate gate binds to the CONTRACTED CONFIGURATION, not to a
+// price. Prices collide — postgres `dev`+78 GB and `standard` both come to
+// 5800¢ — so before this, a caller could price one configuration and provision
+// the other, in either direction, and the gate agreed because the number did.
+func TestEstimateGateRefusesAPriceCollidingShape(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "collide@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"collideco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	estimateFor := func(shape string) string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":`+shape+`}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("createEstimate %s: %d %s", shape, resp.StatusCode, body)
+		}
+		var est struct {
+			Id                string `json:"id"`
+			MonthlyTotalCents int    `json:"monthly_total_cents"`
+		}
+		_ = json.Unmarshal([]byte(body), &est)
+		return est.Id
+	}
+
+	// Both configurations price identically — that is the whole point.
+	const devBig = `{"size":"dev","storage_gb":78}`
+	const standard = `{"size":"standard"}`
+	devEst := estimateFor(devBig)
+
+	// Price a dev+78GB, try to provision a standard at the same price.
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"swapped","product":"postgres","estimate_id":"`+devEst+`","shape":`+standard+`}`, ownerCk)
+	if resp.StatusCode != 409 {
+		t.Fatalf("a price-colliding SUBSTITUTION was accepted (%d) — the estimate is a contract, not a number: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "does not cover this shape") || !strings.Contains(body, "remediation") {
+		t.Fatalf("the refusal must name the reason and carry remediation: %s", body)
+	}
+	// The refusal must NOT have burned the one-shot estimate.
+	var accepted int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM estimates WHERE id = $1 AND accepted_at IS NOT NULL`, devEst).Scan(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted != 0 {
+		t.Fatal("a refused create burned the estimate — a mistyped shape must leave it usable")
+	}
+	// And nothing was provisioned.
+	svcs, err := w.prov.ListServices(ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svcs) != 0 {
+		t.Fatalf("the refused create provisioned %d service(s)", len(svcs))
+	}
+
+	// The other direction is equally refused.
+	stdEst := estimateFor(standard)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"swapped2","product":"postgres","estimate_id":"`+stdEst+`","shape":`+devBig+`}`, ownerCk)
+	if resp.StatusCode != 409 {
+		t.Fatalf("the reverse substitution was accepted (%d): %s", resp.StatusCode, body)
+	}
+
+	// The three substitutions a review reproduced live: all were 201 before,
+	// each persisting the substituted value into the row AND into the desired
+	// doc handed to the cell. They are UNPRICED fields — which is the point:
+	// "any shape substitution impossible regardless of price equality".
+	for _, tc := range []struct{ name, priced, created string }{
+		{"version", `{"size":"standard","version":"16"}`, `{"size":"standard","version":"17"}`},
+		{"pgmq", `{"size":"standard","pgmq":{"dlq":true}}`, `{"size":"standard","pgmq":{"dlq":false}}`},
+		{"connections", `{"size":"standard","connections":{"max":50}}`, `{"size":"standard","connections":{"max":5000}}`},
+	} {
+		t.Run("unpriced field: "+tc.name, func(t *testing.T) {
+			id := estimateFor(tc.priced)
+			resp, body := w.post(t, "/v1/envs/"+env.ID+"/services",
+				`{"name":"sub-`+tc.name+`","product":"postgres","estimate_id":"`+id+`","shape":`+tc.created+`}`, ownerCk)
+			if resp.StatusCode != 409 {
+				t.Fatalf("%s was substituted at the same price (%d): %s", tc.name, resp.StatusCode, body)
+			}
+		})
+	}
+
+	// A wrong-typed field must be refused rather than silently defaulted — it
+	// would otherwise be priced as one configuration and stored as another.
+	illTyped := estimateFor(`{"size":"dev","storage_gb":0}`)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"typed","product":"postgres","estimate_id":"`+illTyped+`","shape":{"size":"dev","storage_gb":"78"}}`, ownerCk)
+	if resp.StatusCode != 422 {
+		t.Fatalf("an ill-typed storage_gb was accepted (%d) — it prices as 0 GB and stores as \"78\": %s", resp.StatusCode, body)
+	}
+
+	// The HONEST create still works — and the same configuration spelled with
+	// its defaults written out must not be refused.
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"honest","product":"postgres","estimate_id":"`+stdEst+`","shape":{"size":"standard","ha":false,"storage_gb":0}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("the contracted configuration, spelled with explicit defaults, was refused: %d %s", resp.StatusCode, body)
+	}
+	// What is STORED is the resolved configuration, with defaults explicit —
+	// so the cell is handed what was contracted, not a partial map.
+	var stored map[string]any
+	if err := w.pool.QueryRow(ctx,
+		`SELECT shape FROM services WHERE name = 'honest'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"size", "storage_gb", "ha", "version", "pgmq", "connections"} {
+		if _, ok := stored[k]; !ok {
+			t.Fatalf("the stored shape omits declared field %q: %v", k, stored)
+		}
+	}
+}
+
+// US-3.7: the price the customer was SHOWN is the price they pay. If the
+// pricing table moves under a live estimate, the create must refuse rather than
+// provision at a number the customer never saw.
+//
+// Driven by rewriting the stored line — which is exactly what a pricing deploy
+// looks like from the gate's side: the estimate's recorded price no longer
+// matches what the same configuration costs now.
+func TestEstimateGateRefusesAShapeRepricedSinceTheEstimate(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "reprice@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"repriceco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev","storage_gb":10}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+
+	// The table moved: the stored line now records a price that the current
+	// engine no longer produces for this configuration.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE estimates SET lines = jsonb_set(lines::jsonb, '{0,monthly_cents}', '9900')::jsonb WHERE id = $1`,
+		est.Id); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
+	if resp.StatusCode != 409 {
+		t.Fatalf("a repriced shape provisioned at a price the customer never saw (%d): %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "repriced") || !strings.Contains(body, "remediation") {
+		t.Fatalf("the refusal must name repricing and carry remediation: %s", body)
+	}
+	svcs, err := w.prov.ListServices(ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svcs) != 0 {
+		t.Fatalf("the repriced create provisioned %d service(s)", len(svcs))
+	}
+}

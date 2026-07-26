@@ -6,6 +6,7 @@ package estimates
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -165,5 +166,218 @@ func TestEstimateLineGrammar(t *testing.T) {
 	}
 	if len(lines) == 0 {
 		t.Fatal("no estimate lines checked — the grammar assertion is inert")
+	}
+}
+
+// US-3.7: Canonical is the CONFIGURATION identity, so equal prices must not
+// make two different configurations interchangeable, and one configuration
+// spelled two ways must not look like two.
+func TestCanonicalIdentity(t *testing.T) {
+	t.Run("colliding prices are DIFFERENT configurations", func(t *testing.T) {
+		dev78 := ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "storage_gb": 78}}
+		standard := ShapeInput{Product: "postgres", Shape: map[string]any{"size": "standard"}}
+		// The collision is real — if this ever stops holding, the test below
+		// proves nothing and must be re-based on a live collision.
+		a, err := Price(dev78)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := Price(standard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.MonthlyCents != b.MonthlyCents {
+			t.Fatalf("the fixture is not a price collision any more (%d vs %d) — pick a live one", a.MonthlyCents, b.MonthlyCents)
+		}
+		ca, err := Canonical(dev78)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cb, err := Canonical(standard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ca == cb {
+			t.Fatalf("dev+78GB and standard share the identity %q — a caller could price one and provision the other", ca)
+		}
+	})
+
+	t.Run("the same configuration spelled differently is ONE identity", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			a, b ShapeInput
+		}{
+			{"omitted default vs explicit",
+				ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}},
+				ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "ha": false, "storage_gb": 0}}},
+			{"omitted intent vs its default",
+				ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}},
+				ShapeInput{Product: "postgres", Intent: defaultIntent("postgres"), Shape: map[string]any{"size": "dev"}}},
+			{"name is not part of the contract",
+				ShapeInput{Product: "postgres", Name: "orders", Shape: map[string]any{"size": "dev"}},
+				ShapeInput{Product: "postgres", Name: "anything-else", Shape: map[string]any{"size": "dev"}}},
+			{"valkey default memory",
+				ShapeInput{Product: "valkey", Shape: map[string]any{}},
+				ShapeInput{Product: "valkey", Shape: map[string]any{"memory_mb": 1024}}},
+			{"web default instances",
+				ShapeInput{Product: "web", Shape: map[string]any{"size": "standard-1"}},
+				ShapeInput{Product: "web", Shape: map[string]any{"size": "standard-1", "instances": 1}}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				ca, err := Canonical(tc.a)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cb, err := Canonical(tc.b)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ca != cb {
+					t.Fatalf("the same configuration produced two identities:\n  %q\n  %q\nthis would refuse a legitimate create", ca, cb)
+				}
+			})
+		}
+	})
+
+	t.Run("every priced difference is an identity difference", func(t *testing.T) {
+		// Whatever the engine reads to compute a price must be part of the
+		// identity — otherwise a field could change the bill without changing
+		// the contract.
+		base := ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "storage_gb": 10, "ha": false}}
+		baseID, _ := Canonical(base)
+		basePrice, _ := Price(base)
+		for _, v := range []map[string]any{
+			{"size": "standard", "storage_gb": 10, "ha": false},
+			{"size": "dev", "storage_gb": 11, "ha": false},
+			{"size": "dev", "storage_gb": 10, "ha": true},
+		} {
+			other := ShapeInput{Product: "postgres", Shape: v}
+			id, err := Canonical(other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := Price(other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.MonthlyCents != basePrice.MonthlyCents && id == baseID {
+				t.Fatalf("%v prices differently (%d vs %d) but shares the identity %q — the bill can change without the contract changing",
+					v, p.MonthlyCents, basePrice.MonthlyCents, id)
+			}
+		}
+	})
+
+	t.Run("an unknown field cannot widen the identity", func(t *testing.T) {
+		_, err := Canonical(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "wibble": 1}})
+		if err == nil {
+			t.Fatal("an out-of-schema field was accepted into the configuration identity")
+		}
+	})
+}
+
+// US-3.7 round 2: every DECLARED field is part of the contract, not only the
+// billed ones. A customer who priced `pgmq` off did not contract for it on,
+// however equal the bill.
+func TestCanonicalCoversEveryDeclaredField(t *testing.T) {
+	for product, fields := range shapeSchema {
+		for key, spec := range fields {
+			t.Run(product+"/"+key, func(t *testing.T) {
+				base := ShapeInput{Product: product, Shape: map[string]any{}}
+				other := ShapeInput{Product: product, Shape: map[string]any{key: differentValue(spec)}}
+				a, err := Canonical(base)
+				if err != nil {
+					t.Fatal(err)
+				}
+				b, err := Canonical(other)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if a == b {
+					t.Fatalf("%s.%s does not affect the contract identity (%q) — it can be substituted freely", product, key, a)
+				}
+			})
+		}
+	}
+}
+
+// differentValue returns a value distinct from the field's default.
+func differentValue(spec fieldSpec) any {
+	switch spec.kind {
+	case "string":
+		if spec.def == "zzz-other" {
+			return "zzz-other2"
+		}
+		return "zzz-other"
+	case "int":
+		return spec.def.(int) + 7
+	case "bool":
+		return !spec.def.(bool)
+	default: // opaque
+		return map[string]any{"substituted": true}
+	}
+}
+
+// A known key carrying the wrong TYPE must be refused, not silently defaulted:
+// defaulting priced `{storage_gb: "78"}` to 0 GB bills for a shape nobody asked
+// for, and the raw value used to be persisted verbatim.
+func TestWrongTypedFieldIsRefusedNotDefaulted(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		shape map[string]any
+	}{
+		{"int as string", map[string]any{"storage_gb": "78"}},
+		{"bool as string", map[string]any{"ha": "true"}},
+		{"string as number", map[string]any{"size": 3}},
+		{"fractional int", map[string]any{"storage_gb": 10.9}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Price(ShapeInput{Product: "postgres", Shape: tc.shape}); err == nil {
+				t.Fatalf("%v was accepted and silently defaulted — it would be billed as something else", tc.shape)
+			}
+			if _, err := Canonical(ShapeInput{Product: "postgres", Shape: tc.shape}); err == nil {
+				t.Fatalf("%v produced a contract identity despite being ill-typed", tc.shape)
+			}
+		})
+	}
+}
+
+// Resolve is what gets persisted, so it must carry every declared field with
+// defaults made explicit.
+func TestResolveMakesDefaultsExplicit(t *testing.T) {
+	got, err := Resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range shapeSchema["postgres"] {
+		if _, ok := got[k]; !ok {
+			t.Fatalf("resolved shape omits declared field %q — the stored configuration would be implicit", k)
+		}
+	}
+	if got["storage_gb"] != 0 || got["ha"] != false {
+		t.Fatalf("defaults not applied: %v", got)
+	}
+}
+
+// A product declared in shapeSchema but missing a pricing arm must ERROR, not
+// price at zero. resolve() owns the unknown-product check, so without an
+// explicit guard the two tables drift in the mis-billing direction.
+func TestDeclaredButUnpricedProductIsRefused(t *testing.T) {
+	shapeSchema["ghost"] = map[string]fieldSpec{"size": {"string", "small"}}
+	t.Cleanup(func() {
+		delete(shapeSchema, "ghost")
+		delete(allowedShapeKeys, "ghost")
+	})
+	allowedShapeKeys["ghost"] = map[string]bool{"size": true}
+
+	// The refusal must come from the switch's own default arm — not from a
+	// side table asserting which products are priced, which would only narrow
+	// the gap rather than close it.
+	line, err := Price(ShapeInput{Product: "ghost", Shape: map[string]any{"size": "small"}})
+	if err == nil {
+		t.Fatalf("a declared product with no pricing arm was priced at %d cents instead of refused", line.MonthlyCents)
+	}
+	var se ShapeError
+	if !errors.As(err, &se) || se.Field != "product" {
+		t.Fatalf("want a product ShapeError, got %v", err)
 	}
 }
