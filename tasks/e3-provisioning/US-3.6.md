@@ -2,7 +2,7 @@
 id: US-3.6
 title: Failed provisioning never bills and never strands state
 epic: E3
-status: blocked
+status: in-progress
 phase: MVP
 priority: critical
 sprint: 4
