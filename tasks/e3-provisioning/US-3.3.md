@@ -2,7 +2,7 @@
 id: US-3.3
 title: Accepted service provisions via the reconciler; metering starts at ready
 epic: E3
-status: blocked
+status: in-progress
 phase: MVP
 priority: critical
 sprint: 4
