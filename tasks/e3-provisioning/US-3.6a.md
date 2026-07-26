@@ -2,7 +2,7 @@
 id: US-3.6a
 title: "Idempotency on credential-bearing responses: signup and createWebhook cannot replay as they stand"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
