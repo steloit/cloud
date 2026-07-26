@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -106,8 +108,11 @@ func CanTransition(from, to string) bool {
 // cell-agent renders from (e1-substrate-design.md §2: product + intent + shape +
 // lifecycle flags). Substrate names never appear here (D8); this is grammar
 // only. `deleting` marks a teardown so the cell converges the service to gone.
-func desiredDoc(product, intent string, shape, scaling, override []byte, deleting bool) []byte {
+func desiredDoc(product, intent, namespace string, shape, scaling, override []byte, deleting bool) []byte {
 	doc := map[string]any{"product": product}
+	if namespace != "" {
+		doc["namespace"] = namespace // the cell renders into proj--env (US-3.3)
+	}
 	if intent != "" {
 		doc["intent"] = intent
 	}
@@ -129,6 +134,42 @@ func desiredDoc(product, intent string, shape, scaling, override []byte, deletin
 	}
 	b, _ := json.Marshal(doc)
 	return b
+}
+
+// projectName returns the project's name for namespace derivation; on lookup
+// error it falls back to the id so a create is never blocked on a naming detail.
+func projectName(ctx context.Context, s *Service, projectID string) string {
+	if p, err := s.q.GetProject(ctx, projectID); err == nil {
+		return p.Name
+	}
+	return projectID
+}
+
+// resolveNamespace derives the cell namespace `proj--env` from the service's
+// environment → project (US-3.3). Sanitized to a valid k8s namespace label. A
+// missing project is an error, not a guessed namespace.
+func (s *Service) resolveNamespace(ctx context.Context, envID string) (string, error) {
+	env, err := s.q.GetEnvironment(ctx, envID)
+	if err != nil {
+		return "", err
+	}
+	proj, err := s.q.GetProject(ctx, env.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	return k8sNamespace(proj.Name) + "--" + k8sNamespace(env.Name), nil
+}
+
+var nsInvalid = regexp.MustCompile(`[^a-z0-9-]`)
+
+// k8sNamespace lowercases and dashes a name to an RFC1123 label segment.
+func k8sNamespace(name string) string {
+	n := nsInvalid.ReplaceAllString(strings.ToLower(name), "-")
+	n = strings.Trim(n, "-")
+	if n == "" {
+		n = "x"
+	}
+	return n
 }
 
 // provisioningSteps is the C4 timeline, born with the row.
@@ -214,6 +255,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
 	}
+	namespace := k8sNamespace(projectName(ctx, s, env.ProjectID)) + "--" + k8sNamespace(env.Name)
 	row, err := s.q.InsertService(ctx, store.InsertServiceParams{
 		ID: ids.New("svc"), EnvID: env.ID, Name: in.Name, Product: in.Product,
 		Intent:               pgtype.Text{String: line.Intent, Valid: true},
@@ -221,9 +263,9 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		ProvisioningSteps:    provisioningSteps(),
 		MonthlyEstimateCents: line.MonthlyCents,
 		EstimateID:           pgtype.Text{String: in.EstimateID, Valid: true},
-		// US-1.3a: desired populated at creation; the row is outstanding
-		// (observed 0 < generation 1) so the cell picks it up on the next poll.
-		Desired: desiredDoc(in.Product, line.Intent, shapeJSON, nil, nil, false),
+		// US-1.3a/US-3.3: desired populated at creation with the resolved cell
+		// namespace; the row is outstanding so the cell picks it up next poll.
+		Desired: desiredDoc(in.Product, line.Intent, namespace, shapeJSON, nil, nil, false),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -380,7 +422,11 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	if override != nil {
 		effOverride = override
 	}
-	params.Desired = desiredDoc(svc.Product, svc.Intent.String, effShape, effScaling, effOverride, false)
+	ns, err := s.resolveNamespace(ctx, svc.EnvID)
+	if err != nil {
+		return store.Service{}, err
+	}
+	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, effShape, effScaling, effOverride, false)
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
 		// The SQL fence `status <> 'deleting'` is the atomic backstop for the Go
@@ -430,7 +476,11 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 	// yet `deleting`, so a second DeleteService passes the guard above and
 	// completes the transition. Ordered desired-first deliberately: the reverse
 	// (status-first) would strand a row that the guard then refuses to retry.
-	del := desiredDoc(svc.Product, svc.Intent.String, svc.Shape, svc.Scaling, svc.Override, true)
+	dns, err := s.resolveNamespace(ctx, svc.EnvID)
+	if err != nil {
+		return err
+	}
+	del := desiredDoc(svc.Product, svc.Intent.String, dns, svc.Shape, svc.Scaling, svc.Override, true)
 	if _, err := s.q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: svc.ID, Desired: del}); err != nil {
 		return err
 	}

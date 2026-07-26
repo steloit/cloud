@@ -59,16 +59,13 @@ func svc(id, status string) agent.DesiredService {
 		ID: id, CellID: "cell-0", Product: "postgres", Status: status, Generation: 1,
 		Desired: map[string]any{
 			"product": "postgres", "shape": map[string]any{"size": "dev"},
-			"placement": map[string]any{
-				"namespace": "acme--prod", "gsa": "sa@steloit-dev.iam.gserviceaccount.com",
-				"wal_bucket": "steloit-dev-wal-customer",
-			},
+			"namespace": "acme--prod",
 		},
 	}
 }
 
 func newRenderer(applier *fakeApplier) *CNPGRenderer {
-	return NewCNPGRenderer(cnpg.New(), applier, "cell-0", quiet())
+	return NewCNPGRenderer(cnpg.New(), applier, "cell-0", "sa@steloit-dev.iam.gserviceaccount.com", "steloit-dev-wal-customer", quiet())
 }
 
 func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
@@ -144,7 +141,7 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 func TestNamespaceDerivedFromDesired(t *testing.T) {
 	// No placement → error, never a guessed namespace.
 	s := svc("svc_db01", "provisioning")
-	delete(s.Desired, "placement")
+	delete(s.Desired, "namespace")
 	if _, err := newRenderer(newFakeApplier("")).Converge(context.Background(), s); err == nil {
 		t.Fatal("a service with no resolved namespace must error, not guess")
 	}

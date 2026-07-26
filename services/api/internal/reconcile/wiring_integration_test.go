@@ -268,3 +268,18 @@ func TestUpdateServiceShapeSQLFenceRejectsDeleting(t *testing.T) {
 }
 
 func errorsIsNoRows(err error) bool { return err != nil && err.Error() == pgx.ErrNoRows.Error() }
+
+// US-3.3: createService resolves and embeds the cell namespace (proj--env) in
+// desired, so the cell-agent renders into the right namespace.
+func TestCreateServiceResolvesNamespace(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	svc := createSvc(t, pool, q, prov, "db-ns")
+	var d map[string]any
+	_ = json.Unmarshal(svc.Desired, &d)
+	ns, _ := d["namespace"].(string)
+	// seedGraph creates project "p" and env "prod" → namespace "p--prod".
+	if ns != "p--prod" {
+		t.Fatalf("createService did not resolve the cell namespace (want p--prod): %q in %s", ns, svc.Desired)
+	}
+}
