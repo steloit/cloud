@@ -2,6 +2,7 @@ package render
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -200,4 +201,35 @@ func TestApplyErrorSurfaces(t *testing.T) {
 	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err == nil {
 		t.Fatal("an apply failure must surface (the reconciler leaves the row outstanding)")
 	}
+}
+
+// The namespace crosses TWO module boundaries: the api embeds it in desired
+// (US-3.3 Step 1), the poll ships it as raw JSON, the agent decodes it to
+// map[string]any, and the renderer reads it. This pins that seam end-to-end
+// over the actual wire encoding — a json tag change on either side breaks here
+// rather than at apply time on a live cluster.
+func TestNamespaceSurvivesTheWire(t *testing.T) {
+	// exactly what the api's desiredDoc produces (US-3.3 Step 1)
+	apiDesired := []byte(`{"product":"postgres","namespace":"acme--prod","shape":{"size":"dev"}}`)
+	// exactly how the poll ships a row and the agent decodes it
+	wire := []byte(`{"id":"svc_db01","cell_id":"cell-0","product":"postgres","status":"provisioning","generation":1,"desired":` + string(apiDesired) + `}`)
+	var decoded agent.DesiredService
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	a := newFakeApplier("Cluster in healthy state")
+	if _, err := newRenderer(a).Converge(context.Background(), decoded); err != nil {
+		t.Fatalf("the renderer could not use the api-produced desired doc: %v", err)
+	}
+	if _, ok := a.applied["acme--prod"]; !ok {
+		t.Fatalf("namespace did not survive api → wire → agent → renderer; applied into %v", keysOf(a.applied))
+	}
+}
+
+func keysOf(m map[string][][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
