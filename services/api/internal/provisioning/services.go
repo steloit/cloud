@@ -108,10 +108,11 @@ func CanTransition(from, to string) bool {
 // cell-agent renders from (e1-substrate-design.md §2: product + intent + shape +
 // lifecycle flags). Substrate names never appear here (D8); this is grammar
 // only. `deleting` marks a teardown so the cell converges the service to gone.
+// `namespace` is the env-derived cell namespace (ADR-0012).
 func desiredDoc(product, intent, namespace string, shape, scaling, override []byte, deleting bool) []byte {
 	doc := map[string]any{"product": product}
 	if namespace != "" {
-		doc["namespace"] = namespace // the cell renders into proj--env (US-3.3)
+		doc["namespace"] = namespace // the cell renders here (env-derived, ADR-0012)
 	}
 	if intent != "" {
 		doc["intent"] = intent

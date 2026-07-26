@@ -45,7 +45,7 @@ func NewCNPGRenderer(pg cnpgDriver, applier kube.Applier, cell, gsaEmail, walBuc
 // placement is the control-plane-resolved location for a service, carried in the
 // desired doc (US-3.3 extends US-1.3a's desiredDoc to populate it). The renderer
 // never guesses a namespace — an unresolved placement is an error, not a default.
-// namespaceOf reads the control-plane-resolved env namespace (proj--env) from
+// namespaceOf reads the control-plane-resolved env namespace (env-<id>, ADR-0012) from
 // the desired doc. Service-specific, so it must come from the control plane —
 // the agent never guesses a namespace.
 func namespaceOf(svc agent.DesiredService) (string, error) {

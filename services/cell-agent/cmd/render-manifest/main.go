@@ -16,13 +16,20 @@ import (
 func main() {
 	var s driver.Spec
 	flag.StringVar(&s.Name, "name", "svc_demo", "service id")
-	flag.StringVar(&s.Namespace, "namespace", "demo--prod", "env namespace (proj--env)")
+	flag.StringVar(&s.Namespace, "namespace", "env-demo", "env namespace (env-<environment_id>, ADR-0012)")
 	flag.StringVar(&s.Cell, "cell", "cell-dev", "cell id")
 	flag.StringVar(&s.GSAEmail, "gsa", "", "workload-identity SA for the DB pod")
 	flag.StringVar(&s.WALBucket, "wal-bucket", "", "customer WAL bucket")
 	size := flag.String("size", "dev", "shape size")
 	flag.Parse()
 
+	if s.GSAEmail == "" || s.WALBucket == "" {
+		// Without these the render is a valid-looking cluster with no backups and
+		// an empty workload-identity annotation — a human following the runbook
+		// would apply an un-backed-up database.
+		fmt.Fprintln(os.Stderr, "render-manifest: -gsa and -wal-bucket are required")
+		os.Exit(2)
+	}
 	s.Product, s.Intent, s.Instances = "postgres", "database", 1
 	s.Shape = map[string]any{"size": *size}
 

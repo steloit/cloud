@@ -1,6 +1,6 @@
 # ADR-0012 — The cell namespace derives from the environment ID, not `proj--env`
 
-**Status:** Proposed (agent, 2026-07-26) — **needs founder ratification**
+**Status:** Accepted — **founder-ratified 2026-07-26**. INF-001 D7 and `contexts/provisioning.md` updated to match; the previous `proj--env` convention is NOT preserved for compatibility (founder: "Security and tenant isolation take precedence").
 **Deciders:** Founder
 **Relates to:** INF-001 D7 (Environment → namespace) · US-3.3 · ADR-0003
 
@@ -50,10 +50,9 @@ function of an immutable id.
   an operator needs one lookup. Mitigations if this proves painful: label the
   namespace with org/project/env names (searchable, non-load-bearing), or append
   a readable prefix to the id.
-- **`00-sources/INF-001` §D7 and `contexts/provisioning.md` now differ from the
-  implementation** until this ADR is ratified and D7's wording updated. That
-  update is a **human-only** edit (AGENTS.md hard rule); this ADR exists so the
-  deviation is visible and decided rather than silently shipped.
+- **`00-sources/INF-001` §D7 and `contexts/provisioning.md` are updated to the
+  ratified model** (2026-07-26). The `proj--env` convention is retired, not kept
+  for compatibility.
 
 ## Alternatives considered
 
