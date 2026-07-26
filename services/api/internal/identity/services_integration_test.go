@@ -6,6 +6,7 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -348,5 +349,191 @@ func TestEstimateGateRefusesAShapeRepricedSinceTheEstimate(t *testing.T) {
 	}
 	if len(svcs) != 0 {
 		t.Fatalf("the repriced create provisioned %d service(s)", len(svcs))
+	}
+}
+
+// US-3.7: an out-of-catalog intent must be refused as a FIELD ERROR before the
+// one-shot estimate is burned. It previously reached the INSERT, violated the
+// services.intent CHECK constraint, and surfaced as a 500 saying "retry" — with
+// the estimate already consumed, so every retry returned 409 forever.
+func TestOutOfCatalogIntentIsRefusedWithoutBurningTheEstimate(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "intent@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"intentco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev","storage_gb":10}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","intent":"bogus","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
+	if resp.StatusCode != 422 {
+		t.Fatalf("an out-of-catalog intent returned %d, want 422: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "intent") {
+		t.Fatalf("the refusal must name the offending field: %s", body)
+	}
+
+	// The estimate must survive — the whole point of refusing before the burn.
+	var burned bool
+	if err := w.pool.QueryRow(ctx,
+		`SELECT accepted_at IS NOT NULL FROM estimates WHERE id = $1`, est.Id).Scan(&burned); err != nil {
+		t.Fatal(err)
+	}
+	if burned {
+		t.Fatal("a rejected intent burned the one-shot estimate — the customer can never provision what they priced")
+	}
+	// ...and the SAME estimate still works with a valid intent.
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","intent":"database","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("the estimate was unusable after a rejected intent: %d %s", resp.StatusCode, body)
+	}
+}
+
+// A stored shape that cannot be read must fail CLOSED — and must not condemn its
+// siblings. Both arms were unreachable by any test: the loop used to abort on
+// the first unreadable shape, so the same estimate refused or succeeded
+// depending purely on array order.
+func TestUnreadableStoredShapeFailsClosedWithoutCondemningSiblings(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "legacy@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"legacyco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newEstimate := func() string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"a","shape":{"size":"dev","storage_gb":10}},`+
+				`{"product":"postgres","name":"b","shape":{"size":"standard"}}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		return est.Id
+	}
+
+	// A legacy row: shape[0] carries a loosely-typed value the OLD helpers
+	// accepted at estimate time and resolve() now refuses.
+	id := newEstimate()
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE estimates SET services = jsonb_set(services::jsonb, '{0,Shape,storage_gb}', '"78"')::jsonb
+		WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	// The VALID sibling at index 1 must still be creatable — the unreadable
+	// shape sits before it, which used to abort the whole loop.
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"b","product":"postgres","estimate_id":"`+id+`","shape":{"size":"standard"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("a valid sibling shape was condemned by an unreadable one at a lower index: %d %s", resp.StatusCode, body)
+	}
+
+	// A shape that matches NOTHING readable, on an estimate with an unreadable
+	// entry, must say what is true — the estimate is unusable, not "not covered".
+	id2 := newEstimate()
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE estimates SET services = jsonb_set(services::jsonb, '{0,Shape,storage_gb}', '"78"')::jsonb
+		WHERE id = $1`, id2); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"c","product":"postgres","estimate_id":"`+id2+`","shape":{"size":"performance"}}`, ownerCk)
+	if resp.StatusCode != 409 || !strings.Contains(body, "can no longer be used") {
+		t.Fatalf("want 409 naming an unusable estimate, got %d %s", resp.StatusCode, body)
+	}
+	var burned bool
+	if err := w.pool.QueryRow(ctx,
+		`SELECT accepted_at IS NOT NULL FROM estimates WHERE id = $1`, id2).Scan(&burned); err != nil {
+		t.Fatal(err)
+	}
+	if burned {
+		t.Fatal("the refusal burned the estimate")
+	}
+}
+
+// The desired doc the CELL renders from must carry the resolved configuration —
+// that is the whole point of persisting it. Asserting only the `shape` column
+// left the doc unpinned.
+func TestDesiredDocCarriesTheResolvedConfiguration(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "desired@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"desiredco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"d","shape":{"size":"dev","storage_gb":10}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"d","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev","storage_gb":10}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+
+	var desired, shape map[string]any
+	if err := w.pool.QueryRow(ctx,
+		`SELECT desired, shape FROM services WHERE name = 'd'`).Scan(&desired, &shape); err != nil {
+		t.Fatal(err)
+	}
+	dshape, _ := desired["shape"].(map[string]any)
+	if dshape == nil {
+		t.Fatalf("the desired doc carries no shape: %v", desired)
+	}
+	for k := range shape {
+		if _, ok := dshape[k]; !ok {
+			t.Fatalf("the desired doc omits %q, which the stored shape carries — the cell would build from a different configuration than the row records", k)
+		}
+	}
+	if fmt.Sprint(dshape) != fmt.Sprint(shape) {
+		t.Fatalf("the desired doc and the stored shape disagree:\n desired: %v\n stored:  %v", dshape, shape)
 	}
 }

@@ -7,7 +7,9 @@ package estimates
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/steloit/cloud/services/api/internal/canon"
@@ -379,5 +381,188 @@ func TestDeclaredButUnpricedProductIsRefused(t *testing.T) {
 	var se ShapeError
 	if !errors.As(err, &se) || se.Field != "product" {
 		t.Fatalf("want a product ShapeError, got %v", err)
+	}
+}
+
+// The schema's own well-formedness, and the round trip that makes
+// TestCanonicalCoversEveryDeclaredField actually self-extending.
+//
+// That test compares two identities and passes as long as they DIFFER — which a
+// silently-dropped field still satisfies (absent → default, present → dropped).
+// This asserts the stronger property: every declared field survives resolve()
+// carrying the value it was given.
+func TestEveryDeclaredKindIsHandledAndRoundTrips(t *testing.T) {
+	known := map[string]bool{"string": true, "int": true, "bool": true, "opaque": true}
+	for product, fields := range shapeSchema {
+		for key, spec := range fields {
+			t.Run(product+"/"+key, func(t *testing.T) {
+				if !known[spec.kind] {
+					t.Fatalf("%s.%s declares kind %q, which resolve() does not handle — the field would be dropped from the price AND the identity", product, key, spec.kind)
+				}
+				want := differentValue(spec)
+				got, err := Resolve(ShapeInput{Product: product, Shape: map[string]any{key: want}})
+				if err != nil {
+					t.Fatalf("resolving %s.%s = %v: %v", product, key, want, err)
+				}
+				have, present := got[key]
+				if !present {
+					t.Fatalf("%s.%s was DROPPED by resolve — it cannot reach the price or the identity", product, key)
+				}
+				if fmt.Sprintf("%v", have) != fmt.Sprintf("%v", want) {
+					t.Fatalf("%s.%s round-tripped as %v, want %v", product, key, have, want)
+				}
+			})
+		}
+	}
+}
+
+// Every product must price with an EMPTY shape, which pins every default at
+// once: a default that stops being a valid catalog value fails here.
+func TestEveryProductPricesWithAnEmptyShape(t *testing.T) {
+	for product := range shapeSchema {
+		t.Run(product, func(t *testing.T) {
+			line, err := Price(ShapeInput{Product: product, Shape: map[string]any{}})
+			if err != nil {
+				t.Fatalf("%s cannot be priced with defaults alone: %v — a declared default is not a valid catalog value", product, err)
+			}
+			if line.MonthlyCents <= 0 {
+				t.Fatalf("%s prices at %d with defaults — a zero floor means a default silently costs nothing", product, line.MonthlyCents)
+			}
+		})
+	}
+}
+
+// An UNSET unpriced field is not the same contract as a set one. The comment on
+// shapeSchema states this invariant; nothing was asserting it, so changing any
+// unpriced default away from its zero value went unnoticed.
+func TestUnsetUnpricedFieldIsADifferentContract(t *testing.T) {
+	// "Unpriced" is DERIVED, not listed: a field is unpriced when changing it
+	// leaves the price unchanged. Selecting by "its default looks like a zero
+	// value" would skip exactly the field whose default was wrongly changed.
+	unpriced := func(product, key string, spec fieldSpec) bool {
+		base, err := Price(ShapeInput{Product: product, Shape: map[string]any{}})
+		if err != nil {
+			return false
+		}
+		other, err := Price(ShapeInput{Product: product, Shape: map[string]any{key: differentValue(spec)}})
+		if err != nil {
+			return false
+		}
+		return base.MonthlyCents == other.MonthlyCents
+	}
+	for product, fields := range shapeSchema {
+		for key, spec := range fields {
+			if !unpriced(product, key, spec) {
+				continue
+			}
+			t.Run(product+"/"+key, func(t *testing.T) {
+				// An unpriced field's default MUST be the zero value: any other
+				// default silently means "the customer asked for this", so
+				// pricing `{}` and creating with the field set would match.
+				switch spec.kind {
+				case "string":
+					if spec.def != "" {
+						t.Fatalf("%s.%s is unpriced but defaults to %q — an unset field would be treated as a request for it", product, key, spec.def)
+					}
+				case "opaque":
+					if spec.def != nil {
+						t.Fatalf("%s.%s is unpriced but defaults to %v, not nil", product, key, spec.def)
+					}
+				}
+				empty, err := Canonical(ShapeInput{Product: product, Shape: map[string]any{}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				set, err := Canonical(ShapeInput{Product: product, Shape: map[string]any{key: differentValue(spec)}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if empty == set {
+					t.Fatalf("%s.%s unset and set share the identity %q — pricing {} and creating with it are different contracts", product, key, empty)
+				}
+			})
+		}
+	}
+}
+
+// Product and intent are part of the contract. `web` and `worker` share their
+// entire schema and default intent, so without the product in the identity they
+// are byte-identical — and the old gate's explicit product comparison was
+// deleted in favour of Canonical.
+func TestProductAndIntentAreInTheIdentity(t *testing.T) {
+	t.Run("product", func(t *testing.T) {
+		a, err := Canonical(ShapeInput{Product: "web", Shape: map[string]any{"size": "standard-1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := Canonical(ShapeInput{Product: "worker", Shape: map[string]any{"size": "standard-1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a == b {
+			t.Fatalf("web and worker share the identity %q — one could be provisioned from the other's estimate", a)
+		}
+	})
+	t.Run("intent", func(t *testing.T) {
+		a, err := Canonical(ShapeInput{Product: "postgres", Intent: "database", Shape: map[string]any{"size": "dev"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := Canonical(ShapeInput{Product: "postgres", Intent: "jobs", Shape: map[string]any{"size": "dev"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a == b {
+			t.Fatalf("two intents share the identity %q — intent is persisted and shipped to the cell, so it is contracted", a)
+		}
+	})
+}
+
+// The opaque identity must distinguish TYPE, not just rendering. %v collapses
+// map[dlq:true] and the string "map[dlq:true]" into the same bytes.
+func TestOpaqueIdentityDistinguishesType(t *testing.T) {
+	id := func(v any) string {
+		t.Helper()
+		c, err := Canonical(ShapeInput{Product: "postgres", Shape: map[string]any{"pgmq": v}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	asMap := id(map[string]any{"dlq": true})
+	asString := id("map[dlq:true]")
+	asSlice := id([]any{"dlq", true})
+	if asMap == asString || asMap == asSlice || asString == asSlice {
+		t.Fatalf("opaque values of different TYPES share an identity:\n map:    %s\n string: %s\n slice:  %s", asMap, asString, asSlice)
+	}
+	// ...while key order within a map must NOT matter.
+	one := id(map[string]any{"a": 1, "b": 2})
+	two := id(map[string]any{"b": 2, "a": 1})
+	if one != two {
+		t.Fatalf("key order changed the identity:\n %s\n %s", one, two)
+	}
+}
+
+// The identity is a `|`-delimited string in which intent is written UNESCAPED
+// (shape values go through json.Marshal, which escapes). That is only safe
+// because intent is now constrained to the catalog — so this asserts the
+// constraint holds AND that no catalog value could forge a delimiter.
+//
+// If intent ever becomes free-form again, this fails, which is the point:
+// the escaping argument and the validation are the same guarantee.
+func TestIntentCannotForgeAnIdentityDelimiter(t *testing.T) {
+	if len(catalogIntents) == 0 {
+		t.Fatal("the catalog is empty — every intent would be refused")
+	}
+	for intent := range catalogIntents {
+		if strings.ContainsAny(intent, "|=\"\\") {
+			t.Fatalf("catalog intent %q contains an identity delimiter — it could forge a collision", intent)
+		}
+	}
+	// And an intent carrying delimiters is refused before it can be rendered.
+	for _, forged := range []string{"database|size=performance", "app=x", `db"`} {
+		if _, err := Canonical(ShapeInput{Product: "postgres", Intent: forged, Shape: map[string]any{"size": "dev"}}); err == nil {
+			t.Fatalf("intent %q was accepted into the identity unescaped", forged)
+		}
 	}
 }

@@ -149,6 +149,12 @@ var shapeSchema = map[string]map[string]fieldSpec{
 }
 
 // allowedShapeKeys is DERIVED, so the allow-list and the schema cannot disagree.
+// catalogIntents mirrors the Intent enum in openapi.yaml (ADR-039/040/041, S11).
+var catalogIntents = map[string]bool{
+	"app": true, "database": true, "jobs": true, "search": true,
+	"vector": true, "cache": true, "storage": true, "ai": true,
+}
+
 var allowedShapeKeys = func() map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for product, fields := range shapeSchema {
@@ -209,11 +215,25 @@ func resolve(in ShapeInput) (map[string]any, string, error) {
 		case "opaque":
 			// Carried through unexamined; the identity compares it structurally.
 			out[k] = raw
+		default:
+			// An unrecognised kind would otherwise DROP the field from the
+			// resolved map when present — vanishing from both the price and the
+			// contract identity, which is precisely the substitution this
+			// schema exists to prevent. Fail loudly instead.
+			return nil, "", fmt.Errorf("estimates: shape field %q of %s declares unknown kind %q", k, in.Product, spec.kind)
 		}
 	}
 	intent := in.Intent
 	if intent == "" {
 		intent = defaultIntent(in.Product)
+	}
+	// Validate here, where the shape is validated, so an out-of-catalog intent
+	// is a field error BEFORE the one-shot estimate is burned. It previously
+	// reached the INSERT and violated the services.intent CHECK constraint —
+	// surfacing as a 500 telling the customer to retry, with their estimate
+	// already consumed and every retry returning 409 forever.
+	if !catalogIntents[intent] {
+		return nil, "", ShapeError{Field: "intent", Detail: "unknown intent " + intent + " — one of " + boolKeys(catalogIntents)}
 	}
 	return out, intent, nil
 }

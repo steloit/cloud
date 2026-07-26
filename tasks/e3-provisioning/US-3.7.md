@@ -184,6 +184,41 @@ the suite still prints `ok`:
 All four are out of scope here, but each undercuts something this task asserts,
 so they are filed rather than noted.
 
+## QA round: six survivors and a falsified criterion
+
+QA's mutation sweep found six guards that could be removed with the suite green,
+and one defect that falsified a ticked criterion.
+
+The important one: **`TestCanonicalCoversEveryDeclaredField` was not
+self-extending.** It compared two identities and passed when they DIFFERED —
+which a silently-dropped field also satisfies. A field declaring an unrecognised
+`kind` was dropped by `resolve` (no `default:` arm), vanishing from the price AND
+the identity, while the test stayed green. `resolve` now errors on an unknown
+kind, and the test asserts the actual property: every declared field survives
+`Resolve` carrying the value it was given.
+
+Also survivable before this round: `intent` and `product` could each be dropped
+from the identity (`web` and `worker` share a schema and default intent, so they
+became byte-identical); `json.Marshal` could become `%v`, collapsing
+`map[dlq:true]` and the string `"map[dlq:true]"`; unpriced defaults could move
+off their zero values; and `size` defaults could be set to nonsense, since
+nothing priced an empty shape.
+
+**The falsified criterion:** an out-of-catalog `intent` bypassed every check,
+violated the `services.intent` CHECK constraint, and returned a 500 saying
+"retry" — AFTER burning the one-shot estimate, so every retry then returned 409
+forever. "The refusal happens BEFORE the estimate is burned" was false for that
+class. `resolve` now validates intent against the catalog enum.
+
+Fixing it exposed a second problem: three tests written earlier this session
+(US-3.6, US-3.6a) used `intent: "transactional"`, which is not a catalog intent.
+The old code accepted it silently, so those tests had been exercising the API
+with data the contract forbids.
+
+A stored shape that cannot be read no longer condemns its siblings, either — the
+loop used to abort on the first unreadable entry, so the same estimate refused or
+succeeded depending on array order.
+
 ## Behaviour tightening, recorded
 
 `intent` now participates in the match. A client that sends a non-default

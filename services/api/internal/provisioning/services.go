@@ -257,6 +257,11 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		return store.Service{}, err
 	}
 	matched := false
+	// A stored shape we cannot read must not condemn its SIBLINGS. Failing the
+	// whole estimate on the first bad shape made the outcome depend on array
+	// order: the same estimate would refuse or succeed depending on whether the
+	// unreadable shape sat before or after the one being created.
+	sawUnreadable := false
 	for i, sh := range priced {
 		got, cerr := estimates.Canonical(sh)
 		if cerr != nil {
@@ -267,9 +272,8 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 			// logged rather than surfaced.
 			slog.ErrorContext(ctx, "provisioning: stored estimate shape is not canonicalizable",
 				"estimate", in.EstimateID, "index", i, "err", cerr)
-			return store.Service{}, problemError{p: problem.Conflict(
-				[]string{"this estimate can no longer be used"},
-				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+			sawUnreadable = true
+			continue
 		}
 		if got != want {
 			continue
@@ -301,6 +305,14 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		break
 	}
 	if !matched {
+		if sawUnreadable {
+			// The requested shape matched nothing readable, and at least one
+			// stored shape could not be read — so we cannot honestly say the
+			// estimate does not cover it. Say what is actually true.
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate can no longer be used"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
 		return store.Service{}, problemError{p: problem.Conflict(
 			[]string{"the estimate does not cover this shape"},
 			"Estimate the exact shape you are creating, accept it, then create — the estimate IS the contract.")}
