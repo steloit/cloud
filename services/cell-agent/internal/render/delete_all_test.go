@@ -21,7 +21,7 @@ func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
 	if len(a.deleted) < 2 {
 		t.Fatalf("teardown deleted %d object(s); the driver rendered 2 (Cluster + ScheduledBackup): %v", len(a.deleted), a.deleted)
 	}
-	for _, ns := range []string{"acme--prod/svc-db01", "acme--prod/svc-db01-nightly"} {
+	for _, ns := range []string{"acme--prod/Cluster/svc-db01", "acme--prod/ScheduledBackup/svc-db01-nightly"} {
 		var found bool
 		for _, d := range a.deleted {
 			if d == ns {

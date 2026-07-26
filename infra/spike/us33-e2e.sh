@@ -10,7 +10,11 @@
 # Postgres for the control plane, and gcloud auth as the founder account.
 set -euo pipefail
 
-NS="${NS:-e2e--prod}"
+# NS is the control-plane-resolved namespace — read it from the service's
+# desired doc (env-<hex>), never guessed. US-3.3 derives it from the immutable
+# env id because project/env NAMES are unique only per org (cross-tenant
+# collision), so the old proj--env form is gone.
+NS="${NS:?set NS to the service row\'s desired.namespace (SELECT desired->>\'namespace\' FROM services WHERE id=...)}"
 CELL="${CELL:-cell-dev}"
 API_PORT="${API_PORT:-8080}"
 RECONCILER_SECRET="${RECONCILER_SECRET:-e2e-secret}"
@@ -22,6 +26,9 @@ step "0 · preflight: cluster reachable, CNPG operator present"
 kubectl cluster-info | head -2
 kubectl get crd clusters.postgresql.cnpg.io -o name || {
   echo "CNPG CRD missing — apply module.cnpg first"; exit 1; }
+# NOTE: nothing in product code or terraform creates this namespace yet — the
+# runbook doing it is a GAP, filed as US-3.3a (namespace + D7 default-deny
+# NetworkPolicy + ResourceQuota + LimitRange at environment creation).
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
 step "1 · control plane: a service is accepted (estimate → createService)"
@@ -30,7 +37,7 @@ step "1 · control plane: a service is accepted (estimate → createService)"
 # through the real API proves the estimate gate is honoured end to end.
 echo "(driven by the caller: create org → project → env → estimate → accept → createService)"
 echo "expected: services row with status=provisioning, generation=1, observed_generation=0,"
-echo "          desired.namespace=$NS  ← the cell renders here (US-3.3 Step 1)"
+echo "          desired.namespace=$NS  ← env-derived; the cell renders here"
 
 step "2 · the agent converges it onto the cell"
 echo "run, in the cluster (or locally with a kubeconfig):"

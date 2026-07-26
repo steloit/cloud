@@ -79,10 +79,13 @@ func (f *fakeApplier) Observe(_ context.Context, ns, name string) (string, error
 	return f.phase, nil
 }
 
-func (f *fakeApplier) Delete(_ context.Context, ns, name string) error {
+// Delete records KIND/name — a real API server routes by kind, so a fake that
+// ignores it cannot see a delete sent to the wrong resource path (exactly how a
+// ScheduledBackup orphan hid in review round 2).
+func (f *fakeApplier) Delete(_ context.Context, ns, kind, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.deleted = append(f.deleted, ns+"/"+name)
+	f.deleted = append(f.deleted, ns+"/"+kind+"/"+name)
 	delete(f.live, ns+"/"+name)
 	return nil
 }
@@ -182,7 +185,7 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 			t.Fatalf("teardown addressed the RAW service id %q — the driver named it svc-db01", d)
 		}
 	}
-	if a.deleted[0] != "acme--prod/svc-db01" {
+	if a.deleted[0] != "acme--prod/Cluster/svc-db01" {
 		t.Fatalf("teardown must delete the cluster by its driver name: %v", a.deleted)
 	}
 	if a.applies != 0 {

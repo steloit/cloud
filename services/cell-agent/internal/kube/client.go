@@ -172,8 +172,12 @@ func (c *Client) Observe(ctx context.Context, namespace, name string) (string, e
 
 // Delete removes the CNPG Cluster (teardown). A 404 is success — idempotent, so
 // a repeated teardown converges to the same absence.
-func (c *Client) Delete(ctx context.Context, namespace, name string) error {
-	path, err := resourcePath("postgresql.cnpg.io/v1", "Cluster", namespace, name)
+func (c *Client) Delete(ctx context.Context, namespace, kind, name string) error {
+	apiVersion := "postgresql.cnpg.io/v1"
+	if kind == "VolumeSnapshot" {
+		apiVersion = "snapshot.storage.k8s.io/v1"
+	}
+	path, err := resourcePath(apiVersion, kind, namespace, name)
 	if err != nil {
 		return err
 	}

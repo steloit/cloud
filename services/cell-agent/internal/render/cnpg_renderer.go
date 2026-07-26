@@ -72,9 +72,15 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// contains characters k8s rejects, and addressing the wrong name makes Delete
 	// 404 → "already gone" → report gone while a real cluster keeps running.
 	if svc.Status == "deleting" || asBool(svc.Desired["deleting"]) {
-		for _, name := range r.objectNames(svc) {
-			if err := r.applier.Delete(ctx, namespace, name); err != nil {
-				return "", fmt.Errorf("render: delete %s: %w", name, err)
+		objs, err := r.renderedObjects(svc, namespace)
+		if err != nil {
+			// A teardown that cannot enumerate its objects must NOT report gone —
+			// that would mark the service deleted while its cluster keeps running.
+			return "", fmt.Errorf("render: enumerate objects for teardown of %s: %w", svc.ID, err)
+		}
+		for _, o := range objs {
+			if err := r.applier.Delete(ctx, namespace, o.Kind, o.Name); err != nil {
+				return "", fmt.Errorf("render: delete %s/%s: %w", o.Kind, o.Name, err)
 			}
 		}
 		r.log.Info("converged: teardown applied", "service", svc.ID, "namespace", namespace)
@@ -129,20 +135,18 @@ func terminal(status string) bool {
 	return false
 }
 
-// objectNames returns the driver-canonical names for a service's objects, so
-// Observe/Delete address exactly what Apply created.
-func (r *CNPGRenderer) objectNames(svc agent.DesiredService) []string {
-	m, err := r.pg.Render(driver.Spec{
-		Name: svc.ID, Namespace: "x", Product: "postgres", Shape: asMap(svc.Desired["shape"]),
+// renderedObjects returns the driver-canonical kind+name for a service's
+// objects, so Observe/Delete address exactly what Apply created. It renders with
+// the REAL namespace and product (a fabricated placeholder would be sound only
+// by accident — nothing in the Driver contract promises namespace-independent
+// names) and propagates errors rather than silently returning nothing.
+func (r *CNPGRenderer) renderedObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
+	return r.pg.Render(driver.Spec{
+		Name: svc.ID, Namespace: namespace, Product: svc.Product,
+		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
+		Instances: instancesOf(svc.Desired), Cell: r.cell,
+		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
 	})
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(m))
-	for _, o := range m {
-		out = append(out, o.Name)
-	}
-	return out
 }
 
 // statusFromPhase maps a CNPG cluster phase to the ADR-024 vocabulary using an
@@ -182,10 +186,13 @@ func statusFromPhase(phase string) string {
 	if st, ok := phaseStatus[phase]; ok {
 		return st
 	}
-	// Unknown phase: fail closed. `degraded` is terminal in the reconciler
-	// vocabulary, so the control plane SEES it instead of the row silently
-	// retrying forever under a transient status.
-	return "degraded"
+	// Unknown phase: fail closed to `failed`, NOT `degraded`. The transition
+	// table allows provisioning → {ready, failed, deleting} but NOT
+	// provisioning → degraded, and provisioning is exactly the state an unknown
+	// phase is most likely to appear in — mapping to degraded would be rejected
+	// by the status machine and the agent would retry the writeback forever,
+	// which is invisible, the opposite of failing closed.
+	return "failed"
 }
 
 // --- small, panic-free extractors from the untyped desired map ---

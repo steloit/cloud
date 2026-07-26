@@ -19,6 +19,8 @@ type Applier interface {
 	// Observe returns the CNPG Cluster's phase string (e.g. "Cluster in healthy
 	// state") for `name` in `namespace`, or "" if it does not exist yet.
 	Observe(ctx context.Context, namespace, name string) (phase string, err error)
-	// Delete removes the named cluster's objects (teardown). Idempotent.
-	Delete(ctx context.Context, namespace, name string) error
+	// Delete removes one object by KIND and name (teardown). Idempotent.
+	// The kind is required: routing every delete to /clusters/ 404s for a
+	// ScheduledBackup and silently orphans it.
+	Delete(ctx context.Context, namespace, kind, name string) error
 }

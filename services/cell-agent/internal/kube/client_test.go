@@ -130,7 +130,7 @@ func TestDeleteIsIdempotent(t *testing.T) {
 	var got []capture
 	srv := serverCapturing(t, 404, `{"code":404}`, &got)
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
-	if err := c.Delete(context.Background(), "acme--prod", "svc-db01"); err != nil {
+	if err := c.Delete(context.Background(), "acme--prod", "Cluster", "svc-db01"); err != nil {
 		t.Fatalf("deleting an already-absent cluster must succeed (idempotent teardown): %v", err)
 	}
 	if got[0].method != http.MethodDelete {
@@ -176,5 +176,20 @@ func TestNewInClusterFailsOutsideCluster(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	if _, err := NewInCluster(); err == nil {
 		t.Fatal("outside a cluster NewInCluster must error so main can fall back visibly")
+	}
+}
+
+// A delete must route by KIND: sending a ScheduledBackup's name to /clusters/
+// 404s and silently orphans it (review round 2 blocker).
+func TestDeleteRoutesByKind(t *testing.T) {
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+	if err := c.Delete(context.Background(), "acme--prod", "ScheduledBackup", "svc-db01-nightly"); err != nil {
+		t.Fatal(err)
+	}
+	want := "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/scheduledbackups/svc-db01-nightly"
+	if got[0].path != want {
+		t.Fatalf("ScheduledBackup delete routed to %q, want %q (a /clusters/ path 404s and orphans it)", got[0].path, want)
 	}
 }
