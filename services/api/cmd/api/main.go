@@ -13,6 +13,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/github"
+	"github.com/steloit/cloud/services/api/internal/httpapi"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
@@ -25,7 +26,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/config"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
-	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/platform/idempotency"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/reconcile"
@@ -257,9 +258,20 @@ func main() {
 		Authorize: authz.Require,
 	}
 
+	// US-3.6 / S7: idempotent mutating POSTs. OUTSIDE the strict server on
+	// purpose — the ruling is about bytes ("replay returns the original
+	// response"), and only a layer holding the raw request and response bodies
+	// can honor that literally. It engages only for a declared operation
+	// carrying an Idempotency-Key, so ordinary traffic (and SSE) is untouched.
+	idemSvc := idempotency.New(queries)
+	// The 24h window is a promise, not just a read filter: without a sweep the
+	// table grows without bound and recorded response bodies outlive the window.
+	go idemSvc.RunSweeper(ctx, time.Hour, logger)
+	idem := idempotency.Middleware(idemSvc, svc)
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           problem.Recover(streamer.Intercept(mux)),
+		Handler:           httpapi.Chain(mux, idem, streamer.Intercept),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

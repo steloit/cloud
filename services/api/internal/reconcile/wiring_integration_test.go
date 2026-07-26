@@ -370,3 +370,113 @@ func TestMeteringStartsAtReadyE2E(t *testing.T) {
 		t.Fatal("service did not reach ready")
 	}
 }
+
+// US-3.6 headline: a provisioning attempt that FAILS never bills. Metering opens
+// only on the ready edge (D10), so a service that goes provisioning → failed
+// must have ZERO usage events — and a subsequent retry that succeeds must open
+// exactly ONE span, not two.
+func TestFailedProvisioningNeverBills(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-fail")
+	rec := reconcile.New(q, prov)
+
+	// The cell reports the provisioning attempt failed.
+	if _, err := rec.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, q, svc.ID).Status; got != "failed" {
+		t.Fatalf("status %q, want failed", got)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM usage_events WHERE service_id=$1`, svc.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a FAILED provisioning billed %d usage event(s) — D10: metering starts at ready, never before", n)
+	}
+
+	// Retry: failed → provisioning → ready must open EXACTLY ONE span.
+	row := mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "provisioning", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "ready", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	var edges []string
+	rows, err := pool.Query(ctx, `SELECT edge FROM usage_events WHERE service_id=$1 ORDER BY at`, svc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		edges = append(edges, e)
+	}
+	if len(edges) != 1 || edges[0] != "open" {
+		t.Fatalf("a failed→retry→ready sequence must open exactly one span, got %v", edges)
+	}
+}
+
+// The money-losing sibling of "a failure never bills": a service that reaches
+// ready and LATER fails must CLOSE its span. Without a close edge the span
+// stays open and the customer is billed for a service that is not running —
+// the same class of defect as billing a failure, in the opposite direction.
+//
+// The legal path is ready → degraded → failed (ADR-024; `ready` has no direct
+// edge to `failed`). `degraded` is still a BILLING state, so the close must
+// land on the degraded → failed edge, not earlier.
+func TestFailureAfterReadyClosesTheSpan(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-close")
+
+	row := mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "ready", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "degraded", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	// degraded still bills, so nothing may have closed yet.
+	if got := spanEdges(t, pool, svc.ID); len(got) != 1 || got[0] != "open" {
+		t.Fatalf("ready→degraded produced %v, want [open] — degraded is still a billing state", got)
+	}
+
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "failed", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	if got := spanEdges(t, pool, svc.ID); len(got) != 2 || got[0] != "open" || got[1] != "close" {
+		t.Fatalf("degraded→failed produced %v, want [open close] — an unclosed span bills a service that is not running", got)
+	}
+}
+
+func spanEdges(t *testing.T, pool *pgxpool.Pool, serviceID string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT edge FROM usage_events WHERE service_id=$1 ORDER BY at`, serviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var edges []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		edges = append(edges, e)
+	}
+	return edges
+}

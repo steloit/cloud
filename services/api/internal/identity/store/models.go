@@ -169,6 +169,17 @@ type GithubInstallation struct {
 	DeletedAt      pgtype.Timestamptz
 }
 
+type IdempotencyKey struct {
+	Principal  string
+	Endpoint   string
+	Key        string
+	BodySha256 string
+	ClaimToken string
+	StatusCode pgtype.Int4
+	Response   []byte
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Invite struct {
 	ID        string
 	OrgID     string

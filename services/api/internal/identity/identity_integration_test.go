@@ -21,6 +21,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/events"
+	"github.com/steloit/cloud/services/api/internal/httpapi"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity"
 	"github.com/steloit/cloud/services/api/internal/identity/password"
@@ -31,7 +32,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/notify"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
-	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/platform/idempotency"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
@@ -118,7 +119,12 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 		Principal: svc.PrincipalFromRequest,
 		Authorize: authz.Require,
 	}
-	srv := httptest.NewServer(problem.Recover(streamer.Intercept(mux)))
+	// The SAME chain main.go builds — including the S7 idempotency layer — so a
+	// middleware that is mounted in production is exercised here, and one that
+	// is dropped from production fails here.
+	srv := httptest.NewServer(httpapi.Chain(mux,
+		idempotency.Middleware(idempotency.New(q), svc),
+		streamer.Intercept))
 	t.Cleanup(srv.Close)
 	return &world{subs: subs, srv: srv, pool: pool, svc: svc, authz: authz, hub: hub, rec: recorder, prov: prov, vault: vault, kek: kek}
 }
@@ -412,5 +418,244 @@ func TestMalformedBody(t *testing.T) {
 	_ = json.Unmarshal([]byte(body), &m)
 	if m["errors"] == nil {
 		t.Fatal("422 without errors[]")
+	}
+}
+
+// US-3.6 / S7, end-to-end through the REAL composed server (httpapi.Chain, real
+// Postgres, real handlers). The unit tests prove the middleware; this proves it
+// is MOUNTED — a chain that drops the layer fails here, and only here.
+//
+// createEstimate is the route the task exists to protect: estimates are
+// one-shot (F2), so a client that times out and retries must replay rather than
+// burn a second one.
+func TestIdempotentEstimateReplaysInsteadOfBurningASecond(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	resp, _ := w.post(t, "/v1/auth/signup", signupBody, "")
+	ck := sessionCookie(resp)
+	if ck == "" {
+		t.Fatal("signup did not set a session cookie")
+	}
+
+	estimate := func(key, body string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/estimates", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ck)
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+
+	const reqBody = `{"services":[{"product":"postgres","intent":"transactional"}]}`
+	first, body1 := estimate("est-key-1", reqBody)
+	if first.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", first.StatusCode, body1)
+	}
+	if first.Header.Get("Idempotent-Replay") != "" {
+		t.Fatal("the first request must not be marked a replay")
+	}
+
+	// The client's connection dropped and it retried with the same key.
+	second, body2 := estimate("est-key-1", reqBody)
+	if second.Header.Get("Idempotent-Replay") != "true" {
+		t.Fatalf("the retry was NOT deduped — the idempotency layer is not mounted in the served chain (status %d, body %s)",
+			second.StatusCode, body2)
+	}
+	if second.StatusCode != first.StatusCode || body2 != body1 {
+		t.Fatalf("replay is not the original response VERBATIM:\n first: %d %s\nsecond: %d %s",
+			first.StatusCode, body1, second.StatusCode, body2)
+	}
+
+	// The decisive check: exactly ONE estimate was created, not two.
+	var n int
+	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM estimates`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("a double-submitted estimate created %d estimates, want exactly 1 (F2: an estimate is one-shot)", n)
+	}
+}
+
+// The e2e twin of the principal-scoping unit test: two REAL users behind the
+// same IP sharing a key must not share a result. Every other e2e uses one user,
+// so a single bucket would satisfy them all and a regression in pre-strict
+// principal resolution would go unnoticed.
+func TestTwoUsersSharingAKeyFromOneIPDoNotShareAnEstimate(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ckA, _ := w.signupUser(t, "share-a@example.com")
+	ckB, _ := w.signupUser(t, "share-b@example.com")
+
+	estimate := func(ck string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/estimates",
+			strings.NewReader(`{"services":[{"product":"postgres","intent":"transactional"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ck)
+		req.Header.Set("Idempotency-Key", "shared-across-users")
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+
+	a, bodyA := estimate(ckA)
+	b, bodyB := estimate(ckB)
+	if a.StatusCode != 200 || b.StatusCode != 200 {
+		t.Fatalf("both users must be served: %d / %d", a.StatusCode, b.StatusCode)
+	}
+	if b.Header.Get("Idempotent-Replay") == "true" {
+		t.Fatal("user B received user A's response as a replay — cross-user leak")
+	}
+	if bodyA == bodyB {
+		t.Fatalf("both users got the same estimate: %s", bodyB)
+	}
+	var n int
+	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM estimates`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("two users sharing a key produced %d estimates, want 2", n)
+	}
+}
+
+// The same key with a DIFFERENT body must be refused end-to-end, with a
+// problem+json carrying remediation (the error contract, not just a status).
+func TestIdempotentReuseWithDifferentBodyIsRefusedEndToEnd(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	resp, _ := w.post(t, "/v1/auth/signup", signupBody, "")
+	ck := sessionCookie(resp)
+
+	estimate := func(key, body string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/estimates", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ck)
+		req.Header.Set("Idempotency-Key", key)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+	estimate("k-mismatch", `{"services":[{"product":"postgres","intent":"transactional"}]}`)
+	got, body := estimate("k-mismatch", `{"services":[{"product":"valkey","intent":"cache"}]}`)
+	if got.StatusCode != http.StatusConflict {
+		t.Fatalf("same key + different body must be 409, got %d %s", got.StatusCode, body)
+	}
+	if !strings.Contains(body, "remediation") {
+		t.Fatalf("problem+json must carry remediation: %s", body)
+	}
+}
+
+// signup DECLARES the parameter in openapi.yaml but is deliberately not
+// enforced (its 201 sets a session cookie that cannot be stored for replay —
+// US-3.6a). The header must PASS THROUGH: refusing it would turn a
+// spec-declared optional header into a hard signup failure.
+func TestIdempotencyKeyOnADeferredRoutePassesThroughEndToEnd(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/auth/signup", strings.NewReader(signupBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "k1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("a key on a declared-but-unenforced route must not break it, got %d %s", resp.StatusCode, b)
+	}
+	if resp.Header.Get("Idempotent-Replay") != "" {
+		t.Fatal("an unenforced route must never claim to have replayed")
+	}
+}
+
+// The route this task exists to protect, end-to-end. F2 makes an estimate
+// ONE-SHOT: a client that times out mid-createService and retries must replay,
+// not burn the estimate a second time — which would fail the retry outright and
+// leave the caller unable to provision what they already paid to price.
+func TestReplayedCreateServiceDoesNotBurnASecondEstimate(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "svc-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"svcco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const shape = `{"size":"dev","storage_gb":10}`
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":`+shape+`}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+
+	createBody := `{"name":"db","product":"postgres","estimate_id":"` + est.Id + `","shape":` + shape + `}`
+	send := func(key string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/envs/"+env.ID+"/services",
+			strings.NewReader(createBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ownerCk)
+		req.Header.Set("Idempotency-Key", key)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+
+	first, body1 := send("svc-key-1")
+	if first.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", first.StatusCode, body1)
+	}
+
+	// The client's connection dropped; it retries with the same key. WITHOUT
+	// dedupe this second call re-consumes the one-shot estimate and fails.
+	second, body2 := send("svc-key-1")
+	if second.Header.Get("Idempotent-Replay") != "true" {
+		t.Fatalf("the retry was not deduped: %d %s", second.StatusCode, body2)
+	}
+	if second.StatusCode != 201 || body2 != body1 {
+		t.Fatalf("replay is not the original response:\n first: %d %s\nsecond: %d %s",
+			first.StatusCode, body1, second.StatusCode, body2)
+	}
+
+	// Exactly ONE service, and nothing billed — provisioning has not reached
+	// ready, and D10 opens a span only at the ready edge.
+	var services int
+	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM services WHERE env_id=$1`, env.ID).Scan(&services); err != nil {
+		t.Fatal(err)
+	}
+	if services != 1 {
+		t.Fatalf("a double-submitted createService produced %d services, want exactly 1", services)
 	}
 }
