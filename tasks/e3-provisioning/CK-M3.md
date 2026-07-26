@@ -2,7 +2,7 @@
 id: CK-M3
 title: Estimate-gated provisioning end-to-end
 epic: E3
-status: blocked
+status: in-progress
 phase: MVP
 priority: critical
 sprint: 4
@@ -27,6 +27,7 @@ Estimate-gated provisioning end-to-end
 - [ ] `steloit db create` → estimate → approved → `ready`, metered
 - [ ] Canon arithmetic invariants green against the estimate engine
 
-## Blocked
+## Unblocked (2026-07-26)
 
-Blocked on P1 via US-3.3: estimate-gated provisioning end-to-end needs a real cell. Everything control-plane-side of the checkpoint is green.
+The blocker text was stale: P1 landed 2026-07-19 and US-3.3 stood up a real
+GKE+CNPG cell, proved the loop end-to-end, and tore it down. Both deps are done.
