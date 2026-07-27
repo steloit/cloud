@@ -493,21 +493,28 @@ func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
 	if err != nil {
 		return fmt.Errorf("namespace: %w", err)
 	}
+	// Resolve everything the post-commit work needs BEFORE committing. A lookup
+	// that fails after the UPDATE leaves the pin cleared and the span still
+	// billing the pinned rate — with the row now unlistable (`override IS
+	// NULL`), so no later sweep retries it and nothing detects it.
+	orgID, err := s.q.OrgForService(ctx, row.ID)
+	if err != nil {
+		return fmt.Errorf("org lookup: %w", err)
+	}
 	prior := row.MonthlyEstimateCents
 	updated, err := s.q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
 		ID:                   row.ID,
 		MonthlyEstimateCents: base.MonthlyCents,
 		Desired:              desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
+		Generation:           row.Generation,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // a concurrent edit already cleared it
+			// The row moved under us — a concurrent edit. Not an error: the
+			// next tick re-lists it if it is still pinned and still expired.
+			return nil
 		}
 		return err
-	}
-	orgID, err := s.q.OrgForService(ctx, row.ID)
-	if err != nil {
-		return fmt.Errorf("org lookup: %w", err)
 	}
 	s.repriceSpan(ctx, orgID, updated, prior, updated.MonthlyEstimateCents)
 	return nil
@@ -593,15 +600,6 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		for k, v := range shape {
 			current[k] = v
 		}
-		line, err := estimates.Price(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
-		if err != nil {
-			var se estimates.ShapeError
-			if errors.As(err, &se) {
-				return store.Service{}, problemError{p: problem.ValidationFailed(
-					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
-			}
-			return store.Service{}, err
-		}
 		// Persist the RESOLVED merged shape, exactly as create does. Storing a
 		// raw map here and a resolved one there would mean the same
 		// configuration is spelled two ways depending on how the service got
@@ -616,52 +614,57 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 			return store.Service{}, err
 		}
 		params.Shape = merged
-		params.MonthlyEstimateCents = pgtype.Int8{Int64: line.MonthlyCents, Valid: true}
-		// T11.6 hard cap: a scale-UP raises committed monthly spend and MUST
-		// respect the cap exactly like a create — otherwise the cap is trivially
-		// bypassed by scaling an existing service up. The run-rate already
-		// includes this service's OLD cost, so only the increase is projected (a
-		// scale-down is always allowed).
-		if delta := line.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
-			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
-				return store.Service{}, err
-			}
-		}
 	}
 	params.Scaling = scaling
-	// An override provisions REAL capacity, so it must clear the same hard cap
-	// a scale-up does. Setting it outside the reprice branch meant the cap was
-	// bypassable by anyone who could PATCH a service — the exact bypass the
-	// scale-up comment says the cap exists to prevent.
+
+	// Price the EFFECTIVE post-edit configuration, unconditionally.
+	//
+	// Doing this only inside the shape branch and the live-pin branch left a
+	// hole the moment "any PATCH clears the pin" became real: `PATCH {"scaling":…}`
+	// or `PATCH {}` released the capacity but `monthly_estimate_cents` kept the
+	// PINNED rate — and the row was then unsweepable (`override IS NULL`), so
+	// nothing ever restored it. The customer paid the pinned rate forever for
+	// capacity that was gone, and the phantom charged against their hard cap.
+	effShapeRaw := svc.Shape
+	if params.Shape != nil {
+		effShapeRaw = params.Shape
+	}
+	var effShapeMap map[string]any
+	_ = json.Unmarshal(effShapeRaw, &effShapeMap)
+	priceIn := estimates.ShapeInput{
+		Product: svc.Product, Intent: svc.Intent.String, Name: svc.Name, Shape: effShapeMap,
+	}
+	var effLine estimates.Line
+	var priceErr error
 	if pinned, live := overrideInstances(override, time.Now()); live {
-		// Founder ruling (2026-07-27): pinned capacity is METERED. So the pin
-		// is repriced through the engine, the increase clears the same hard cap
-		// a scale-up does, and the row's monthly estimate becomes the pinned
-		// rate — which is what the billing span is opened at.
-		effShapeRaw := svc.Shape
-		if params.Shape != nil {
-			effShapeRaw = params.Shape
+		// Founder ruling (2026-07-27): pinned capacity is METERED, so the pin
+		// is priced through the engine and refused when the catalog cannot
+		// price it.
+		effLine, priceErr = estimates.PriceWithInstances(priceIn, pinned)
+	} else {
+		// No live pin: the effective price is the configuration's base — which
+		// is what RELEASES a pinned rate, whether or not the shape changed.
+		effLine, priceErr = estimates.Price(priceIn)
+	}
+	if priceErr != nil {
+		var se estimates.ShapeError
+		if errors.As(priceErr, &se) {
+			return store.Service{}, problemError{p: problem.ValidationFailed(
+				[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
 		}
-		var effShapeMap map[string]any
-		_ = json.Unmarshal(effShapeRaw, &effShapeMap)
-		pinnedLine, err := estimates.PriceWithInstances(estimates.ShapeInput{
-			Product: svc.Product, Intent: svc.Intent.String, Name: svc.Name, Shape: effShapeMap,
-		}, pinned)
-		if err != nil {
-			var se estimates.ShapeError
-			if errors.As(err, &se) {
-				return store.Service{}, problemError{p: problem.ValidationFailed(
-					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
-			}
+		return store.Service{}, priceErr
+	}
+	// T11.6 hard cap: any increase in committed monthly spend — a scale-up or a
+	// pin — must clear the cap exactly like a create. Only the increase is
+	// projected, since the run-rate already includes this service's old cost;
+	// a decrease is always allowed.
+	if delta := effLine.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+		if err := s.enforceBudget(ctx, orgID, delta); err != nil {
 			return store.Service{}, err
 		}
-		if delta := pinnedLine.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
-			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
-				return store.Service{}, err
-			}
-		}
-		params.MonthlyEstimateCents = pgtype.Int8{Int64: pinnedLine.MonthlyCents, Valid: true}
 	}
+	params.MonthlyEstimateCents = pgtype.Int8{Int64: effLine.MonthlyCents, Valid: true}
+
 	params.Override = override
 	// US-1.3a: rebuild desired from the effective post-edit state and let the
 	// query bump generation, so the cell re-reconciles. Effective shape/scaling

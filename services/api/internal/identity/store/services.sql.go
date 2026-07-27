@@ -17,7 +17,7 @@ UPDATE services SET
     monthly_estimate_cents = $2,
     desired = $3,
     generation = generation + 1
-WHERE id = $1 AND override IS NOT NULL AND status <> 'deleting'
+WHERE id = $1 AND generation = $4 AND override IS NOT NULL AND status <> 'deleting'
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
@@ -25,13 +25,26 @@ type ClearExpiredOverrideParams struct {
 	ID                   string
 	MonthlyEstimateCents int64
 	Desired              []byte
+	Generation           int64
 }
 
 // Clear the pin, restore the unpinned price, rewrite desired, and bump
-// generation — ATOMICALLY. Fenced on `override IS NOT NULL` so a concurrent
-// edit that already cleared it is a no-op rather than a double bump.
+// generation — ATOMICALLY.
+//
+// FENCED ON GENERATION, not merely on `override IS NOT NULL`. The desired doc
+// and price passed in are computed from the row as it was READ, and rows are
+// processed serially with several round trips each, so a customer edit can land
+// in between. Without the fence that edit is silently reverted — its shape
+// replaced by the pre-edit doc and its price by the pre-edit rate — and since
+// generation was bumped the cell converges on the stale doc and nothing bumps
+// again. A lost race must be a no-op the next tick re-lists, never a rollback.
 func (q *Queries) ClearExpiredOverride(ctx context.Context, arg ClearExpiredOverrideParams) (Service, error) {
-	row := q.db.QueryRow(ctx, clearExpiredOverride, arg.ID, arg.MonthlyEstimateCents, arg.Desired)
+	row := q.db.QueryRow(ctx, clearExpiredOverride,
+		arg.ID,
+		arg.MonthlyEstimateCents,
+		arg.Desired,
+		arg.Generation,
+	)
 	var i Service
 	err := row.Scan(
 		&i.ID,
@@ -173,8 +186,10 @@ WHERE override IS NOT NULL
   AND status <> 'deleting'
   AND (
         (override->>'expires_at') IS NULL
-     OR (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T'
-     OR ((override->>'expires_at') ~ '^\d{4}-\d{2}-\d{2}T'
+     OR (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$'
+     OR pg_input_is_valid(override->>'expires_at', 'timestamptz') = false
+     OR ((override->>'expires_at') ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$'
+         AND pg_input_is_valid(override->>'expires_at', 'timestamptz')
          AND (override->>'expires_at')::timestamptz <= now())
   )
 `

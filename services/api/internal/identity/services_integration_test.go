@@ -673,7 +673,8 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	// --- EXPIRY: the pin must stop being rendered, and the cell must be told --
 	if _, err := w.pool.Exec(ctx, `
 		UPDATE services SET override = jsonb_set(override::jsonb, '{expires_at}',
-			to_jsonb((now() - interval '1 hour')::text))::jsonb WHERE id = $1`, svc.Id); err != nil {
+			to_jsonb(to_char(now() - interval '1 hour', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')))::jsonb
+		WHERE id = $1`, svc.Id); err != nil {
 		t.Fatal(err)
 	}
 	var genBefore int64
@@ -897,10 +898,13 @@ func TestAnEditWithoutAnOverrideClearsThePinEverywhere(t *testing.T) {
 		t.Fatalf("pin: %d %s", resp.StatusCode, body)
 	}
 
-	// A shape-only edit. It carries no override, so the pin goes.
-	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"standard-1"}}`, ownerCk)
+	// A SCALING-only edit — no shape, no override. This is the shape of un-pin
+	// that used to release the capacity while keeping the pinned PRICE forever:
+	// the price was only recomputed inside the shape branch, and the row was
+	// then unsweepable, so nothing ever restored it.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"scaling":{"min":1,"max":3}}`, ownerCk)
 	if resp.StatusCode != 200 {
-		t.Fatalf("shape edit: %d %s", resp.StatusCode, body)
+		t.Fatalf("scaling edit: %d %s", resp.StatusCode, body)
 	}
 
 	var override []byte
