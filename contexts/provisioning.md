@@ -117,6 +117,10 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   compile at all. **The question after writing any guard is not "is this one right" — it is "how many
   places must be right, and what stops the next one being missed?"** If the answer is "a reviewer",
   the design is wrong.
+  *What ships today, so this entry is not misread as describing it:* US-3.8 keeps the ONE-ARM bound
+  deliberately — the sibling arms and the whole-class `money.Cents` fix are O16, split out because a
+  platform primitive should not ride a feature branch (founder, 2026-07-27). A reader arriving at
+  `engine.go` from here is looking at a ratified deferral, not at the mistake.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

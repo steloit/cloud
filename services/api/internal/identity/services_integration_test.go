@@ -2059,7 +2059,7 @@ func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
 	// (the decision that file explicitly refuses to make) would satisfy a
 	// non-200 assertion and silently move the boundary.
 	if rBig.StatusCode != 402 || !strings.Contains(bBig, "quota") {
-		t.Fatalf("a 2^40-instance pin should be refused by the hard spend cap (402 quota_exceeded), got %d %s — if the pricing engine refused it instead, the engine has acquired a commercial ceiling it is not allowed to have", rBig.StatusCode, bBig)
+		t.Fatalf("a 1000-instance pin should be refused by the hard spend cap (402 quota_exceeded), got %d %s — if the pricing engine refused it instead, the engine has acquired a commercial ceiling it is not allowed to have", rBig.StatusCode, bBig)
 	}
 	var capEvents int
 	if err := w.pool.QueryRow(ctx,

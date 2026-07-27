@@ -56,14 +56,19 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 	if err != nil {
 		return err
 	}
-	// The PROJECTION is checked arithmetic. `current + newMonthlyCents` wrapping
-	// does not merely mis-answer one request: it answers "under the cap" for a
-	// request that is astronomically over it, and — because the wrapped value is
-	// then persisted into monthly_estimate_cents and summed by
-	// SumOrgMonthlyEstimate — every LATER projection for that org wraps too. One
-	// request disables the org's spend cap permanently. Overflow is treated as
-	// over-cap, which is the only safe direction: a number we cannot represent is
-	// not a number we can prove is affordable.
+	// DEBT MARKER, not a claim: this projection is NOT checked arithmetic, and it
+	// must become so. `current + newMonthlyCents` wraps, and a wrapped projection
+	// is NEGATIVE — which reads as UNDER the cap. Worse, the wrapped value is
+	// persisted and then summed by SumOrgMonthlyEstimate, so every later
+	// projection for that org wraps too: one request disables the cap
+	// permanently.
+	//
+	// Owned by O16 (priority: critical), which names this as its first item. The
+	// fix is not reachable from an instance pin — it needs a stored row already
+	// out of range, which requires the postgres/valkey pricing arms to wrap
+	// first, and those are O16's too. Stated here because an earlier version of
+	// this comment described the CHECKED implementation that moved to O16, and a
+	// comment asserting the defect is already fixed is how it stays unfixed.
 	current := planFee + committed
 	projected := current + newMonthlyCents
 	if projected > limit {

@@ -100,6 +100,13 @@ const maxMonthlyCents = int64(math.MaxInt64) / secondsInLongestMonth
 // maxPriceableInstances is the largest instance count whose price is
 // representable for a given size.
 func maxPriceableInstances(sz computeSize) int64 {
+	// UNREACHABLE from the shipped pricing.json, and marked as such: only web
+	// and worker declare an `instances` field and their sizes price at 1700 and
+	// 1100, so InstanceCents is never <= 0. It is a fail-safe against a future
+	// catalog edit — a size priced at 0 per instance would divide by zero here —
+	// and it goes live the day such a size lands. Marked because the sibling
+	// guard in provisioning's overrideInstances documents its own unreachable
+	// arm, and an unmarked one is how a live guard gets filed as decoration.
 	if sz.InstanceCents <= 0 {
 		return math.MaxInt64
 	}
@@ -359,7 +366,6 @@ func Price(in ShapeInput) (Line, error) {
 		if memMB <= 0 {
 			return Line{}, ShapeError{Field: "shape.memory_mb", Detail: "must be > 0"}
 		}
-		// price per GB, rounded up to whole GB (integer cents, never fractions)
 		// price per GB, rounded up to whole GB (integer cents, never fractions)
 		gb := int64(math.Ceil(float64(memMB) / 1024.0))
 		line.MonthlyCents = gb * table.Valkey.MemoryCentsPerGB

@@ -644,3 +644,106 @@ func TestThePricedInstanceCountRefusesWhatItCannotRepresent(t *testing.T) {
 		})
 	}
 }
+
+// The instance ceiling sits where REPRESENTABILITY stops, not where a business
+// decision would put it — and the boundary is asserted from both sides.
+//
+// Four mutations survived the branch's own tests before this existed: dividing
+// the ceiling by 1000, moving `>` to `>=`, and dropping `- ServiceBaseCents`.
+// The suite pinned the refuse side only at 1<<60 and MaxInt64 and the accept
+// side only at 1, 3, 9 and 1000 — so the frontier was unconstrained across six
+// orders of magnitude, and the engine could silently acquire the commercial
+// ceiling its own comment forbids it from having.
+//
+// Every expectation is DERIVED from the embedded pricing table and from
+// maxMonthlyCents, never retyped, and never by calling maxPriceableInstances —
+// asserting a function against itself is the mirror this repo already records
+// against a test that re-implemented the guard it was named for.
+func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
+	for _, product := range []string{"web", "worker"} {
+		sizes := table.Web.Sizes
+		if product == "worker" {
+			sizes = table.Worker.Sizes
+		}
+		for size, sz := range sizes {
+			if sz.InstanceCents <= 0 {
+				continue
+			}
+			max := (maxMonthlyCents - sz.ServiceBaseCents) / sz.InstanceCents
+			t.Run(product+"/"+size, func(t *testing.T) {
+				// A ceiling low enough to be a product decision is a product
+				// decision, whatever the comment says.
+				if max < 1_000_000_000 {
+					t.Fatalf("%s/%s refuses above %d instances — a limit that low is a commercial ceiling, and the engine does not make those (founder, 2026-07-27)", product, size, max)
+				}
+				at, err := Price(ShapeInput{Product: product, Name: "x",
+					Shape: map[string]any{"size": size, "instances": int(max)}})
+				if err != nil {
+					t.Fatalf("the largest representable count (%d) was refused: %v", max, err)
+				}
+				want := sz.ServiceBaseCents + max*sz.InstanceCents
+				if at.MonthlyCents != want {
+					t.Fatalf("price at the boundary = %d, want %d", at.MonthlyCents, want)
+				}
+				// The whole reason for the derivation: this price is multiplied
+				// by a month of seconds in metering.Rollup.
+				if at.MonthlyCents <= 0 || at.MonthlyCents*secondsInLongestMonth <= 0 {
+					t.Fatalf("the boundary price %d does not survive a billing month", at.MonthlyCents)
+				}
+				if _, err := Price(ShapeInput{Product: product, Name: "x",
+					Shape: map[string]any{"size": size, "instances": int(max + 1)}}); err == nil {
+					t.Fatalf("one past the boundary (%d) was accepted", max+1)
+				}
+			})
+		}
+	}
+}
+
+// PriceWithInstances is exported API added by US-3.8 and had no package-level
+// test — its only direct caller in test code used it to compute its own
+// expectation, which proves nothing about it.
+func TestAPinIsPriceableOnlyWhereTheShapeDeclaresInstances(t *testing.T) {
+	for _, tc := range []struct {
+		product string
+		shape   map[string]any
+		ok      bool
+	}{
+		{"postgres", map[string]any{"size": "dev"}, false},
+		{"valkey", map[string]any{"memory_mb": 1024}, false},
+		{"web", map[string]any{"size": "standard-1"}, true},
+		{"worker", map[string]any{"size": "standard-1"}, true},
+	} {
+		t.Run(tc.product, func(t *testing.T) {
+			line, err := PriceWithInstances(ShapeInput{Product: tc.product, Name: "x", Shape: tc.shape}, 3)
+			if !tc.ok {
+				var se ShapeError
+				if !errors.As(err, &se) || se.Field != "override.instances" {
+					t.Fatalf("a pin on %s must be refused naming override.instances, got %v / %v", tc.product, line.MonthlyCents, err)
+				}
+				// The DETAIL is the contract, not just the field. Removing the
+				// priced-field check still produces an override.instances error —
+				// `resolve` rejects `instances` as an unknown key for these
+				// products — but the message becomes "unknown shape field", which
+				// tells the operator their request was malformed rather than that
+				// the capacity cannot be METERED. The founder ruling (2026-07-27)
+				// is that the refusal exists because the catalog cannot price the
+				// capacity; a message that says otherwise misreports why.
+				if !strings.Contains(se.Detail, "metered") {
+					t.Fatalf("a pin on %s is refused with %q — it must say the capacity could not be METERED, which is the reason it is refused, not that the field is unknown", tc.product, se.Detail)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a pin on %s must price: %v", tc.product, err)
+			}
+			sizes := table.Web.Sizes
+			if tc.product == "worker" {
+				sizes = table.Worker.Sizes
+			}
+			sz := sizes["standard-1"]
+			if want := sz.ServiceBaseCents + 3*sz.InstanceCents; line.MonthlyCents != want {
+				t.Fatalf("pinned price = %d, want %d", line.MonthlyCents, want)
+			}
+		})
+	}
+}

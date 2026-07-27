@@ -30,7 +30,14 @@ files:
   - services/api/internal/provisioning/services_test.go
   - services/api/internal/reconcile/wiring_integration_test.go
   - tasks/e11-billing/US-11.9.md
+  - tasks/e10-observability/US-10.7.md
+  - tasks/e3-provisioning/US-3.10.md
   - tasks/e3-provisioning/US-3.8.md
+  - tasks/eops/O13.md
+  - tasks/eops/O14.md
+  - tasks/eops/O15.md
+  - tasks/eops/O16.md
+  - tasks/eops/O17.md
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./..."
 owner: agent
@@ -238,5 +245,5 @@ Two test fixtures asserted on states the API cannot produce: an override with no
 `expires_at`, and a postgres pin. Both corrected — the same class as US-3.7's
 `intent: "transactional"`.
 
-Evidence: `services/api` 22 packages RC=0 (no `-race` — see Q10), `apps/cli` 2
+Evidence: `services/api` 23 packages, 0 failures, 0 skips (serial, `-p 1 -timeout 30m`); cell-agent 5; CLI 2. No `-race` — see O14, which owns a pre-existing fixture race that fails under it.
 RC=0, `services/cell-agent` 5 RC=0 under `-race`; zero failures, zero skips.
