@@ -8,6 +8,7 @@ package estimates
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -347,6 +348,46 @@ func Price(in ShapeInput) (Line, error) {
 		if instances < 1 {
 			return Line{}, ShapeError{Field: "shape.instances", Detail: "must be >= 1"}
 		}
+		// UPPER BOUND — arithmetic integrity, not a commercial ceiling.
+		//
+		// Without it `int64(instances)*sz.InstanceCents` WRAPS. Reproduced
+		// end-to-end: PATCH override.instances = 9223372036854775807 returned
+		// HTTP 200 and wrote monthly_estimate_cents = -700. Three things then go
+		// wrong at once, and the first is the worst:
+		//
+		//   1. The hard spend cap is BYPASSED. UpdateService only enforces on
+		//      `delta > 0` ("a decrease is always allowed"), and a wrapped price
+		//      is a decrease. The one guard that exists to stop capacity being
+		//      provisioned outside an accepted estimate is skipped by the input
+		//      that needs it most.
+		//   2. ADR-025 is violated — money is integer cents, and negative cents
+		//      for provisioned capacity is not a price.
+		//   3. repriceSpan then opens a BILLING SPAN at a negative rate.
+		//
+		// The bound is deliberately NOT a product ceiling: picking "at most N
+		// instances" is a commercial decision and this file does not make those
+		// (founder, 2026-07-27 — never invent commercial pricing in
+		// implementation code). Anything below this bound but still absurd is
+		// refused by the hard spend cap, which is where that judgement belongs.
+		// This only refuses counts that cannot be PRICED correctly at all.
+		//
+		// Two limits, both mechanical: the multiply must not overflow int64, and
+		// the count must survive a JSON round-trip exactly — `desiredDoc` renders
+		// through map[string]any, so above 2^53 the cell, the audit row and the
+		// column each carry a different number.
+		const maxExactJSONInt = int64(1) << 53
+		maxPriceable := maxExactJSONInt
+		if sz.InstanceCents > 0 {
+			if lim := (math.MaxInt64 - sz.ServiceBaseCents) / sz.InstanceCents; lim < maxPriceable {
+				maxPriceable = lim
+			}
+		}
+		if int64(instances) > maxPriceable {
+			return Line{}, ShapeError{
+				Field:  "shape.instances",
+				Detail: "too large to price exactly — the monthly total would overflow or lose precision, so the capacity could not be metered",
+			}
+		}
 		line.MonthlyCents = sz.ServiceBaseCents + int64(instances)*sz.InstanceCents
 	default:
 		// resolve() already rejected products absent from shapeSchema, so
@@ -426,7 +467,18 @@ func PriceWithInstances(in ShapeInput, instances int) (Line, error) {
 		pinned[k] = v
 	}
 	pinned["instances"] = instances
-	return Price(ShapeInput{Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: pinned})
+	line, err := Price(ShapeInput{Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: pinned})
+	// Report the field the CALLER sent. Price validates the merged shape and so
+	// names `shape.instances`, but on this path the number came from
+	// `override.instances` — telling a client to fix a field it did not send is
+	// the same class of unhelpful as the 500 this task already replaced with a
+	// field error.
+	var se ShapeError
+	if errors.As(err, &se) && se.Field == "shape.instances" {
+		se.Field = "override.instances"
+		return Line{}, se
+	}
+	return line, err
 }
 
 // Canonical returns the CONFIGURATION IDENTITY of a shape: the product, the

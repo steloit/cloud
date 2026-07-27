@@ -23,6 +23,14 @@ type AccessDeniedError struct{ DeniedBy string }
 
 func (e AccessDeniedError) Error() string { return "identity: access denied: " + e.DeniedBy }
 
+// DeniedReason exposes the denial cause across a package boundary, so callers
+// that cannot import identity — `events.Streamer`, which identity itself
+// imports — can still tell a no-standing denial from a lacks-permission one.
+// Without it the SSE half of an endpoint answers 403 where the JSON half
+// answers 404, and one request header reopens the existence oracle the 404 was
+// added to close (api-conventions.md; US-3.8 architecture review).
+func (e AccessDeniedError) DeniedReason() string { return e.DeniedBy }
+
 // Authorizer binds the pure evaluator to membership. Every mutating handler
 // in every module routes through this — the governed-resource contract's
 // clause (3); no module ships its own authZ.

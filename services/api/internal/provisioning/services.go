@@ -516,6 +516,13 @@ func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
 		}
 		return err
 	}
+	// The post-commit work runs on a context that CANNOT be cancelled by the
+	// sweeper stopping. The clear has already committed; if shutdown cancels
+	// between the commit and the spine write, the release is dropped and the
+	// activity feed shows capacity pinned and never given back — with no error
+	// anywhere, since `record` discards its own. Same reasoning as US-3.6's
+	// idempotency recorder, which hit this as a live defect.
+	ctx = context.WithoutCancel(ctx)
 	s.repriceSpan(ctx, orgID, updated, prior, updated.MonthlyEstimateCents)
 	// The expiry is a state change like any other, so it goes to the SPINE, not
 	// only to a log line. Applying a pin records `service.updated` carrying the
@@ -584,6 +591,14 @@ func overrideInstances(raw []byte, now time.Time) (int, bool) {
 		Instances int    `json:"instances"`
 		ExpiresAt string `json:"expires_at"`
 	}
+	// The `o.Instances < 1` half is now UNREACHABLE from production: the handler
+	// refuses `override.instances < 1` with a 422 before anything reaches here
+	// (services_http.go). It stays as the service layer's own floor — this
+	// function is also the read side for rows planted by a migration or a
+	// support script, which the handler never sees — and it is covered by
+	// TestOverrideLiveness. Noted because this file records which arms are
+	// reachable and why, and an unmarked one is how a live guard gets filed as
+	// decoration.
 	if err := json.Unmarshal(raw, &o); err != nil || o.Instances < 1 {
 		return 0, false
 	}

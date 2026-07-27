@@ -17,6 +17,7 @@ files:
   - services/api/internal/identity/store/services.sql.go
   - services/api/internal/provisioning/services.go
   - services/api/internal/identity/services_integration_test.go
+  - docs/product/08-api/openapi.yaml
   - tasks/e3-provisioning/US-3.10.md
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./..."
@@ -88,6 +89,18 @@ alternative — relaxing Go — would start honouring pins the API never promise
 
 Whichever way it goes, the two rules should stop being two rules. Consider
 whether the liveness decision can live in one place that both sides call.
+
+## Also in scope: the contract does not advertise the bounds
+
+`openapi.yaml`'s `override.instances` is `{type: integer}` with no `minimum` and
+no `maximum`, while the implementation now refuses `< 1` at the handler and
+refuses counts too large to price exactly in the engine. Generated clients and
+the console therefore cannot know the bound and will discover it as a 422.
+
+Adding `minimum: 1` (and a maximum consistent with the engine's bound) is an
+owner-level change to the design authority, which is why US-3.8 recorded it
+rather than editing the spec — but it belongs with this task, since both are
+"the two liveness/validity rules must agree" in different guises.
 
 ## Found by
 

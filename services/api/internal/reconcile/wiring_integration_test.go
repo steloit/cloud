@@ -560,7 +560,21 @@ func TestTheClearFenceRejectsARowThatStartedDeletingMidSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The sweeper's read: still provisioning, so it lists.
+	// Drive DeleteService's TWO WRITES with the sweeper's read interposed between
+	// them — which is the whole reachability claim, and asserting it is the point
+	// of this test. An earlier version listed BEFORE the delete and hand-fed the
+	// generation, which proved the fence fires but left "the sweeper can list a
+	// row already carrying the post-bump generation" as prose. If those two
+	// writes are ever made one transaction (a carried atomicity finding,
+	// services.go), that version would still have passed while the comment it
+	// supports became false — the same failure mode, one round later.
+	before := mustGet(t, q, svc.ID)
+	if _, err := q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{
+		ID: svc.ID, Desired: []byte(`{"product":"postgres","deleting":true}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// Write 1 done, write 2 not yet: status is still provisioning, so the sweeper
+	// lists — and what it reads is the POST-BUMP generation.
 	listed, err := q.ListExpiredOverrides(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -572,22 +586,24 @@ func TestTheClearFenceRejectsARowThatStartedDeletingMidSweep(t *testing.T) {
 		}
 	}
 	if read == nil {
-		t.Fatal("the fixture did not produce a listable dead pin")
+		t.Fatal("a dead pin on a row mid-delete was not listed — if that is now intended, this fence is unreachable and the comment on it is wrong")
 	}
-
-	// The delete lands in the window: generation bumped, status not yet flipped,
-	// then flipped — exactly DeleteService's two writes.
-	if err := prov.DeleteService(ctx, mustGet(t, q, svc.ID), "org_w", "usr_w"); err != nil {
+	if read.Generation == before.Generation {
+		t.Fatalf("the sweeper read generation %d, the same as before the bump — the window this fence covers depends on the read happening AFTER it", read.Generation)
+	}
+	// Write 2: status flips, generation untouched.
+	if _, err := q.SetServiceStatus(ctx, store.SetServiceStatusParams{
+		ID: svc.ID, Status: "provisioning", Status_2: "deleting"}); err != nil {
 		t.Fatal(err)
 	}
 	after := mustGet(t, q, svc.ID)
+	if after.Generation != read.Generation {
+		t.Fatalf("the status flip moved generation (%d → %d); if SetServiceStatus now bumps, the generation fence alone would stop the sweeper and this fence's reason has changed",
+			read.Generation, after.Generation)
+	}
 	if after.Status != "deleting" {
 		t.Fatalf("status %q, want deleting", after.Status)
 	}
-	if after.Generation == read.Generation {
-		t.Skip("DeleteService no longer bumps generation; this interleaving is unreachable and the fence would be genuine decoration")
-	}
-
 	// The sweeper now clears using the generation IT read — which, because
 	// SetServiceStatus does not bump, is still the row's generation.
 	_, err = q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{

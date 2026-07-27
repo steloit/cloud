@@ -1561,38 +1561,6 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 	var svc struct{ Id string }
 	_ = json.Unmarshal([]byte(body), &svc)
 
-	// --- a pin below one instance is REFUSED at the edge ---------------------
-	//
-	// It used to return 200 and do nothing visible: overrideInstances declines
-	// it, no pin reaches the desired doc, the price stays at base — but the raw
-	// pin was still written to the column, where it is non-NULL, unhonoured, and
-	// UNSWEEPABLE, because the expires_at the handler stamps is future and
-	// well-formed so every arm of ListExpiredOverrides calls it live. A 200
-	// followed by 24h of a pin nothing will honour and nothing will clear. The
-	// same value in shape.instances has always been a 422.
-	for _, n := range []string{"0", "-5"} {
-		req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
-			strings.NewReader(`{"override":{"instances":`+n+`,"reason":"x"}}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Cookie", ownerCk)
-		r, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(r.Body)
-		r.Body.Close()
-		if r.StatusCode != 422 || !strings.Contains(string(b), "override.instances") {
-			t.Fatalf("instances=%s: %d %s — want 422 naming override.instances", n, r.StatusCode, string(b))
-		}
-		var stored []byte
-		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, svc.Id).Scan(&stored); err != nil {
-			t.Fatal(err)
-		}
-		if stored != nil {
-			t.Fatalf("a refused pin was still written to the column: %s — it is non-NULL, unhonoured, and its stamped expiry keeps every sweep arm calling it live", stored)
-		}
-	}
-
 	// --- APPLY: the reason reaches the feed ---------------------------------
 	req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
 		strings.NewReader(`{"override":{"instances":3,"reason":"black friday"}}`))
@@ -1737,10 +1705,9 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 
 // A DELETING service's dead pin is teardown's problem, not the sweep's.
 //
-// `ListExpiredOverrides` fences on `status <> 'deleting'`, and unlike the two
-// fences on ClearExpiredOverride — which are unreachable because generation
-// always fires first — this one is observable, so it gets a test rather than a
-// comment. Without it a deleting service carrying a dead pin is listed on EVERY
+// `ListExpiredOverrides` fences on `status <> 'deleting'`, and it is observable,
+// so it gets a test rather than a comment. Without it a deleting service
+// carrying a dead pin is listed on EVERY
 // tick, forever: expireOverride does the price, namespace and org lookups, the
 // clear matches zero rows, and that comes back as pgx.ErrNoRows, which
 // expireOverride reads as "the row moved under us" and returns nil for — with
@@ -1950,4 +1917,243 @@ func TestAPinExpiringAtExactlyNowIsSweptNotStranded(t *testing.T) {
 	if !found {
 		t.Fatal("a pin expiring at exactly now() was not swept — SQL would be treating the window as open at the instant Go treats it as closed, so the API refuses to honour the pin while the sweep declines to clear it: stranded, in the one place the two implementations are supposed to agree")
 	}
+}
+
+// The pin's numeric bounds, at the edge and in the pricing engine.
+//
+// Three separate jobs, and the test asserts the LAYERING as much as the values:
+// the handler refuses a nonsensical count, the engine refuses a count it cannot
+// price exactly, and the hard spend cap refuses a count that prices fine but
+// costs too much. Collapsing any of those into another is how the overflow
+// below went unnoticed.
+func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "bounds@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"boundsco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	pin := func(payload string) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id, strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ownerCk)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+	// --- a pin below one instance is REFUSED at the edge ---------------------
+	//
+	// It used to return 200 and do nothing visible: overrideInstances declines
+	// it, no pin reaches the desired doc, the price stays at base — but the raw
+	// pin was still written to the column, where it is non-NULL, unhonoured, and
+	// UNSWEEPABLE, because the expires_at the handler stamps is future and
+	// well-formed so every arm of ListExpiredOverrides calls it live. A 200
+	// followed by 24h of a pin nothing will honour and nothing will clear. The
+	// same value in shape.instances has always been a 422.
+	for _, n := range []string{"0", "-5"} {
+		r, b := pin(`{"override":{"instances":` + n + `,"reason":"x"}}`)
+		if r.StatusCode != 422 || !strings.Contains(b, "override.instances") {
+			t.Fatalf("instances=%s: %d %s — want 422 naming override.instances", n, r.StatusCode, b)
+		}
+		var stored []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, svc.Id).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored != nil {
+			t.Fatalf("a refused pin was still written to the column: %s — it is non-NULL, unhonoured, and its stamped expiry keeps every sweep arm calling it live", stored)
+		}
+	}
+
+	// --- a pin too large to PRICE is refused, and never wraps ----------------
+	//
+	// This is the one that mattered most. Before the engine's upper bound,
+	// override.instances = MaxInt64 returned HTTP 200 and wrote
+	// monthly_estimate_cents = -700: the multiply wrapped, so the hard spend cap
+	// was BYPASSED (UpdateService only enforces on `delta > 0`, and a wrapped
+	// price is a decrease), ADR-025's integer-cents rule was violated, and
+	// repriceSpan would open a billing span at a negative rate. The whole task's
+	// premise is "never provision what cannot be billed correctly", and this was
+	// the input that broke it on a single authenticated PATCH.
+	for _, n := range []string{"9223372036854775807"} {
+		r, b := pin(`{"override":{"instances":` + n + `,"reason":"probe"}}`)
+		if r.StatusCode != 422 || !strings.Contains(b, "override.instances") {
+			t.Fatalf("instances=%s: %d %s — want 422 naming override.instances", n, r.StatusCode, b)
+		}
+		var cents int64
+		var stored []byte
+		if err := w.pool.QueryRow(ctx,
+			`SELECT monthly_estimate_cents, override FROM services WHERE id=$1`, svc.Id).Scan(&cents, &stored); err != nil {
+			t.Fatal(err)
+		}
+		if cents < 0 {
+			t.Fatalf("instances=%s produced monthly_estimate_cents=%d — money is integer cents (ADR-025) and a wrapped price also skips the hard cap, because UpdateService only enforces on an increase", n, cents)
+		}
+		if stored != nil {
+			t.Fatalf("a refused pin reached the column: %s", stored)
+		}
+	}
+
+	// A merely ABSURD pin is a different job. 2^40 instances prices exactly —
+	// ~1.87e15 cents — so the engine has no business refusing it, and the
+	// comment on that bound says so: picking a maximum instance count is a
+	// commercial decision. The HARD SPEND CAP is what refuses it, and this
+	// asserts that layering rather than assuming it. Before the overflow fix
+	// this path was unreachable for large pins, because a wrapped price is a
+	// DECREASE and UpdateService only enforces the cap on an increase.
+	var base int64
+	if err := w.pool.QueryRow(ctx, `SELECT monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&base); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO budgets (org_id, limit_cents) VALUES ($1,$2)
+		 ON CONFLICT (org_id) DO UPDATE SET limit_cents = $2`, org.Id, base+100); err != nil {
+		t.Fatal(err)
+	}
+	rBig, bBig := pin(`{"override":{"instances":1099511627776,"reason":"absurd"}}`)
+	if rBig.StatusCode == 200 {
+		t.Fatalf("a 2^40-instance pin cleared the hard spend cap: %s", bBig)
+	}
+	var afterCents int64
+	if err := w.pool.QueryRow(ctx, `SELECT monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&afterCents); err != nil {
+		t.Fatal(err)
+	}
+	if afterCents != base {
+		t.Fatalf("a capped-out pin still moved the price: %d → %d", base, afterCents)
+	}
+	if _, err := w.pool.Exec(ctx, `DELETE FROM budgets WHERE org_id=$1`, org.Id); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- one instance is the LEGAL FLOOR, and it is honoured ------------------
+	//
+	// Without this the guard is pinned from below only: `< 1` can be tightened to
+	// `< 2` and the whole suite stays green, silently refusing a legal pin.
+	r0, b0 := pin(`{"override":{"instances":1,"reason":"floor"}}`)
+	if r0.StatusCode != 200 {
+		t.Fatalf("a one-instance pin is legal and must be honoured: %d %s", r0.StatusCode, b0)
+	}
+	var floorDesired []byte
+	if err := w.pool.QueryRow(ctx, `SELECT desired FROM services WHERE id=$1`, svc.Id).Scan(&floorDesired); err != nil {
+		t.Fatal(err)
+	}
+	var fd map[string]any
+	_ = json.Unmarshal(floorDesired, &fd)
+	ov, _ := fd["override"].(map[string]any)
+	if ov["instances"] != float64(1) {
+		t.Fatalf("a one-instance pin did not reach the cell: %s", floorDesired)
+	}
+
+}
+
+// The activity feed hides itself from every principal WITHOUT standing — on
+// BOTH transports.
+//
+// `listEvents` is x-streamable: the same path is served by the strict JSON
+// handler and, when the client sends `Accept: text/event-stream`, by
+// `events.Streamer`. The 404-for-no-standing conversion was added to the JSON
+// half only, so one request header restored the existence oracle it was added
+// to close — and the JSON half's assertion made the endpoint look fenced. An
+// unknown env already 404s on both, so a 403 on either is a positive signal
+// that this env id is real.
+//
+// Both denial classes are exercised, because they take different code paths:
+// `membership:` for a user who is not in the org, `key:` for an org key scoped
+// elsewhere. A member who merely LACKS the permission is an honest 403 — that is
+// the arm the conversion must not swallow, and without it here the whole prefix
+// check could be deleted and every test still pass.
+func TestTheActivityFeedHidesItselfFromPrincipalsWithoutStanding(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "fence-owner@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"fenceco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/envs/" + env.ID + "/events?kind=scale"
+
+	get := func(t *testing.T, cookie, accept string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+path, nil)
+		req.Header.Set("Cookie", cookie)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+		return r.StatusCode
+	}
+
+	strangerCk, _ := w.signupUser(t, "fence-stranger@example.com")
+	// The control: an env that does not exist 404s for the owner on both
+	// transports. That is what a no-standing denial has to be indistinguishable
+	// FROM, so without it "404" proves nothing.
+	for _, accept := range []string{"", "text/event-stream"} {
+		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/env_doesnotexist/events?kind=scale", nil)
+		req.Header.Set("Cookie", ownerCk)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+		if r.StatusCode != 404 {
+			t.Fatalf("an unknown env returns %d (accept=%q); the fence below is only meaningful if this is 404", r.StatusCode, accept)
+		}
+	}
+
+	if got := get(t, strangerCk, ""); got != 404 {
+		t.Fatalf("JSON: a non-member got %d, want 404 — anything else separates a real env id from a fabricated one", got)
+	}
+	if got := get(t, strangerCk, "text/event-stream"); got != 404 {
+		t.Fatalf("SSE: a non-member got %d, want 404 — the JSON half is fenced and this one is not, so one request header is the oracle", got)
+	}
+	_ = ctx
 }
