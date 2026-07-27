@@ -82,6 +82,18 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   answered 422 on another. **The diagnostic question after any restructure is not "does the new code
   work" — it is "what did the moved or deleted code guarantee, and who guarantees it now?"** Each of the
   three had a second job nobody had written down, and a green suite found none of them.
+- **A test that re-implements the guard it is named for asserts nothing about that guard.** US-3.8's
+  `TestDesiredDocNeverCarriesADeadPin` called `overrideInstances` on its own input, nilled the pin,
+  and then asserted `desiredDoc` produced no pin — which is the production line, copied into the test
+  body. Deleting the real one from `services.go` left the test GREEN; a mutation sweep found it. The
+  same shape hid in the sweep predicate: `pg_input_is_valid(…) AND (…)::timestamptz` looked like it
+  guarded the cast, but Postgres does not promise WHERE-clause evaluation order, and deleting BOTH
+  guards also passed — the current query plan was doing the work, not the code. Both were caught by
+  the same question: **if I delete the line this test is named after, does this test fail?** If the
+  answer needs a plan, an ordering, or a copy of the line to be yes, the class is open. The fix for
+  the first is to drive the real entry point and read the real column; for the second, `CASE`, whose
+  evaluation order IS guaranteed — and one flat `CASE`, since a `CASE` nested inside an `OR` silently
+  absorbed a sibling arm and made it undeletable-in-effect but deletable-in-fact.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

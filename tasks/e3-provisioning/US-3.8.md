@@ -148,6 +148,20 @@ Two criteria in this file were marked done with no test executing the function
 they rested on. That is the failure worth remembering: a green gate plus present
 code read as proof, and it was not.
 
+The final QA round found the same failure one level deeper, in the fixes for it.
+The test written to close the desired-doc guard **re-implemented that guard in
+its own body**, so deleting the production line left it green. And the sweep
+predicate's cast guard (`pg_input_is_valid(…) AND (…)::timestamptz`) was holding
+only because the current query plan happened to short-circuit the arms before
+it — deleting the guards entirely also passed. Both were "evidence" that
+described the property without depending on it. The diagnostic that catches this
+class is one question: *if I delete the line this test is named after, does the
+test fail?* Answering it requires running the deletion, which is why mutation
+testing found what three reviews of the code did not. Both are now closed by
+construction — the doc test drives `UpdateService` and reads the stored column,
+and the predicate is one ordered `CASE`, the only SQL construct whose evaluation
+order Postgres guarantees.
+
 Two of QA's survivors were also instructive in opposite directions. One is an
 **equivalent mutant** — deleting the `ExpiresAt == ""` check falls through to a
 parse failure with identical behaviour, so no test can distinguish it and
@@ -157,6 +171,14 @@ future-dated space-separated timestamp is parseable by Postgres and rejected by
 Go's RFC3339, so the API would refuse to honour a pin the sweep would never
 clear. Two implementations of one predicate, and the guard keeping them in
 agreement looked redundant until checked.
+
+A third survivor is recorded rather than closed: the sweep's `<=` vs `<` at the
+exact expiry instant. `now()` has moved on by the time any assertion runs, so no
+test can distinguish them. `<=` is the arm that agrees with the Go side's
+half-open window, and the SQL says so in a comment. Similarly, two checks in
+`overrideInstances` are equivalent mutants kept for legibility — with a note
+that the equivalence is conditional on the parser staying strict, since mutation
+testing will not re-flag something already filed as equivalent.
 
 ## Recorded decisions and consequences
 

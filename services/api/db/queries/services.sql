@@ -74,20 +74,50 @@ WHERE s.id = $1;
 -- symptom is a log line, so the control DB's floor is now 16 — stated here
 -- because nothing else records it.
 --
--- The timestamp cast is GUARDED: one row with a malformed expires_at would
--- otherwise abort the whole statement, and the sweep would then fail on every
--- tick, silently, for every customer.
+-- The timestamp cast is GUARDED, and the guard is ONE ORDERED CASE rather than
+-- a chain of OR/AND arms. One row with a malformed expires_at would otherwise
+-- abort the whole statement, and the sweep would then fail on every tick,
+-- silently, for every customer.
+--
+-- `… OR (pg_input_is_valid(…) AND (…)::timestamptz <= now())` reads as if the
+-- AND protects the cast, but Postgres does not promise it: WHERE clauses are
+-- "extensively reprocessed as part of developing an execution plan", and the
+-- documented counter-example is exactly `x <> 0 AND y/x > 1.5` still dividing
+-- by zero. That form passed the sweep test only because the current plan
+-- happened to short-circuit the earlier OR arms — deleting the guards entirely
+-- ALSO passed, which is how it was caught. An index, a bigger table or a
+-- version bump can take that luck away. CASE is the one construct whose
+-- evaluation order IS guaranteed, so the cast is unreachable for an invalid
+-- input by construction rather than by plan.
+--
+-- One CASE and not a CASE inside an OR: with the arms split, `expires_at IS
+-- NULL` was silently absorbed by the ELSE (pg_input_is_valid is strict, so it
+-- returns NULL, so NULL fell through to "sweep it") and deleting the explicit
+-- arm changed nothing. Redundant arms cannot be tested, and an arm nobody can
+-- test is an arm nobody can trust to still be doing its job. Here each arm is
+-- reachable only by its own input class, and deleting any of them fails
+-- TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne.
 SELECT * FROM services
 WHERE override IS NOT NULL
   AND status <> 'deleting'
-  AND (
-        (override->>'expires_at') IS NULL
-     OR (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$'
-     OR pg_input_is_valid(override->>'expires_at', 'timestamptz') = false
-     OR ((override->>'expires_at') ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$'
-         AND pg_input_is_valid(override->>'expires_at', 'timestamptz')
-         AND (override->>'expires_at')::timestamptz <= now())
-  );
+  AND CASE
+        -- No expiry at all: not a temporary pin, so it is dead on arrival.
+        WHEN (override->>'expires_at') IS NULL THEN true
+        -- Go's time.Parse(RFC3339) would reject it, so the API already refuses
+        -- to honour the pin. If the sweep disagreed, the row would sit forever:
+        -- unhonoured and unclearable. The two liveness implementations must
+        -- agree, and this arm is what makes them.
+        WHEN (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$' THEN true
+        -- Shaped like a timestamp but not one ('2026-13-45T99:99:99Z').
+        WHEN NOT pg_input_is_valid(override->>'expires_at', 'timestamptz') THEN true
+        -- KNOWN BOUNDARY, deliberately uncovered: swapping <= for < survives
+        -- mutation and no test can kill it — now() has moved on by the time any
+        -- assertion runs. Go pins the half-open window (exactly-at-expiry is
+        -- DEAD, TestOverrideLiveness) and <= is the arm that agrees with it; a
+        -- bare < would strand a pin for one tick at the exact boundary.
+        -- Recorded rather than claimed as covered.
+        ELSE (override->>'expires_at')::timestamptz <= now()
+      END;
 
 -- name: ClearExpiredOverride :one
 -- Clear the pin, restore the unpinned price, rewrite desired, and bump

@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1244,4 +1245,195 @@ func TestARepriceBeforeReadyEmitsNoSpan(t *testing.T) {
 	if edges[0].rate != cents {
 		t.Fatalf("the span opened at %d but the row says %d", edges[0].rate, cents)
 	}
+}
+
+// The desired doc never carries a dead pin — asserted through UpdateService,
+// because that is where the guard lives.
+//
+// The first version of this test lived in `provisioning` and applied
+// `overrideInstances` to its own input before calling `desiredDoc`. That is the
+// production guard, copied into the test body: deleting the real one from
+// services.go left the test green, and a mutation sweep found it still alive.
+// A test that re-implements the line it is named for asserts only that the test
+// author can write that line twice.
+//
+// So: drive the real entry point, read the real column. Deleting the guard at
+// services.go must fail four of these five rows.
+func TestTheDesiredDocNeverCarriesADeadPin(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "deadpin@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"deadpinco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	past := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	future := time.Now().Add(time.Hour).Format(time.RFC3339)
+
+	// `web` because it is the one product the catalog can price per instance
+	// (founder ruling 2026-07-27: postgres/valkey pins are refused as
+	// unpriceable), so the live row exercises the pinned path rather than a 422.
+	for _, tc := range []struct {
+		name     string
+		override string
+		wantPin  bool
+	}{
+		{"expired", `{"instances":3,"reason":"x","expires_at":"` + past + `"}`, false},
+		{"no expiry at all", `{"instances":3,"reason":"x"}`, false},
+		{"unparseable expiry", `{"instances":3,"reason":"x","expires_at":"soon"}`, false},
+		{"zero instances", `{"instances":0,"reason":"x","expires_at":"` + future + `"}`, false},
+		{"live", `{"instances":3,"reason":"x","expires_at":"` + future + `"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svc.Id),
+				org.Id, ownerID, nil, nil, []byte(tc.override))
+			if err != nil {
+				t.Fatalf("UpdateService: %v", err)
+			}
+			var d map[string]any
+			if err := json.Unmarshal(row.Desired, &d); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := d["override"]; present != tc.wantPin {
+				t.Fatalf("override in desired = %v, want %v — the cell renders whatever is here, expiry or not: %s",
+					present, tc.wantPin, row.Desired)
+			}
+			// The column itself keeps the raw pin either way: the sweep matches
+			// on `override IS NOT NULL`, so stripping it here as well would make
+			// a dead pin invisible to the only thing that clears it. Compared as
+			// parsed JSON, never as bytes — jsonb reorders keys and re-spaces.
+			var gotPin, wantPin map[string]any
+			if err := json.Unmarshal(row.Override, &gotPin); err != nil {
+				t.Fatalf("override column is not JSON: %s", row.Override)
+			}
+			_ = json.Unmarshal([]byte(tc.override), &wantPin)
+			if !reflect.DeepEqual(gotPin, wantPin) {
+				t.Fatalf("override column = %v, want the raw pin %v — the sweep lists on this column",
+					gotPin, wantPin)
+			}
+		})
+	}
+}
+
+// The TICKER arm, not just the startup sweep.
+//
+// `RunOverrideExpiry` sweeps once at boot and then on every tick. Deleting the
+// tick arm survived a mutation sweep, because every existing test plants its
+// pins before the goroutine starts and is therefore satisfied by the boot
+// sweep alone. The consequence of that survivor is the whole feature dark in
+// production with the suite green: any pin created more than a moment after
+// boot never expires, which is precisely the "temporary pin that is permanent"
+// this task exists to fix.
+//
+// So the pin here is planted only AFTER the boot sweep has been observed to
+// finish — a sentinel row it clears — leaving a tick as the only mechanism that
+// can clear the second one.
+func TestAPinCreatedAfterBootStillExpires(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "ticker@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"tickerco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name string) string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"web","name":"`+name+`","shape":{"size":"standard-1"}}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("estimate %s: %d %s", name, resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"`+name+`","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create %s: %d %s", name, resp.StatusCode, body)
+		}
+		var svc struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &svc)
+		return svc.Id
+	}
+	pin := func(id string) {
+		t.Helper()
+		if _, err := w.pool.Exec(ctx, `UPDATE services SET override = $2::jsonb WHERE id = $1`,
+			id, `{"instances":3,"reason":"x","expires_at":"`+
+				time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)+`"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitCleared := func(id, why string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			var o []byte
+			if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, id).Scan(&o); err != nil {
+				t.Fatal(err)
+			}
+			if o == nil {
+				return
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("%s: pin still set after 5s — %s", id, why)
+			default:
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
+
+	sentinel := mk("sentinel")
+	pin(sentinel)
+
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		w.prov.RunOverrideExpiry(sweepCtx, 50*time.Millisecond, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+	defer func() { cancel(); <-done }()
+
+	// The boot sweep clears the sentinel; once it has, its row loop is done and
+	// it has already listed.
+	waitCleared(sentinel, "the startup sweep did not run at all")
+
+	// Everything from here can only be reached by a tick.
+	late := mk("late")
+	pin(late)
+	waitCleared(late, "only the startup sweep runs: every pin created after boot renders forever, and nothing reports it")
 }

@@ -554,6 +554,16 @@ func (s *Service) repriceSpan(ctx context.Context, orgID string, svc store.Servi
 // the only argument for not charging for the capacity it provisions.
 //
 // Returns (0, false) for an absent, malformed, or expired override.
+//
+// Two of the checks below are EQUIVALENT MUTANTS — `len(raw) == 0` and
+// `ExpiresAt == ""` can both be deleted with no observable change, because the
+// Unmarshal and the time.Parse under them already fail on those inputs. No test
+// can distinguish them and none pretends to. They stay because they say what
+// the rule IS ("unset is not forever"), rather than leaving it as a side effect
+// of a parser erroring. That equivalence is CONDITIONAL on the parse staying
+// strict: relax time.Parse to accept more layouts, or make an empty expiry mean
+// "no constraint", and `ExpiresAt == ""` becomes load-bearing again — while
+// mutation testing has it filed as equivalent and will not re-flag it.
 func overrideInstances(raw []byte, now time.Time) (int, bool) {
 	if len(raw) == 0 {
 		return 0, false

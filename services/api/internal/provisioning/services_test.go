@@ -176,36 +176,38 @@ func TestOverrideLiveness(t *testing.T) {
 // capacity: the cell's renderer reads `desired.override.instances` and never
 // consults `expires_at` (cell-agent/internal/render/cnpg_renderer.go,
 // instancesOf). If an expired pin reaches the doc, the cell renders it.
-func TestDesiredDocNeverCarriesADeadPin(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-time.Hour).Format(time.RFC3339)
-	future := now.Add(time.Hour).Format(time.RFC3339)
-
+// desiredDoc is a RENDERER, not a filter: it embeds whatever pin it is handed
+// and consults no expiry. That is deliberate — the liveness decision belongs to
+// the one caller that also prices the pin — and it is the reason
+// `TestTheDesiredDocNeverCarriesADeadPin` (identity, integration) has to drive
+// UpdateService rather than this function.
+//
+// An earlier version of this test applied `overrideInstances` to the input
+// itself and then asserted the doc came out unpinned. It passed for the same
+// reason a mirror is flat: it had COPIED the production guard into the test
+// body, so deleting that guard from services.go left it green. What it actually
+// pinned was that the two functions COMPOSE — worth keeping, but not what its
+// name claimed, and the class it was named for was uncovered while it reported
+// covered.
+func TestDesiredDocEmbedsThePinItIsHanded(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		override string
+		override []byte
 		wantPin  bool
 	}{
-		{"expired", `{"instances":9,"reason":"x","expires_at":"` + past + `"}`, false},
-		{"no expiry", `{"instances":9,"reason":"x"}`, false},
-		{"malformed expiry", `{"instances":9,"expires_at":"soon"}`, false},
-		{"zero instances", `{"instances":0,"expires_at":"` + future + `"}`, false},
-		{"live", `{"instances":9,"reason":"x","expires_at":"` + future + `"}`, true},
+		{"a pin is rendered verbatim", []byte(`{"instances":9,"reason":"x"}`), true},
+		{"an expired pin is rendered too — this function does not judge",
+			[]byte(`{"instances":9,"expires_at":"2000-01-01T00:00:00Z"}`), true},
+		{"nil is the only thing that omits it", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := []byte(tc.override)
-			if _, live := overrideInstances(raw, time.Now()); !live {
-				raw = nil // the guard UpdateService applies before building the doc
-			}
-			doc := desiredDoc("web", "app", "env-x", []byte(`{"size":"standard-1"}`), nil, raw, false)
+			doc := desiredDoc("web", "app", "env-x", []byte(`{"size":"standard-1"}`), nil, tc.override, false)
 			var d map[string]any
 			if err := json.Unmarshal(doc, &d); err != nil {
 				t.Fatal(err)
 			}
-			_, present := d["override"]
-			if present != tc.wantPin {
-				t.Fatalf("override in desired = %v, want %v — the cell renders whatever is here, expiry or not: %s",
-					present, tc.wantPin, doc)
+			if _, present := d["override"]; present != tc.wantPin {
+				t.Fatalf("override in desired = %v, want %v: %s", present, tc.wantPin, doc)
 			}
 		})
 	}
