@@ -92,17 +92,13 @@ func (s *Streamer) serve(w http.ResponseWriter, r *http.Request, envID string) {
 	}
 	scope := rbac.Scope{OrgID: orgID, EnvID: envID}
 	if err := s.Authorize(ctx, p, "observe.read", scope); err != nil {
-		// 404, not 403, for a principal with NO STANDING in the org — a
-		// non-member (membership:…) or a key scoped elsewhere (key:…). This
-		// endpoint is the SSE half of `listEvents`; its JSON half converts the
-		// same denials, and an unknown env already 404s eight lines up. Without
-		// the same conversion here, `Accept: text/event-stream` is a one-header
-		// existence oracle for any env id — and the JSON half's test makes the
-		// endpoint look fenced. A member who merely lacks observe.read (role:…)
-		// still gets the honest 403.
-		var ns interface{ AccessDeniedNoStanding() bool }
-		if errors.As(err, &ns) && ns.AccessDeniedNoStanding() {
-			problem.Write(w, r, problem.NotFound("environment"))
+		// The SAME mapping the JSON half of this operation uses. This endpoint is
+		// `listEvents` over SSE; when the two halves classify denials
+		// differently, one request header becomes an existence oracle for any env
+		// id — which is exactly what happened when this conversion lived at the
+		// call site and was added to only one of them.
+		if p, ok := problem.FromDenial(err, "environment", "Ask an org admin for observe access."); ok {
+			problem.Write(w, r, p)
 			return
 		}
 		problem.Write(w, r, problem.PermissionDenied(err.Error(), "Ask an org admin for observe access."))

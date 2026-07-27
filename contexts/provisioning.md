@@ -106,6 +106,17 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   `cp -R services/api` they fail before any mutation is applied. Establish the baseline FIRST and
   name the pre-failing tests, or copy from the repo root when the sweep touches those packages.
   A reviewer who skips the baseline spends the session chasing a red they introduced.
+- **If the same invariant must hold at more than one site, give it one owner — and prefer an owner
+  the compiler enforces (ADR-0014).** US-3.8 spent six review rounds on ONE error repeated: a guard
+  applied per-site instead of made unrepresentable. An overflow bound went into one arm of a
+  three-arm pricing switch (the siblings kept wrapping, and a wrapped price disabled the org's spend
+  cap permanently); a 404-for-no-standing conversion went into one transport of a two-transport
+  endpoint (one request header reopened the oracle). Both fixes were correct and both were partial,
+  and no amount of care at the next site would have changed the rate. `int64` cents compiles `a * b`,
+  so every priced dimension is an opportunity to forget; `money.Cents` is a struct, so it does not
+  compile at all. **The question after writing any guard is not "is this one right" — it is "how many
+  places must be right, and what stops the next one being missed?"** If the answer is "a reviewer",
+  the design is wrong.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

@@ -655,7 +655,7 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinnedCents != wantPinned.MonthlyCents {
+	if pinnedCents != wantPinned.MonthlyCents.Int64() {
 		t.Fatalf("the pin priced at %d, the engine says %d", pinnedCents, wantPinned.MonthlyCents)
 	}
 	// And the INVOICE follows. Billing reads usage_events.rate_cents, snapshotted
@@ -666,7 +666,7 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	if len(pinEdges) < 3 {
 		t.Fatalf("a pin must re-cut the span (open@base, close@base, open@pinned); got %v", pinEdges)
 	}
-	if last := pinEdges[len(pinEdges)-1]; last.edge != "open" || last.rate != wantPinned.MonthlyCents {
+	if last := pinEdges[len(pinEdges)-1]; last.edge != "open" || last.rate != wantPinned.MonthlyCents.Int64() {
 		t.Fatalf("after the pin the open span bills at %s@%d, want open@%d — nine provisioned, one billed",
 			last.edge, last.rate, wantPinned.MonthlyCents)
 	}

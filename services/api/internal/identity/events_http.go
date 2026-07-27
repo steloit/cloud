@@ -61,16 +61,13 @@ func (h *Handlers) ListEvents(ctx context.Context, req gen.ListEventsRequestObje
 		return nil, err
 	}
 	if err := h.authz.Require(ctx, p, "observe.read", rbac.Scope{OrgID: orgID, EnvID: req.EnvPathParam}); err != nil {
-		// A principal with no standing in the org — a non-member
-		// (membership:none) or an org key scoped elsewhere (key:…) — must not
-		// learn the environment exists: 404, not a 403 oracle. A member who
-		// merely lacks observe.read (role:…) gets the honest 403.
-		// `api-conventions.md`; the conversion pattern is policy_http.go's.
-		// Without it a stranger separates a real env id from a fabricated one,
-		// since an unknown env already 404s via ErrEnvNotFound above.
-		var ad AccessDeniedError
-		if errors.As(err, &ad) && ad.AccessDeniedNoStanding() {
-			return nil, notFoundError{what: "environment"}
+		// One mapping for every enforcement point (problem.FromDenial): no
+		// standing → 404 indistinguishable from a missing env, has standing but
+		// lacks the permission → an honest 403. Not re-implemented here, because
+		// re-implementing it is how the SSE half of this same operation ended up
+		// answering 403 where this half answered 404.
+		if p, ok := problem.FromDenial(err, "environment", "Ask an org admin for observe access."); ok {
+			return nil, problemError{p: p}
 		}
 		return nil, err
 	}
