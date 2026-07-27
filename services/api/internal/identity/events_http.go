@@ -6,6 +6,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
@@ -61,6 +62,17 @@ func (h *Handlers) ListEvents(ctx context.Context, req gen.ListEventsRequestObje
 		return nil, err
 	}
 	if err := h.authz.Require(ctx, p, "observe.read", rbac.Scope{OrgID: orgID, EnvID: req.EnvPathParam}); err != nil {
+		// A principal with no standing in the org — a non-member
+		// (membership:none) or an org key scoped elsewhere (key:…) — must not
+		// learn the environment exists: 404, not a 403 oracle. A member who
+		// merely lacks observe.read (role:…) gets the honest 403.
+		// `api-conventions.md`; the conversion pattern is policy_http.go's.
+		// Without it a stranger separates a real env id from a fabricated one,
+		// since an unknown env already 404s via ErrEnvNotFound above.
+		var ad AccessDeniedError
+		if errors.As(err, &ad) && (strings.HasPrefix(ad.DeniedBy, "membership:") || strings.HasPrefix(ad.DeniedBy, "key:")) {
+			return nil, notFoundError{what: "environment"}
+		}
 		return nil, err
 	}
 	cursor := ""

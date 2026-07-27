@@ -157,6 +157,21 @@ func (h *Handlers) UpdateService(ctx context.Context, req gen.UpdateServiceReque
 			return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{
 				{Field: "override.reason", Detail: "required — manual pins carry a reason and auto-expire in 24h (D22)"}})}
 		}
+		// A pin below one instance is REFUSED, not silently ignored.
+		//
+		// Without this it returned 200 and did nothing visible: overrideInstances
+		// declines it, no pin reaches the desired doc, the price stays at base —
+		// but the raw pin is still written to `override`, where it is non-NULL,
+		// unhonoured, and NOT SWEPT, because the expires_at stamped just below is
+		// future and well-formed so every arm of ListExpiredOverrides calls it
+		// live. A column holding a pin nothing will honour and nothing will clear,
+		// for 24h, after a 200. The same value in `shape.instances` is a 422 from
+		// the pricing engine — one class of input, two answers, which is the
+		// defect this task already fixed one field over (services.go's Resolve).
+		if req.Body.Override.Instances < 1 {
+			return nil, problemError{p: problem.ValidationFailed([]problem.FieldError{
+				{Field: "override.instances", Detail: "must be at least 1"}})}
+		}
 		override, _ = json.Marshal(map[string]any{
 			"instances":  req.Body.Override.Instances,
 			"reason":     req.Body.Override.Reason,

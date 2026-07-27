@@ -531,3 +531,79 @@ func spanEdges(t *testing.T, pool *pgxpool.Pool, serviceID string) []string {
 	}
 	return edges
 }
+
+// The clear's `status <> 'deleting'` fence, driven through the exact
+// interleaving that reaches it.
+//
+// This fence was recorded as untestable defence-in-depth, on the reasoning that
+// "every path that starts a delete also bumps generation, so the generation
+// fence always fires first." That reasoning is FALSE, and DeleteService is its
+// own counterexample: it does BumpServiceGeneration (gen→N+1) and only THEN
+// Transition→deleting, via SetServiceStatus, which does not touch generation.
+// Two non-transactional writes. A sweep that lists the row in between arrives at
+// the clear with a generation that MATCHES — so without this fence the clear
+// succeeds, rewriting desired WITHOUT deleting:true and bumping generation
+// again, and the cell converges an in-flight teardown back into existence.
+//
+// The window DeleteService's own comment documents for crashes is equally open
+// to the sweeper. Recording an arm as unreachable without checking the reason is
+// how a live fence gets filed as decoration.
+func TestTheClearFenceRejectsARowThatStartedDeletingMidSweep(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-midsweep")
+
+	pin := `{"instances":3,"reason":"x","expires_at":"` +
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}`
+	if _, err := pool.Exec(ctx, `UPDATE services SET override = $2::jsonb WHERE id = $1`, svc.ID, pin); err != nil {
+		t.Fatal(err)
+	}
+
+	// The sweeper's read: still provisioning, so it lists.
+	listed, err := q.ListExpiredOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read *store.Service
+	for i := range listed {
+		if listed[i].ID == svc.ID {
+			read = &listed[i]
+		}
+	}
+	if read == nil {
+		t.Fatal("the fixture did not produce a listable dead pin")
+	}
+
+	// The delete lands in the window: generation bumped, status not yet flipped,
+	// then flipped — exactly DeleteService's two writes.
+	if err := prov.DeleteService(ctx, mustGet(t, q, svc.ID), "org_w", "usr_w"); err != nil {
+		t.Fatal(err)
+	}
+	after := mustGet(t, q, svc.ID)
+	if after.Status != "deleting" {
+		t.Fatalf("status %q, want deleting", after.Status)
+	}
+	if after.Generation == read.Generation {
+		t.Skip("DeleteService no longer bumps generation; this interleaving is unreachable and the fence would be genuine decoration")
+	}
+
+	// The sweeper now clears using the generation IT read — which, because
+	// SetServiceStatus does not bump, is still the row's generation.
+	_, err = q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
+		ID: svc.ID, MonthlyEstimateCents: 100, Desired: []byte(`{"product":"web"}`),
+		Generation: after.Generation,
+	})
+	if !errorsIsNoRows(err) {
+		t.Fatalf("the clear was not refused on a deleting row (got %v) — it has just replaced the teardown's desired doc with one that does not say deleting, and bumped generation, so the cell will converge the service back into existence", err)
+	}
+	final := mustGet(t, q, svc.ID)
+	var d map[string]any
+	_ = json.Unmarshal(final.Desired, &d)
+	if d["deleting"] != true {
+		t.Fatalf("the teardown's desired doc was overwritten: %s", final.Desired)
+	}
+	if final.Override == nil {
+		t.Fatal("the pin was cleared on a deleting row")
+	}
+}

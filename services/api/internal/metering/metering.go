@@ -55,9 +55,6 @@ func (e *Emitter) MustEmitSpan(ctx context.Context, tags Tags, edge, product str
 	}
 }
 
-// BillingEdge classifies a status transition for the span machine:
-// "open" when billing starts, "close" when it stops, "" when unaffected.
-// degraded still bills (the resource runs); suspended/deleting/failed stop.
 // IsBilling reports whether a status has an OPEN billing span. A rate change
 // while one is open is invisible to the invoice unless the span is closed and
 // reopened — rate_cents is snapshotted at open and the rollup weights every
@@ -66,6 +63,9 @@ func IsBilling(status string) bool { return billingStates[status] }
 
 var billingStates = map[string]bool{"ready": true, "degraded": true}
 
+// BillingEdge classifies a status transition for the span machine:
+// "open" when billing starts, "close" when it stops, "" when unaffected.
+// degraded still bills (the resource runs); suspended/deleting/failed stop.
 func BillingEdge(from, to string) string {
 	billing := billingStates
 	switch {

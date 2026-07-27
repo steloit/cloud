@@ -1561,6 +1561,38 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 	var svc struct{ Id string }
 	_ = json.Unmarshal([]byte(body), &svc)
 
+	// --- a pin below one instance is REFUSED at the edge ---------------------
+	//
+	// It used to return 200 and do nothing visible: overrideInstances declines
+	// it, no pin reaches the desired doc, the price stays at base — but the raw
+	// pin was still written to the column, where it is non-NULL, unhonoured, and
+	// UNSWEEPABLE, because the expires_at the handler stamps is future and
+	// well-formed so every arm of ListExpiredOverrides calls it live. A 200
+	// followed by 24h of a pin nothing will honour and nothing will clear. The
+	// same value in shape.instances has always been a 422.
+	for _, n := range []string{"0", "-5"} {
+		req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
+			strings.NewReader(`{"override":{"instances":`+n+`,"reason":"x"}}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ownerCk)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		if r.StatusCode != 422 || !strings.Contains(string(b), "override.instances") {
+			t.Fatalf("instances=%s: %d %s — want 422 naming override.instances", n, r.StatusCode, string(b))
+		}
+		var stored []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, svc.Id).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored != nil {
+			t.Fatalf("a refused pin was still written to the column: %s — it is non-NULL, unhonoured, and its stamped expiry keeps every sweep arm calling it live", stored)
+		}
+	}
+
 	// --- APPLY: the reason reaches the feed ---------------------------------
 	req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
 		strings.NewReader(`{"override":{"instances":3,"reason":"black friday"}}`))
@@ -1576,17 +1608,73 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 		t.Fatalf("pin: %d %s", r.StatusCode, string(b))
 	}
 
-	feed := func() string {
+	// Decode and select the ONE event being asserted about. `strings.Contains` on
+	// the page body is not enough here and the reason is specific: `ListEvents`
+	// resolves env→org and then pages the whole ORG (there is no env predicate),
+	// the spine is append-only so the apply event stays in the page forever, and
+	// the release carries the same reason string. So a body-level `Contains` for
+	// the reason was satisfied by the apply row — the release assertion below
+	// could never fail for the reason its message gave, and a test that cannot
+	// fail for its stated reason will be trusted for it. It also let the apply
+	// event carry the wrong subject, actor, via and action, all four at once.
+	type feedEvent struct {
+		Kind    string         `json:"kind"`
+		Via     string         `json:"via"`
+		Actor   string         `json:"actor"`
+		Action  string         `json:"action"`
+		Subject string         `json:"subject"`
+		Detail  map[string]any `json:"detail"`
+	}
+	feed := func(detailKey string) []feedEvent {
 		t.Helper()
 		resp, body := w.get(t, "/v1/envs/"+env.ID+"/events?kind=scale", ownerCk)
 		if resp.StatusCode != 200 {
 			t.Fatalf("listEvents: %d %s", resp.StatusCode, body)
 		}
-		return body
+		// `data`, per EventList in openapi.yaml — NOT `items`. A wrong key here
+		// decodes to an empty slice with no error, which is a silent zero-hit
+		// feed: the assertions below would then be measuring the decode, not the
+		// spine. The len()==1 checks are what turn that into a failure.
+		var page struct {
+			Data []feedEvent `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &page); err != nil {
+			t.Fatalf("decode feed: %v — %s", err, body)
+		}
+		if len(page.Data) == 0 {
+			t.Fatalf("the activity feed is empty: %s", body)
+		}
+		var hits []feedEvent
+		for _, e := range page.Data {
+			if e.Subject == svc.Id {
+				if _, ok := e.Detail[detailKey]; ok {
+					hits = append(hits, e)
+				}
+			}
+		}
+		return hits
 	}
-	applied := feed()
-	if !strings.Contains(applied, "black friday") {
-		t.Fatalf("the pin's reason is absent from the kind=scale feed — an operator pinning capacity outside the estimate path with no recorded reason is the exact affordance the audit trail exists for: %s", applied)
+
+	applied := feed("override")
+	if len(applied) != 1 {
+		t.Fatalf("the pin recorded %d events on this service carrying an override — an operator pinning capacity outside the estimate path with no recorded reason is the exact affordance the audit trail exists for", len(applied))
+	}
+	if applied[0].Via != "user" || applied[0].Actor != ownerID || applied[0].Action != "service.updated" {
+		t.Fatalf("the pin's audit row is via=%q actor=%q action=%q, want user/%s/service.updated — an out-of-band capacity grab attributed to the system, or to nobody, is not an audit trail",
+			applied[0].Via, applied[0].Actor, applied[0].Action, ownerID)
+	}
+	gotApplied, _ := applied[0].Detail["override"].(map[string]any)
+	if gotApplied["instances"] != float64(3) || gotApplied["reason"] != "black friday" {
+		t.Fatalf("the pin's audit row carries %v, want instances 3 / reason \"black friday\"", applied[0].Detail["override"])
+	}
+	// The stamped expiry is part of the record: D22's promise to the customer is
+	// that the pin is TEMPORARY, so the audit row has to say when it ends.
+	exp, err := time.Parse(time.RFC3339, fmt.Sprint(gotApplied["expires_at"]))
+	if err != nil {
+		t.Fatalf("the audit row's expires_at is not RFC3339 (%v) — the sweep parses it with exactly this, so an unparseable one is a pin nothing will ever clear", gotApplied["expires_at"])
+	}
+	if d := time.Until(exp); d < 23*time.Hour || d > 25*time.Hour {
+		t.Fatalf("the pin expires in %s, want ~24h (D22)", d)
 	}
 
 	// --- RELEASE: the expiry reaches the SAME feed ---------------------------
@@ -1620,19 +1708,30 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 	cancel()
 	<-done
 
-	released := feed()
-	if !strings.Contains(released, "override_expired") {
-		t.Fatalf("the release is missing from the kind=scale feed the application appears in — the customer sees capacity pinned and never given back: %s", released)
+	released := feed("override_expired")
+	if len(released) != 1 {
+		t.Fatalf("the release recorded %d events in the kind=scale feed the application appears in — the customer sees capacity pinned and never given back", len(released))
 	}
-	if !strings.Contains(released, "black friday") {
-		t.Fatalf("the release does not carry the reason the pin was created with: %s", released)
+	if released[0].Via != "system" || released[0].Actor != "system" {
+		t.Fatalf("the release is via=%q actor=%q, want system/system — the clock released it, not a person",
+			released[0].Via, released[0].Actor)
+	}
+	// The reason is asserted on the RELEASE event specifically. Asserted against
+	// the page it would have passed on the apply event's copy of the same string.
+	gotReleased, _ := released[0].Detail["override_expired"].(map[string]any)
+	if gotReleased["reason"] != "black friday" || gotReleased["instances"] != float64(3) {
+		t.Fatalf("the release carries %v, want the pin it released — the reason is the whole audit value and it has to survive the release", released[0].Detail["override_expired"])
 	}
 
-	// --- and a stranger's org sees neither -----------------------------------
+	// --- and a stranger cannot tell this env from one that does not exist -----
+	//
+	// 404, not 403: `contexts/api-conventions.md` makes membership and key
+	// denials indistinguishable from a missing id, and only role denials an
+	// honest 403. A 403 here tells a stranger that `env_…` is real.
 	strangerCk, _ := w.signupUser(t, "feed-stranger@example.com")
 	resp, _ = w.get(t, "/v1/envs/"+env.ID+"/events?kind=scale", strangerCk)
-	if resp.StatusCode != 403 && resp.StatusCode != 404 {
-		t.Fatalf("a non-member read the org's activity feed: %d", resp.StatusCode)
+	if resp.StatusCode != 404 {
+		t.Fatalf("a non-member got %d for a foreign env's activity feed, want 404 — anything else distinguishes a real env id from a fabricated one", resp.StatusCode)
 	}
 }
 
@@ -1686,6 +1785,27 @@ func TestTheSweepLeavesADeletingServiceAlone(t *testing.T) {
 		`UPDATE services SET override = $2::jsonb, status = 'deleting' WHERE id = $1`, svc.Id, pin); err != nil {
 		t.Fatal(err)
 	}
+	// POSITIVE CONTROL. Without it this test is negative-only: a
+	// ListExpiredOverrides that returned nothing at all — or errored into an
+	// empty slice — would satisfy "the deleting row is absent" perfectly.
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"live","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate live: %d %s", resp.StatusCode, body)
+	}
+	var est2 struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est2)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"live","product":"web","estimate_id":"`+est2.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService live: %d %s", resp.StatusCode, body)
+	}
+	var live struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &live)
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET override = $2::jsonb WHERE id = $1`, live.Id, pin); err != nil {
+		t.Fatal(err)
+	}
 
 	// Assert on the QUERY, not on the row's end state. Both fences exist —
 	// ClearExpiredOverride carries `status <> 'deleting'` too — so deleting the
@@ -1698,36 +1818,27 @@ func TestTheSweepLeavesADeletingServiceAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sawLive := false
 	for _, row := range listed {
+		if row.ID == live.Id {
+			sawLive = true
+		}
 		if row.ID == svc.Id {
 			t.Fatal("a deleting service with a dead pin is listed as sweepable — it will be listed on every tick forever, doing the price, namespace and org lookups each time and swallowing the zero-row clear as 'moved under us', with no log line and no end")
 		}
 	}
+	if !sawLive {
+		t.Fatal("the identical dead pin on a NON-deleting service was not listed either — this test would pass against a query that returns nothing at all, which is not evidence that the deleting fence did anything")
+	}
 
-	// And a full boot sweep leaves it exactly as it was: teardown owns this row,
-	// and clearing the pin would bump generation and rewrite desired with
-	// deleting=false, re-outstanding a row whose teardown is in flight.
-	sweepCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
-		close(done)
-	}()
-	cancel()
-	<-done
-
-	var o []byte
-	var status string
-	if err := w.pool.QueryRow(ctx,
-		`SELECT override, status FROM services WHERE id=$1`, svc.Id).Scan(&o, &status); err != nil {
-		t.Fatal(err)
-	}
-	if o == nil {
-		t.Fatal("the sweep cleared a deleting service's pin")
-	}
-	if status != "deleting" {
-		t.Fatalf("status is %q, want deleting", status)
-	}
+	// The earlier version of this test also ran a boot sweep and asserted the row
+	// was unchanged. That half was worthless twice over: `cancel()` fired
+	// immediately after starting the goroutine, so the sweep usually died on a
+	// cancelled context before querying anything; and even when it ran,
+	// ClearExpiredOverride carries the same fence, so the row would be unchanged
+	// with the LIST fence deleted too. Dropped — the query assertion above is the
+	// real owner, and a second assertion that cannot fail only makes the first
+	// one look better supported than it is.
 }
 
 // Exactly-at-expiry is DEAD in SQL, matching Go's half-open window.
@@ -1773,6 +1884,22 @@ func TestAPinExpiringAtExactlyNowIsSweptNotStranded(t *testing.T) {
 	var svc struct{ Id string }
 	_ = json.Unmarshal([]byte(body), &svc)
 
+	// A second service, for the just-alive side of the boundary.
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"live","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate live: %d %s", resp.StatusCode, body)
+	}
+	var est2 struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est2)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"live","product":"web","estimate_id":"`+est2.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService live: %d %s", resp.StatusCode, body)
+	}
+	var live struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &live)
+
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1799,6 +1926,27 @@ func TestAPinExpiringAtExactlyNowIsSweptNotStranded(t *testing.T) {
 			found = true
 		}
 	}
+	// The OTHER side of the window. Without this the boundary is pinned from one
+	// direction only, and `<= now()` widened to `<= now() + interval '1 minute'`
+	// survives — the sweep clearing pins the API is still honouring, capacity
+	// vanishing early, which is the same disagreement in the opposite direction.
+	// The other tests miss it because their live pin is an hour out.
+	if _, err := tx.Exec(ctx, `UPDATE services SET override = jsonb_build_object(
+	        'instances', 9, 'reason', 'just-alive',
+	        'expires_at', to_char((now() + interval '1 microsecond') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+	      WHERE id = $1`, live.Id); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = store.New(tx).ListExpiredOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.ID == live.Id {
+			t.Fatal("a pin expiring one microsecond in the FUTURE was swept — the sweep is clearing capacity the API is still honouring, and the customer loses instances before the pin they were promised runs out")
+		}
+	}
+
 	if !found {
 		t.Fatal("a pin expiring at exactly now() was not swept — SQL would be treating the window as open at the instant Go treats it as closed, so the API refuses to honour the pin while the sweep declines to clear it: stranded, in the one place the two implementations are supposed to agree")
 	}

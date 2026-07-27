@@ -18,12 +18,14 @@ files:
   - services/api/cmd/api/main.go
   - services/api/db/queries/services.sql
   - services/api/internal/estimates/engine.go
+  - services/api/internal/identity/events_http.go
   - services/api/internal/identity/services_integration_test.go
   - services/api/internal/identity/store/**
   - services/api/internal/metering/metering.go
   - services/api/internal/platform/db/db.go
   - services/api/internal/platform/db/db_integration_test.go
   - services/api/internal/provisioning/services.go
+  - services/api/internal/provisioning/services_http.go
   - services/api/internal/provisioning/services_test.go
   - services/api/internal/reconcile/wiring_integration_test.go
   - tasks/e11-billing/US-11.9.md
@@ -110,12 +112,12 @@ the HA capability as a whole, so borrowing it would silently change pricing.
   pinned rate while the pin is live, and the base rate is restored on expiry.
 - [x] A pin the catalog cannot price is **refused**, never provisioned —
   `TestUnpriceablePinIsRefused` (422 naming `override.instances`).
-- [x] The 24h expiry is real: `ExpireManualOverrides` clears the pin, bumps
+- [x] The 24h expiry is real: `RunOverrideExpiry` clears the pin, bumps
   generation so the cell re-polls, rebuilds desired without it, and restores the
   unpinned price. Mutation-verified in both halves (the sweep never matching,
   and the flag never being set).
 - [x] An expired pin is never shipped to the cell even before the sweep runs —
-  `TestDesiredDocNeverCarriesADeadPin`. This was previously ticked on the
+  `TestTheDesiredDocNeverCarriesADeadPin`. This was previously ticked on the
   strength of the guard existing: QA showed the guard could be deleted with the
   suite green, and the cell's renderer never consults `expires_at`, so that one
   line is all that stands between a dead pin and provisioned capacity.
@@ -178,10 +180,15 @@ Go's RFC3339, so the API would refuse to honour a pin the sweep would never
 clear. Two implementations of one predicate, and the guard keeping them in
 agreement looked redundant until checked.
 
-A third survivor is recorded rather than closed: the sweep's `<=` vs `<` at the
-exact expiry instant. `now()` has moved on by the time any assertion runs, so no
-test can distinguish them. `<=` is the arm that agrees with the Go side's
-half-open window, and the SQL says so in a comment. Similarly, two checks in
+A third survivor was recorded rather than closed, and that was WRONG. I claimed
+the sweep's `<=` vs `<` at the exact expiry instant was unkillable because
+`now()` moves on before any assertion runs. That holds for the sweep, which runs
+its SELECT in its own transaction — but not for a test that controls the
+transaction, where `now()` is fixed for its whole duration. QA disagreed and was
+right; `TestAPinExpiringAtExactlyNowIsSweptNotStranded` now kills it from both
+sides of the window. The lesson is not "check harder" — it is that "no test can
+distinguish these" is a claim about tests, and I had only checked the tests that
+already existed. Similarly, two checks in
 `overrideInstances` are equivalent mutants kept for legibility — with a note
 that the equivalence is conditional on the parser staying strict, since mutation
 testing will not re-flag something already filed as equivalent.

@@ -47,6 +47,12 @@ func TestConnectEnforcesThePostgres16Floor(t *testing.T) {
 			pool.Close()
 			t.Fatal("Connect accepted PostgreSQL 15 — the override-expiry sweep would fail on every tick and no pin would ever expire, with a log line as the only symptom")
 		}
+		// A refusal hands the caller NOTHING. Two arms return an error here — the
+		// version query failing and the version being too low — and only the
+		// first asserted this, so `return pool, err` on the second arm survived.
+		if pool != nil {
+			t.Fatal("Connect returned a live pool alongside a refusal; the caller sees an error and leaks a pool it was never told about")
+		}
 		// An operator reading this at boot needs to know what to change, so the
 		// refusal names the requirement rather than just failing.
 		if !strings.Contains(err.Error(), "PostgreSQL 16") {

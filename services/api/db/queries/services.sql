@@ -145,12 +145,26 @@ WHERE override IS NOT NULL
 -- generation was bumped the cell converges on the stale doc and nothing bumps
 -- again. A lost race must be a no-op the next tick re-lists, never a rollback.
 --
--- `override IS NOT NULL` and `status <> 'deleting'` below are defence in depth
--- and NOT independently testable: every path that NULLs override or starts a
--- delete also bumps generation, so the generation fence always fires first.
--- Recorded rather than removed — but recorded, because this is the same
--- "arm nobody can test" shape as the ListExpiredOverrides lesson above, and an
--- untestable arm that goes unmentioned is how that lesson gets re-learned.
+-- `status <> 'deleting'` below is LOAD-BEARING and has its own test. An earlier
+-- version of this comment called it untestable defence-in-depth on the grounds
+-- that "every path that starts a delete also bumps generation, so the generation
+-- fence always fires first." That is FALSE, and the counterexample is
+-- DeleteService's own two non-transactional writes: BumpServiceGeneration
+-- (gen→N+1) and only THEN Transition→deleting, via SetServiceStatus, which does
+-- not touch generation. So a sweep that lists the row after the bump and before
+-- the status flip arrives here with a generation that MATCHES — and without this
+-- fence the clear succeeds, rewriting desired without deleting:true and bumping
+-- generation again, cancelling an in-flight teardown. The window DeleteService
+-- documents for crashes is equally open to the sweeper.
+-- TestTheClearFenceRejectsARowThatStartedDeletingMidSweep drives exactly that
+-- interleaving.
+--
+-- `override IS NOT NULL` IS untestable in the way the other one was claimed to
+-- be: every path that NULLs override also bumps generation, so the generation
+-- fence genuinely always fires first there. Recorded, not removed — recording it
+-- is the point, because this is the same "arm nobody can test" shape as the
+-- ListExpiredOverrides lesson above, and the false claim two paragraphs up is
+-- what happens when the shape is recorded without checking the reason.
 UPDATE services SET
     override = NULL,
     monthly_estimate_cents = $2,

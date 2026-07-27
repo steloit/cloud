@@ -83,7 +83,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   work" — it is "what did the moved or deleted code guarantee, and who guarantees it now?"** Each of the
   three had a second job nobody had written down, and a green suite found none of them.
 - **A test that re-implements the guard it is named for asserts nothing about that guard.** US-3.8's
-  `TestDesiredDocNeverCarriesADeadPin` called `overrideInstances` on its own input, nilled the pin,
+  `TestTheDesiredDocNeverCarriesADeadPin` called `overrideInstances` on its own input, nilled the pin,
   and then asserted `desiredDoc` produced no pin — which is the production line, copied into the test
   body. Deleting the real one from `services.go` left the test GREEN; a mutation sweep found it. The
   same shape hid in the sweep predicate: `… AND pg_input_is_valid(x) AND x::timestamptz <= now()`
