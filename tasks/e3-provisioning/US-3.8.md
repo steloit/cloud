@@ -21,8 +21,10 @@ files:
   - services/api/internal/identity/services_integration_test.go
   - services/api/internal/identity/store/**
   - services/api/internal/metering/metering.go
-  - services/api/internal/platform/db/**
-  - services/api/internal/provisioning/**
+  - services/api/internal/platform/db/db.go
+  - services/api/internal/platform/db/db_integration_test.go
+  - services/api/internal/provisioning/services.go
+  - services/api/internal/provisioning/services_test.go
   - services/api/internal/reconcile/wiring_integration_test.go
   - tasks/e11-billing/US-11.9.md
   - tasks/e3-provisioning/US-3.8.md
