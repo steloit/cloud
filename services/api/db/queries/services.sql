@@ -49,34 +49,39 @@ JOIN environments e ON e.id = s.env_id
 JOIN projects p ON p.id = e.project_id
 WHERE s.id = $1;
 
--- name: ExpireManualOverrides :many
--- D22: a manual instance-pin auto-expires in 24h. Clearing it must BUMP
--- generation, or the cell keeps rendering the pinned count forever — the doc is
--- otherwise only rebuilt when someone edits the service, and a pin nobody
--- touches again would be permanent.
+-- name: ListExpiredOverrides :many
+-- D22: pins past their 24h expiry. SELECT only — the caller computes the new
+-- desired doc and base price, then clears everything in ONE statement, because
+-- a clear that commits before the doc is rewritten leaves the row outstanding
+-- with a stale pinned doc: the cell polls it, renders the pin, and MarkObserved
+-- succeeds — after which nothing bumps generation again and the pin renders
+-- forever.
 --
--- `desired` is rewritten by the caller (it owns the doc grammar); this returns
--- the rows so it can.
-UPDATE services SET
-    override = NULL,
-    generation = generation + 1
+-- A pin with NO expires_at is expired BY DEFINITION: "unset" must not mean
+-- "forever", and such a row is otherwise unreachable by any sweep.
+--
+-- The timestamp cast is GUARDED: one row with a malformed expires_at would
+-- otherwise abort the whole statement, and the sweep would then fail on every
+-- tick, silently, for every customer.
+SELECT * FROM services
 WHERE override IS NOT NULL
   AND status <> 'deleting'
-  AND (override->>'expires_at') IS NOT NULL
-  AND (override->>'expires_at')::timestamptz <= now()
+  AND (
+        (override->>'expires_at') IS NULL
+     OR (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T'
+     OR ((override->>'expires_at') ~ '^\d{4}-\d{2}-\d{2}T'
+         AND (override->>'expires_at')::timestamptz <= now())
+  );
+
+-- name: ClearExpiredOverride :one
+-- Clear the pin, restore the unpinned price, rewrite desired, and bump
+-- generation — ATOMICALLY. Fenced on `override IS NOT NULL` so a concurrent
+-- edit that already cleared it is a no-op rather than a double bump.
+UPDATE services SET
+    override = NULL,
+    monthly_estimate_cents = $2,
+    desired = $3,
+    generation = generation + 1
+WHERE id = $1 AND override IS NOT NULL AND status <> 'deleting'
 RETURNING *;
 
--- name: SetServiceDesired :one
--- Rewrite the desired doc WITHOUT bumping generation: the caller
--- (RunOverrideExpiry) already bumped it when it cleared the pin, and bumping
--- twice would leave the row outstanding after the cell converged.
-UPDATE services SET desired = $2
-WHERE id = $1 AND status <> 'deleting'
-RETURNING *;
-
--- name: SetServiceMonthlyEstimate :one
--- Restore the unpinned price when a manual pin expires. No generation bump:
--- ExpireManualOverrides already bumped it when it cleared the pin.
-UPDATE services SET monthly_estimate_cents = $2
-WHERE id = $1 AND status <> 'deleting'
-RETURNING *;

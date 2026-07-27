@@ -449,44 +449,19 @@ func (s *Service) ServiceOrg(ctx context.Context, serviceID string) (store.Servi
 // for not charging for the capacity.
 func (s *Service) RunOverrideExpiry(ctx context.Context, every time.Duration, log *slog.Logger) {
 	sweep := func() {
-		rows, err := s.q.ExpireManualOverrides(ctx)
+		rows, err := s.q.ListExpiredOverrides(ctx)
 		if err != nil {
-			log.Warn("override expiry sweep failed", "err", err)
+			// ERROR, not warn: while this fails no pin anywhere expires, and
+			// the only symptom is a log line.
+			log.Error("override expiry sweep could not list expired pins; NO pin is expiring", "err", err)
 			return
 		}
 		for _, row := range rows {
-			// The pin was metered at the pinned rate, so expiry must restore
-			// the UNPINNED price — otherwise the customer keeps paying for
-			// capacity that has just been taken away.
-			var shape map[string]any
-			_ = json.Unmarshal(row.Shape, &shape)
-			if base, perr := estimates.Price(estimates.ShapeInput{
-				Product: row.Product, Intent: row.Intent.String, Name: row.Name, Shape: shape,
-			}); perr == nil {
-				if _, uerr := s.q.SetServiceMonthlyEstimate(ctx, store.SetServiceMonthlyEstimateParams{
-					ID: row.ID, MonthlyEstimateCents: base.MonthlyCents,
-				}); uerr != nil {
-					log.Error("override expired but the base price could not be restored",
-						"service", row.ID, "err", uerr)
-				}
+			if err := s.expireOverride(ctx, row); err != nil {
+				log.Error("an expired pin could not be fully cleared", "service", row.ID, "err", err)
 			} else {
-				log.Error("override expired but the base price could not be computed",
-					"service", row.ID, "err", perr)
+				log.Info("manual override expired; converging back to the unpinned count", "service", row.ID)
 			}
-			ns, err := s.resolveNamespace(ctx, row.EnvID)
-			if err != nil {
-				log.Error("override expired but the namespace could not be resolved; desired not rebuilt",
-					"service", row.ID, "err", err)
-				continue
-			}
-			if _, err := s.q.SetServiceDesired(ctx, store.SetServiceDesiredParams{
-				ID:      row.ID,
-				Desired: desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
-			}); err != nil {
-				log.Error("override expired but desired could not be rebuilt", "service", row.ID, "err", err)
-				continue
-			}
-			log.Info("manual override expired; converging back to the unpinned count", "service", row.ID)
 		}
 	}
 	sweep() // once at startup: a ticker does not fire immediately
@@ -500,6 +475,68 @@ func (s *Service) RunOverrideExpiry(ctx context.Context, every time.Duration, lo
 			sweep()
 		}
 	}
+}
+
+// expireOverride clears one pin: unpinned price, unpinned desired doc, and the
+// generation bump, in ONE statement — then re-cuts the billing span so the
+// customer stops paying the pinned rate the moment the capacity goes away.
+func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
+	var shape map[string]any
+	_ = json.Unmarshal(row.Shape, &shape)
+	base, err := estimates.Price(estimates.ShapeInput{
+		Product: row.Product, Intent: row.Intent.String, Name: row.Name, Shape: shape,
+	})
+	if err != nil {
+		return fmt.Errorf("base price: %w", err)
+	}
+	ns, err := s.resolveNamespace(ctx, row.EnvID)
+	if err != nil {
+		return fmt.Errorf("namespace: %w", err)
+	}
+	prior := row.MonthlyEstimateCents
+	updated, err := s.q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
+		ID:                   row.ID,
+		MonthlyEstimateCents: base.MonthlyCents,
+		Desired:              desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // a concurrent edit already cleared it
+		}
+		return err
+	}
+	orgID, err := s.q.OrgForService(ctx, row.ID)
+	if err != nil {
+		return fmt.Errorf("org lookup: %w", err)
+	}
+	s.repriceSpan(ctx, orgID, updated, prior, updated.MonthlyEstimateCents)
+	return nil
+}
+
+// repriceSpan makes a mid-life rate change reach the INVOICE.
+//
+// Billing derives solely from `usage_events.rate_cents`, which is snapshotted
+// when a span opens and which the rollup multiplies by every second of that
+// span. So changing `services.monthly_estimate_cents` moves the forward-looking
+// cap and the API response and NOTHING ELSE: the open span keeps billing at the
+// rate it opened with. A pin that raised capacity 9x was billed at 1x.
+//
+// A rate change is therefore a close-at-the-old-rate plus an open-at-the-new —
+// the shape the rollup's open/close pairing already expects. No span is open
+// outside a billing status, so there is nothing to re-cut there.
+func (s *Service) repriceSpan(ctx context.Context, orgID string, svc store.Service, oldCents, newCents int64) {
+	if s.meter == nil || oldCents == newCents || !metering.IsBilling(svc.Status) {
+		return
+	}
+	env, err := s.q.GetEnvironment(ctx, svc.EnvID)
+	if err != nil {
+		slog.ErrorContext(ctx, "reprice: environment lookup failed; the span keeps the old rate and the invoice will be wrong",
+			"service", svc.ID, "err", err)
+		return
+	}
+	tags := metering.Tags{OrgID: orgID, ProjectID: env.ProjectID, EnvID: svc.EnvID, ServiceID: svc.ID}
+	s.meter.MustEmitSpan(ctx, tags, "close", svc.Product, oldCents)
+	s.meter.MustEmitSpan(ctx, tags, "open", svc.Product, newCents)
 }
 
 // overrideInstances reports the pinned instance count of a LIVE override.
@@ -637,10 +674,13 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	if scaling != nil {
 		effScaling = scaling
 	}
-	effOverride := svc.Override
-	if override != nil {
-		effOverride = override
-	}
+	// The desired doc carries EXACTLY what the column gets. UpdateServiceShape
+	// sets `override = sqlc.narg('override')` unconditionally, so a PATCH with
+	// no override key NULLs the column — and keeping svc.Override in the doc
+	// left the pin rendering forever, unsweepable (the sweep matches only
+	// `override IS NOT NULL`) and un-un-pinnable, since that PATCH is the only
+	// way a customer clears one.
+	effOverride := override
 	// Never ship an EXPIRED pin to the cell. Without this an override written
 	// once keeps its instance count forever, because nothing else consults
 	// expires_at and the doc is only rebuilt when someone edits the service.
@@ -652,6 +692,7 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		return store.Service{}, err
 	}
 	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, effShape, effScaling, effOverride, false)
+	priorCents := svc.MonthlyEstimateCents
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
 		// The SQL fence `status <> 'deleting'` is the atomic backstop for the Go
@@ -663,9 +704,20 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 		return store.Service{}, err
 	}
+	// The rate the customer PAYS follows the row. Without this a pin (or a
+	// scale-up) changes monthly_estimate_cents while the open span keeps
+	// billing at the pre-change rate — nine instances provisioned, one billed.
+	s.repriceSpan(ctx, orgID, row, priorCents, row.MonthlyEstimateCents)
+	// The pin's REASON is the whole audit value of an affordance that
+	// provisions capacity outside the normal estimate path, so it reaches the
+	// spine rather than being recorded as a bare "service.updated".
+	detail := []byte(`{}`)
+	if len(override) > 0 {
+		detail = []byte(`{"override":` + string(override) + `}`)
+	}
 	s.record(ctx, events.Input{
 		OrgID: orgID, Kind: "scale", Via: "user", Actor: actorID,
-		Action: "service.updated", Subject: svc.ID,
+		Action: "service.updated", Subject: svc.ID, Detail: detail,
 	})
 	return row, nil
 }

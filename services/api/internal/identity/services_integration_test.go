@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
 
@@ -587,6 +589,15 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	}
 	_ = json.Unmarshal([]byte(body), &svc)
 
+	// Drive it to ready FIRST: a pin's whole use case is a running service, and
+	// the billing span only exists once one is open. Pinning a `provisioning`
+	// service exercises no billing path at all.
+	row, err := w.prov.Transition(ctx, mustGetSvc(t, w, svc.Id), "ready", "system", "system", org.Id)
+	if err != nil {
+		t.Fatalf("transition to ready: %v", err)
+	}
+	_ = row
+
 	// A cap just above the current run-rate: a 9× pin must not fit under it.
 	if _, err := w.pool.Exec(ctx,
 		`INSERT INTO budgets (org_id, limit_cents) VALUES ($1,$2)
@@ -635,9 +646,28 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	}
 	// Founder ruling: pinned capacity is METERED, so the row must carry the
 	// pinned rate — nine instances provisioned and one billed is the defect.
-	if pinnedCents <= int64(svc.MonthlyEstimateCents) {
-		t.Fatalf("a 9-instance pin left the monthly estimate at %d (was %d) — the capacity is provisioned and not billed",
-			pinnedCents, svc.MonthlyEstimateCents)
+	// The EXACT pinned rate, not merely "more than base": a pricing bug that
+	// bills 1¢ extra for nine instances is otherwise indistinguishable.
+	wantPinned, err := estimates.PriceWithInstances(estimates.ShapeInput{
+		Product: "web", Shape: map[string]any{"size": "standard-1"},
+	}, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinnedCents != wantPinned.MonthlyCents {
+		t.Fatalf("the pin priced at %d, the engine says %d", pinnedCents, wantPinned.MonthlyCents)
+	}
+	// And the INVOICE follows. Billing reads usage_events.rate_cents, snapshotted
+	// when a span opens — so a pin must CLOSE the base span and OPEN one at the
+	// pinned rate. Asserting monthly_estimate_cents alone tests the one column
+	// no billing arithmetic reads.
+	pinEdges := spanRates(t, w, svc.Id)
+	if len(pinEdges) < 3 {
+		t.Fatalf("a pin must re-cut the span (open@base, close@base, open@pinned); got %v", pinEdges)
+	}
+	if last := pinEdges[len(pinEdges)-1]; last.edge != "open" || last.rate != wantPinned.MonthlyCents {
+		t.Fatalf("after the pin the open span bills at %s@%d, want open@%d — nine provisioned, one billed",
+			last.edge, last.rate, wantPinned.MonthlyCents)
 	}
 
 	// --- EXPIRY: the pin must stop being rendered, and the cell must be told --
@@ -651,17 +681,53 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := store.New(w.pool).ExpireManualOverrides(ctx)
-	if err != nil {
-		t.Fatal(err)
+	// Drive the REAL runner, not the raw query: every part of RunOverrideExpiry
+	// — the price restore, the desired rebuild, the startup sweep, the ticker,
+	// and its wiring in main.go — was removable with the suite green when only
+	// the SQL was exercised.
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+	// Wait for the END STATE, not for the column: the clear commits before the
+	// span is re-cut, so polling on `override IS NULL` and reading the spans
+	// immediately is a race that would flake in CI.
+	deadline := time.After(5 * time.Second)
+	for {
+		var stillPinned bool
+		if err := w.pool.QueryRow(ctx, `SELECT override IS NOT NULL FROM services WHERE id=$1`, svc.Id).Scan(&stillPinned); err != nil {
+			t.Fatal(err)
+		}
+		edges := spanRates(t, w, svc.Id)
+		settled := !stillPinned && len(edges) > 0 &&
+			edges[len(edges)-1].edge == "open" &&
+			edges[len(edges)-1].rate == int64(svc.MonthlyEstimateCents)
+		if settled {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the STARTUP sweep did not converge: pinned=%v spans=%v — a ticker does not fire immediately, so a service nobody edits keeps rendering and billing its pin",
+				stillPinned, edges)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
-	if len(rows) != 1 {
-		t.Fatalf("the expiry sweep found %d expired pin(s), want 1 — an expired pin is rendered forever", len(rows))
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunOverrideExpiry did not return when its context was cancelled")
 	}
+
 	var overrideAfter []byte
-	var genAfter int64
+	var genAfter, centsAfter int64
+	var desiredAfter map[string]any
 	if err := w.pool.QueryRow(ctx,
-		`SELECT override, generation FROM services WHERE id=$1`, svc.Id).Scan(&overrideAfter, &genAfter); err != nil {
+		`SELECT override, generation, monthly_estimate_cents, desired FROM services WHERE id=$1`,
+		svc.Id).Scan(&overrideAfter, &genAfter, &centsAfter, &desiredAfter); err != nil {
 		t.Fatal(err)
 	}
 	if overrideAfter != nil {
@@ -670,6 +736,58 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	if genAfter <= genBefore {
 		t.Fatalf("generation did not advance (%d → %d) — the cell would never re-poll, so it keeps rendering the pinned count", genBefore, genAfter)
 	}
+	if o, _ := desiredAfter["override"]; o != nil {
+		t.Fatalf("the desired doc still carries the expired pin: %v", desiredAfter)
+	}
+	if centsAfter != int64(svc.MonthlyEstimateCents) {
+		t.Fatalf("the base price was not restored (%d, want %d) — the customer keeps paying for capacity that was taken away",
+			centsAfter, svc.MonthlyEstimateCents)
+	}
+
+	// And the INVOICE follows: the pinned span must be closed and a new one
+	// opened at the base rate. `monthly_estimate_cents` alone reaches no
+	// billing arithmetic.
+	edges := spanRates(t, w, svc.Id)
+	if len(edges) < 3 {
+		t.Fatalf("expected open@base, close@pinned, open@base — got %v", edges)
+	}
+	last := edges[len(edges)-1]
+	if last.edge != "open" || last.rate != int64(svc.MonthlyEstimateCents) {
+		t.Fatalf("the final span is %s@%d; billing must resume at the base rate %d", last.edge, last.rate, svc.MonthlyEstimateCents)
+	}
+}
+
+func mustGetSvc(t *testing.T, w *world, id string) store.Service {
+	t.Helper()
+	svc, err := store.New(w.pool).GetService(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc
+}
+
+type spanRate struct {
+	edge string
+	rate int64
+}
+
+func spanRates(t *testing.T, w *world, serviceID string) []spanRate {
+	t.Helper()
+	rows, err := w.pool.Query(context.Background(),
+		`SELECT edge, rate_cents FROM usage_events WHERE service_id=$1 ORDER BY at`, serviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []spanRate
+	for rows.Next() {
+		var e spanRate
+		if err := rows.Scan(&e.edge, &e.rate); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // A pin on a product whose catalog shape has no instance count cannot be
@@ -723,5 +841,88 @@ func TestUnpriceablePinIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "override.instances") {
 		t.Fatalf("the refusal must name the field: %s", string(b))
+	}
+}
+
+// A PATCH that carries no `override` key clears the pin — `UpdateServiceShape`
+// sets the column unconditionally, so that is the shipped semantic and the only
+// way a customer un-pins. The DESIRED DOC must agree.
+//
+// Before this, `desired` kept `svc.Override` while the column went NULL: the
+// capacity kept rendering, the sweep could never match it (`override IS NOT
+// NULL`), and a shape-only PATCH additionally dropped the price back to base —
+// so un-pinning released neither the capacity nor the money, and the original
+// defect was reachable in two calls.
+func TestAnEditWithoutAnOverrideClearsThePinEverywhere(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "unpin@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"unpinco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct {
+		Id                   string `json:"id"`
+		MonthlyEstimateCents int    `json:"monthly_estimate_cents"`
+	}
+	_ = json.Unmarshal([]byte(body), &svc)
+	if _, err := w.prov.Transition(ctx, mustGetSvc(t, w, svc.Id), "ready", "system", "system", org.Id); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"override":{"instances":9,"reason":"load test"}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("pin: %d %s", resp.StatusCode, body)
+	}
+
+	// A shape-only edit. It carries no override, so the pin goes.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("shape edit: %d %s", resp.StatusCode, body)
+	}
+
+	var override []byte
+	var cents int64
+	var desired map[string]any
+	if err := w.pool.QueryRow(ctx,
+		`SELECT override, monthly_estimate_cents, desired FROM services WHERE id=$1`,
+		svc.Id).Scan(&override, &cents, &desired); err != nil {
+		t.Fatal(err)
+	}
+	if override != nil {
+		t.Fatalf("the override column survived an edit that carries none: %s", override)
+	}
+	if o := desired["override"]; o != nil {
+		t.Fatalf("the pin is gone from the column but STILL IN THE DESIRED DOC (%v) — the capacity keeps running, unsweepable, and the price just dropped to base", o)
+	}
+	if cents != int64(svc.MonthlyEstimateCents) {
+		t.Fatalf("price is %d, want the base %d", cents, svc.MonthlyEstimateCents)
+	}
+	// And the invoice followed the release.
+	edges := spanRates(t, w, svc.Id)
+	if last := edges[len(edges)-1]; last.edge != "open" || last.rate != int64(svc.MonthlyEstimateCents) {
+		t.Fatalf("billing did not return to the base rate: final span %s@%d, want open@%d", last.edge, last.rate, svc.MonthlyEstimateCents)
 	}
 }
