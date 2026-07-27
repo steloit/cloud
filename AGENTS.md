@@ -56,6 +56,13 @@ never hand-written · demo data from `19-canon` only.
 7. Spec conflicts you discover are **findings**: record them in the PR and file a follow-up task — never resolve silently.
 8. Lessons that should outlive the task go to a *living file* — the domain pack's mistake bank, the nearest
    AGENTS.md, or an ADR. A lesson that didn't change a living file didn't happen.
+   **Examples are normative** (founder, 2026-07-27): a canonical example is held to at least the
+   evidentiary standard of the rule it teaches. If the example contradicts the principle, the
+   EXAMPLE is wrong even when the rule is right — O11 shipped a mutation-class rule whose own
+   example named the same representation on both sides, erasing the distinction it existed to
+   introduce. And cite only what the committed history supports: three O11 entries narrated
+   incidents that did not happen as described, one of them a counterfactual from the author's
+   own code comment. A mistake bank entry without a verifiable incident is a style guide.
 
 ## Hard rules
 
@@ -89,6 +96,15 @@ never hand-written · demo data from `19-canon` only.
   only**. A hook stops common accidental writes and CI's `authority-paths` flags any PR that touches
   them — but **nothing blocks a merge** (this repo has no branch protection: O6g), so the real control
   is still you and the diff. Engineering decisions get an ADR in `docs/adr/`.
+- **Fault injection happens in a throwaway copy, never the working tree** — this binds the
+  IMPLEMENTER as much as the reviewers. A mutate-then-restore leaves no diff, so an
+  interrupted run is invisible to review; and a reviewer reading the tree mid-mutation
+  gets a false baseline. In US-3.7 this corrupted an independent review sweep twice (a
+  mutated `engine.go` and a mid-edit test file were copied into the reviewer's sandbox,
+  producing a red baseline it had to chase down before it could trust any result).
+  `cp -R` the module, mutate the copy, delete it. If you nonetheless mutate the tree,
+  **say so plainly in the PR** — ADR-0008 makes disclosure the operative obligation,
+  because a mutate-then-restore is otherwise invisible to everyone downstream.
 - Never mix restructuring and feature work in one commit.
 
 ## Don't read (token discipline)
