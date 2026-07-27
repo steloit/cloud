@@ -1068,3 +1068,180 @@ func TestAConcurrentEditIsRefusedNotSilentlyOverwritten(t *testing.T) {
 		t.Fatalf("the price is %d, A was charged %d", cents, afterA.MonthlyEstimateCents)
 	}
 }
+
+// The sweep must clear every shape of dead pin, and ONE malformed row must not
+// abort the batch — a raising cast would stop expiry platform-wide with a log
+// line as the only symptom.
+//
+// This restores coverage that was LOST while fixing something else: the earlier
+// test aged the pin with `::text` (a space separator), which happened to exercise
+// the malformed arm; correcting it to real RFC3339 moved it onto the cast arm and
+// silently took the malformed arm's only coverage with it.
+func TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "sweep@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"sweepco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mk := func(name, override string) string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"web","name":"`+name+`","shape":{"size":"standard-1"}}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("estimate %s: %d %s", name, resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"`+name+`","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create %s: %d %s", name, resp.StatusCode, body)
+		}
+		var svc struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &svc)
+		// Plant the pin directly: these shapes are ones the API would never write,
+		// which is exactly why the sweep has to cope with them.
+		if _, err := w.pool.Exec(ctx,
+			`UPDATE services SET override = $2::jsonb WHERE id = $1`, svc.Id, override); err != nil {
+			t.Fatal(err)
+		}
+		return svc.Id
+	}
+
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	garbage := mk("a-garbage", `{"instances":9,"reason":"x","expires_at":"garbage"}`)
+	// Passes a prefix regex but is not a valid timestamp — this is the shape that
+	// used to abort the entire statement.
+	castInvalid := mk("b-castbad", `{"instances":9,"reason":"x","expires_at":"2026-13-45T99:99:99Z"}`)
+	noExpiry := mk("c-noexpiry", `{"instances":9,"reason":"x"}`)
+	// FUTURE-dated, but space-separated: Postgres parses it, Go's RFC3339 does
+	// NOT. So the API refuses to honour the pin while a cast-only predicate
+	// would call it unexpired and never sweep it — the pin sits forever,
+	// unhonoured and unclearable. The two liveness implementations (Go and SQL)
+	// must agree, and the regex arm is what makes them.
+	goRejects := mk("f-spaceform", `{"instances":9,"reason":"x","expires_at":"`+
+		time.Now().Add(time.Hour).UTC().Format("2006-01-02 15:04:05-07")+`"}`)
+	validPast := mk("d-valid", `{"instances":9,"reason":"x","expires_at":"`+past+`"}`)
+	future := mk("e-future", `{"instances":9,"reason":"x","expires_at":"`+
+		time.Now().Add(time.Hour).UTC().Format(time.RFC3339)+`"}`)
+
+	sweepCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+	deadline := time.After(5 * time.Second)
+	for {
+		var pinned int
+		if err := w.pool.QueryRow(ctx,
+			`SELECT count(*) FROM services WHERE override IS NOT NULL AND env_id = $1`, env.ID).Scan(&pinned); err != nil {
+			t.Fatal(err)
+		}
+		if pinned == 1 { // only the future pin should remain
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%d pins still set — a dead pin the sweep cannot match renders forever, and one malformed row must not abort the batch", pinned)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	cancel()
+	<-done
+
+	for _, id := range []string{garbage, castInvalid, noExpiry, validPast, goRejects} {
+		var o []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, id).Scan(&o); err != nil {
+			t.Fatal(err)
+		}
+		if o != nil {
+			t.Fatalf("a dead pin survived the sweep: %s", o)
+		}
+	}
+	var stillFuture []byte
+	if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id=$1`, future).Scan(&stillFuture); err != nil {
+		t.Fatal(err)
+	}
+	if stillFuture == nil {
+		t.Fatal("the sweep cleared a pin that has not expired")
+	}
+}
+
+// US-3.6's invariant, reached through US-3.8's new code path: metering opens at
+// `ready`, never before. A PATCH now writes the price on every edit, so without
+// the IsBilling guard a reprice on a still-provisioning service would emit an
+// OPEN span — and the rollup accrues an open span to the cutoff, billing a
+// service that never ran.
+func TestARepriceBeforeReadyEmitsNoSpan(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "prebill@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"prebillco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	// Still provisioning. A scale-up reprices the row...
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"instances":3}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("scale-up while provisioning: %d %s", resp.StatusCode, body)
+	}
+	if got := spanRates(t, w, svc.Id); len(got) != 0 {
+		t.Fatalf("a reprice before ready emitted %v — D10: metering starts at ready, never before, and an open span accrues to the cutoff", got)
+	}
+
+	// ...and reaching ready opens exactly one span, at the repriced rate.
+	if _, err := w.prov.Transition(ctx, mustGetSvc(t, w, svc.Id), "ready", "system", "system", org.Id); err != nil {
+		t.Fatal(err)
+	}
+	edges := spanRates(t, w, svc.Id)
+	if len(edges) != 1 || edges[0].edge != "open" {
+		t.Fatalf("reaching ready produced %v, want exactly one open", edges)
+	}
+	var cents int64
+	if err := w.pool.QueryRow(ctx, `SELECT monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&cents); err != nil {
+		t.Fatal(err)
+	}
+	if edges[0].rate != cents {
+		t.Fatalf("the span opened at %d but the row says %d", edges[0].rate, cents)
+	}
+}

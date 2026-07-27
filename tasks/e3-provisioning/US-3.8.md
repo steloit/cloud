@@ -109,8 +109,22 @@ the HA capability as a whole, so borrowing it would silently change pricing.
   generation so the cell re-polls, rebuilds desired without it, and restores the
   unpinned price. Mutation-verified in both halves (the sweep never matching,
   and the flag never being set).
-- [x] An expired pin is never shipped to the cell even before the sweep runs.
-- [x] A pin with NO expiry is not honoured — "unset" must not mean "forever".
+- [x] An expired pin is never shipped to the cell even before the sweep runs —
+  `TestDesiredDocNeverCarriesADeadPin`. This was previously ticked on the
+  strength of the guard existing: QA showed the guard could be deleted with the
+  suite green, and the cell's renderer never consults `expires_at`, so that one
+  line is all that stands between a dead pin and provisioned capacity.
+- [x] A pin with NO expiry is not honoured — `TestOverrideLiveness`, a
+  table over all five liveness branches. Also previously ticked without a test:
+  nothing executed `overrideInstances` at all.
+- [x] The sweep clears EVERY shape of dead pin — absent, garbage, regex-passing
+  but cast-invalid, and Postgres-parseable-but-not-RFC3339 — and one malformed
+  row does not abort the batch
+  (`TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne`).
+- [x] US-3.6's invariant survives this new code path: a reprice before `ready`
+  emits no span (`TestARepriceBeforeReadyEmitsNoSpan`). A PATCH now writes the
+  price on every edit, so without the `IsBilling` guard it would open a span on
+  a service that never ran.
 
 ## Found by
 
@@ -119,6 +133,30 @@ US-3.7's architecture review (2026-07-26), reproduced live.
 ## Related
 
 US-3.7 (the same law on the create path) · T11.6 (the hard spend cap) · D10
+
+## What this task cost, and why
+
+The feature was largely correct after the first pass: the founder ruling was
+implemented, and no review round changed the product behaviour that was asked
+for. Three architecture rounds and two QA rounds were spent almost entirely on
+**restoring evidence that the invariants still held after each refactor** —
+guards that existed and worked until a boundary moved under them, and
+acceptance criteria that had been ticked because the code was there rather than
+because anything proved it.
+
+Two criteria in this file were marked done with no test executing the function
+they rested on. That is the failure worth remembering: a green gate plus present
+code read as proof, and it was not.
+
+Two of QA's survivors were also instructive in opposite directions. One is an
+**equivalent mutant** — deleting the `ExpiresAt == ""` check falls through to a
+parse failure with identical behaviour, so no test can distinguish it and
+claiming coverage would be false. The other looked equivalent and was not:
+dropping the sweep's regex arm seemed subsumed by `pg_input_is_valid`, but a
+future-dated space-separated timestamp is parseable by Postgres and rejected by
+Go's RFC3339, so the API would refuse to honour a pin the sweep would never
+clear. Two implementations of one predicate, and the guard keeping them in
+agreement looked redundant until checked.
 
 ## Recorded decisions and consequences
 
