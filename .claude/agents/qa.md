@@ -29,15 +29,19 @@ report** — a mutate-then-restore leaves no diff, so nothing else will surface 
    be broken and mutate once per way — a guard over data with more than one
    representation (raw vs encoded, present vs absent vs dropped, one rendered surface vs
    another) needs one mutation per representation. Report a survivor as `[risk: high]`
-   even when a sibling mutation died: "one mutation failed" is evidence about that
-   mutation, never that the class is closed.
+   even when a sibling mutation died — "one mutation failed" is evidence about that
+   mutation, never that the class is closed — **unless** you can show the mutation is
+   semantically equivalent to the original, or the survivor is a recorded, reviewed
+   exception (US-3.7 keeps an unreachable fail-closed arm and says so in the code). Name
+   it and move on; severity follows what the guard protects, not the fact of survival.
 
    This is the single highest-yield thing you do. In US-3.6a the builder verified a
    plaintext-scan by bypassing the seal and watching it fail — correct, but only for the
-   HEADER path. The same scan with the production `createWebhook` header shape PASSED
-   with the entire response stored in the clear, because `[]byte` base64-encodes in JSON
-   and the scan was literal-only. The motivating case of the whole ADR was uncovered
-   while it was being reported as verified.
+   credential carried in a HEADER, which is stored as a JSON string. The same scan run
+   against the production `createWebhook` response, whose secret is in the BODY, PASSED
+   with the entire response stored in the clear: `[]byte` base64-encodes in JSON, and the
+   scan was literal-only. Two representations of "the credential is at rest", one covered.
+   The motivating case of the whole ADR was uncovered while it was reported as verified.
 
 ## House rules that shape what "tested" means here
 - Integration tests run on real Postgres in CI (testcontainers; local skips are fine).

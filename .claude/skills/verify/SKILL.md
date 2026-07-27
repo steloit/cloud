@@ -19,7 +19,9 @@ description: Run the active Steloit task's executable definition of done. Use be
 
    One mutation is evidence about one mutation. If the guard covers data with more than
    one representation (raw/encoded, present/absent/dropped, two rendered surfaces), run
-   one per representation — see the mutation-class rule in `.claude/agents/qa.md`.
+   one per representation — see the mutation-class rule in `.claude/agents/qa.md`. State
+   WHERE you ran them: AGENTS.md requires a throwaway copy, and since a mutate-then-restore
+   leaves no diff, this line is the only place a tree mutation becomes visible.
 7. **A skipped test is not a pass.** If a verify command can print `ok` while its tests
    skip or match nothing, it is not a gate. In US-1.3 integration tests were reported as
    "PASSED against real Postgres" when they had **silently skipped** — `DOCKER_HOST` was

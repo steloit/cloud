@@ -51,7 +51,8 @@ The PR number/branch and a summary of intent. Read the diff yourself:
    they touched on the way.
 
    Report a finding when you can show the guard's responsibility has no remaining owner —
-   an absent caller is verifiable. Do not report a suspicion that one might be missing.
+   an absent caller, an unreachable arm, a constraint with no server-side peer are all
+   verifiable. Do not report a suspicion that one might be missing.
 
 ## Output format (this exact structure)
 ```

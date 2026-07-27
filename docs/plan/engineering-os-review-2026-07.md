@@ -4,7 +4,29 @@
 `tasks/_template.md`, `scripts/spec-sync/validate.mjs`, AGENTS.md.
 **Evidence base:** US-1.3, US-1.3a, T3.4, US-3.3, US-3.6, US-3.6a, CK-M3, US-3.7 —
 17 review rounds across 4 merged PRs (#300–#303).
-**Status:** proposal only. Nothing here is implemented.
+**Status:** implemented as O11 (2026-07-27).
+
+> **Corrections — read before citing this document.** O11's review round rejected three
+> claims below as unsupported by the committed history, and QA found a fourth
+> misattribution. They are struck in place; the corrected versions live in the files O11
+> shipped. This document is evidence for the *recommendations*, not for those four
+> incidents.
+>
+> 1. **`Price`'s `default:` arm was never deleted** (H1 below). `34774cd` already carried
+>    it; US-3.7 repurposed it in place. The 0-cent outcome existed only as a counterfactual
+>    in a code comment. Corrected text: `.claude/agents/reviewer.md` dimension 7.
+> 2. **CK-M3 did not ship a non-skip-proof gate** (C5 below). Its claim commit had
+>    `verify: []` and its implementation commit already carried the grep form — CK-M3 is
+>    where the fix was invented. The real silent-skip incident is **US-1.3**
+>    (`tasks/e1-substrate/US-1.3.md:196`). Corrected text: `.claude/skills/verify/SKILL.md`.
+> 3. **"Every survivor was found in an unexplored class, never in a re-run"** (H6 below) is
+>    falsified by C1's own evidence — the base64 finding came from a reviewer re-running the
+>    builder's mutation against a different representation. Corrected text:
+>    `.claude/skills/task-pickup/SKILL.md`.
+> 4. **The NUL-separator incident belongs to US-3.6, not US-3.7**, and it was caught **by the
+>    gate**, not by a reviewer — so it is weak evidence for dimension 7, whose thesis is that
+>    reviewers catch what the gate cannot. `.claude/agents/reviewer.md` cites it without
+>    naming a task, so the misattribution did not propagate.
 
 ---
 

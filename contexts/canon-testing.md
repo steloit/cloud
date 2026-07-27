@@ -93,7 +93,7 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - `git diff --exit-code` as a drift gate misses newly-generated UNTRACKED files (returns clean). Stage
   first: `git add -A -- <paths> && git diff --cached --exit-code -- <paths>` (Q3).
 
-### The proxy-assertion class (E3 — seven classes, drawn from four tasks)
+### The proxy-assertion class (E3 — seven classes, drawn from five tasks)
 
 Every one of these passed its suite, was reported as verified, and was caught only by an
 adversarial reviewer. They share one shape: **the assertion is a proxy for the property,
