@@ -107,7 +107,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   name the pre-failing tests, or copy from the repo root when the sweep touches those packages.
   A reviewer who skips the baseline spends the session chasing a red they introduced.
 - **If the same invariant must hold at more than one site, give it one owner — and prefer an owner
-  the compiler enforces (ADR-0014).** US-3.8 spent six review rounds on ONE error repeated: a guard
+  the compiler enforces (O16; ADR-0014 proposed).** US-3.8 spent six review rounds on ONE error repeated: a guard
   applied per-site instead of made unrepresentable. An overflow bound went into one arm of a
   three-arm pricing switch (the siblings kept wrapping, and a wrapped price disabled the org's spend
   cap permanently); a 404-for-no-standing conversion went into one transport of a two-transport

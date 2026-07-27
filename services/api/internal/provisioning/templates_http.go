@@ -129,7 +129,7 @@ func (h *Handlers) UpdateTemplate(ctx context.Context, req gen.UpdateTemplateReq
 			if err != nil {
 				return nil, err
 			}
-			params.MonthlyEstimateCents = tplCents(total.Int64())
+			params.MonthlyEstimateCents = tplCents(total)
 			projected, _ := json.Marshal(decoded)
 			params.Contents = projected
 		}

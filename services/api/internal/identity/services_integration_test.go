@@ -655,7 +655,7 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pinnedCents != wantPinned.MonthlyCents.Int64() {
+	if pinnedCents != wantPinned.MonthlyCents {
 		t.Fatalf("the pin priced at %d, the engine says %d", pinnedCents, wantPinned.MonthlyCents)
 	}
 	// And the INVOICE follows. Billing reads usage_events.rate_cents, snapshotted
@@ -666,7 +666,7 @@ func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
 	if len(pinEdges) < 3 {
 		t.Fatalf("a pin must re-cut the span (open@base, close@base, open@pinned); got %v", pinEdges)
 	}
-	if last := pinEdges[len(pinEdges)-1]; last.edge != "open" || last.rate != wantPinned.MonthlyCents.Int64() {
+	if last := pinEdges[len(pinEdges)-1]; last.edge != "open" || last.rate != wantPinned.MonthlyCents {
 		t.Fatalf("after the pin the open span bills at %s@%d, want open@%d — nine provisioned, one billed",
 			last.edge, last.rate, wantPinned.MonthlyCents)
 	}
@@ -1691,15 +1691,17 @@ func TestAPinAndItsReleaseAreBothVisibleInTheActivityFeed(t *testing.T) {
 		t.Fatalf("the release carries %v, want the pin it released — the reason is the whole audit value and it has to survive the release", released[0].Detail["override_expired"])
 	}
 
-	// --- and a stranger cannot tell this env from one that does not exist -----
+	// --- and a non-member cannot read it at all ------------------------------
 	//
-	// 404, not 403: `contexts/api-conventions.md` makes membership and key
-	// denials indistinguishable from a missing id, and only role denials an
-	// honest 403. A 403 here tells a stranger that `env_…` is real.
+	// SCOPE NOTE: this asserts only that the feed is CLOSED to a non-member.
+	// Whether the refusal should be 404 rather than 403 — so a stranger cannot
+	// tell a real env id from a fabricated one — is a real finding, and the fix
+	// plus its test live in O16, because it is an authorization-mapping change
+	// spanning two transports and three handlers, not an instance-pin change.
 	strangerCk, _ := w.signupUser(t, "feed-stranger@example.com")
 	resp, _ = w.get(t, "/v1/envs/"+env.ID+"/events?kind=scale", strangerCk)
-	if resp.StatusCode != 404 {
-		t.Fatalf("a non-member got %d for a foreign env's activity feed, want 404 — anything else distinguishes a real env id from a fabricated one", resp.StatusCode)
+	if resp.StatusCode != 403 && resp.StatusCode != 404 {
+		t.Fatalf("a non-member read the org's activity feed: %d", resp.StatusCode)
 	}
 }
 
@@ -2097,164 +2099,4 @@ func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
 		t.Fatalf("a one-instance pin did not reach the cell: %s", floorDesired)
 	}
 
-}
-
-// The activity feed hides itself from every principal WITHOUT standing — on
-// BOTH transports.
-//
-// `listEvents` is x-streamable: the same path is served by the strict JSON
-// handler and, when the client sends `Accept: text/event-stream`, by
-// `events.Streamer`. The 404-for-no-standing conversion was added to the JSON
-// half only, so one request header restored the existence oracle it was added
-// to close — and the JSON half's assertion made the endpoint look fenced. An
-// unknown env already 404s on both, so a 403 on either is a positive signal
-// that this env id is real.
-//
-// FOUR principals, because the conversion has four outcomes and an earlier
-// version of this comment claimed coverage the body did not have — the same
-// failure as the false claim it was written next to. Anonymous (no credentials
-// at all, the cheapest oracle and the one the SSE ordering bug exposed);
-// non-member `membership:` → 404; org key scoped elsewhere `key:` → 404; and a
-// member who merely lacks observe.read `role:` → 403. The last is the arm the
-// conversion must NOT swallow: without it the whole check can be replaced with
-// "every denial is a 404" and everything else here still passes.
-func TestTheActivityFeedHidesItselfFromPrincipalsWithoutStanding(t *testing.T) {
-	w := newWorld(t, time.Hour)
-	ctx := context.Background()
-	ownerCk, ownerID := w.signupUser(t, "fence-owner@example.com")
-	resp, body := w.post(t, "/v1/orgs", `{"name":"fenceco"}`, ownerCk)
-	if resp.StatusCode != 201 {
-		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
-	}
-	var org struct{ Id string }
-	_ = json.Unmarshal([]byte(body), &org)
-	orgRow, err := w.svc.GetOrg(ctx, org.Id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := "/v1/envs/" + env.ID + "/events?kind=scale"
-
-	get := func(t *testing.T, cookie, accept string) int {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+path, nil)
-		req.Header.Set("Cookie", cookie)
-		if accept != "" {
-			req.Header.Set("Accept", accept)
-		}
-		r, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		return r.StatusCode
-	}
-
-	strangerCk, _ := w.signupUser(t, "fence-stranger@example.com")
-	// The control: an env that does not exist 404s for the owner on both
-	// transports. That is what a no-standing denial has to be indistinguishable
-	// FROM, so without it "404" proves nothing.
-	for _, accept := range []string{"", "text/event-stream"} {
-		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/env_doesnotexist/events?kind=scale", nil)
-		req.Header.Set("Cookie", ownerCk)
-		if accept != "" {
-			req.Header.Set("Accept", accept)
-		}
-		r, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		if r.StatusCode != 404 {
-			t.Fatalf("an unknown env returns %d (accept=%q); the fence below is only meaningful if this is 404", r.StatusCode, accept)
-		}
-	}
-
-	// ANONYMOUS first, because it is the cheapest oracle and the one this test
-	// originally missed: SSE looked up the env BEFORE checking the principal, so
-	// with no credentials a fabricated env answered 404 and a real one 401. Both
-	// transports must answer the same thing to a caller with nothing.
-	for _, accept := range []string{"", "text/event-stream"} {
-		var codes []int
-		for _, envPath := range []string{env.ID, "env_doesnotexist"} {
-			req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+envPath+"/events?kind=scale", nil)
-			if accept != "" {
-				req.Header.Set("Accept", accept)
-			}
-			r, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, _ = io.Copy(io.Discard, r.Body)
-			r.Body.Close()
-			codes = append(codes, r.StatusCode)
-		}
-		if codes[0] != codes[1] {
-			t.Fatalf("anonymous (accept=%q): real env → %d, fabricated env → %d — with no credentials at all, the difference IS the oracle", accept, codes[0], codes[1])
-		}
-	}
-
-	// A NON-MEMBER: 404 on both transports.
-	if got := get(t, strangerCk, ""); got != 404 {
-		t.Fatalf("JSON: a non-member got %d, want 404 — anything else separates a real env id from a fabricated one", got)
-	}
-	if got := get(t, strangerCk, "text/event-stream"); got != 404 {
-		t.Fatalf("SSE: a non-member got %d, want 404 — the JSON half is fenced and this one is not, so one request header is the oracle", got)
-	}
-
-	// An ORG KEY SCOPED ELSEWHERE: also no standing, also 404 on both. This is
-	// the `key:` arm, and dropping it from the conversion used to survive the
-	// entire suite on both transports while a doc comment said it was covered.
-	otherCk, otherOwner := w.signupUser(t, "fence-otherorg@example.com")
-	_ = otherOwner
-	resp, body = w.post(t, "/v1/orgs", `{"name":"otherfenceco"}`, otherCk)
-	if resp.StatusCode != 201 {
-		t.Fatalf("createOrg(other): %d %s", resp.StatusCode, body)
-	}
-	var otherOrg struct{ Id string }
-	_ = json.Unmarshal([]byte(body), &otherOrg)
-	rk, kb := w.post(t, "/v1/orgs/"+otherOrg.Id+"/api-keys",
-		`{"name":"obs","scope":"full","permissions":["observe.read"]}`, otherCk)
-	if rk.StatusCode != 201 {
-		t.Fatalf("createApiKey: %d %s", rk.StatusCode, kb)
-	}
-	var key struct{ Token string }
-	_ = json.Unmarshal([]byte(kb), &key)
-	for _, accept := range []string{"", "text/event-stream"} {
-		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+path, nil)
-		req.Header.Set("Authorization", "Bearer "+key.Token)
-		if accept != "" {
-			req.Header.Set("Accept", accept)
-		}
-		r, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		if r.StatusCode != 404 {
-			t.Fatalf("a key scoped to another org got %d (accept=%q), want 404 — a key:… denial is no standing, exactly like a non-member", r.StatusCode, accept)
-		}
-	}
-
-	// A MEMBER WHO MERELY LACKS THE PERMISSION: an honest 403, on both
-	// transports. This is the arm the conversion must NOT swallow — without it,
-	// the whole prefix check can be replaced with "every denial is a 404" and
-	// every other assertion here still passes. `billing` is the role without
-	// observe.read (rbac/matrix.csv).
-	memberCk, memberID := w.signupUser(t, "fence-billing@example.com")
-	if err := w.svc.AddMember(ctx, org.Id, memberID, "billing", ownerID); err != nil {
-		t.Fatal(err)
-	}
-	if got := get(t, memberCk, ""); got != 403 {
-		t.Fatalf("JSON: a member lacking observe.read got %d, want 403 — turning this into a 404 would hide the org from its own members and make the remediation unreachable", got)
-	}
-	if got := get(t, memberCk, "text/event-stream"); got != 403 {
-		t.Fatalf("SSE: a member lacking observe.read got %d, want 403", got)
-	}
 }

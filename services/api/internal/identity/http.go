@@ -160,15 +160,6 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrAssistantUserScoped):
 		problem.Write(w, r, problem.PermissionDenied("org-key principal",
 			"The assistant is a user surface — sign in as a user (browser session or personal token)."))
-	// A handler that has already decided the exact response carries it here.
-	// This case is FIRST so a pre-decided problem is never re-derived by a later
-	// arm — a denial mapped to 404 by problem.FromDenial must not be caught by
-	// the generic AccessDeniedError → 403 arm below and turned back into an
-	// existence oracle.
-	case errors.As(err, new(problemError)):
-		var pe problemError
-		errors.As(err, &pe)
-		problem.Write(w, r, pe.p)
 	case errors.As(err, new(AccessDeniedError)):
 		var ad AccessDeniedError
 		errors.As(err, &ad)
@@ -342,12 +333,3 @@ func deviceOf(r *http.Request) string {
 	}
 	return ua
 }
-
-// problemError carries a fully-decided Problem out of a handler, for the cases
-// where the handler knows something the central mapper cannot — which resource
-// name a not-found should claim, for instance. The mapper above handles it
-// first, so a decided response is never re-derived.
-type problemError struct{ p problem.Problem }
-
-func (e problemError) Error() string            { return "identity: " + e.p.Title }
-func (e problemError) Problem() problem.Problem { return e.p }

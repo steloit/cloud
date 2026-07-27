@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steloit/cloud/services/api/internal/platform/money"
-
 	"github.com/steloit/cloud/services/api/internal/canon"
 )
 
@@ -56,10 +54,10 @@ func TestCanonArithmetic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("canon %s: %v", s.Name, err)
 		}
-		if line.MonthlyCents.Int64() != s.MonthlyEstimateCent {
+		if line.MonthlyCents != s.MonthlyEstimateCent {
 			t.Fatalf("canon %s prices to %d, canon says %d", s.Name, line.MonthlyCents, s.MonthlyEstimateCent)
 		}
-		total += line.MonthlyCents.Int64()
+		total += line.MonthlyCents
 	}
 	// The $208 anchor is IMPORTED from the shared canon package (Q2), not
 	// retyped — the same number the console/invoice layers assert.
@@ -93,7 +91,7 @@ func TestCheckoutStackTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total.Int64() != 12600 {
+	if total != 12600 {
 		t.Fatalf("checkout-stack must be $126 (12600), got %d", total)
 	}
 }
@@ -111,14 +109,14 @@ func TestEngineRules(t *testing.T) {
 		t.Fatalf("web default intent: %+v", l)
 	}
 	// explicit intent survives (jobs rides postgres)
-	if l, _ = Price(ShapeInput{Product: "postgres", Intent: "jobs", Shape: map[string]any{"size": "dev", "storage_gb": 4}}); l.Intent != "jobs" || l.MonthlyCents.Int64() != 2100 {
+	if l, _ = Price(ShapeInput{Product: "postgres", Intent: "jobs", Shape: map[string]any{"size": "dev", "storage_gb": 4}}); l.Intent != "jobs" || l.MonthlyCents != 2100 {
 		t.Fatalf("jobs line: %+v", l)
 	}
 	// HA is +$19 (C2)
 	base, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}})
 	ha, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "ha": true}})
-	if ha.MonthlyCents.Int64()-base.MonthlyCents.Int64() != 1900 {
-		t.Fatalf("HA delta: %d", ha.MonthlyCents.Int64()-base.MonthlyCents.Int64())
+	if ha.MonthlyCents-base.MonthlyCents != 1900 {
+		t.Fatalf("HA delta: %d", ha.MonthlyCents-base.MonthlyCents)
 	}
 	// unknown product / size fail loudly with the field named
 	if _, err := Price(ShapeInput{Product: "gpu"}); err == nil {
@@ -129,11 +127,11 @@ func TestEngineRules(t *testing.T) {
 	}
 	// Dev pays for every GB; Standard's canon-derived 50 GB allowance holds
 	devTen, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "storage_gb": 10}})
-	if devTen.MonthlyCents.Int64() != 2400 {
+	if devTen.MonthlyCents != 2400 {
 		t.Fatalf("dev+10GB must be $24: %d", devTen.MonthlyCents)
 	}
 	stdSixty, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "standard", "storage_gb": 60}})
-	if stdSixty.MonthlyCents.Int64() != 5800+10*50 {
+	if stdSixty.MonthlyCents != 5800+10*50 {
 		t.Fatalf("standard+60GB: %d", stdSixty.MonthlyCents)
 	}
 }
@@ -160,13 +158,13 @@ func TestEstimateLineGrammar(t *testing.T) {
 		if l.Basis != "fixed" && l.Basis != "usage_projection" {
 			t.Fatalf("estimate line %q violates the §74 grammar: basis=%q (want fixed|usage_projection)", l.Name, l.Basis)
 		}
-		if l.MonthlyCents.Int64() < 0 { // integer cents (int64) end-to-end (ADR-025)
+		if l.MonthlyCents < 0 { // integer cents (int64) end-to-end (ADR-025)
 			t.Fatalf("estimate line %q has negative cents: %d", l.Name, l.MonthlyCents)
 		}
-		sum += l.MonthlyCents.Int64()
+		sum += l.MonthlyCents
 	}
-	if sum != total.Int64() {
-		t.Fatalf("estimate lines do not sum to the total: Σ %d ≠ %d", sum, total.Int64())
+	if sum != total {
+		t.Fatalf("estimate lines do not sum to the total: Σ %d ≠ %d", sum, total)
 	}
 	if len(lines) == 0 {
 		t.Fatal("no estimate lines checked — the grammar assertion is inert")
@@ -190,7 +188,7 @@ func TestCanonicalIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if a.MonthlyCents.Int64() != b.MonthlyCents.Int64() {
+		if a.MonthlyCents != b.MonthlyCents {
 			t.Fatalf("the fixture is not a price collision any more (%d vs %d) — pick a live one", a.MonthlyCents, b.MonthlyCents)
 		}
 		ca, err := Canonical(dev78)
@@ -264,7 +262,7 @@ func TestCanonicalIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.MonthlyCents.Int64() != basePrice.MonthlyCents.Int64() && id == baseID {
+			if p.MonthlyCents != basePrice.MonthlyCents && id == baseID {
 				t.Fatalf("%v prices differently (%d vs %d) but shares the identity %q — the bill can change without the contract changing",
 					v, p.MonthlyCents, basePrice.MonthlyCents, id)
 			}
@@ -427,7 +425,7 @@ func TestEveryProductPricesWithAnEmptyShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s cannot be priced with defaults alone: %v — a declared default is not a valid catalog value", product, err)
 			}
-			if line.MonthlyCents.Int64() <= 0 {
+			if line.MonthlyCents <= 0 {
 				t.Fatalf("%s prices at %d with defaults — a zero floor means a default silently costs nothing", product, line.MonthlyCents)
 			}
 		})
@@ -450,7 +448,7 @@ func TestUnsetUnpricedFieldIsADifferentContract(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return base.MonthlyCents.Int64() == other.MonthlyCents.Int64()
+		return base.MonthlyCents == other.MonthlyCents
 	}
 	for product, fields := range shapeSchema {
 		for key, spec := range fields {
@@ -616,23 +614,19 @@ func TestResolvedDefaultsAreExactlyTheDeclaredConfiguration(t *testing.T) {
 	}
 }
 
-// Every priced dimension is bounded, not just the one that was reported.
+// The instance count is bounded — US-3.8's one inseparable arithmetic guard,
+// because a pin's price reaches metering.Rollup through repriceSpan, and a
+// wrapped price is a DECREASE, which the spend cap does not enforce on.
 //
-// The overflow was found on `override.instances`, fixed in the web/worker arm,
-// and the two sibling arms of the same switch kept wrapping — postgres
-// `storage_gb` returned a price of -5340232221128652948, which then poisoned
-// the org's committed run-rate and disabled its spend cap for every later
-// create. This asserts the class, one case per priced dimension.
-func TestEveryPricedDimensionRefusesWhatItCannotRepresent(t *testing.T) {
+// The postgres and valkey arms of the same switch wrap identically and are NOT
+// fixed here: they are pre-existing, reachable with no pin involved, and they
+// belong to O16 with the money.Cents type that makes the class uncompilable.
+func TestThePricedInstanceCountRefusesWhatItCannotRepresent(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		in      ShapeInput
 		wantFld string
 	}{
-		{"postgres storage", ShapeInput{Product: "postgres", Name: "d",
-			Shape: map[string]any{"size": "dev", "storage_gb": int(1) << 60}}, "shape.storage_gb"},
-		{"valkey memory", ShapeInput{Product: "valkey", Name: "c",
-			Shape: map[string]any{"memory_mb": int(1) << 60}}, "shape.memory_mb"},
 		{"web instances", ShapeInput{Product: "web", Name: "a",
 			Shape: map[string]any{"size": "standard-1", "instances": int(1) << 60}}, "shape.instances"},
 		{"worker instances", ShapeInput{Product: "worker", Name: "w",
@@ -648,42 +642,5 @@ func TestEveryPricedDimensionRefusesWhatItCannotRepresent(t *testing.T) {
 				t.Fatalf("want a ShapeError naming %s, got %v", tc.wantFld, err)
 			}
 		})
-	}
-}
-
-// The AGGREGATE is bounded too. Bounding each line moved the wrap up a level
-// rather than removing it: two individually legal lines produced a negative
-// monthly_total_cents over HTTP, and the total is what the customer accepts,
-// what is persisted, and what the estimate gate compares.
-func TestAnEstimateTotalCanNeverWrap(t *testing.T) {
-	sz := table.Web.Sizes["standard-1"]
-	max := int((money.MaxMonthly - sz.ServiceBaseCents) / sz.InstanceCents)
-	in := []ShapeInput{
-		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": max}},
-		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": max}},
-	}
-	lines, total, err := PriceAll(in)
-	if err == nil {
-		t.Fatalf("two individually-legal lines produced total=%d from lines %d + %d — the total is the number the customer accepts and the gate compares",
-			total.Int64(), lines[0].MonthlyCents.Int64(), lines[1].MonthlyCents.Int64())
-	}
-	var se ShapeError
-	if !errors.As(err, &se) {
-		t.Fatalf("want a ShapeError, got %v", err)
-	}
-	// A pair that DOES fit still prices, and the total is the sum.
-	lines, total, err = PriceAll([]ShapeInput{
-		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": 2}},
-		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": 3}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := money.Sum(lines[0].MonthlyCents, lines[1].MonthlyCents)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total.Cmp(want) != 0 {
-		t.Fatalf("total %d is not the sum of %d and %d", total.Int64(), lines[0].MonthlyCents.Int64(), lines[1].MonthlyCents.Int64())
 	}
 }

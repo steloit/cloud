@@ -401,7 +401,7 @@ func TestCKM3EstimateGatedProvisioningEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if line.MonthlyCents.Int64() != wantCents {
+	if line.MonthlyCents != wantCents {
 		t.Fatalf("the engine prices the canon db-reports shape at %d, canon says %d", line.MonthlyCents, wantCents)
 	}
 	cw, err := canon.Load()

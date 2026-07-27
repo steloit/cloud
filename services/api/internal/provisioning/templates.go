@@ -222,7 +222,7 @@ func (s *Service) captureFrom(ctx context.Context, envID string, serviceIDs []st
 	if err != nil {
 		return tplContents{}, nil, 0, err
 	}
-	return contents, required, total.Int64(), nil
+	return contents, required, total, nil
 }
 
 // RefreshTemplate re-captures from the stored source names → a new version.

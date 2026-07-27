@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -208,50 +207,3 @@ func nonEmpty(s, fallback string) string {
 	}
 	return fallback
 }
-
-// deniedNoStanding is satisfied by an authorization error that can classify
-// itself. The method name is deliberately distinctive so nothing satisfies it by
-// accident, and the interface lives HERE rather than in the authorization
-// package so that every enforcement point can reach the mapping without
-// importing it — `events.Streamer` cannot import `identity`, because `identity`
-// imports `events`.
-type deniedNoStanding interface {
-	AccessDeniedNoStanding() bool
-}
-
-// FromDenial maps an authorization failure to the response it must produce.
-//
-// This is the single ENFORCEMENT mapping for the whole API: one decision (made
-// where the denial is constructed, by AccessDeniedNoStanding) turned into one
-// response, in one place. The rule it implements is the repo's stated
-// convention and the industry norm — GitHub answers 404 for a private
-// repository you cannot see, because a 403 would confirm it exists:
-//
-//   - NO STANDING (not a member; a key scoped elsewhere) → 404, indistinguishable
-//     from an id that does not exist. Anything else is an existence oracle.
-//   - HAS STANDING but lacks the permission → an honest 403 that names what
-//     denied it, so the remediation is reachable.
-//
-// It returns ok=false for an error that is not an authorization denial, so
-// callers pass those through unchanged rather than mapping them by accident.
-//
-// WHY THIS EXISTS. The classification and this mapping were previously written
-// out at each call site. That produced exactly the defect the pattern predicts:
-// the conversion was added to one handler and not to the second transport of the
-// SAME operation, so `Accept: text/event-stream` answered 403 where the JSON
-// half answered 404 — one request header reopening the oracle the fix had just
-// closed. A rule enforced by repetition is a rule enforced unevenly.
-func FromDenial(err error, resource, remediation string) (Problem, bool) {
-	var d deniedNoStanding
-	if !errorsAs(err, &d) {
-		return Problem{}, false
-	}
-	if d.AccessDeniedNoStanding() {
-		return NotFound(resource), true
-	}
-	return PermissionDenied(err.Error(), remediation), true
-}
-
-// errorsAs is errors.As, wrapped so this file states its one dependency on the
-// errors package explicitly rather than importing it for a single call.
-func errorsAs(err error, target any) bool { return errors.As(err, target) }
