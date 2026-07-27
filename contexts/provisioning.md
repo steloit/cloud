@@ -70,6 +70,24 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Letting an execution model change silently under a Product, or migrating one without a visible, priced,
   consented estimate (ADR-040: the Composer proposes; the accepted estimate is the contract).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.
+- **Moving a guard without asking what else it was doing.** US-3.8 shipped five blockers across three
+  review rounds and every one was the same: a guard that existed and worked, until a boundary moved
+  under it. Making `desired` track the override column turned "any PATCH un-pins" into a real path but
+  left the price restore only in the shape branch, so un-pinning released the capacity and kept charging
+  for it — permanently, since the row was then unsweepable. Splitting the sweep's one UPDATE into
+  SELECT+UPDATE moved the expiry predicate off the write path, so a concurrent customer edit was
+  silently reverted and billed at the pre-edit rate. Unifying the pricing path deleted the `estimates.Price`
+  call that was also the merged shape's first validator and owned the `ShapeError → 422` conversion, so a
+  client typo started answering 500 "contact support" on one endpoint while the same input still
+  answered 422 on another. **The diagnostic question after any restructure is not "does the new code
+  work" — it is "what did the moved or deleted code guarantee, and who guarantees it now?"** Each of the
+  three had a second job nobody had written down, and a green suite found none of them.
+- **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
+  pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
+  column on every PATCH, at which point it could put three facts in disagreement at once: the column
+  holding one shape, the cell rendering another, and the invoice charging a third rate that no reprice
+  could detect (both sides of the comparison come from the same stale read). Fence on the generation
+  read, return 409 "re-read and retry"; a silent overwrite of money is not recoverable.
 - **Never hand-append to a committed raw evidence log.** If an ad-hoc command produced the number
   (a diagnosis mid-spike), the fix is: commit the producing command as a script/manifest, and record
   line-by-line provenance (results/PROVENANCE.md) — an unattributed append to a "raw" log defeats

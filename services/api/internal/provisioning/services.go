@@ -708,14 +708,19 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	}
 	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, effShape, effScaling, effOverride, false)
 	priorCents := svc.MonthlyEstimateCents
+	params.Generation = svc.Generation
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
-		// The SQL fence `status <> 'deleting'` is the atomic backstop for the Go
-		// guard above: a delete that raced in after the read returns zero rows.
+		// Zero rows means the row moved under us: either a delete raced in
+		// (the `status <> 'deleting'` fence) or a concurrent edit did (the
+		// generation fence). Both are "re-read and retry" — writing anyway
+		// would overwrite the other edit's shape, doc and PRICE from a stale
+		// read, leaving the column, the cell and the invoice each holding a
+		// different answer.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return store.Service{}, problemError{p: problem.Conflict(
-				[]string{"the service is being deleted"},
-				"Wait for deletion to complete; a deleting service cannot be edited.")}
+				[]string{"the service changed while this request was in flight"},
+				"Re-read the service and retry; it was deleted or edited concurrently.")}
 		}
 		return store.Service{}, err
 	}

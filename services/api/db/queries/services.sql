@@ -30,6 +30,15 @@ WHERE id = $1 AND status = $2
 RETURNING *;
 
 -- name: UpdateServiceShape :one
+-- FENCED ON GENERATION. The handler reads the service, prices from that read,
+-- and writes back — so a concurrent edit that lands in between is silently
+-- overwritten. That was a stale-desired race before US-3.8; now that the PRICE
+-- column is written on every PATCH it is a billing race, and it can put three
+-- facts in disagreement at once: the column holding one shape, the cell
+-- rendering another from the stale desired doc, and the invoice charging a
+-- third rate that repriceSpan cannot detect (both sides of its comparison come
+-- from the stale read). A lost race must be a 409 the client re-reads and
+-- retries, never a silent overwrite.
 -- A desired-state edit (US-1.3a): rewrite desired and BUMP generation so the
 -- service becomes outstanding (observed_generation < generation) and the cell
 -- re-reconciles. Without the bump a converged service would never see the edit.
@@ -40,7 +49,7 @@ UPDATE services SET
     monthly_estimate_cents = coalesce(sqlc.narg('monthly_estimate_cents'), monthly_estimate_cents),
     desired = coalesce(sqlc.narg('desired'), desired),
     generation = generation + 1
-WHERE id = $1 AND status <> 'deleting'
+WHERE id = $1 AND generation = sqlc.arg('generation') AND status <> 'deleting'
 RETURNING *;
 
 -- name: OrgForService :one

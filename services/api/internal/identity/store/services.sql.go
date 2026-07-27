@@ -204,6 +204,11 @@ WHERE override IS NOT NULL
 // A pin with NO expires_at is expired BY DEFINITION: "unset" must not mean
 // "forever", and such a row is otherwise unreachable by any sweep.
 //
+// REQUIRES PostgreSQL 16+ (`pg_input_is_valid`), the repo's first use of it.
+// On 15 this fails every tick with "function does not exist" and the only
+// symptom is a log line, so the control DB's floor is now 16 — stated here
+// because nothing else records it.
+//
 // The timestamp cast is GUARDED: one row with a malformed expires_at would
 // otherwise abort the whole statement, and the sweep would then fail on every
 // tick, silently, for every customer.
@@ -355,7 +360,7 @@ UPDATE services SET
     monthly_estimate_cents = coalesce($5, monthly_estimate_cents),
     desired = coalesce($6, desired),
     generation = generation + 1
-WHERE id = $1 AND status <> 'deleting'
+WHERE id = $1 AND generation = $7 AND status <> 'deleting'
 RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
 `
 
@@ -366,8 +371,18 @@ type UpdateServiceShapeParams struct {
 	Override             []byte
 	MonthlyEstimateCents pgtype.Int8
 	Desired              []byte
+	Generation           int64
 }
 
+// FENCED ON GENERATION. The handler reads the service, prices from that read,
+// and writes back — so a concurrent edit that lands in between is silently
+// overwritten. That was a stale-desired race before US-3.8; now that the PRICE
+// column is written on every PATCH it is a billing race, and it can put three
+// facts in disagreement at once: the column holding one shape, the cell
+// rendering another from the stale desired doc, and the invoice charging a
+// third rate that repriceSpan cannot detect (both sides of its comparison come
+// from the stale read). A lost race must be a 409 the client re-reads and
+// retries, never a silent overwrite.
 // A desired-state edit (US-1.3a): rewrite desired and BUMP generation so the
 // service becomes outstanding (observed_generation < generation) and the cell
 // re-reconciles. Without the bump a converged service would never see the edit.
@@ -379,6 +394,7 @@ func (q *Queries) UpdateServiceShape(ctx context.Context, arg UpdateServiceShape
 		arg.Override,
 		arg.MonthlyEstimateCents,
 		arg.Desired,
+		arg.Generation,
 	)
 	var i Service
 	err := row.Scan(

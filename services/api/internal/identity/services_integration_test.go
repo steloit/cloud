@@ -988,3 +988,83 @@ func TestAMalformedShapeOnPatchIsAFieldErrorNotA500(t *testing.T) {
 		})
 	}
 }
+
+// A concurrent edit must lose loudly, not silently overwrite.
+//
+// `UpdateService` reads the service, prices from that read, and writes back. With
+// no generation fence, an edit that lands in between is overwritten — and since
+// US-3.8 writes the PRICE on every PATCH, that put three facts in disagreement:
+// the column holding one shape, the cell rendering another from the stale
+// desired doc, and the invoice charging a third rate that `repriceSpan` cannot
+// detect, because both sides of its comparison come from the same stale read.
+func TestAConcurrentEditIsRefusedNotSilentlyOverwritten(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "race@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"raceco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	// B reads the service (what the handler does before pricing).
+	stale := mustGetSvc(t, w, svc.Id)
+
+	// A commits a scale-up in between.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"instances":3}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("A's scale-up: %d %s", resp.StatusCode, body)
+	}
+	var afterA struct {
+		MonthlyEstimateCents int `json:"monthly_estimate_cents"`
+	}
+	_ = json.Unmarshal([]byte(body), &afterA)
+
+	// B now writes from its stale read. It must be refused.
+	_, err = w.prov.UpdateService(ctx, stale, org.Id, ownerID, nil, []byte(`{"min":1,"max":3}`), nil)
+	if err == nil {
+		t.Fatal("a write from a stale read succeeded — it overwrites the other edit's shape, desired doc AND price, leaving the column, the cell and the invoice each holding a different answer")
+	}
+
+	// A's edit survives, intact and self-consistent.
+	var shape, desired map[string]any
+	var cents int64
+	if err := w.pool.QueryRow(ctx,
+		`SELECT shape, desired, monthly_estimate_cents FROM services WHERE id=$1`,
+		svc.Id).Scan(&shape, &desired, &cents); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := shape["instances"].(float64); int(got) != 3 {
+		t.Fatalf("A's contracted configuration was overwritten: %v", shape)
+	}
+	dshape, _ := desired["shape"].(map[string]any)
+	if got, _ := dshape["instances"].(float64); int(got) != 3 {
+		t.Fatalf("the cell would render %v, not A's 3 instances", dshape["instances"])
+	}
+	if cents != int64(afterA.MonthlyEstimateCents) {
+		t.Fatalf("the price is %d, A was charged %d", cents, afterA.MonthlyEstimateCents)
+	}
+}
