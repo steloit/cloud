@@ -3,6 +3,7 @@ package provisioning
 import (
 	"encoding/json"
 	"github.com/steloit/cloud/services/api/internal/metering"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -222,5 +223,46 @@ func TestIsBillingGatesTheStatusesThatHaveAnOpenSpan(t *testing.T) {
 			t.Fatalf("IsBilling(%q) = %v, want %v — a rate change is only meaningful while a span is open, and emitting one otherwise bills a service that never ran",
 				status, got, want)
 		}
+	}
+}
+
+// The spend cap's arithmetic must fail SAFE, never wrap.
+//
+// `projected := current + newMonthlyCents` wrapping does not merely mis-answer
+// one request: the wrapped value is persisted into monthly_estimate_cents and
+// then summed by SumOrgMonthlyEstimate, so every LATER projection for that org
+// wraps too. One request disables the org's cap permanently. Overflow is
+// therefore treated as over-cap — a number we cannot represent is not a number
+// we can prove is affordable.
+//
+// Tested here rather than end-to-end because the engine's price ceiling now
+// makes a single service too small to wrap the sum on its own: reaching it
+// needs a committed run-rate no ordinary sequence of API calls can build. The
+// guard still has to hold for the state a past bug (or a future one) can leave
+// behind — the old overflow left exactly such a row.
+func TestTheSpendCapsArithmeticFailsSafeInsteadOfWrapping(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		a, b    int64
+		wantOK  bool
+		wantSum int64
+	}{
+		{"ordinary", 5_000, 1_200, true, 6_200},
+		{"zero", 0, 0, true, 0},
+		{"at the edge", math.MaxInt64 - 1, 1, true, math.MaxInt64},
+		{"one past the edge", math.MaxInt64, 1, false, 0},
+		{"both large", math.MaxInt64 / 2, math.MaxInt64/2 + 3, false, 0},
+		// A poisoned run-rate is exactly what the old wrap left behind.
+		{"negative committed", -5_340_232_221_128_652_948, 100, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := checkedSum(tc.a, tc.b)
+			if ok != tc.wantOK {
+				t.Fatalf("checkedSum(%d, %d) ok = %v, want %v — an unrepresentable projection must be refused, not wrapped into an affordable-looking number", tc.a, tc.b, ok, tc.wantOK)
+			}
+			if ok && got != tc.wantSum {
+				t.Fatalf("checkedSum(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.wantSum)
+			}
+		})
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -56,9 +57,17 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 	if err != nil {
 		return err
 	}
-	current := planFee + committed
-	projected := current + newMonthlyCents
-	if projected > limit {
+	// The PROJECTION is checked arithmetic. `current + newMonthlyCents` wrapping
+	// does not merely mis-answer one request: it answers "under the cap" for a
+	// request that is astronomically over it, and — because the wrapped value is
+	// then persisted into monthly_estimate_cents and summed by
+	// SumOrgMonthlyEstimate — every LATER projection for that org wraps too. One
+	// request disables the org's spend cap permanently. Overflow is treated as
+	// over-cap, which is the only safe direction: a number we cannot represent is
+	// not a number we can prove is affordable.
+	current, curOK := checkedSum(planFee, committed)
+	projected, projOK := checkedSum(current, newMonthlyCents)
+	if !curOK || !projOK || projected > limit {
 		// F9 flagship: an ENFORCED bound, refused at accept time (402) with the
 		// arithmetic shown — never an alert-only. Every cap hit lands on the
 		// events spine (AC3) so "the cap is real" is auditable, not just a UI toast.
@@ -78,6 +87,15 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
 	}
 	return nil
+}
+
+// checkedSum adds two non-negative cent amounts, reporting false on overflow.
+// The cap's arithmetic must never wrap: see enforceBudget.
+func checkedSum(a, b int64) (int64, bool) {
+	if a < 0 || b < 0 || a > math.MaxInt64-b {
+		return 0, false
+	}
+	return a + b, true
 }
 
 // dollars renders integer cents as $D.CC for the cap's shown arithmetic.
@@ -761,6 +779,20 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 		return store.Service{}, err
 	}
+	// Post-commit, so the context must not be cancellable. The row is already
+	// written; a client disconnecting between here and the two calls below would
+	// leave the price changed with the span still billing the OLD rate — the
+	// precise defect repriceSpan exists to prevent — and the pin's reason would
+	// never reach the spine, with no error anywhere, since `record` discards its
+	// own and MustEmitSpan only logs. expireOverride's structurally identical
+	// block got this treatment first; this one is ten lines away and was missed.
+	//
+	// KNOWN UNCOVERED: deleting this line survives mutation. Forcing it needs a
+	// client disconnect in the window between the commit and the two calls
+	// below, which no deterministic test can place — an already-cancelled
+	// context fails the write instead, and a short deadline is a race. Recorded
+	// rather than claimed, and the same is true of expireOverride's copy.
+	ctx = context.WithoutCancel(ctx)
 	// The rate the customer PAYS follows the row. Without this a pin (or a
 	// scale-up) changes monthly_estimate_cents while the open span keeps
 	// billing at the pre-change rate — nine instances provisioned, one billed.

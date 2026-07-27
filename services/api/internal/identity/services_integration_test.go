@@ -2024,13 +2024,18 @@ func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
 		}
 	}
 
-	// A merely ABSURD pin is a different job. 2^40 instances prices exactly —
-	// ~1.87e15 cents — so the engine has no business refusing it, and the
-	// comment on that bound says so: picking a maximum instance count is a
-	// commercial decision. The HARD SPEND CAP is what refuses it, and this
-	// asserts that layering rather than assuming it. Before the overflow fix
-	// this path was unreachable for large pins, because a wrapped price is a
-	// DECREASE and UpdateService only enforces the cap on an increase.
+	// A merely EXPENSIVE pin is a different job. 1000 instances prices exactly
+	// and is nowhere near the engine's representability ceiling, so the engine
+	// has no business refusing it — picking a maximum instance count is a
+	// commercial decision and the engine does not make those. The HARD SPEND CAP
+	// is what refuses it, and this asserts the layering rather than assuming it.
+	// Before the overflow fix this path was unreachable for large pins, because a
+	// wrapped price is a DECREASE and UpdateService only enforces on an increase.
+	// (An earlier version used 2^40 here. Once the ceiling was re-derived from
+	// what the billing rollup can carry it dropped to ~3.4e12 cents, and 2^40
+	// instances became the ENGINE's business — so the example stopped testing the
+	// layer it named. A test whose example drifts out from under its claim is the
+	// same failure as a comment that does.)
 	var base int64
 	if err := w.pool.QueryRow(ctx, `SELECT monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&base); err != nil {
 		t.Fatal(err)
@@ -2040,9 +2045,27 @@ func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
 		 ON CONFLICT (org_id) DO UPDATE SET limit_cents = $2`, org.Id, base+100); err != nil {
 		t.Fatal(err)
 	}
-	rBig, bBig := pin(`{"override":{"instances":1099511627776,"reason":"absurd"}}`)
-	if rBig.StatusCode == 200 {
-		t.Fatalf("a 2^40-instance pin cleared the hard spend cap: %s", bBig)
+	// t.Cleanup, not a trailing DELETE: a t.Fatalf between the insert and the
+	// delete would otherwise leave a live cap for whatever ran next.
+	t.Cleanup(func() {
+		_, _ = w.pool.Exec(context.Background(), `DELETE FROM budgets WHERE org_id=$1`, org.Id)
+	})
+	rBig, bBig := pin(`{"override":{"instances":1000,"reason":"expensive"}}`)
+	// 402 specifically, from the CAP — not merely "not 200". Asserting only
+	// non-200 does not say which layer refused, which is the one thing this
+	// section exists to show: adding a commercial ceiling to the pricing engine
+	// (the decision that file explicitly refuses to make) would satisfy a
+	// non-200 assertion and silently move the boundary.
+	if rBig.StatusCode != 402 || !strings.Contains(bBig, "quota") {
+		t.Fatalf("a 2^40-instance pin should be refused by the hard spend cap (402 quota_exceeded), got %d %s — if the pricing engine refused it instead, the engine has acquired a commercial ceiling it is not allowed to have", rBig.StatusCode, bBig)
+	}
+	var capEvents int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE org_id=$1 AND action='billing.spend_cap_reached'`, org.Id).Scan(&capEvents); err != nil {
+		t.Fatal(err)
+	}
+	if capEvents == 0 {
+		t.Fatal("the cap refused the pin but recorded nothing on the spine — 'the cap is real' has to be auditable, not just a response code")
 	}
 	var afterCents int64
 	if err := w.pool.QueryRow(ctx, `SELECT monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&afterCents); err != nil {
@@ -2087,11 +2110,14 @@ func TestAPinsInstanceCountIsBoundedAtEveryLayer(t *testing.T) {
 // unknown env already 404s on both, so a 403 on either is a positive signal
 // that this env id is real.
 //
-// Both denial classes are exercised, because they take different code paths:
-// `membership:` for a user who is not in the org, `key:` for an org key scoped
-// elsewhere. A member who merely LACKS the permission is an honest 403 — that is
-// the arm the conversion must not swallow, and without it here the whole prefix
-// check could be deleted and every test still pass.
+// FOUR principals, because the conversion has four outcomes and an earlier
+// version of this comment claimed coverage the body did not have — the same
+// failure as the false claim it was written next to. Anonymous (no credentials
+// at all, the cheapest oracle and the one the SSE ordering bug exposed);
+// non-member `membership:` → 404; org key scoped elsewhere `key:` → 404; and a
+// member who merely lacks observe.read `role:` → 403. The last is the arm the
+// conversion must NOT swallow: without it the whole check can be replaced with
+// "every denial is a 404" and everything else here still passes.
 func TestTheActivityFeedHidesItselfFromPrincipalsWithoutStanding(t *testing.T) {
 	w := newWorld(t, time.Hour)
 	ctx := context.Background()
@@ -2149,11 +2175,86 @@ func TestTheActivityFeedHidesItselfFromPrincipalsWithoutStanding(t *testing.T) {
 		}
 	}
 
+	// ANONYMOUS first, because it is the cheapest oracle and the one this test
+	// originally missed: SSE looked up the env BEFORE checking the principal, so
+	// with no credentials a fabricated env answered 404 and a real one 401. Both
+	// transports must answer the same thing to a caller with nothing.
+	for _, accept := range []string{"", "text/event-stream"} {
+		var codes []int
+		for _, envPath := range []string{env.ID, "env_doesnotexist"} {
+			req, _ := http.NewRequest(http.MethodGet, w.srv.URL+"/v1/envs/"+envPath+"/events?kind=scale", nil)
+			if accept != "" {
+				req.Header.Set("Accept", accept)
+			}
+			r, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, r.Body)
+			r.Body.Close()
+			codes = append(codes, r.StatusCode)
+		}
+		if codes[0] != codes[1] {
+			t.Fatalf("anonymous (accept=%q): real env → %d, fabricated env → %d — with no credentials at all, the difference IS the oracle", accept, codes[0], codes[1])
+		}
+	}
+
+	// A NON-MEMBER: 404 on both transports.
 	if got := get(t, strangerCk, ""); got != 404 {
 		t.Fatalf("JSON: a non-member got %d, want 404 — anything else separates a real env id from a fabricated one", got)
 	}
 	if got := get(t, strangerCk, "text/event-stream"); got != 404 {
 		t.Fatalf("SSE: a non-member got %d, want 404 — the JSON half is fenced and this one is not, so one request header is the oracle", got)
 	}
-	_ = ctx
+
+	// An ORG KEY SCOPED ELSEWHERE: also no standing, also 404 on both. This is
+	// the `key:` arm, and dropping it from the conversion used to survive the
+	// entire suite on both transports while a doc comment said it was covered.
+	otherCk, otherOwner := w.signupUser(t, "fence-otherorg@example.com")
+	_ = otherOwner
+	resp, body = w.post(t, "/v1/orgs", `{"name":"otherfenceco"}`, otherCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg(other): %d %s", resp.StatusCode, body)
+	}
+	var otherOrg struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &otherOrg)
+	rk, kb := w.post(t, "/v1/orgs/"+otherOrg.Id+"/api-keys",
+		`{"name":"obs","scope":"full","permissions":["observe.read"]}`, otherCk)
+	if rk.StatusCode != 201 {
+		t.Fatalf("createApiKey: %d %s", rk.StatusCode, kb)
+	}
+	var key struct{ Token string }
+	_ = json.Unmarshal([]byte(kb), &key)
+	for _, accept := range []string{"", "text/event-stream"} {
+		req, _ := http.NewRequest(http.MethodGet, w.srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+key.Token)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+		if r.StatusCode != 404 {
+			t.Fatalf("a key scoped to another org got %d (accept=%q), want 404 — a key:… denial is no standing, exactly like a non-member", r.StatusCode, accept)
+		}
+	}
+
+	// A MEMBER WHO MERELY LACKS THE PERMISSION: an honest 403, on both
+	// transports. This is the arm the conversion must NOT swallow — without it,
+	// the whole prefix check can be replaced with "every denial is a 404" and
+	// every other assertion here still passes. `billing` is the role without
+	// observe.read (rbac/matrix.csv).
+	memberCk, memberID := w.signupUser(t, "fence-billing@example.com")
+	if err := w.svc.AddMember(ctx, org.Id, memberID, "billing", ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, memberCk, ""); got != 403 {
+		t.Fatalf("JSON: a member lacking observe.read got %d, want 403 — turning this into a 404 would hide the org from its own members and make the remediation unreachable", got)
+	}
+	if got := get(t, memberCk, "text/event-stream"); got != 403 {
+		t.Fatalf("SSE: a member lacking observe.read got %d, want 403", got)
+	}
 }

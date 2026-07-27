@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
@@ -137,7 +136,7 @@ func (h *Handlers) policyScoped(ctx context.Context, policyID string, perm rbac.
 		// or an org key scoped to a different org (key:…) — must not learn the
 		// policy exists: 404, not a 403 oracle. A member who merely lacks the
 		// permission (role:…) gets the honest 403.
-		if errors.As(err, &ad) && (strings.HasPrefix(ad.DeniedBy, "membership:") || strings.HasPrefix(ad.DeniedBy, "key:")) {
+		if errors.As(err, &ad) && ad.AccessDeniedNoStanding() {
 			return store.Policy{}, notFoundError{what: "policy"}
 		}
 		return store.Policy{}, err

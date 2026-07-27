@@ -23,13 +23,23 @@ type AccessDeniedError struct{ DeniedBy string }
 
 func (e AccessDeniedError) Error() string { return "identity: access denied: " + e.DeniedBy }
 
-// DeniedReason exposes the denial cause across a package boundary, so callers
-// that cannot import identity — `events.Streamer`, which identity itself
-// imports — can still tell a no-standing denial from a lacks-permission one.
-// Without it the SSE half of an endpoint answers 403 where the JSON half
-// answers 404, and one request header reopens the existence oracle the 404 was
-// added to close (api-conventions.md; US-3.8 architecture review).
-func (e AccessDeniedError) DeniedReason() string { return e.DeniedBy }
+// AccessDeniedNoStanding reports whether the principal has NO STANDING in the
+// org — a non-member, or a key that does not authorize here — as opposed to a
+// member who merely lacks the permission.
+//
+// The DECISION lives here, next to `deny`, which is where these strings are
+// constructed. It was previously a prefix match repeated in three handlers and
+// none of them was this package: a fourth denial prefix added in
+// `requireOrgKey` would silently have been a 403 in one handler and a 404 in
+// another. The classification is the contract; an accessor returning the raw
+// string would have left every caller re-deciding it.
+//
+// Callers that cannot import identity — `events.Streamer`, which identity
+// itself imports — assert on the interface, which is named distinctively so
+// nothing satisfies it by accident.
+func (e AccessDeniedError) AccessDeniedNoStanding() bool {
+	return strings.HasPrefix(e.DeniedBy, "membership:") || strings.HasPrefix(e.DeniedBy, "key:")
+}
 
 // Authorizer binds the pure evaluator to membership. Every mutating handler
 // in every module routes through this — the governed-resource contract's

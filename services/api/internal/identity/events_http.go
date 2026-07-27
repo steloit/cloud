@@ -6,7 +6,6 @@ package identity
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
@@ -70,7 +69,7 @@ func (h *Handlers) ListEvents(ctx context.Context, req gen.ListEventsRequestObje
 		// Without it a stranger separates a real env id from a fabricated one,
 		// since an unknown env already 404s via ErrEnvNotFound above.
 		var ad AccessDeniedError
-		if errors.As(err, &ad) && (strings.HasPrefix(ad.DeniedBy, "membership:") || strings.HasPrefix(ad.DeniedBy, "key:")) {
+		if errors.As(err, &ad) && ad.AccessDeniedNoStanding() {
 			return nil, notFoundError{what: "environment"}
 		}
 		return nil, err

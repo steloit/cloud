@@ -567,7 +567,15 @@ func TestTheClearFenceRejectsARowThatStartedDeletingMidSweep(t *testing.T) {
 	// row already carrying the post-bump generation" as prose. If those two
 	// writes are ever made one transaction (a carried atomicity finding,
 	// services.go), that version would still have passed while the comment it
-	// supports became false — the same failure mode, one round later.
+	// supports became false.
+	//
+	// Caveat, stated because the earlier comment overclaimed: driving the writes
+	// by hand does NOT protect against DeleteService being made one transaction
+	// — this version does not call DeleteService at all, so it has that blind
+	// spot too, slightly more so. What it does buy is that all three legs of the
+	// reachability argument now fail if they stop being true, instead of one.
+	// The atomicity leg is not observable from outside DeleteService, and a
+	// comment is its right home.
 	before := mustGet(t, q, svc.ID)
 	if _, err := q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{
 		ID: svc.ID, Desired: []byte(`{"product":"postgres","deleting":true}`)}); err != nil {

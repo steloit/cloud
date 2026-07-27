@@ -18,9 +18,12 @@ files:
   - services/api/cmd/api/main.go
   - services/api/db/queries/services.sql
   - services/api/internal/estimates/engine.go
+  - services/api/internal/estimates/engine_test.go
+  - services/api/internal/identity/events_http.go
+  - services/api/internal/identity/policy_http.go
+  - services/api/internal/platform/db/migrations/**
   - services/api/internal/events/sse.go
   - services/api/internal/identity/authorize.go
-  - services/api/internal/identity/events_http.go
   - services/api/internal/identity/services_integration_test.go
   - services/api/internal/identity/store/**
   - services/api/internal/metering/metering.go

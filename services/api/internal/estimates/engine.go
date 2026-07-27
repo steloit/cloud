@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -70,6 +71,63 @@ type Line struct {
 	MonthlyCents int64   `json:"monthly_cents"`
 	Basis        string  `json:"basis"` // fixed | usage_projection
 	EgressNote   *string `json:"egress_note"`
+}
+
+// secondsInBillingMonth is the longest month, which is what the rollup can be
+// asked to weight a rate across.
+const secondsInBillingMonth = int64(31 * 24 * 60 * 60)
+
+// MaxMonthlyCents is the largest monthly price this platform can carry through
+// its WHOLE money path without wrapping — not merely the largest one multiply
+// survives.
+//
+// It is derived, not chosen. `metering.Rollup` computes `weighted += secs *
+// rate`, so a price the estimate accepts must still be multiplied by a month of
+// seconds downstream. An earlier version of this bound only guaranteed that
+// `base + n*perInstance` fit in an int64; a price just under that limit then
+// wrapped in the rollup, which is the same defect one layer later — the invoice
+// rather than the estimate.
+//
+// This is emphatically NOT a commercial ceiling. Choosing "at most N instances"
+// or "at most $X/month" is a pricing decision and this file does not make those
+// (founder, 2026-07-27). This is the point past which the platform's integers
+// stop being able to represent the answer at all, which is arithmetic.
+// Anything below it that is merely unaffordable is the hard spend cap's job.
+const MaxMonthlyCents = int64(math.MaxInt64) / secondsInBillingMonth
+
+// checkedAddMul returns base + count*unit, reporting false on overflow or on a
+// negative input rather than wrapping.
+//
+// Every priced dimension goes through this. The first version of the overflow
+// fix was written inline in the web/worker arm, and the two sibling arms of the
+// same switch kept wrapping: `postgres {storage_gb: 1e18}` returned 200 with
+// monthly_total_cents = -5340232221128652948, which then poisoned the org's
+// committed run-rate through SumOrgMonthlyEstimate and disabled the hard cap for
+// EVERY LATER CREATE. A per-arm guard is how that gap happened, so there is one
+// helper and no arm may compute a price without it.
+func checkedAddMul(base, count, unit int64) (int64, bool) {
+	if base < 0 || count < 0 || unit < 0 {
+		return 0, false
+	}
+	if unit != 0 && count > (math.MaxInt64-base)/unit {
+		return 0, false
+	}
+	return base + count*unit, true
+}
+
+// withinPriceCeiling reports whether a computed line price is representable all
+// the way through billing.
+func withinPriceCeiling(cents int64, ok bool) bool {
+	return ok && cents >= 0 && cents <= MaxMonthlyCents
+}
+
+// tooLargeToPrice is the single 422 for every dimension that overflows.
+func tooLargeToPrice(field string) ShapeError {
+	return ShapeError{
+		Field: field,
+		Detail: "too large to price — the monthly total would exceed what the platform can meter exactly " +
+			"(max " + strconv.FormatInt(MaxMonthlyCents, 10) + " cents/month)",
+	}
 }
 
 // ShapeError names the field a caller must fix (422 at the edge).
@@ -307,14 +365,22 @@ func Price(in ShapeInput) (Line, error) {
 			return Line{}, ShapeError{Field: "shape.storage_gb", Detail: "must be >= 0"}
 		}
 		if extra := storageGB - sz.IncludedGB; extra > 0 {
-			cents += int64(extra) * table.Postgres.StorageCentsPerGB
+			v, ok := checkedAddMul(cents, int64(extra), table.Postgres.StorageCentsPerGB)
+			if !withinPriceCeiling(v, ok) {
+				return Line{}, tooLargeToPrice("shape.storage_gb")
+			}
+			cents = v
 		}
 		ha, ok := shape["ha"].(bool)
 		if !ok {
 			return Line{}, fmt.Errorf("estimates: resolved ha is %T, not bool — shapeSchema and Price disagree", shape["ha"])
 		}
 		if ha {
-			cents += table.Postgres.HACents
+			v, ok := checkedAddMul(cents, 1, table.Postgres.HACents)
+			if !withinPriceCeiling(v, ok) {
+				return Line{}, tooLargeToPrice("shape.storage_gb")
+			}
+			cents = v
 		}
 		line.MonthlyCents = cents
 	case "valkey":
@@ -327,7 +393,11 @@ func Price(in ShapeInput) (Line, error) {
 		}
 		// price per GB, rounded up to whole GB (integer cents, never fractions)
 		gb := int64(math.Ceil(float64(memMB) / 1024.0))
-		line.MonthlyCents = gb * table.Valkey.MemoryCentsPerGB
+		v, ok := checkedAddMul(0, gb, table.Valkey.MemoryCentsPerGB)
+		if !withinPriceCeiling(v, ok) {
+			return Line{}, tooLargeToPrice("shape.memory_mb")
+		}
+		line.MonthlyCents = v
 	case "web", "worker":
 		sizes := table.Web.Sizes
 		if in.Product == "worker" {
@@ -348,47 +418,11 @@ func Price(in ShapeInput) (Line, error) {
 		if instances < 1 {
 			return Line{}, ShapeError{Field: "shape.instances", Detail: "must be >= 1"}
 		}
-		// UPPER BOUND — arithmetic integrity, not a commercial ceiling.
-		//
-		// Without it `int64(instances)*sz.InstanceCents` WRAPS. Reproduced
-		// end-to-end: PATCH override.instances = 9223372036854775807 returned
-		// HTTP 200 and wrote monthly_estimate_cents = -700. Three things then go
-		// wrong at once, and the first is the worst:
-		//
-		//   1. The hard spend cap is BYPASSED. UpdateService only enforces on
-		//      `delta > 0` ("a decrease is always allowed"), and a wrapped price
-		//      is a decrease. The one guard that exists to stop capacity being
-		//      provisioned outside an accepted estimate is skipped by the input
-		//      that needs it most.
-		//   2. ADR-025 is violated — money is integer cents, and negative cents
-		//      for provisioned capacity is not a price.
-		//   3. repriceSpan then opens a BILLING SPAN at a negative rate.
-		//
-		// The bound is deliberately NOT a product ceiling: picking "at most N
-		// instances" is a commercial decision and this file does not make those
-		// (founder, 2026-07-27 — never invent commercial pricing in
-		// implementation code). Anything below this bound but still absurd is
-		// refused by the hard spend cap, which is where that judgement belongs.
-		// This only refuses counts that cannot be PRICED correctly at all.
-		//
-		// Two limits, both mechanical: the multiply must not overflow int64, and
-		// the count must survive a JSON round-trip exactly — `desiredDoc` renders
-		// through map[string]any, so above 2^53 the cell, the audit row and the
-		// column each carry a different number.
-		const maxExactJSONInt = int64(1) << 53
-		maxPriceable := maxExactJSONInt
-		if sz.InstanceCents > 0 {
-			if lim := (math.MaxInt64 - sz.ServiceBaseCents) / sz.InstanceCents; lim < maxPriceable {
-				maxPriceable = lim
-			}
+		v, ok := checkedAddMul(sz.ServiceBaseCents, int64(instances), sz.InstanceCents)
+		if !withinPriceCeiling(v, ok) {
+			return Line{}, tooLargeToPrice("shape.instances")
 		}
-		if int64(instances) > maxPriceable {
-			return Line{}, ShapeError{
-				Field:  "shape.instances",
-				Detail: "too large to price exactly — the monthly total would overflow or lose precision, so the capacity could not be metered",
-			}
-		}
-		line.MonthlyCents = sz.ServiceBaseCents + int64(instances)*sz.InstanceCents
+		line.MonthlyCents = v
 	default:
 		// resolve() already rejected products absent from shapeSchema, so
 		// reaching here means a product was DECLARED but never given a pricing
@@ -421,7 +455,21 @@ func PriceAll(in []ShapeInput) ([]Line, int64, error) {
 			return nil, 0, err
 		}
 		lines = append(lines, l)
-		total += l.MonthlyCents
+		// The TOTAL is bounded too, not just each line. Bounding only the lines
+		// moved the wrap up one level rather than removing it: two individually
+		// legal web lines produced `monthly_total_cents: -3016` over HTTP, and
+		// the total is the number the customer accepts, the number persisted,
+		// and the number the estimate gate compares. Reachable through
+		// `shape.instances` with no override anywhere.
+		v, ok := checkedAddMul(total, 1, l.MonthlyCents)
+		if !withinPriceCeiling(v, ok) {
+			return nil, 0, ShapeError{
+				Field: "services",
+				Detail: "the estimate total is too large to price — the combined monthly cost would exceed " +
+					"what the platform can meter exactly (max " + strconv.FormatInt(MaxMonthlyCents, 10) + " cents/month)",
+			}
+		}
+		total = v
 	}
 	return lines, total, nil
 }

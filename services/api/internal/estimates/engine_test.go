@@ -613,3 +613,170 @@ func TestResolvedDefaultsAreExactlyTheDeclaredConfiguration(t *testing.T) {
 		})
 	}
 }
+
+// The price ceiling, at its exact boundary and on every priced dimension.
+//
+// The first version of this bound lived inline in the web/worker arm and was
+// pinned only by MaxInt64 — about 1.7e3 times the actual boundary — so three
+// separate one-token mutations moved the limit and the whole suite stayed
+// green, each one readmitting a negative price. A guard tested only far from its
+// edge is a guard whose edge is undefined.
+//
+// Every expected value is DERIVED from the loaded pricing table, never retyped:
+// a retyped constant would drift the moment pricing.json changed and would then
+// be testing the constant.
+func TestThePriceCeilingSitsExactlyAtTheLastRepresentableConfiguration(t *testing.T) {
+	for _, product := range []string{"web", "worker"} {
+		sizes := table.Web.Sizes
+		if product == "worker" {
+			sizes = table.Worker.Sizes
+		}
+		for size, sz := range sizes {
+			if sz.InstanceCents <= 0 {
+				continue
+			}
+			// The largest count whose price is both representable and meterable.
+			max := (MaxMonthlyCents - sz.ServiceBaseCents) / sz.InstanceCents
+			t.Run(product+"/"+size, func(t *testing.T) {
+				at, err := Price(ShapeInput{Product: product, Name: "x",
+					Shape: map[string]any{"size": size, "instances": int(max)}})
+				if err != nil {
+					t.Fatalf("the largest representable count (%d) was refused: %v", max, err)
+				}
+				want := sz.ServiceBaseCents + max*sz.InstanceCents
+				if at.MonthlyCents != want {
+					t.Fatalf("price at the boundary = %d, want %d", at.MonthlyCents, want)
+				}
+				if at.MonthlyCents <= 0 {
+					t.Fatalf("the boundary price is not positive: %d", at.MonthlyCents)
+				}
+				// One past it must be refused — this is what `>` vs `>=` and an
+				// off-by-one in the divisor both break.
+				if _, err := Price(ShapeInput{Product: product, Name: "x",
+					Shape: map[string]any{"size": size, "instances": int(max + 1)}}); err == nil {
+					t.Fatalf("one past the boundary (%d) was accepted", max+1)
+				}
+				// And the floor still prices normally.
+				one, err := Price(ShapeInput{Product: product, Name: "x",
+					Shape: map[string]any{"size": size, "instances": 1}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if one.MonthlyCents != sz.ServiceBaseCents+sz.InstanceCents {
+					t.Fatalf("one instance = %d, want %d", one.MonthlyCents, sz.ServiceBaseCents+sz.InstanceCents)
+				}
+			})
+		}
+	}
+}
+
+// Every priced dimension is bounded, not just the one that was reported.
+//
+// The overflow was found on `override.instances`, fixed in the web/worker arm,
+// and the two sibling arms of the same switch kept wrapping — postgres
+// `storage_gb` returned a price of -5340232221128652948, which then poisoned
+// the org's committed run-rate and disabled its spend cap for every later
+// create. This asserts the class, one case per priced dimension.
+func TestEveryPricedDimensionRefusesWhatItCannotRepresent(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		in      ShapeInput
+		wantFld string
+	}{
+		{"postgres storage", ShapeInput{Product: "postgres", Name: "d",
+			Shape: map[string]any{"size": "dev", "storage_gb": int(1) << 60}}, "shape.storage_gb"},
+		{"valkey memory", ShapeInput{Product: "valkey", Name: "c",
+			Shape: map[string]any{"memory_mb": int(1) << 60}}, "shape.memory_mb"},
+		{"web instances", ShapeInput{Product: "web", Name: "a",
+			Shape: map[string]any{"size": "standard-1", "instances": int(1) << 60}}, "shape.instances"},
+		{"worker instances", ShapeInput{Product: "worker", Name: "w",
+			Shape: map[string]any{"size": "standard-1", "instances": int(1) << 60}}, "shape.instances"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line, err := Price(tc.in)
+			if err == nil {
+				t.Fatalf("accepted, priced at %d — money is integer cents (ADR-025), and a wrapped price also disables the spend cap, because the cap only enforces on an increase", line.MonthlyCents)
+			}
+			var se ShapeError
+			if !errors.As(err, &se) || se.Field != tc.wantFld {
+				t.Fatalf("want a ShapeError naming %s, got %v", tc.wantFld, err)
+			}
+		})
+	}
+}
+
+// The AGGREGATE is bounded too. Bounding each line moved the wrap up a level
+// rather than removing it: two individually legal lines produced a negative
+// monthly_total_cents over HTTP, and the total is what the customer accepts,
+// what is persisted, and what the estimate gate compares.
+func TestAnEstimateTotalCanNeverWrap(t *testing.T) {
+	sz := table.Web.Sizes["standard-1"]
+	max := int((MaxMonthlyCents - sz.ServiceBaseCents) / sz.InstanceCents)
+	in := []ShapeInput{
+		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": max}},
+		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": max}},
+	}
+	lines, total, err := PriceAll(in)
+	if err == nil {
+		t.Fatalf("two individually-legal lines produced total=%d from lines %d + %d — the total is the number the customer accepts and the gate compares",
+			total, lines[0].MonthlyCents, lines[1].MonthlyCents)
+	}
+	var se ShapeError
+	if !errors.As(err, &se) {
+		t.Fatalf("want a ShapeError, got %v", err)
+	}
+	// A pair that DOES fit still prices, and the total is the sum.
+	lines, total, err = PriceAll([]ShapeInput{
+		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": 2}},
+		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": 3}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != lines[0].MonthlyCents+lines[1].MonthlyCents {
+		t.Fatalf("total %d is not the sum of %d and %d", total, lines[0].MonthlyCents, lines[1].MonthlyCents)
+	}
+}
+
+// The ceiling is derived from what the BILLING ROLLUP can carry, not from what
+// one multiply survives. metering.Rollup computes `weighted += secs * rate`, so
+// a price the estimate accepts is multiplied by a month of seconds downstream.
+// An earlier bound guaranteed only that `base + n*perInstance` fit an int64;
+// prices just under it then wrapped in the rollup — the same defect, one layer
+// later, on the invoice instead of the estimate.
+func TestTheAcceptedPriceSurvivesAFullBillingMonth(t *testing.T) {
+	// Runtime values, not constants: Go rejects a constant expression that
+	// overflows at COMPILE time, so writing this with constants makes the very
+	// regression it guards unbuildable rather than failing — which reads as a
+	// broken test, not a caught bug.
+	secs := int64(31 * 24 * 60 * 60)
+	maxPrice := MaxMonthlyCents
+	if maxPrice <= 0 {
+		t.Fatalf("MaxMonthlyCents is %d", maxPrice)
+	}
+	if got := maxPrice * secs; got <= 0 || got/secs != maxPrice {
+		t.Fatalf("the maximum accepted price wraps when weighted across a month: %d * %d = %d — metering.Rollup does exactly this multiplication, so a price the estimate accepts must survive it",
+			maxPrice, secs, got)
+	}
+}
+
+// The ceiling's own boundary, asserted on the predicate that owns it.
+//
+// The end-to-end boundary test cannot pin this: integer division makes the
+// largest priceable configuration land strictly BELOW MaxMonthlyCents, so
+// `<=` → `<` is invisible there. The predicate is where the comparison lives,
+// so it is where the comparison is tested.
+func TestThePriceCeilingIsInclusive(t *testing.T) {
+	if !withinPriceCeiling(MaxMonthlyCents, true) {
+		t.Fatalf("a price of exactly MaxMonthlyCents (%d) was refused; the ceiling is the largest price the money path can carry, so it is legal", MaxMonthlyCents)
+	}
+	if withinPriceCeiling(MaxMonthlyCents+1, true) {
+		t.Fatal("a price one cent past the ceiling was accepted")
+	}
+	if withinPriceCeiling(-1, true) {
+		t.Fatal("a negative price was accepted — that is the wrap this whole bound exists to make impossible")
+	}
+	if withinPriceCeiling(100, false) {
+		t.Fatal("a price whose arithmetic reported overflow was accepted anyway")
+	}
+}
