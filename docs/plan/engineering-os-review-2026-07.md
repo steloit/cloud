@@ -15,10 +15,15 @@
 > 1. **`Price`'s `default:` arm was never deleted** (H1 below). `34774cd` already carried
 >    it; US-3.7 repurposed it in place. The 0-cent outcome existed only as a counterfactual
 >    in a code comment. Corrected text: `.claude/agents/reviewer.md` dimension 7.
-> 2. **CK-M3 did not ship a non-skip-proof gate** (C5 below). Its claim commit had
->    `verify: []` and its implementation commit already carried the grep form — CK-M3 is
->    where the fix was invented. The real silent-skip incident is **US-1.3**
->    (`tasks/e1-substrate/US-1.3.md:196`). Corrected text: `.claude/skills/verify/SKILL.md`.
+> 2. **The CK-M3 claim is UNVERIFIABLE, not false** (C5 below). PR #302 was squashed, so
+>    CK-M3's pre-review state is not in the history at all — "its implementation commit
+>    already carried the grep form" is an artifact of squashing, not evidence about the
+>    first submission, and `4b9ace6`'s own body says "a skipped checkpoint also read as
+>    green". A first correction here asserted the claim was false, which read absence of
+>    evidence as evidence of absence — the thing AGENTS.md step 8 forbids, applied to
+>    entries but not, at first, to corrections. The entry now cites **US-1.3**
+>    (`tasks/e1-substrate/US-1.3.md:196`) because its incident IS directly citable.
+>    Corrected text: `.claude/skills/verify/SKILL.md`.
 > 3. **"Every survivor was found in an unexplored class, never in a re-run"** (H6 below) is
 >    falsified by C1's own evidence — the base64 finding came from a reviewer re-running the
 >    builder's mutation against a different representation. Corrected text:

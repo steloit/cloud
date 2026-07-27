@@ -45,10 +45,11 @@ The PR number/branch and a summary of intent. Read the diff yourself:
    describing a condition it no longer owned — a review required it be repurposed to catch
    "declared but never priced", the gap the move opened. The general form is wider than
    deletion: ask what the FIX disturbed, not only what the feature changed. Two further
-   E3 blockers were introduced by fixes for earlier findings (an unfenced destructive
-   statement that omitted a fence its siblings had; a key encoding that no store could
-   accept) — in each case the author verified the thing they set out to fix, not the thing
-   they touched on the way.
+   E3 blockers were introduced by fixes for earlier findings: an unfenced destructive
+   statement that omitted a fence its siblings had (a review caught it), and a key encoding
+   no store could accept (the GATE caught that one — it is evidence for "the author verified
+   what they set out to fix, not what they touched", not for this dimension's premise that
+   reviewers see what gates cannot).
 
    Report a finding when you can show the guard's responsibility has no remaining owner —
    an absent caller, an unreachable arm, a constraint with no server-side peer are all
