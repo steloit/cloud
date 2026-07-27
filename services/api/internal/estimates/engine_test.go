@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steloit/cloud/services/api/internal/canon"
 )
@@ -667,14 +668,27 @@ func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
 		}
 		for size, sz := range sizes {
 			if sz.InstanceCents <= 0 {
-				continue
+				// LOUD, not skipped. maxPriceableInstances marks this arm as
+				// unreachable from the shipped catalog; the day it becomes
+				// reachable is the day that mark stops being true, and a silent
+				// `continue` would drop this size's coverage at exactly that
+				// moment without saying so.
+				t.Fatalf("%s/%s prices at 0 per instance — the unreachable arm in maxPriceableInstances is now LIVE, so its comment is stale and this test no longer covers this size", product, size)
 			}
 			max := (maxMonthlyCents - sz.ServiceBaseCents) / sz.InstanceCents
 			t.Run(product+"/"+size, func(t *testing.T) {
 				// A ceiling low enough to be a product decision is a product
-				// decision, whatever the comment says.
-				if max < 1_000_000_000 {
-					t.Fatalf("%s/%s refuses above %d instances — a limit that low is a commercial ceiling, and the engine does not make those (founder, 2026-07-27)", product, size, max)
+				// decision, whatever the comment says. The floor is DERIVED from
+				// the catalog's cheapest priced instance rather than a literal:
+				// a literal 1e9 trips the moment an expensive size is added
+				// (instance_cents > 3443), which would report "commercial
+				// ceiling" for what is really "we added a bigger machine". The
+				// message names both readings, because the test cannot tell them
+				// apart and should not pretend to.
+				floor := maxMonthlyCents / (cheapestInstanceCents() * 1000)
+				if max < floor {
+					t.Fatalf("%s/%s refuses above %d instances (floor %d) — either the ceiling has become a commercial limit, which the engine does not impose (founder, 2026-07-27), or this size is expensive enough that the floor needs re-deriving. Decide which; do not just lower the floor.",
+						product, size, max, floor)
 				}
 				at, err := Price(ShapeInput{Product: product, Name: "x",
 					Shape: map[string]any{"size": size, "instances": int(max)}})
@@ -746,4 +760,59 @@ func TestAPinIsPriceableOnlyWhereTheShapeDeclaresInstances(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The billing-month constant is pinned against the arithmetic that actually
+// multiplies it — not against itself.
+//
+// `secondsInLongestMonth` had one representation in `engine.go` and another in
+// `metering.Rollup`, which multiplies a rate by the REAL elapsed seconds of a
+// period. Changing the constant from 31 days to 30 survived every package,
+// because the ceiling and the test that checked it moved together. The
+// consequence was not academic: a 30-day constant admits a rate of
+// 3,558,399,704,200 cents/month, and multiplying that by a real 31-day period
+// gives 9.53e18, which wraps to -8,915,926,305,980,271,616 in
+// `weighted += secs * rate` — persisted as `quota_usage.rate_cents`, the number
+// billing derives charges from.
+//
+// So this derives the longest real period from the same `AddDate(0, 1, 0)`
+// arithmetic `metering.periodBounds` uses, across a leap year and a non-leap
+// year, and asserts the constant covers it. Two representations, one invariant,
+// and now the test depends on the one the constant does not control.
+func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
+	var longest int64
+	var when string
+	for _, year := range []int{2024, 2026} { // leap and non-leap
+		for month := 1; month <= 12; month++ {
+			start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+			// The same expression periodBounds uses to find a period's end.
+			secs := int64(start.AddDate(0, 1, 0).Sub(start).Seconds())
+			if secs > longest {
+				longest, when = secs, start.Format("2006-01")
+			}
+		}
+	}
+	if secondsInLongestMonth < longest {
+		t.Fatalf("secondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
+			secondsInLongestMonth, when, longest)
+	}
+	// And the ceiling it produces genuinely survives that period.
+	if got := maxMonthlyCents * longest; got <= 0 || got/longest != maxMonthlyCents {
+		t.Fatalf("the maximum accepted rate wraps across %s: %d × %d = %d", when, maxMonthlyCents, longest, got)
+	}
+}
+
+// cheapestInstanceCents is the lowest per-instance rate in the shipped catalog,
+// so the commercial-ceiling floor scales with the catalog instead of with a
+// literal that a new size invalidates.
+func cheapestInstanceCents() int64 {
+	cheapest := int64(0)
+	for _, sizes := range []map[string]computeSize{table.Web.Sizes, table.Worker.Sizes} {
+		for _, sz := range sizes {
+			if sz.InstanceCents > 0 && (cheapest == 0 || sz.InstanceCents < cheapest) {
+				cheapest = sz.InstanceCents
+			}
+		}
+	}
+	return cheapest
 }

@@ -62,7 +62,7 @@ endpoint that accepts a caller-supplied expiry all make it live.
 
 ## What to build
 
-A property test, not a table — the acceptance is the biconditional:
+Under Option B, a property test, not a table:
 
     for any expires_at string s at a fixed instant T:
         sqlKeeps(s, T)  ⟺  goLive(s, T)
@@ -80,15 +80,69 @@ widths 0–9, leap seconds, year `0000` and `99999`, space separator, lowercase
 **It must fail on the three strings above before the fix**, so the ticket
 reproduces itself.
 
-## Fix direction
+## Fix direction — DELETION FIRST, and read this before tightening anything
 
-Prefer making SQL agree with Go rather than the reverse: Go's rule is the one
-the API enforces and the one the customer's pin was accepted under. Tightening
-the regex to require the colon and reject hour 24 is the smaller change; the
-alternative — relaxing Go — would start honouring pins the API never promised.
+**Option A (preferred): delete the SQL liveness predicate entirely.**
 
-Whichever way it goes, the two rules should stop being two rules. Consider
-whether the liveness decision can live in one place that both sides call.
+`ListExpiredOverrides` becomes `WHERE override IS NOT NULL AND status <>
+'deleting'` — already index-bounded by `services_override_idx`, on the same
+premise that index rests on (pins are rare and short-lived by construction) —
+and the sweep filters liveness in Go with `overrideInstances`, which already
+owns that decision. There is then ONE implementation and nothing to disagree.
+
+What this retires, all together: the regex arm, the `pg_input_is_valid` arm, the
+malformed-row batch-abort hazard, **the PostgreSQL 16 floor and `db.Connect`'s
+version probe with its two tests**, the CNPG `imageName` pin, the
+exactly-at-expiry SQL boundary test — and this task itself.
+
+**Do not count the batch-resilience argument on the "keep" side.** It is
+circular: the malformed-row abort exists ONLY because the SQL casts
+`expires_at` to `timestamptz`. Under the Go filter there is no cast in the
+query, so there is no batch to make resilient. The resilience is a COST of the
+SQL predicate, not a benefit of it. (US-3.8 architecture review, correcting the
+implementer's own stated reason for deferring.)
+
+**Weigh honestly, though:** dropping the PG16 floor is easy and raising one
+later is not. That predicate cost a database version requirement *and* produced
+three of US-3.8's recorded mistakes — which makes the case stronger than "retire
+the disagreement", but the floor is still a deliberate decision to give up, not
+a benefit to bank.
+
+**Deletion MOVES risk rather than removing it.** Three things need tests
+afterwards, none of them string-parsing agreement (US-3.8 QA review):
+
+1. **A bad row must not stop the sweep.** This is the strongest argument FOR
+   deletion — today one malformed `expires_at` can abort the whole statement,
+   silently, for every customer; a Go parse error is per-row. But
+   `expireOverride`'s loop could still `return` where it should `continue`, so
+   `TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne` needs
+   RETARGETING, not deleting.
+2. **A live pin must cost no per-row work.** `WHERE override IS NOT NULL` lists
+   every pinned service, not every expired one, and `expireOverride` does three
+   round trips before the clear. If the liveness filter does not run BEFORE
+   those, the sweep does N× the work every five minutes — the "permanent
+   busy-work with no symptom" `TestTheSweepLeavesADeletingServiceAlone` exists
+   to prevent.
+3. **Whose clock decides.** Genuinely new, and neither design has a test for it.
+   Today the sweep defers to Postgres's `now()`. Afterwards the Go process's
+   `time.Now()` is authoritative — better in that there is one clock, but
+   skewed API replicas can then disagree about liveness where they previously
+   all deferred to the database.
+
+**Option B (only if A is rejected): tighten the SQL regex** to require the
+offset colon and reject hour 24, and add the property test below. This makes the
+two-implementation split PERMANENT. It is the smaller diff and the worse
+outcome, and it is recorded second deliberately — an earlier version of this
+task named it first, which would have had an implementer close off Option A
+cheaply and correctly without ever seeing it.
+
+## The property test (Option B only)
+
+WITHDRAWN under Option A: a biconditional with one side deleted asserts that a
+thing agrees with itself, which can only pass. Insurance against an impossible
+disagreement is worse than no test, because it reports coverage.
+
+Under Option B, the acceptance is the biconditional:
 
 ## Also in scope: the contract does not advertise the bounds
 

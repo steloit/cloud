@@ -246,4 +246,3 @@ Two test fixtures asserted on states the API cannot produce: an override with no
 `intent: "transactional"`.
 
 Evidence: `services/api` 23 packages, 0 failures, 0 skips (serial, `-p 1 -timeout 30m`); cell-agent 5; CLI 2. No `-race` — see O14, which owns a pre-existing fixture race that fails under it.
-RC=0, `services/cell-agent` 5 RC=0 under `-race`; zero failures, zero skips.
