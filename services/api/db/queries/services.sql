@@ -60,6 +60,11 @@ WHERE s.id = $1;
 -- A pin with NO expires_at is expired BY DEFINITION: "unset" must not mean
 -- "forever", and such a row is otherwise unreachable by any sweep.
 --
+-- REQUIRES PostgreSQL 16+ (`pg_input_is_valid`), the repo's first use of it.
+-- On 15 this fails every tick with "function does not exist" and the only
+-- symptom is a log line, so the control DB's floor is now 16 — stated here
+-- because nothing else records it.
+--
 -- The timestamp cast is GUARDED: one row with a malformed expires_at would
 -- otherwise abort the whole statement, and the sweep would then fail on every
 -- tick, silently, for every customer.

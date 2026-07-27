@@ -141,7 +141,7 @@ func TestServices(t *testing.T) {
 	// postgres has no priced instance count, so the replicas a pin provisions
 	// cannot be metered — and the platform must never provision capacity it
 	// cannot bill correctly. Re-enabled when per-replica pricing is ratified
-	// (US-3.10); the priceable path (web/worker) is covered by
+	// (US-11.9); the priceable path (web/worker) is covered by
 	// TestManualOverrideRespectsTheCapAndExpires.
 	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"override":{"instances":5,"reason":"load test"}}`, ownerCk)
 	if resp.StatusCode != 422 || !strings.Contains(body, "override.instances") {
@@ -928,5 +928,63 @@ func TestAnEditWithoutAnOverrideClearsThePinEverywhere(t *testing.T) {
 	edges := spanRates(t, w, svc.Id)
 	if last := edges[len(edges)-1]; last.edge != "open" || last.rate != int64(svc.MonthlyEstimateCents) {
 		t.Fatalf("billing did not return to the base rate: final span %s@%d, want open@%d", last.edge, last.rate, svc.MonthlyEstimateCents)
+	}
+}
+
+// A malformed shape on PATCH must be a 422 naming the field, exactly as it is
+// on POST /v1/estimates — one class of error, one answer.
+//
+// The Price call that used to validate the merged shape was removed when
+// pricing was unified; Resolve became the first validator and its error path
+// returned the raw error, so a client typo became a 500 with an event id and
+// "contact support". Three shapes, three ways to be wrong.
+func TestAMalformedShapeOnPatchIsAFieldErrorNotA500(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "badshape@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"badshapeco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	for _, tc := range []struct{ name, shape, field string }{
+		{"unknown key", `{"bogus":1}`, "shape.bogus"},
+		{"wrong type", `{"size":123}`, "shape.size"},
+		{"fractional int", `{"instances":1.5}`, "shape.instances"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := w.patch(t, "/v1/services/"+svc.Id, `{"shape":`+tc.shape+`}`, ownerCk)
+			if resp.StatusCode != 422 {
+				t.Fatalf("%s returned %d, want 422 naming the field — a typo must not read as a server fault: %s",
+					tc.shape, resp.StatusCode, body)
+			}
+			if !strings.Contains(body, tc.field) {
+				t.Fatalf("the refusal must name %s: %s", tc.field, body)
+			}
+		})
 	}
 }

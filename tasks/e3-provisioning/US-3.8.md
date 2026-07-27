@@ -13,8 +13,15 @@ labels: [Backend, Billing]
 module: M4 Provisioning
 contexts: [provisioning, api-conventions]
 files:
-  - services/api/internal/provisioning/services.go
+  - services/api/cmd/api/main.go
+  - services/api/db/queries/services.sql
+  - services/api/internal/estimates/engine.go
   - services/api/internal/identity/services_integration_test.go
+  - services/api/internal/identity/store/**
+  - services/api/internal/metering/metering.go
+  - services/api/internal/provisioning/services.go
+  - services/api/internal/reconcile/wiring_integration_test.go
+  - tasks/e11-billing/US-11.9.md
   - tasks/e3-provisioning/US-3.8.md
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go build ./... && go vet ./... && go test ./..."
@@ -112,6 +119,19 @@ US-3.7's architecture review (2026-07-26), reproduced live.
 ## Related
 
 US-3.7 (the same law on the create path) · T11.6 (the hard spend cap) · D10
+
+## Recorded decisions and consequences
+
+**Every PATCH now reprices from the current catalog.** Previously a scaling-only
+edit preserved the stored price. This is what makes un-pinning correct — the
+price follows the effective configuration, whatever the edit touched — and it is
+consistent with US-3.7's direction that the configuration is the contract and
+the price is derived from it. Recorded as a decision rather than left as a side
+effect of the restructure.
+
+**The control DB floor is now PostgreSQL 16**, for `pg_input_is_valid` in the
+expiry predicate. Stated in the query itself; on 15 the sweep would fail every
+tick with only a log line as the symptom.
 
 ## Outcome
 

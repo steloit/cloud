@@ -607,6 +607,18 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		// resolved form.
 		resolvedMerged, err := estimates.Resolve(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
 		if err != nil {
+			// Resolve is now the FIRST validator of the merged shape — the
+			// Price call that used to be here owned the ShapeError → 422
+			// conversion as a second job nobody had written down. Without this,
+			// a client typo (`{"bogus":1}`, `{"size":123}`) became a 500 with
+			// an event id and "contact support" instead of the field that is
+			// wrong, while the same input still returned 422 on
+			// POST /v1/estimates — one class of error, two answers.
+			var se estimates.ShapeError
+			if errors.As(err, &se) {
+				return store.Service{}, problemError{p: problem.ValidationFailed(
+					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
+			}
 			return store.Service{}, err
 		}
 		merged, err := json.Marshal(resolvedMerged)
