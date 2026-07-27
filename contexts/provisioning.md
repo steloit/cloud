@@ -100,6 +100,12 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   order (which is why `CASE` is still right, forward-looking), but that was not the mechanism here, and
   "a plan might reorder this" and "I wrote this guard twice" have different fixes. **A mistake bank
   entry that names the wrong cause teaches the wrong reflex** — the same failure O11 was corrected for.
+- **A module-only `cp -R` gives a red baseline for tests that reach outside the module.** The
+  fault-injection rule says copy the module, mutate the copy — but `TestCKM3EstimateGatedProvisioningEndToEnd`
+  and `TestEveryAssistantHandlerGatesOnPolicy` read `../../../../docs/…` and `apps/cli`, so under
+  `cp -R services/api` they fail before any mutation is applied. Establish the baseline FIRST and
+  name the pre-failing tests, or copy from the repo root when the sweep touches those packages.
+  A reviewer who skips the baseline spends the session chasing a red they introduced.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

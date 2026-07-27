@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/steloit/cloud/services/api/internal/platform/db"
@@ -60,4 +61,64 @@ func TestConnectEnforcesThePostgres16Floor(t *testing.T) {
 		}
 		pool.Close()
 	})
+
+	// The FLOOR itself, not "some 16.x". Without this, `< 160000` can be
+	// weakened to `<= 160000` — refusing PostgreSQL 16.0 exactly — and both
+	// other subtests stay green, because the images they run are 16.14 and 15.
+	// Unreachable in production today (the CNPG manifest pins 16.6), but a
+	// boundary nothing asserts is a boundary that drifts.
+	t.Run("accepts exactly 16.0, the floor", func(t *testing.T) {
+		pool, err := db.Connect(context.Background(), runPG(t, "postgres:16.0-alpine"))
+		if err != nil {
+			t.Fatalf("Connect rejected PostgreSQL 16.0, which is exactly the floor: %v", err)
+		}
+		pool.Close()
+	})
+}
+
+// A server that cannot ANSWER the version question is refused too.
+//
+// The floor's failure mode has two arms, and only one of them was covered: the
+// comparison, and the query. Making the version query's error path return the
+// pool anyway (`return pool, nil`) left the whole suite green — so a database
+// that cannot report its version would have booted unchecked, which is the same
+// silent degradation the floor exists to prevent. An unverifiable floor is not
+// a satisfied floor.
+func TestConnectRefusesAServerThatCannotReportItsVersion(t *testing.T) {
+	url := runPG(t, "postgres:16-alpine")
+	ctx := context.Background()
+
+	// Take current_setting away from a non-superuser and connect as them.
+	// Superusers bypass ACLs, so the role has to be ordinary.
+	admin, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE ROLE lowly LOGIN PASSWORD 'lowly'`,
+		`GRANT CONNECT ON DATABASE app TO lowly`,
+		`REVOKE EXECUTE ON FUNCTION pg_catalog.current_setting(text) FROM PUBLIC`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			admin.Close()
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	admin.Close()
+
+	lowURL := strings.Replace(url, "://app:app@", "://lowly:lowly@", 1)
+	if lowURL == url {
+		t.Fatalf("could not rewrite the connection string for the restricted role: %s", url)
+	}
+	pool, err := db.Connect(ctx, lowURL)
+	if err == nil {
+		pool.Close()
+		t.Fatal("Connect accepted a server whose version it could not read — the floor is unverified, and an unverified floor is not a satisfied floor")
+	}
+	if pool != nil {
+		t.Fatal("Connect returned a live pool alongside an error; the caller will leak it")
+	}
+	if !strings.Contains(err.Error(), "version check") {
+		t.Fatalf("the refusal must say the version check failed, got: %v", err)
+	}
 }

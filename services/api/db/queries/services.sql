@@ -122,12 +122,14 @@ WHERE override IS NOT NULL
         WHEN (override->>'expires_at') !~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$' THEN true
         -- Shaped like a timestamp but not one ('2026-13-45T99:99:99Z').
         WHEN NOT pg_input_is_valid(override->>'expires_at', 'timestamptz') THEN true
-        -- KNOWN BOUNDARY, deliberately uncovered: swapping <= for < survives
-        -- mutation and no test can kill it — now() has moved on by the time any
-        -- assertion runs. Go pins the half-open window (exactly-at-expiry is
-        -- DEAD, TestOverrideLiveness) and <= is the arm that agrees with it; a
-        -- bare < would strand a pin for one tick at the exact boundary.
-        -- Recorded rather than claimed as covered.
+        -- <= not <, and it is TESTED: inside one transaction now() is fixed,
+        -- so a pin written from now() in this same transaction is exactly at
+        -- the boundary. TestAPinExpiringAtExactlyNowIsSweptNotStranded drives
+        -- this query there. (Recorded first as an unkillable boundary; that was
+        -- wrong — the reasoning held for the sweep, which runs its SELECT in
+        -- its own transaction, not for a test that controls the transaction.)
+        -- Go pins the same half-open window in TestOverrideLiveness, and this
+        -- is the one point where the two implementations must agree.
         ELSE (override->>'expires_at')::timestamptz <= now()
       END;
 
