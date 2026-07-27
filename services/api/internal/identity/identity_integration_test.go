@@ -457,7 +457,7 @@ func TestIdempotentEstimateReplaysInsteadOfBurningASecond(t *testing.T) {
 		return r, string(b)
 	}
 
-	const reqBody = `{"services":[{"product":"postgres","intent":"transactional"}]}`
+	const reqBody = `{"services":[{"product":"postgres","intent":"database"}]}`
 	first, body1 := estimate("est-key-1", reqBody)
 	if first.StatusCode != 200 {
 		t.Fatalf("createEstimate: %d %s", first.StatusCode, body1)
@@ -500,7 +500,7 @@ func TestTwoUsersSharingAKeyFromOneIPDoNotShareAnEstimate(t *testing.T) {
 	estimate := func(ck string) (*http.Response, string) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodPost, w.srv.URL+"/v1/estimates",
-			strings.NewReader(`{"services":[{"product":"postgres","intent":"transactional"}]}`))
+			strings.NewReader(`{"services":[{"product":"postgres","intent":"database"}]}`))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Cookie", ck)
 		req.Header.Set("Idempotency-Key", "shared-across-users")
@@ -554,7 +554,7 @@ func TestIdempotentReuseWithDifferentBodyIsRefusedEndToEnd(t *testing.T) {
 		r.Body.Close()
 		return r, string(b)
 	}
-	estimate("k-mismatch", `{"services":[{"product":"postgres","intent":"transactional"}]}`)
+	estimate("k-mismatch", `{"services":[{"product":"postgres","intent":"database"}]}`)
 	got, body := estimate("k-mismatch", `{"services":[{"product":"valkey","intent":"cache"}]}`)
 	if got.StatusCode != http.StatusConflict {
 		t.Fatalf("same key + different body must be 409, got %d %s", got.StatusCode, body)

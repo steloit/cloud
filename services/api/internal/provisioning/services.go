@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -230,18 +231,93 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	// Coverage pre-check BEFORE burning the one-shot estimate (estimate rows
 	// are immutable, so this is race-free): a mistyped create keeps the
 	// estimate usable — better DX, same law.
-	priced, err := est.Shapes(ctx, in.EstimateID)
+	priced, pricedLines, err := est.PricedShapes(ctx, in.EstimateID)
 	if err != nil {
 		return store.Service{}, err
 	}
-	matched := false
-	for _, sh := range priced {
-		if sh.Product == in.Product && priceOf(sh) == line.MonthlyCents {
-			matched = true
-			break
+	// The gate binds to the CONTRACTED CONFIGURATION, not to a price.
+	//
+	// Matching on (product, price) was substitutable: prices collide — a
+	// postgres `dev` with 78 GB and a `standard` both come to 5800¢ — so a
+	// caller could price one configuration and provision the other, in either
+	// direction, and the gate agreed because the number agreed (US-3.7).
+	//
+	// estimates.Canonical resolves defaults, so the same configuration spelled
+	// differently still matches; what it cannot do is let a DIFFERENT
+	// configuration through because it happens to cost the same.
+	want, err := estimates.Canonical(estimates.ShapeInput{
+		Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: in.Shape,
+	})
+	if err != nil {
+		var se estimates.ShapeError
+		if errors.As(err, &se) {
+			return store.Service{}, problemError{p: problem.ValidationFailed(
+				[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
 		}
+		return store.Service{}, err
+	}
+	matched := false
+	// A stored shape we cannot read must not condemn its SIBLINGS. Failing the
+	// whole estimate on the first bad shape made the outcome depend on array
+	// order: the same estimate would refuse or succeed depending on whether the
+	// unreadable shape sat before or after the one being created.
+	sawUnreadable := false
+	for i, sh := range priced {
+		got, cerr := estimates.Canonical(sh)
+		if cerr != nil {
+			// A stored shape we cannot canonicalize is an internal
+			// inconsistency — but estimate rows are IMMUTABLE, so "retry" (the
+			// 500 remediation) can never succeed. The actionable answer is the
+			// same as any unusable estimate: get a fresh one. The cause is
+			// logged rather than surfaced.
+			slog.ErrorContext(ctx, "provisioning: stored estimate shape is not canonicalizable",
+				"estimate", in.EstimateID, "index", i, "err", cerr)
+			sawUnreadable = true
+			continue
+		}
+		if got != want {
+			continue
+		}
+		// The price the customer was SHOWN must still be the price they pay.
+		// Comparing against a freshly computed price could only ever agree with
+		// itself; the stored line is what was on their screen, so a pricing
+		// table that moved under a live estimate is caught here.
+		//
+		// A missing line is an internal inconsistency, never a pass: skipping
+		// the check would provision at the CURRENT price with no conflict —
+		// silently failing open in a billing guard.
+		if i >= len(pricedLines) {
+			// KNOWN DEAD BRANCH, deliberately kept: `estimates.lines` is NOT
+			// NULL and PriceAll preserves length, so this is unreachable today
+			// and no test covers it (a `if false` here survives the suite —
+			// stated so it is not mistaken for tested).
+			//
+			// Same reasoning as the un-canonicalisable shape above: fail
+			// CLOSED, but with remediation the customer can act on. Estimate
+			// rows are immutable, so "retry" could never succeed.
+			slog.ErrorContext(ctx, "provisioning: estimate has fewer lines than shapes; cannot verify the price shown",
+				"estimate", in.EstimateID, "shapes", len(priced), "lines", len(pricedLines))
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate can no longer be used"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
+		if pricedLines[i].MonthlyCents != line.MonthlyCents {
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this shape has been repriced since the estimate was issued"},
+				"Create a fresh estimate for this environment and accept it — the price you were shown is the price you pay.")}
+		}
+		matched = true
+		break
 	}
 	if !matched {
+		if sawUnreadable {
+			// The requested shape matched nothing readable, and at least one
+			// stored shape could not be read — so we cannot honestly say the
+			// estimate does not cover it. Say what is actually true.
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate can no longer be used"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
 		return store.Service{}, problemError{p: problem.Conflict(
 			[]string{"the estimate does not cover this shape"},
 			"Estimate the exact shape you are creating, accept it, then create — the estimate IS the contract.")}
@@ -257,7 +333,16 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		return store.Service{}, err
 	}
 
-	shapeJSON, err := json.Marshal(in.Shape)
+	// Persist the RESOLVED shape, not the raw request map: what is stored — and
+	// what the cell is handed — must be the configuration that was priced and
+	// contracted, with defaults explicit rather than implied.
+	resolvedShape, err := estimates.Resolve(estimates.ShapeInput{
+		Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: in.Shape,
+	})
+	if err != nil {
+		return store.Service{}, err
+	}
+	shapeJSON, err := json.Marshal(resolvedShape)
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
 	}
@@ -288,15 +373,6 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		Detail: []byte(`{"name":` + strconv.Quote(in.Name) + `,"product":` + strconv.Quote(in.Product) + `,"estimate":` + strconv.Quote(in.EstimateID) + `}`),
 	})
 	return row, nil
-}
-
-// priceOf prices a stored estimate shape (already validated at estimate time).
-func priceOf(sh estimates.ShapeInput) int64 {
-	l, err := estimates.Price(sh)
-	if err != nil {
-		return -1
-	}
-	return l.MonthlyCents
 }
 
 // Transition moves a service along a legal edge, atomically (the SQL guard
@@ -385,10 +461,6 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		for k, v := range shape {
 			current[k] = v
 		}
-		merged, err := json.Marshal(current)
-		if err != nil {
-			return store.Service{}, err
-		}
 		line, err := estimates.Price(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
 		if err != nil {
 			var se estimates.ShapeError
@@ -396,6 +468,19 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 				return store.Service{}, problemError{p: problem.ValidationFailed(
 					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
 			}
+			return store.Service{}, err
+		}
+		// Persist the RESOLVED merged shape, exactly as create does. Storing a
+		// raw map here and a resolved one there would mean the same
+		// configuration is spelled two ways depending on how the service got
+		// there — and the identity that gates provisioning is computed from the
+		// resolved form.
+		resolvedMerged, err := estimates.Resolve(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
+		if err != nil {
+			return store.Service{}, err
+		}
+		merged, err := json.Marshal(resolvedMerged)
+		if err != nil {
 			return store.Service{}, err
 		}
 		params.Shape = merged

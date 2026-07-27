@@ -2,7 +2,7 @@
 id: US-3.7
 title: "The estimate gate matches on PRICE, so a colliding shape provisions something you did not price"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -69,15 +69,28 @@ pricing table moved under a live estimate — which should also refuse.
 
 ## Acceptance criteria
 
-- [ ] Estimating `{size: dev, storage_gb: 78}` and creating `{size: standard}`
-  is **refused** with the existing conflict problem + remediation.
-- [ ] The same shape spelled with omitted defaults still matches (no false
-  refusal for `{size:"dev"}` vs `{size:"dev", ha:false}`).
-- [ ] A shape whose price has changed since the estimate was issued is refused.
-- [ ] The refusal happens BEFORE the one-shot estimate is burned (the existing
-  ordering at the spend-cap check is the precedent).
-- [ ] Mutation-verified: reverting the gate to a price-only match fails the new
-  test.
+- [x] Estimating `{size: dev, storage_gb: 78}` and creating `{size: standard}` is
+  **refused** with the conflict problem + remediation —
+  `TestEstimateGateRefusesAPriceCollidingShape`, which also asserts the reverse
+  substitution is refused, that the refusal does NOT burn the one-shot estimate,
+  and that nothing was provisioned.
+- [x] The same configuration spelled with omitted defaults still matches — the
+  same test creates successfully with `{size: standard, ha: false, storage_gb: 0}`
+  against a `{size: standard}` estimate, and `TestCanonicalIdentity` covers
+  omitted-vs-explicit defaults, omitted-vs-default intent, differing names, and
+  the valkey/web default cases.
+- [x] A shape whose price has changed since the estimate was issued is refused —
+  `TestEstimateGateRefusesAShapeRepricedSinceTheEstimate` moves the stored line
+  under a live estimate (what a pricing deploy looks like from the gate's side)
+  and asserts a 409 naming repricing, with nothing provisioned. Mutation-verified.
+  The first implementation compared two freshly-computed prices, which can only
+  ever agree with themselves — review caught that the branch was dead and the
+  criterion was ticked with no test.
+- [x] The refusal happens BEFORE the one-shot estimate is burned (unchanged
+  ordering; asserted).
+- [x] Mutation-verified: reverting the gate to a price-only match reproduces the
+  exploit exactly — a `standard` instance provisioned from a `dev`+78 GB
+  estimate, 201 with `"shape":{"size":"standard"}`.
 
 ## Found by
 
@@ -90,3 +103,147 @@ gate's matching logic.
 
 US-3.2 (the gate) · CK-M3 (checkpoint that surfaced it) · F2 (estimate-before-
 provision law) · ADR-025 (integer cents)
+
+## Beyond the original scope — what review found
+
+The reported collision was one instance of a broader defect: the gate compared a
+DERIVED property (price) instead of the contract itself. Review reproduced three
+further substitutions live, using fields that are declared but unpriced —
+`version` 16→17, `pgmq` `{dlq:true}`→`{dlq:false}`, `connections`
+`{max:50}`→`{max:5000}` — each returning 201 with the substituted value
+persisted into the row AND into the desired doc handed to the cell.
+
+It also found a type-confusion hole: the shape helpers silently fell back to
+defaults on a wrong type while `CreateService` persisted the RAW request map, so
+an estimate for `{storage_gb: 0}` at 1900¢ accepted a create of
+`{storage_gb: "78"}` — priced as 0 GB, stored as `"78"`. Not exploitable today
+only because no driver reads that field yet.
+
+Both are closed, along with the drift hazard of retyping defaults next to the
+pricing path.
+
+## Outcome
+
+The gate binds to the **contracted configuration**, and the configuration has a
+single definition. `shapeSchema` declares every key of each product's closed
+schema with its type and default; `resolve` validates and defaults once; `Price`
+computes cents from the resolved form, `Canonical` renders it as the contract
+identity, and `Resolve` exports it so `CreateService` persists the resolved
+configuration rather than the raw request map. `allowedShapeKeys` is derived
+from the same table, so the allow-list cannot disagree with the schema either.
+
+That structure is the actual fix. Retyping defaults beside `Price` was a live
+hazard in both directions: a default that drifts stricter false-refuses a
+legitimate create, and one that drifts looser silently reopens the substitution
+hole — table-dependent, so it could be either. With one resolver, divergence is
+impossible by construction rather than by discipline.
+
+Unpriced fields are in the identity because they are contracted: a customer who
+priced `pgmq` off did not agree to it on, however equal the bill. `connections`
+and `pgmq` are carried opaquely and compared structurally — canon stores them as
+objects, not scalars, which the first implementation got wrong and the canon
+tests caught immediately.
+
+The price check is kept alongside the identity check, but now compares the
+STORED line — the number that was on the customer's screen. Comparing two
+freshly-computed prices, as the first version did, can only ever agree with
+itself.
+
+`TestCanonicalCoversEveryDeclaredField` iterates `shapeSchema` rather than a
+hard-coded list, so a field declared later and left out of the identity fails
+automatically. That is what keeps the class closed rather than these instances.
+
+Evidence: `services/api` 22 packages RC=0 (no `-race` — see Q10),
+`apps/cli` 2 RC=0, `services/cell-agent` 5 RC=0 under `-race`; zero failures,
+zero skips.
+
+Reproducing it needs a container runtime, or the Postgres-backed tests SKIP and
+the suite still prints `ok`:
+`DOCKER_HOST=unix://$HOME/.colima/default/docker.sock go test ./...`
+
+## Findings filed (pre-existing, out of this diff)
+
+- **US-3.8** (high) — an instance `override` changes real capacity with no
+  reprice and no spend-cap check. Reproduced live: created at 1900¢, override
+  `instances: 9` → 200, still 1900¢, desired doc carrying 9. Nine provisioned,
+  one billed. The same law this task strengthens, pointing at the update path.
+- **T3.4c** (high) — the CNPG driver sizes the PVC from an unschema'd
+  `shape["storage"]` key and never reads the priced `storage_gb`, so a customer
+  billed for 78 GB receives the size-derived default. The contract is enforced at
+  the gate and then discarded by the renderer.
+
+- **Q10** (high) — `TestConcurrentWritebackAppliesOnce` fails under `-race` on a
+  data race in its own test doubles. Introduced by US-3.6 (#300) — mine — and
+  already on the base branch; `go test -race ./...` is unusable for
+  `services/api` until it is fixed.
+- **US-3.9** (low) — `connections`/`pgmq` are opaque, so canon's observed
+  `connections.used` is inside the contract identity. Harmless today; springs
+  the moment anything on the observe path writes a live value into
+  `services.shape`. Filed with a precondition on that work.
+
+All four are out of scope here, but each undercuts something this task asserts,
+so they are filed rather than noted.
+
+## QA round: six survivors and a falsified criterion
+
+QA's mutation sweep found six guards that could be removed with the suite green,
+and one defect that falsified a ticked criterion.
+
+The important one: **`TestCanonicalCoversEveryDeclaredField` was not
+self-extending.** It compared two identities and passed when they DIFFERED —
+which a silently-dropped field also satisfies. A field declaring an unrecognised
+`kind` was dropped by `resolve` (no `default:` arm), vanishing from the price AND
+the identity, while the test stayed green. `resolve` now errors on an unknown
+kind, and the test asserts the actual property: every declared field survives
+`Resolve` carrying the value it was given.
+
+Also survivable before this round: `intent` and `product` could each be dropped
+from the identity (`web` and `worker` share a schema and default intent, so they
+became byte-identical); `json.Marshal` could become `%v`, collapsing
+`map[dlq:true]` and the string `"map[dlq:true]"`; unpriced defaults could move
+off their zero values; and `size` defaults could be set to nonsense, since
+nothing priced an empty shape.
+
+**The falsified criterion:** an out-of-catalog `intent` bypassed every check,
+violated the `services.intent` CHECK constraint, and returned a 500 saying
+"retry" — AFTER burning the one-shot estimate, so every retry then returned 409
+forever. "The refusal happens BEFORE the estimate is burned" was false for that
+class. `resolve` now validates intent against the catalog enum.
+
+Fixing it exposed a second problem: three tests written earlier this session
+(US-3.6, US-3.6a) used `intent: "transactional"`, which is not a catalog intent.
+The old code accepted it silently, so those tests had been exercising the API
+with data the contract forbids.
+
+A stored shape that cannot be read no longer condemns its siblings, either — the
+loop used to abort on the first unreadable entry, so the same estimate refused or
+succeeded depending on array order.
+
+## Behaviour tightening, recorded
+
+**`POST /v1/estimates` now 422s on an out-of-catalog intent.** The validation
+lives in `resolve`, which `Price`/`PriceAll` call, so it applies to estimate
+creation and not only to the create gate. This is a public behaviour change
+beyond the task's stated scope: any client sending a non-catalog intent to
+`/v1/estimates` now breaks. It is the correct outcome — the `services.intent`
+CHECK constraint would have rejected it downstream anyway, after burning the
+estimate — but it is an endpoint change, not an internal one.
+
+Evidence it was already happening: three pre-existing tests used
+`intent: "transactional"`, which is not in the catalog enum, and had to be
+corrected to `database`/`cache`.
+
+**A known dead branch is kept and labelled.** The `i >= len(pricedLines)`
+fail-closed arm is unreachable today (`lines` is NOT NULL, `PriceAll` preserves
+length) and no test covers it — `if false` there survives the suite. It is
+recorded in the code as untested rather than left to look covered.
+
+`intent` now participates in the match. A client that sends a non-default
+`intent` on the estimate but omits it on create (or vice versa) is refused where
+it previously succeeded. No current client does this — the CLI builds no intent
+and no console path sends one — but a future client regression should be
+diagnosable from this note.
+
+Shapes are also now persisted resolved, so `services.shape` carries every
+declared field explicitly. Anything reading a shape and distinguishing "absent"
+from "default" would see a behaviour change; nothing does today.
