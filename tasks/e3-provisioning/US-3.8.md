@@ -2,7 +2,7 @@
 id: US-3.8
 title: "An instance override changes real capacity with no reprice and no budget check"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
