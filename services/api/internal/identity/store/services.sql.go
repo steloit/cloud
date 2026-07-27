@@ -38,6 +38,13 @@ type ClearExpiredOverrideParams struct {
 // replaced by the pre-edit doc and its price by the pre-edit rate — and since
 // generation was bumped the cell converges on the stale doc and nothing bumps
 // again. A lost race must be a no-op the next tick re-lists, never a rollback.
+//
+// `override IS NOT NULL` and `status <> 'deleting'` are defence in depth and NOT
+// independently testable: every path that NULLs override or starts a delete also
+// bumps generation, so the generation fence always fires first. Recorded rather
+// than removed — but recorded, because this is the same "arm nobody can test"
+// shape as the ListExpiredOverrides lesson, and an untestable arm that goes
+// unmentioned is how that lesson gets re-learned.
 func (q *Queries) ClearExpiredOverride(ctx context.Context, arg ClearExpiredOverrideParams) (Service, error) {
 	row := q.db.QueryRow(ctx, clearExpiredOverride,
 		arg.ID,
@@ -224,23 +231,35 @@ WHERE override IS NOT NULL
 // abort the whole statement, and the sweep would then fail on every tick,
 // silently, for every customer.
 //
-// `… OR (pg_input_is_valid(…) AND (…)::timestamptz <= now())` reads as if the
-// AND protects the cast, but Postgres does not promise it: WHERE clauses are
-// "extensively reprocessed as part of developing an execution plan", and the
-// documented counter-example is exactly `x <> 0 AND y/x > 1.5` still dividing
-// by zero. That form passed the sweep test only because the current plan
-// happened to short-circuit the earlier OR arms — deleting the guards entirely
-// ALSO passed, which is how it was caught. An index, a bigger table or a
-// version bump can take that luck away. CASE is the one construct whose
-// evaluation order IS guaranteed, so the cast is unreachable for an invalid
-// input by construction rather than by plan.
+// The previous form was a chain of OR arms ending in
+// `OR (pg_input_is_valid(x) AND x::timestamptz <= now())`, and its inner guards
+// turned out to be DEAD: deleting both of them changed nothing, because an
+// EARLIER arm was already `OR pg_input_is_valid(x) = false` — the same guard,
+// written twice, one arm up. OR short-circuits left to right, so the duplicate
+// shielded the cast and the inner copy could never fire. Delete the earlier arm
+// too and the statement aborts, which is how the mechanism was identified.
+// (An earlier version of this comment blamed query-plan reordering. It did not:
+// the shield was deterministic and the duplication was the whole story. Getting
+// that wrong matters — the fix for "a plan might reorder this" and the fix for
+// "I wrote this guard twice" are different fixes.)
 //
-// One CASE and not a CASE inside an OR: with the arms split, `expires_at IS
-// NULL` was silently absorbed by the ELSE (pg_input_is_valid is strict, so it
-// returns NULL, so NULL fell through to "sweep it") and deleting the explicit
-// arm changed nothing. Redundant arms cannot be tested, and an arm nobody can
-// test is an arm nobody can trust to still be doing its job. Here each arm is
-// reachable only by its own input class, and deleting any of them fails
+// That said, the old form WAS also leaning on ordering Postgres declines to
+// promise: WHERE clauses are "extensively reprocessed as part of developing an
+// execution plan", and the documented counter-example is exactly
+// `x <> 0 AND y/x > 1.5` still dividing by zero. So CASE remains the right
+// construct — it is the one whose evaluation order IS guaranteed — but it is
+// the forward-looking reason, not the diagnosis.
+//
+// One CASE and not a CASE inside an OR. The intermediate fix kept the first two
+// arms in the OR and wrote the third as
+// `CASE WHEN pg_input_is_valid(x) THEN x::timestamptz <= now() ELSE true END`.
+// pg_input_is_valid is strict, so a NULL expiry returned NULL, missed the WHEN,
+// hit that ELSE true, and was swept anyway — which made the explicit
+// `IS NULL` arm deletable with no observable change. Note that this depended on
+// the ELSE being `true`; written the other way it would not have been absorbed.
+// Redundant arms cannot be tested, and an arm nobody can test is an arm nobody
+// can trust to still be doing its job. Flattened, each arm is reachable only by
+// its own input class and deleting any of them fails
 // TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne.
 func (q *Queries) ListExpiredOverrides(ctx context.Context) ([]Service, error) {
 	rows, err := q.db.Query(ctx, listExpiredOverrides)

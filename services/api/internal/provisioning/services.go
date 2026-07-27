@@ -517,6 +517,18 @@ func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
 		return err
 	}
 	s.repriceSpan(ctx, orgID, updated, prior, updated.MonthlyEstimateCents)
+	// The expiry is a state change like any other, so it goes to the SPINE, not
+	// only to a log line. Applying a pin records `service.updated` carrying the
+	// operator's reason (below); without this the activity feed shows capacity
+	// being pinned and never released, and the only account of the release is a
+	// log the customer cannot see. `Via: "system"` because no actor asked for it
+	// — the clock did. The expired pin travels in the detail: it is the answer to
+	// "what was released, and what reason had been given for it".
+	s.record(ctx, events.Input{
+		OrgID: orgID, Kind: "scale", Via: "system", Actor: "system",
+		Action: "service.updated", Subject: updated.ID,
+		Detail: []byte(`{"override_expired":` + string(row.Override) + `}`),
+	})
 	return nil
 }
 

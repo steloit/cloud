@@ -1181,6 +1181,34 @@ func TestTheSweepClearsEveryDeadPinShapeAndSurvivesAMalformedOne(t *testing.T) {
 	if stillFuture == nil {
 		t.Fatal("the sweep cleared a pin that has not expired")
 	}
+
+	// Every clear reaches the SPINE, not only a log line. Applying a pin records
+	// `service.updated` carrying the operator's reason; without a matching record
+	// on release, the activity feed shows capacity pinned and never given back,
+	// and the only account of the release is a log the customer cannot see.
+	// `via='system'` because the clock asked for it, not a person.
+	for _, id := range []string{garbage, castInvalid, noExpiry, validPast, goRejects} {
+		var n int
+		if err := w.pool.QueryRow(ctx,
+			`SELECT count(*) FROM events
+			  WHERE subject=$1 AND action='service.updated' AND via='system'
+			    AND detail ? 'override_expired'`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("clearing %s recorded %d spine events, want exactly 1 — an expiry the customer cannot see in their activity feed is capacity that silently vanished", id, n)
+		}
+	}
+	// ...and the pin that is still live recorded nothing.
+	var futureEvents int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE subject=$1 AND detail ? 'override_expired'`,
+		future).Scan(&futureEvents); err != nil {
+		t.Fatal(err)
+	}
+	if futureEvents != 0 {
+		t.Fatalf("a live pin recorded %d expiry events", futureEvents)
+	}
 }
 
 // US-3.6's invariant, reached through US-3.8's new code path: metering opens at
@@ -1428,8 +1456,10 @@ func TestAPinCreatedAfterBootStillExpires(t *testing.T) {
 	}()
 	defer func() { cancel(); <-done }()
 
-	// The boot sweep clears the sentinel; once it has, its row loop is done and
-	// it has already listed.
+	// The boot sweep clears the sentinel. The load-bearing fact is not that its
+	// row loop has finished — it may still be working through other rows — but
+	// that it has already LISTED. `late` is created after this observation, so
+	// it cannot be in the boot sweep's row set, and only a tick can reach it.
 	waitCleared(sentinel, "the startup sweep did not run at all")
 
 	// Everything from here can only be reached by a tick.

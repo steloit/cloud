@@ -289,11 +289,32 @@ func TestUpdateServiceShapeSQLFenceRejectsDeleting(t *testing.T) {
 	}
 	// Call the generated query directly, bypassing UpdateService's Go guard: the
 	// SQL fence WHERE status <> 'deleting' must return zero rows for a deleting row.
+	//
+	// The generation MUST be the row's current one. US-3.8 added `AND generation
+	// = $7` to this query, and while `Generation` was left at its zero value that
+	// fence alone returned zero rows — so this test passed without the deleting
+	// fence ever being consulted, and deleting `AND status <> 'deleting'` from
+	// the query left it green. Every other route into this statement is stopped
+	// by the Go pre-check in UpdateService, so this test is the ONLY owner of the
+	// atomic backstop for that TOCTOU. Read the generation fresh: DeleteService
+	// bumps it.
+	deleting := mustGet(t, q, svc.ID)
 	_, err := q.UpdateServiceShape(context.Background(), store.UpdateServiceShapeParams{
-		ID: svc.ID, Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
+		ID: svc.ID, Generation: deleting.Generation,
+		Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
 	})
 	if !errorsIsNoRows(err) {
 		t.Fatalf("the SQL fence must reject an edit to a deleting row (zero rows), got %v", err)
+	}
+	// ...and the same call at the same generation against a NON-deleting row must
+	// succeed. Without this the two fences are not separable: a query that
+	// rejected everything would satisfy the assertion above.
+	live := createSvc(t, pool, q, prov, "db7-live")
+	if _, err := q.UpdateServiceShape(context.Background(), store.UpdateServiceShapeParams{
+		ID: live.ID, Generation: live.Generation,
+		Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
+	}); err != nil {
+		t.Fatalf("the same edit must succeed on a live row at the right generation: %v", err)
 	}
 }
 

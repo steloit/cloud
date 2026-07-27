@@ -12,6 +12,14 @@ metadata:
   namespace: ${namespace}
 spec:
   instances: 1
+  # PINNED MAJOR, not the operator default. The control plane's floor is
+  # PostgreSQL 16: US-3.8's override-expiry sweep uses pg_input_is_valid (16+),
+  # and on an older server that query fails every tick, no manual pin ever
+  # expires, and the only symptom is a log line. `db.Connect` refuses to start
+  # below 16 — this pins what we actually deploy so that assertion never fires
+  # in production. A major-version bump here is a deliberate change (CNPG will
+  # not downgrade, and a major upgrade is an offline operation).
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.6
   storage:
     storageClass: pd-cell
     size: ${storage_size}

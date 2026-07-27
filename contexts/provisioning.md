@@ -86,14 +86,20 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   `TestDesiredDocNeverCarriesADeadPin` called `overrideInstances` on its own input, nilled the pin,
   and then asserted `desiredDoc` produced no pin — which is the production line, copied into the test
   body. Deleting the real one from `services.go` left the test GREEN; a mutation sweep found it. The
-  same shape hid in the sweep predicate: `pg_input_is_valid(…) AND (…)::timestamptz` looked like it
-  guarded the cast, but Postgres does not promise WHERE-clause evaluation order, and deleting BOTH
-  guards also passed — the current query plan was doing the work, not the code. Both were caught by
-  the same question: **if I delete the line this test is named after, does this test fail?** If the
-  answer needs a plan, an ordering, or a copy of the line to be yes, the class is open. The fix for
-  the first is to drive the real entry point and read the real column; for the second, `CASE`, whose
-  evaluation order IS guaranteed — and one flat `CASE`, since a `CASE` nested inside an `OR` silently
-  absorbed a sibling arm and made it undeletable-in-effect but deletable-in-fact.
+  same shape hid in the sweep predicate: `… AND pg_input_is_valid(x) AND x::timestamptz <= now()`
+  looked like it guarded the cast, and deleting BOTH guards changed nothing — because an *earlier* OR
+  arm was already `OR pg_input_is_valid(x) = false`. The same guard, written twice. OR short-circuits
+  left to right, so the duplicate shielded the cast and the inner copy could never fire; delete the
+  earlier arm too and the statement aborts. Both were caught by the same question: **if I delete the
+  line this test is named after, does the test fail?** If the answer needs a copy of that line
+  somewhere else to be yes, the class is open. The fix for the first is to drive the real entry point
+  and read the real column; for the second, one flat `CASE` — a `CASE` nested inside the `OR` merely
+  moved the problem, silently absorbing the `IS NULL` arm through its `ELSE`.
+  *Corrected 2026-07-27 after review:* this entry first blamed query-plan reordering. It was not that —
+  the shield was deterministic duplication. Postgres genuinely does not promise WHERE-clause evaluation
+  order (which is why `CASE` is still right, forward-looking), but that was not the mechanism here, and
+  "a plan might reorder this" and "I wrote this guard twice" have different fixes. **A mistake bank
+  entry that names the wrong cause teaches the wrong reflex** — the same failure O11 was corrected for.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

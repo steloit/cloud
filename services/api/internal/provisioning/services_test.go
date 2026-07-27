@@ -172,10 +172,6 @@ func TestOverrideLiveness(t *testing.T) {
 	}
 }
 
-// The `effOverride` guard is the ONLY thing between a dead pin and provisioned
-// capacity: the cell's renderer reads `desired.override.instances` and never
-// consults `expires_at` (cell-agent/internal/render/cnpg_renderer.go,
-// instancesOf). If an expired pin reaches the doc, the cell renders it.
 // desiredDoc is a RENDERER, not a filter: it embeds whatever pin it is handed
 // and consults no expiry. That is deliberate — the liveness decision belongs to
 // the one caller that also prices the pin — and it is the reason

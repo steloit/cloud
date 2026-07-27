@@ -13,13 +13,16 @@ labels: [Backend, Billing]
 module: M4 Provisioning
 contexts: [provisioning, api-conventions]
 files:
+  - contexts/provisioning.md
+  - infra/k8s/control-plane/cnpg-cluster.yaml
   - services/api/cmd/api/main.go
   - services/api/db/queries/services.sql
   - services/api/internal/estimates/engine.go
   - services/api/internal/identity/services_integration_test.go
   - services/api/internal/identity/store/**
   - services/api/internal/metering/metering.go
-  - services/api/internal/provisioning/services.go
+  - services/api/internal/platform/db/**
+  - services/api/internal/provisioning/**
   - services/api/internal/reconcile/wiring_integration_test.go
   - tasks/e11-billing/US-11.9.md
   - tasks/e3-provisioning/US-3.8.md
@@ -151,9 +154,10 @@ code read as proof, and it was not.
 The final QA round found the same failure one level deeper, in the fixes for it.
 The test written to close the desired-doc guard **re-implemented that guard in
 its own body**, so deleting the production line left it green. And the sweep
-predicate's cast guard (`pg_input_is_valid(…) AND (…)::timestamptz`) was holding
-only because the current query plan happened to short-circuit the arms before
-it — deleting the guards entirely also passed. Both were "evidence" that
+predicate's cast guard (`pg_input_is_valid(…) AND (…)::timestamptz`) was dead
+code: deleting it changed nothing, because an earlier OR arm was already
+`OR pg_input_is_valid(…) = false` — the same guard written twice, with OR's
+left-to-right short-circuit shielding the cast. Both were "evidence" that
 described the property without depending on it. The diagnostic that catches this
 class is one question: *if I delete the line this test is named after, does the
 test fail?* Answering it requires running the deletion, which is why mutation

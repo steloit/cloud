@@ -27,6 +27,30 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
+	// The control database's floor is PostgreSQL 16, and it is asserted HERE
+	// because a floor stated only in a comment is not a floor.
+	//
+	// US-3.8's override-expiry sweep uses pg_input_is_valid (16+). On 15 that
+	// query fails on every tick with "function does not exist", the sweeper logs
+	// an error and loops, no manual pin anywhere ever expires, and the only
+	// symptom is a log line nobody is watching — a silent, permanent loss of the
+	// property that makes a "temporary" pin temporary. Refusing to start is the
+	// correct response to a database that cannot run our queries: a boot failure
+	// is loud, and this class of degradation is not.
+	// current_setting()::int, not SHOW: SHOW returns text, and scanning it into
+	// an int fails on every server — which would have made this guard reject
+	// PostgreSQL 16 too, i.e. refuse to start at all. Caught by the accept half
+	// of TestConnectEnforcesThePostgres16Floor, which exists for exactly this.
+	var version int
+	if err := pool.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db version check: %w", err)
+	}
+	if version < 160000 {
+		pool.Close()
+		return nil, fmt.Errorf("db: PostgreSQL 16 or newer is required (server reports %d); "+
+			"the override-expiry sweep needs pg_input_is_valid and would fail silently on this server", version)
+	}
 	return pool, nil
 }
 
