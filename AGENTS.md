@@ -56,6 +56,13 @@ never hand-written · demo data from `19-canon` only.
 7. Spec conflicts you discover are **findings**: record them in the PR and file a follow-up task — never resolve silently.
 8. Lessons that should outlive the task go to a *living file* — the domain pack's mistake bank, the nearest
    AGENTS.md, or an ADR. A lesson that didn't change a living file didn't happen.
+   **Examples are normative** (founder, 2026-07-27): a canonical example is held to at least the
+   evidentiary standard of the rule it teaches. If the example contradicts the principle, the
+   EXAMPLE is wrong even when the rule is right — O11 shipped a mutation-class rule whose own
+   example named the same representation on both sides, erasing the distinction it existed to
+   introduce. And cite only what the committed history supports: three O11 entries narrated
+   incidents that did not happen as described, one of them a counterfactual from the author's
+   own code comment. A mistake bank entry without a verifiable incident is a style guide.
 
 ## Hard rules
 
