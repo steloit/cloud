@@ -267,6 +267,9 @@ func main() {
 	// The 24h window is a promise, not just a read filter: without a sweep the
 	// table grows without bound and recorded response bodies outlive the window.
 	go idemSvc.RunSweeper(ctx, time.Hour, logger)
+	// D22: manual instance-pins auto-expire in 24h. Sweeping is what makes that
+	// true — clearing the pin bumps generation so the cell converges back.
+	go prov.RunOverrideExpiry(ctx, 5*time.Minute, logger)
 	idem := idempotency.Middleware(idemSvc, svc)
 
 	srv := &http.Server{

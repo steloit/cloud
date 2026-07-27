@@ -48,3 +48,35 @@ SELECT p.org_id FROM services s
 JOIN environments e ON e.id = s.env_id
 JOIN projects p ON p.id = e.project_id
 WHERE s.id = $1;
+
+-- name: ExpireManualOverrides :many
+-- D22: a manual instance-pin auto-expires in 24h. Clearing it must BUMP
+-- generation, or the cell keeps rendering the pinned count forever — the doc is
+-- otherwise only rebuilt when someone edits the service, and a pin nobody
+-- touches again would be permanent.
+--
+-- `desired` is rewritten by the caller (it owns the doc grammar); this returns
+-- the rows so it can.
+UPDATE services SET
+    override = NULL,
+    generation = generation + 1
+WHERE override IS NOT NULL
+  AND status <> 'deleting'
+  AND (override->>'expires_at') IS NOT NULL
+  AND (override->>'expires_at')::timestamptz <= now()
+RETURNING *;
+
+-- name: SetServiceDesired :one
+-- Rewrite the desired doc WITHOUT bumping generation: the caller
+-- (RunOverrideExpiry) already bumped it when it cleared the pin, and bumping
+-- twice would leave the row outstanding after the cell converged.
+UPDATE services SET desired = $2
+WHERE id = $1 AND status <> 'deleting'
+RETURNING *;
+
+-- name: SetServiceMonthlyEstimate :one
+-- Restore the unpinned price when a manual pin expires. No generation bump:
+-- ExpireManualOverrides already bumped it when it cleared the pin.
+UPDATE services SET monthly_estimate_cents = $2
+WHERE id = $1 AND status <> 'deleting'
+RETURNING *;

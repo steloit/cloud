@@ -7,9 +7,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
 
 func TestServices(t *testing.T) {
@@ -131,13 +135,15 @@ func TestServices(t *testing.T) {
 	if resp.StatusCode != 422 || !strings.Contains(body, "override.reason") {
 		t.Fatalf("override without reason: %d %s", resp.StatusCode, body)
 	}
-	resp, _ = w.patch(t, "/v1/services/"+svc.Id, `{"override":{"instances":5,"reason":"load test"}}`, ownerCk)
-	if resp.StatusCode != 200 {
-		t.Fatalf("override: %d", resp.StatusCode)
-	}
-	var overrideJSON string
-	if err := w.pool.QueryRow(ctx, "select override->>'expires_at' from services where id=$1", svc.Id).Scan(&overrideJSON); err != nil || overrideJSON == "" {
-		t.Fatalf("override auto-expiry not recorded: %q %v", overrideJSON, err)
+	// A pin on postgres is REFUSED (US-3.8, founder-ratified 2026-07-27):
+	// postgres has no priced instance count, so the replicas a pin provisions
+	// cannot be metered — and the platform must never provision capacity it
+	// cannot bill correctly. Re-enabled when per-replica pricing is ratified
+	// (US-3.10); the priceable path (web/worker) is covered by
+	// TestManualOverrideRespectsTheCapAndExpires.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"override":{"instances":5,"reason":"load test"}}`, ownerCk)
+	if resp.StatusCode != 422 || !strings.Contains(body, "override.instances") {
+		t.Fatalf("a postgres pin must be refused as unpriceable: %d %s", resp.StatusCode, body)
 	}
 
 	// --- list + non-member 404 ----------------------------------------------
@@ -535,5 +541,187 @@ func TestDesiredDocCarriesTheResolvedConfiguration(t *testing.T) {
 	}
 	if fmt.Sprint(dshape) != fmt.Sprint(shape) {
 		t.Fatalf("the desired doc and the stored shape disagree:\n desired: %v\n stored:  %v", dshape, shape)
+	}
+}
+
+// US-3.8: a manual instance-pin provisions REAL capacity, so it must clear the
+// same hard cap a scale-up does — and it must actually expire.
+//
+// Before this: `params.Override` was set outside the reprice branch, so the pin
+// bypassed the cap entirely; and `expires_at` was written but never read by
+// anything, so the "24h auto-expiry" D22 requires — and the API's own error
+// message promises — did not exist. Nine instances, billed for one, forever.
+func TestManualOverrideRespectsTheCapAndExpires(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "pin@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"pinco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"api","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"api","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct {
+		Id                   string `json:"id"`
+		MonthlyEstimateCents int    `json:"monthly_estimate_cents"`
+	}
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	// A cap just above the current run-rate: a 9× pin must not fit under it.
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO budgets (org_id, limit_cents) VALUES ($1,$2)
+		 ON CONFLICT (org_id) DO UPDATE SET limit_cents = $2`,
+		org.Id, int64(svc.MonthlyEstimateCents)+100); err != nil {
+		t.Fatal(err)
+	}
+
+	pin := func(n int) (*http.Response, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
+			strings.NewReader(`{"override":{"instances":`+fmt.Sprint(n)+`,"reason":"load test"}}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", ownerCk)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return r, string(b)
+	}
+
+	// --- the cap must refuse the pin -----------------------------------------
+	resp, body = pin(9)
+	if resp.StatusCode == 200 {
+		t.Fatalf("a 9-instance pin cleared a hard cap that does not cover it — the cap is bypassable by anyone who can PATCH a service: %s", body)
+	}
+
+	// --- lift the cap; the pin now applies and reaches the cell ---------------
+	if _, err := w.pool.Exec(ctx, `UPDATE budgets SET limit_cents = 100000000 WHERE org_id = $1`, org.Id); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = pin(9)
+	if resp.StatusCode != 200 {
+		t.Fatalf("pin under an ample cap: %d %s", resp.StatusCode, body)
+	}
+	var desired map[string]any
+	var pinnedCents int64
+	if err := w.pool.QueryRow(ctx,
+		`SELECT desired, monthly_estimate_cents FROM services WHERE id=$1`, svc.Id).Scan(&desired, &pinnedCents); err != nil {
+		t.Fatal(err)
+	}
+	if o, _ := desired["override"].(map[string]any); o == nil {
+		t.Fatal("a live pin did not reach the desired doc")
+	}
+	// Founder ruling: pinned capacity is METERED, so the row must carry the
+	// pinned rate — nine instances provisioned and one billed is the defect.
+	if pinnedCents <= int64(svc.MonthlyEstimateCents) {
+		t.Fatalf("a 9-instance pin left the monthly estimate at %d (was %d) — the capacity is provisioned and not billed",
+			pinnedCents, svc.MonthlyEstimateCents)
+	}
+
+	// --- EXPIRY: the pin must stop being rendered, and the cell must be told --
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE services SET override = jsonb_set(override::jsonb, '{expires_at}',
+			to_jsonb((now() - interval '1 hour')::text))::jsonb WHERE id = $1`, svc.Id); err != nil {
+		t.Fatal(err)
+	}
+	var genBefore int64
+	if err := w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id=$1`, svc.Id).Scan(&genBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := store.New(w.pool).ExpireManualOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("the expiry sweep found %d expired pin(s), want 1 — an expired pin is rendered forever", len(rows))
+	}
+	var overrideAfter []byte
+	var genAfter int64
+	if err := w.pool.QueryRow(ctx,
+		`SELECT override, generation FROM services WHERE id=$1`, svc.Id).Scan(&overrideAfter, &genAfter); err != nil {
+		t.Fatal(err)
+	}
+	if overrideAfter != nil {
+		t.Fatalf("the expired pin survived the sweep: %s", overrideAfter)
+	}
+	if genAfter <= genBefore {
+		t.Fatalf("generation did not advance (%d → %d) — the cell would never re-poll, so it keeps rendering the pinned count", genBefore, genAfter)
+	}
+}
+
+// A pin on a product whose catalog shape has no instance count cannot be
+// metered, and the founder ruling is that pinned capacity IS metered — so it
+// must be refused rather than provisioned unbilled.
+func TestUnpriceablePinIsRefused(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "unpriced@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"unpricedco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	req, _ := http.NewRequest(http.MethodPatch, w.srv.URL+"/v1/services/"+svc.Id,
+		strings.NewReader(`{"override":{"instances":9,"reason":"load test"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cookie", ownerCk)
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if r.StatusCode != 422 {
+		t.Fatalf("an unpriceable pin returned %d, want 422 — it would provision replicas nothing can bill: %s", r.StatusCode, string(b))
+	}
+	if !strings.Contains(string(b), "override.instances") {
+		t.Fatalf("the refusal must name the field: %s", string(b))
 	}
 }

@@ -401,6 +401,34 @@ func keys[V any](m map[string]V) string {
 	return strings.Join(out, "|")
 }
 
+// PriceWithInstances prices a shape with its instance count replaced by a
+// manual pin (D22).
+//
+// It REFUSES for a product whose shape declares no `instances` — postgres and
+// valkey today. Their pins provision replicas the catalog has no price for, and
+// the founder ruling is that pinned capacity is metered: capacity we cannot
+// price is capacity we must not provision. Inventing a rate here would be worse
+// than refusing, because it would be a number nobody ratified appearing on an
+// invoice.
+func PriceWithInstances(in ShapeInput, instances int) (Line, error) {
+	fields, ok := shapeSchema[in.Product]
+	if !ok {
+		return Line{}, ShapeError{Field: "product", Detail: "unknown product " + in.Product}
+	}
+	if _, priced := fields["instances"]; !priced {
+		return Line{}, ShapeError{
+			Field:  "override.instances",
+			Detail: "a manual instance pin is not priceable for " + in.Product + " — its catalog shape has no instance count, so the extra capacity could not be metered",
+		}
+	}
+	pinned := map[string]any{}
+	for k, v := range in.Shape {
+		pinned[k] = v
+	}
+	pinned["instances"] = instances
+	return Price(ShapeInput{Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: pinned})
+}
+
 // Canonical returns the CONFIGURATION IDENTITY of a shape: the product, the
 // resolved intent, and every shape field the engine reads, with defaults
 // applied — rendered as a deterministic string.

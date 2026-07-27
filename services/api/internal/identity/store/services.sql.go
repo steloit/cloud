@@ -24,6 +24,63 @@ func (q *Queries) CountServicesForEnvs(ctx context.Context, projectID string) (i
 	return count, err
 }
 
+const expireManualOverrides = `-- name: ExpireManualOverrides :many
+UPDATE services SET
+    override = NULL,
+    generation = generation + 1
+WHERE override IS NOT NULL
+  AND status <> 'deleting'
+  AND (override->>'expires_at') IS NOT NULL
+  AND (override->>'expires_at')::timestamptz <= now()
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+`
+
+// D22: a manual instance-pin auto-expires in 24h. Clearing it must BUMP
+// generation, or the cell keeps rendering the pinned count forever — the doc is
+// otherwise only rebuilt when someone edits the service, and a pin nobody
+// touches again would be permanent.
+//
+// `desired` is rewritten by the caller (it owns the doc grammar); this returns
+// the rows so it can.
+func (q *Queries) ExpireManualOverrides(ctx context.Context) ([]Service, error) {
+	rows, err := q.db.Query(ctx, expireManualOverrides)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Service
+	for rows.Next() {
+		var i Service
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnvID,
+			&i.Name,
+			&i.Product,
+			&i.Intent,
+			&i.Status,
+			&i.Shape,
+			&i.Scaling,
+			&i.Override,
+			&i.ProvisioningSteps,
+			&i.MonthlyEstimateCents,
+			&i.EstimateID,
+			&i.CellID,
+			&i.CreatedAt,
+			&i.Desired,
+			&i.Generation,
+			&i.ObservedGeneration,
+			&i.LastReconciledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getService = `-- name: GetService :one
 SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services WHERE id = $1
 `
@@ -177,6 +234,85 @@ func (q *Queries) OrgForService(ctx context.Context, id string) (string, error) 
 	var org_id string
 	err := row.Scan(&org_id)
 	return org_id, err
+}
+
+const setServiceDesired = `-- name: SetServiceDesired :one
+UPDATE services SET desired = $2
+WHERE id = $1 AND status <> 'deleting'
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+`
+
+type SetServiceDesiredParams struct {
+	ID      string
+	Desired []byte
+}
+
+// Rewrite the desired doc WITHOUT bumping generation: the caller
+// (RunOverrideExpiry) already bumped it when it cleared the pin, and bumping
+// twice would leave the row outstanding after the cell converged.
+func (q *Queries) SetServiceDesired(ctx context.Context, arg SetServiceDesiredParams) (Service, error) {
+	row := q.db.QueryRow(ctx, setServiceDesired, arg.ID, arg.Desired)
+	var i Service
+	err := row.Scan(
+		&i.ID,
+		&i.EnvID,
+		&i.Name,
+		&i.Product,
+		&i.Intent,
+		&i.Status,
+		&i.Shape,
+		&i.Scaling,
+		&i.Override,
+		&i.ProvisioningSteps,
+		&i.MonthlyEstimateCents,
+		&i.EstimateID,
+		&i.CellID,
+		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
+	)
+	return i, err
+}
+
+const setServiceMonthlyEstimate = `-- name: SetServiceMonthlyEstimate :one
+UPDATE services SET monthly_estimate_cents = $2
+WHERE id = $1 AND status <> 'deleting'
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+`
+
+type SetServiceMonthlyEstimateParams struct {
+	ID                   string
+	MonthlyEstimateCents int64
+}
+
+// Restore the unpinned price when a manual pin expires. No generation bump:
+// ExpireManualOverrides already bumped it when it cleared the pin.
+func (q *Queries) SetServiceMonthlyEstimate(ctx context.Context, arg SetServiceMonthlyEstimateParams) (Service, error) {
+	row := q.db.QueryRow(ctx, setServiceMonthlyEstimate, arg.ID, arg.MonthlyEstimateCents)
+	var i Service
+	err := row.Scan(
+		&i.ID,
+		&i.EnvID,
+		&i.Name,
+		&i.Product,
+		&i.Intent,
+		&i.Status,
+		&i.Shape,
+		&i.Scaling,
+		&i.Override,
+		&i.ProvisioningSteps,
+		&i.MonthlyEstimateCents,
+		&i.EstimateID,
+		&i.CellID,
+		&i.CreatedAt,
+		&i.Desired,
+		&i.Generation,
+		&i.ObservedGeneration,
+		&i.LastReconciledAt,
+	)
+	return i, err
 }
 
 const setServiceStatus = `-- name: SetServiceStatus :one

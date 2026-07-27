@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -438,6 +439,100 @@ func (s *Service) ServiceOrg(ctx context.Context, serviceID string) (store.Servi
 	return svc, orgID, nil
 }
 
+// RunOverrideExpiry clears manual pins past their 24h expiry and rebuilds the
+// desired doc so the cell converges back to the unpinned count.
+//
+// The expiry has to be swept, not merely filtered on read: `desired` is rebuilt
+// only when someone edits the service, and generation is what makes the cell
+// re-poll. A pin nobody touches again would otherwise render its instance count
+// forever — which is what made "temporary" untrue and, with it, the argument
+// for not charging for the capacity.
+func (s *Service) RunOverrideExpiry(ctx context.Context, every time.Duration, log *slog.Logger) {
+	sweep := func() {
+		rows, err := s.q.ExpireManualOverrides(ctx)
+		if err != nil {
+			log.Warn("override expiry sweep failed", "err", err)
+			return
+		}
+		for _, row := range rows {
+			// The pin was metered at the pinned rate, so expiry must restore
+			// the UNPINNED price — otherwise the customer keeps paying for
+			// capacity that has just been taken away.
+			var shape map[string]any
+			_ = json.Unmarshal(row.Shape, &shape)
+			if base, perr := estimates.Price(estimates.ShapeInput{
+				Product: row.Product, Intent: row.Intent.String, Name: row.Name, Shape: shape,
+			}); perr == nil {
+				if _, uerr := s.q.SetServiceMonthlyEstimate(ctx, store.SetServiceMonthlyEstimateParams{
+					ID: row.ID, MonthlyEstimateCents: base.MonthlyCents,
+				}); uerr != nil {
+					log.Error("override expired but the base price could not be restored",
+						"service", row.ID, "err", uerr)
+				}
+			} else {
+				log.Error("override expired but the base price could not be computed",
+					"service", row.ID, "err", perr)
+			}
+			ns, err := s.resolveNamespace(ctx, row.EnvID)
+			if err != nil {
+				log.Error("override expired but the namespace could not be resolved; desired not rebuilt",
+					"service", row.ID, "err", err)
+				continue
+			}
+			if _, err := s.q.SetServiceDesired(ctx, store.SetServiceDesiredParams{
+				ID:      row.ID,
+				Desired: desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
+			}); err != nil {
+				log.Error("override expired but desired could not be rebuilt", "service", row.ID, "err", err)
+				continue
+			}
+			log.Info("manual override expired; converging back to the unpinned count", "service", row.ID)
+		}
+	}
+	sweep() // once at startup: a ticker does not fire immediately
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
+}
+
+// overrideInstances reports the pinned instance count of a LIVE override.
+//
+// D22 makes the pin temporary: it carries a reason and auto-expires in 24h. The
+// expiry was being written and never read — nothing anywhere consulted
+// `expires_at` — so a "temporary" pin was permanent, which is also what removed
+// the only argument for not charging for the capacity it provisions.
+//
+// Returns (0, false) for an absent, malformed, or expired override.
+func overrideInstances(raw []byte, now time.Time) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var o struct {
+		Instances int    `json:"instances"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.Unmarshal(raw, &o); err != nil || o.Instances < 1 {
+		return 0, false
+	}
+	if o.ExpiresAt == "" {
+		// A pin with no expiry is not a temporary pin. Refuse to honour it
+		// rather than treat "unset" as "forever".
+		return 0, false
+	}
+	exp, err := time.Parse(time.RFC3339, o.ExpiresAt)
+	if err != nil || !now.Before(exp) {
+		return 0, false
+	}
+	return o.Instances, true
+}
+
 // UpdateService — shape/scaling are desired-state edits (repriced); the
 // manual override requires a reason and auto-expires in 24h (D22).
 func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, actorID string, shape map[string]any, scaling, override []byte) (store.Service, error) {
@@ -497,6 +592,39 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 	}
 	params.Scaling = scaling
+	// An override provisions REAL capacity, so it must clear the same hard cap
+	// a scale-up does. Setting it outside the reprice branch meant the cap was
+	// bypassable by anyone who could PATCH a service — the exact bypass the
+	// scale-up comment says the cap exists to prevent.
+	if pinned, live := overrideInstances(override, time.Now()); live {
+		// Founder ruling (2026-07-27): pinned capacity is METERED. So the pin
+		// is repriced through the engine, the increase clears the same hard cap
+		// a scale-up does, and the row's monthly estimate becomes the pinned
+		// rate — which is what the billing span is opened at.
+		effShapeRaw := svc.Shape
+		if params.Shape != nil {
+			effShapeRaw = params.Shape
+		}
+		var effShapeMap map[string]any
+		_ = json.Unmarshal(effShapeRaw, &effShapeMap)
+		pinnedLine, err := estimates.PriceWithInstances(estimates.ShapeInput{
+			Product: svc.Product, Intent: svc.Intent.String, Name: svc.Name, Shape: effShapeMap,
+		}, pinned)
+		if err != nil {
+			var se estimates.ShapeError
+			if errors.As(err, &se) {
+				return store.Service{}, problemError{p: problem.ValidationFailed(
+					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
+			}
+			return store.Service{}, err
+		}
+		if delta := pinnedLine.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
+				return store.Service{}, err
+			}
+		}
+		params.MonthlyEstimateCents = pgtype.Int8{Int64: pinnedLine.MonthlyCents, Valid: true}
+	}
 	params.Override = override
 	// US-1.3a: rebuild desired from the effective post-edit state and let the
 	// query bump generation, so the cell re-reconciles. Effective shape/scaling
@@ -512,6 +640,12 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	effOverride := svc.Override
 	if override != nil {
 		effOverride = override
+	}
+	// Never ship an EXPIRED pin to the cell. Without this an override written
+	// once keeps its instance count forever, because nothing else consults
+	// expires_at and the doc is only rebuilt when someone edits the service.
+	if _, live := overrideInstances(effOverride, time.Now()); !live {
+		effOverride = nil
 	}
 	ns, err := s.resolveNamespace(ctx, svc.EnvID)
 	if err != nil {

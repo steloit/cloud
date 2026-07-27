@@ -8,7 +8,9 @@ package reconcile_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +56,30 @@ func seedGraph(t *testing.T, pool *pgxpool.Pool, q *store.Queries) store.Environ
 		t.Fatal(err)
 	}
 	return env
+}
+
+// createWebSvc makes a service whose catalog shape PRICES an instance count, so
+// a D22 manual pin is legal on it. postgres has no priced instance count and its
+// pins are refused (US-3.8), so a pin test cannot use one.
+func createWebSvc(t *testing.T, pool *pgxpool.Pool, q *store.Queries, prov *provisioning.Service, name string) store.Service {
+	t.Helper()
+	ctx := context.Background()
+	env := seedGraph(t, pool, q)
+	est := estimates.NewService(q)
+	created, err := est.Create(ctx, "org_w", "env_w", []estimates.ShapeInput{
+		{Product: "web", Name: name, Shape: map[string]any{"size": "standard-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := prov.CreateService(ctx, est, env, "org_w", provisioning.CreateServiceInput{
+		Name: name, Product: "web", Shape: map[string]any{"size": "standard-1"},
+		EstimateID: created.Row.ID, ActorID: "usr_w",
+	})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	return svc
 }
 
 func createSvc(t *testing.T, pool *pgxpool.Pool, q *store.Queries, prov *provisioning.Service, name string) store.Service {
@@ -218,13 +244,17 @@ func TestNoOpUpdateStillBumpsGeneration(t *testing.T) {
 func TestOverrideEditReachesCell(t *testing.T) {
 	pool, q := realDB(t)
 	prov := newProvisioning(t, pool, q)
-	svc := createSvc(t, pool, q, prov, "db6")
+	svc := createWebSvc(t, pool, q, prov, "api6")
 	rec := reconcile.New(q, prov)
 	if _, err := rec.Writeback(context.Background(), "cell-0", reconcile.Report{ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready"}); err != nil {
 		t.Fatal(err)
 	}
-	// Pin instances via override.
-	edited, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, nil, []byte(`{"instances":5,"reason":"load"}`))
+	// Pin instances via override. `expires_at` is REQUIRED: D22 makes the pin
+	// temporary, the API always stamps one, and a pin without an expiry is not
+	// honoured — treating "unset" as "forever" is what made pins permanent.
+	pin := fmt.Sprintf(`{"instances":5,"reason":"load","expires_at":%q}`,
+		time.Now().Add(24*time.Hour).UTC().Format(time.RFC3339))
+	edited, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, nil, []byte(pin))
 	if err != nil {
 		t.Fatalf("UpdateService(override): %v", err)
 	}
