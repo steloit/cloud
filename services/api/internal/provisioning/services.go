@@ -287,6 +287,11 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		// the check would provision at the CURRENT price with no conflict —
 		// silently failing open in a billing guard.
 		if i >= len(pricedLines) {
+			// KNOWN DEAD BRANCH, deliberately kept: `estimates.lines` is NOT
+			// NULL and PriceAll preserves length, so this is unreachable today
+			// and no test covers it (a `if false` here survives the suite —
+			// stated so it is not mistaken for tested).
+			//
 			// Same reasoning as the un-canonicalisable shape above: fail
 			// CLOSED, but with remediation the customer can act on. Estimate
 			// rows are immutable, so "retry" could never succeed.

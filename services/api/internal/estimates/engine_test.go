@@ -566,3 +566,50 @@ func TestIntentCannotForgeAnIdentityDelimiter(t *testing.T) {
 		}
 	}
 }
+
+// The VALUE of every default, asserted as an explicit statement.
+//
+// TestEveryProductPricesWithAnEmptyShape only requires "no error, positive
+// price", which a DIFFERENT valid catalog value also satisfies — so swapping
+// postgres's default size from dev to standard kept the suite green while
+// silently changing what an omitted field means (2400¢ → 5800¢, and a
+// standard cluster shipped to the cell).
+//
+// This is not a substitution hole — both sides of the gate resolve the same —
+// but it is mis-billing and mis-provisioning. There is no external authority to
+// assert against: openapi.yaml documents no shape defaults, and every canon
+// fixture spells size/instances explicitly, so canon never exercises one.
+// The pin therefore has to be a second deliberate statement: changing a default
+// must force a visible edit here.
+func TestResolvedDefaultsAreExactlyTheDeclaredConfiguration(t *testing.T) {
+	want := map[string]map[string]any{
+		"postgres": {"size": "dev", "storage_gb": 0, "ha": false,
+			"connections": nil, "pgmq": nil, "version": ""},
+		"valkey": {"memory_mb": 1024, "eviction": "", "mode": ""},
+		"web":    {"size": "standard-1", "instances": 1, "health_check": ""},
+		"worker": {"size": "standard-1", "instances": 1, "health_check": ""},
+	}
+	if len(want) != len(shapeSchema) {
+		t.Fatalf("this test covers %d products, the schema declares %d — a new product needs its defaults stated here", len(want), len(shapeSchema))
+	}
+	for product, expected := range want {
+		t.Run(product, func(t *testing.T) {
+			got, err := Resolve(ShapeInput{Product: product, Shape: map[string]any{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(expected) {
+				t.Fatalf("resolved %d fields, expected %d:\n got:  %v\n want: %v", len(got), len(expected), got, expected)
+			}
+			for k, wv := range expected {
+				gv, ok := got[k]
+				if !ok {
+					t.Fatalf("%s.%s missing from the resolved defaults", product, k)
+				}
+				if fmt.Sprintf("%v", gv) != fmt.Sprintf("%v", wv) {
+					t.Fatalf("%s.%s defaults to %v, this test declares %v — changing a default changes what an OMITTED field means, so it must be a deliberate edit here", product, k, gv, wv)
+				}
+			}
+		})
+	}
+}

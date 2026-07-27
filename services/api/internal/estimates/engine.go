@@ -359,14 +359,14 @@ func Price(in ShapeInput) (Line, error) {
 }
 
 func boolKeys(m map[string]bool) string {
-	out := ""
+	// Sorted: an unsorted error message lists the same set differently on every
+	// run, which makes a field-error assertion flaky and a diff unreadable.
+	ks := make([]string, 0, len(m))
 	for k := range m {
-		if out != "" {
-			out += ", "
-		}
-		out += k
+		ks = append(ks, k)
 	}
-	return out
+	sort.Strings(ks)
+	return strings.Join(ks, ", ")
 }
 
 // PriceAll prices a set of shapes; the total is the exact sum of lines —

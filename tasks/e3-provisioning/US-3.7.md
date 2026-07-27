@@ -221,6 +221,23 @@ succeeded depending on array order.
 
 ## Behaviour tightening, recorded
 
+**`POST /v1/estimates` now 422s on an out-of-catalog intent.** The validation
+lives in `resolve`, which `Price`/`PriceAll` call, so it applies to estimate
+creation and not only to the create gate. This is a public behaviour change
+beyond the task's stated scope: any client sending a non-catalog intent to
+`/v1/estimates` now breaks. It is the correct outcome — the `services.intent`
+CHECK constraint would have rejected it downstream anyway, after burning the
+estimate — but it is an endpoint change, not an internal one.
+
+Evidence it was already happening: three pre-existing tests used
+`intent: "transactional"`, which is not in the catalog enum, and had to be
+corrected to `database`/`cache`.
+
+**A known dead branch is kept and labelled.** The `i >= len(pricedLines)`
+fail-closed arm is unreachable today (`lines` is NOT NULL, `PriceAll` preserves
+length) and no test covers it — `if false` there survives the suite. It is
+recorded in the code as untested rather than left to look covered.
+
 `intent` now participates in the match. A client that sends a non-default
 `intent` on the estimate but omits it on create (or vice versa) is refused where
 it previously succeeded. No current client does this — the CLI builds no intent
