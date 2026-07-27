@@ -89,6 +89,15 @@ never hand-written · demo data from `19-canon` only.
   only**. A hook stops common accidental writes and CI's `authority-paths` flags any PR that touches
   them — but **nothing blocks a merge** (this repo has no branch protection: O6g), so the real control
   is still you and the diff. Engineering decisions get an ADR in `docs/adr/`.
+- **Fault injection happens in a throwaway copy, never the working tree** — this binds the
+  IMPLEMENTER as much as the reviewers. A mutate-then-restore leaves no diff, so an
+  interrupted run is invisible to review; and a reviewer reading the tree mid-mutation
+  gets a false baseline. In US-3.7 this corrupted an independent review sweep twice (a
+  mutated `engine.go` and a mid-edit test file were copied into the reviewer's sandbox,
+  producing a red baseline it had to chase down before it could trust any result).
+  `cp -R` the module, mutate the copy, delete it. If you nonetheless mutate the tree,
+  **say so plainly in the PR** — ADR-0008 makes disclosure the operative obligation,
+  because a mutate-then-restore is otherwise invisible to everyone downstream.
 - Never mix restructuring and feature work in one commit.
 
 ## Don't read (token discipline)

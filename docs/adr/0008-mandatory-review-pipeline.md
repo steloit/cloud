@@ -7,6 +7,15 @@ blocks are untouched, and the reviewers must still not write. The amendment does
 **working-practice instruction** (reproduce faults in a temp copy; disclose any tree mutation),
 carried into `reviewer.md`/`qa.md` in the same change; flagged here because it is an obligation,
 not a description. Open for founder revision.
+**Amended 2026-07-27 (O11, agent):** the temp-copy working-practice instruction now binds
+**every** agent, including the Implementation Agent, and is stated in AGENTS.md's hard
+rules alongside the disclosure clause. **No decision changed** — who reviews, when, and
+what blocks are untouched. The amendment is a widening of an existing obligation, prompted
+by evidence: in US-3.7 the implementer fault-injected in the working tree and corrupted an
+independent review sweep twice (a mutated source file and a mid-edit test were copied into
+the reviewer's sandbox, producing a false red baseline it had to chase down). The
+obligation was previously addressed only to reviewers, so the implementer was unbound by
+omission rather than by decision. Open for founder revision.
 **Deciders:** Founder
 **Relates to:** ADR-0002 (AI-native engineering OS), the Phase-2 support agents (`.claude/agents/`)
 

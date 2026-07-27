@@ -18,3 +18,18 @@ description: Pick up and execute a Steloit work item from tasks/. Use when asked
 6. **Close.** Append `## Outcome` (5–10 lines: shipped, deviations, follow-ups) and flip
    `status: done` in the same branch. Open the PR with the template: id in title, evidence pasted,
    spec-conflicts section honest.
+
+When you request review (ADR-0008), give the reviewers two things beyond the diff:
+
+- **The blast radius.** Which endpoints, contracts or clients change behaviour —
+  *including outside the task's stated scope*. A validation added to a shared path applies
+  everywhere that path is called: US-3.7 added an intent check inside `resolve()`, which
+  `Price`/`PriceAll` also call, making it a breaking change to `POST /v1/estimates` that
+  the builder did not notice and QA had to surface. If you cannot name the radius, you do
+  not yet know what you changed.
+- **The mutations you already ran**, and what each covers. This is CONTEXT, not a
+  skip-list: E3's most serious defect was found by a reviewer re-running the builder's own
+  plaintext-scan against a DIFFERENT representation of the same data (the body, which
+  base64-encodes, where the builder had only covered the header). Re-running a mutation
+  against a representation the builder did not consider is a known-productive move —
+  saying which representation each of yours covered is what makes that cheap to spot.

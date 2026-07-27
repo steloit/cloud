@@ -24,6 +24,20 @@ report** — a mutate-then-restore leaves no diff, so nothing else will surface 
    crypto round-trips — anything with an invariant worth randomized sweeping.
 5. Canon: any number from docs/product/19-canon must be asserted from the imported
    fixtures, never retyped. Flag retyped canon.
+6. **Mutation CLASSES, not mutation examples.** Treat each mutation as a hypothesis about
+   a *class* of violation. For every guard, enumerate the distinct WAYS the property can
+   be broken and mutate once per way — a guard over data with more than one
+   representation (raw vs encoded, present vs absent vs dropped, one rendered surface vs
+   another) needs one mutation per representation. Report a survivor as `[risk: high]`
+   even when a sibling mutation died: "one mutation failed" is evidence about that
+   mutation, never that the class is closed.
+
+   This is the single highest-yield thing you do. In US-3.6a the builder verified a
+   plaintext-scan by bypassing the seal and watching it fail — correct, but only for the
+   HEADER path. The same scan with the production `createWebhook` header shape PASSED
+   with the entire response stored in the clear, because `[]byte` base64-encodes in JSON
+   and the scan was literal-only. The motivating case of the whole ADR was uncovered
+   while it was being reported as verified.
 
 ## House rules that shape what "tested" means here
 - Integration tests run on real Postgres in CI (testcontainers; local skips are fine).

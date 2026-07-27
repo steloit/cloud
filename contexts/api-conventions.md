@@ -149,3 +149,10 @@ hits a missing endpoint: check the ledger first; if listed, your task depends on
   feature (templates, exports) ships org-wide. Closed schemas: reject unknown keys at the pricing/
   validation gate (the canon's shape vocabulary is the whitelist), and every re-share path stores a
   PROJECTION of the decoded whitelist struct — never the caller's raw bytes (T12.4 review blocker).
+
+- **Silent acceptance** (E3 — `docs/plan/engineering-os-review-2026-07.md`): validate at the
+  boundary that OWNS the vocabulary. A DB CHECK is a backstop, not a contract — when it
+  fires, one-shot resources may already be consumed (`services.intent` had a CHECK but no
+  handler validation: a non-catalog value stood nine days, and three tests asserted on an
+  impossible API state). Refuse a wrong TYPE, never default it, or the system prices one
+  thing and stores another.

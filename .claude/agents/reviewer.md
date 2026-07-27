@@ -16,7 +16,7 @@ mutate-then-restore leaves no diff, so nothing else will surface it.
 The PR number/branch and a summary of intent. Read the diff yourself:
 `git diff main...HEAD` (or `gh pr diff <n>`), plus any file you need for context.
 
-## Review dimensions (all six, every time)
+## Review dimensions (all seven, every time)
 1. **Architecture** — docs/architecture.md v1.2 is FROZEN (ADR-0001/3/4/5). Product surface
    is exactly [postgres, valkey, web, worker]; queue = pgmq capability; storage/AI =
    external Bindings; no imperative provisioning from handlers (D9); cell_id on every
@@ -34,6 +34,24 @@ The PR number/branch and a summary of intent. Read the diff yourself:
 6. **ADR compliance** — check docs/product/18-philosophy/decisions.md and docs/adr/ for
    anything the diff touches. Estimate-before-provision at the API layer; events on every
    state change; denials audited; AI four laws (no auto-apply path).
+
+7. **Displaced guards, and what the fix disturbed** — for every check the diff MOVES,
+   RENAMES or DELETES, ask what it was catching and whether anything still catches it. A
+   refactor that relocates validation between layers is the highest-risk shape here: the
+   new check is tested, and the thing the old check quietly did is not.
+
+   US-3.7 consolidated shape defaults into one resolver, which moved the unknown-product
+   check out of `Price`'s switch into `resolve`. That left the switch's own `default:` arm
+   describing a condition it no longer owned — a review required it be repurposed to catch
+   "declared but never priced", the gap the move opened. The general form is wider than
+   deletion: ask what the FIX disturbed, not only what the feature changed. Two further
+   E3 blockers were introduced by fixes for earlier findings (an unfenced destructive
+   statement that omitted a fence its siblings had; a key encoding that no store could
+   accept) — in each case the author verified the thing they set out to fix, not the thing
+   they touched on the way.
+
+   Report a finding when you can show the guard's responsibility has no remaining owner —
+   an absent caller is verifiable. Do not report a suspicion that one might be missing.
 
 ## Output format (this exact structure)
 ```

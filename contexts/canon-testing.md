@@ -35,6 +35,24 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 - **Clock warping** for billing time (see `billing`).
 - Canon mode (MSW) ships forever as the demo world — keep it green alongside real-API paths.
 
+## More techniques (E3, 2026-07)
+
+- **Ordering is unprovable from final output.** A substring check on completed stdout
+  cannot establish that A happened before B — the output is the same either way. Make the
+  wrong order impossible instead: CK-M3 proves the estimate reaches the operator BEFORE
+  anything provisions by declining the prompt and asserting the price is on screen while
+  zero services exist. Ordering by construction, not by inspection.
+- **Anti-vacuity guards.** A test whose subject may legitimately be empty must fail loudly
+  on empty rather than passing: `if len(needles) == 0 { t.Fatal("this case proves
+  nothing") }`, `if ctLen <= 16 { t.Fatal("no payload stored — this scan proves
+  nothing") }`. Costs one line; the alternative is discovering the vacuity months later.
+- **Assert the shipped artifact.** CK-M3 BUILDS the CLI binary and execs it rather than
+  importing its packages — importing proves the library works, not that the binary a
+  customer runs does. Where a seam matters, cross it the way the customer crosses it.
+- **Derive the selector, do not list it.** A registry-driven test must iterate the SOURCE
+  (the schema, the spec, the fixtures) so a member added later is covered without anyone
+  remembering. A hand-maintained list covers exactly what it lists.
+
 ## Mistake bank
 
 - Retyping a canon number in a test (import from packages/canon; drift must fail, not fork).
@@ -74,3 +92,49 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
   (`DisallowUnknownFields`) catches extra fields, presence catches dropped/renamed required ones.
 - `git diff --exit-code` as a drift gate misses newly-generated UNTRACKED files (returns clean). Stage
   first: `git add -A -- <paths> && git diff --cached --exit-code -- <paths>` (Q3).
+
+### The proxy-assertion class (E3 — seven classes, drawn from four tasks)
+
+Every one of these passed its suite, was reported as verified, and was caught only by an
+adversarial reviewer. They share one shape: **the assertion is a proxy for the property,
+so it passes for a reason unrelated to what it claims.**
+
+- **An assertion satisfiable by output from a DIFFERENT part of the program.** CK-M3's
+  `Contains(out, "orders")` named the per-service estimate line, but the post-create
+  confirmation line also prints the service name — so deleting the entire estimate loop
+  passed. Tie the label and the value on the SAME line (split on newlines, require both),
+  or assert on a structured value instead of rendered text.
+- **An assertion true BY CONSTRUCTION.** `w.(http.Flusher)` succeeds because the wrapper
+  declares the method; it says nothing about whether the call forwards. Assert the EFFECT
+  — a spy that counts calls reaching the underlying writer — never interface satisfaction.
+  (Related: a wrapper must not advertise a capability the wrapped value lacks. Declaring
+  `Hijack` unconditionally made `w.(http.Hijacker)` succeed over a non-hijackable writer,
+  so a handler took the hijack branch instead of its fallback: worse than stripping it.)
+- **A scan for a value that has more than one on-the-wire REPRESENTATION.** `[]byte` in
+  JSON is base64, so a literal scan for a secret cannot see the body. Check every encoding
+  the value can take, and fail loudly when the needle is too short for the check to be
+  meaningful — an empty comparison target matches everything, which is the same bug
+  wearing the opposite mask.
+- **An assertion of DIFFERENCE where the property is INVARIANCE (or vice versa).** "The
+  two identities differ" is satisfied by corruption, dropping and mangling alike — a
+  field silently dropped from a resolved map still made the identities differ, so a
+  registry test that iterated every declared field still missed one. Assert what must be
+  true (every declared field survives the round trip carrying the value it was given).
+- **A test that SELECTS its cases by a property of today's values.** Choosing "fields whose
+  default looks like a zero value" skipped exactly the field whose default had been
+  wrongly changed. Derive the selector from BEHAVIOUR instead ("fields where changing the
+  value does not move the price"), so the mutated case cannot exclude itself.
+- **A `0 == 0` comparison over a collection that may be empty.** `len(a.live)` unchanged
+  after a retry is satisfied by an apply that did nothing. Assert the collection is
+  non-empty first, then that it did not grow.
+- **A fixture the API could never produce.** `intent: "transactional"` is not in the
+  catalog enum; an override with no `expires_at` cannot be created by the handler that
+  always stamps one. Such a test asserts on an impossible state and its green means
+  nothing — both surfaced only when unrelated validation was tightened, revealing that
+  three tests had been exercising a non-existent API state. Drive fixtures through the
+  real construction path; when hand-building, name the handler that produces this shape.
+
+**The discipline these imply:** when an assertion covers something a customer perceives —
+a price on screen, a credential at rest, an ordering — one mutation is not verification.
+Mutate once per way the property can break, and if a check can be satisfied by output from
+elsewhere in the program, it is not checking what its failure message claims.
