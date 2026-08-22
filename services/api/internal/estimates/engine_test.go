@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -821,5 +822,75 @@ func TestAPinIsPriceableOnlyWhereTheShapeDeclaresInstances(t *testing.T) {
 				t.Fatalf("pinned price = %d, want %d", line.MonthlyCents.Int64(), want)
 			}
 		})
+	}
+}
+
+// Valkey's GB rounding is ceiling division, pinned at the boundaries that
+// actually decide a bill: a partial GB rounds UP, an exact GB does not.
+//
+// WHAT THIS DELIBERATELY DOES NOT CLAIM. O16's QA review proposed a case above
+// 2^53 MB, where the pre-migration `int64(math.Ceil(float64(memMB)/1024.0))` and
+// this integer form diverge — reverting to the float form survives the suite, so
+// the change looks unpinned. That case is NOT CONSTRUCTIBLE through Price: at
+// 2200 cents/GB the largest priceable size is ~1.6e12 MB, about three orders of
+// magnitude below 2^53 (9.0e15), so the ceiling refuses every input where the
+// two forms could differ. Below 2^53 a float64 represents every integer exactly
+// and division by 1024 is exact, so they agree on every ACCEPTED input.
+//
+// The integer form is still the right code — it does not depend on the ceiling
+// existing, and `int64(math.Ceil(…))` of an out-of-range float is
+// implementation-defined (MinInt64 on amd64, saturating on arm64), which would
+// make the REFUSAL differ between CI and a dev Mac. But that is an argument
+// about robustness, not a behaviour this test can assert. Recorded so the next
+// person does not spend the same hour rediscovering it.
+func TestValkeyGBRoundingIsCeilingDivision(t *testing.T) {
+	perGB := table.Valkey.MemoryCentsPerGB
+	for _, tc := range []struct {
+		mb   int
+		want int64
+	}{
+		{1, 1}, {1023, 1}, {1024, 1}, {1025, 2}, {2048, 2}, {2049, 3}, {65536, 64},
+	} {
+		t.Run(strconv.Itoa(tc.mb), func(t *testing.T) {
+			line, err := Price(ShapeInput{Product: "valkey", Name: "c",
+				Shape: map[string]any{"memory_mb": tc.mb}})
+			if err != nil {
+				t.Fatalf("%d MB was refused: %v", tc.mb, err)
+			}
+			if got, want := line.MonthlyCents.Int64(), tc.want*perGB; got != want {
+				t.Fatalf("%d MB priced %d, want %d (%d GB × %d) — a partial GB must round UP",
+					tc.mb, got, want, tc.want, perGB)
+			}
+		})
+	}
+}
+
+// The postgres `ha` surcharge is its own checked Add, and its own arm.
+//
+// A shape can price just under the ceiling on storage alone and then overflow on
+// the HA surcharge. Dropping that arm's error return does not wrap — a failed
+// checked Add returns Zero — so the service prices at $0.00: a billing hole
+// rather than a visibly wrong number, and equally wrong. The storage_gb below is
+// DERIVED so it stays correct if the pricing table changes.
+func TestThePostgresHASurchargeIsBoundedToo(t *testing.T) {
+	sz := table.Postgres.Sizes["dev"]
+	maxExtra := (money.MaxMonthly - sz.BaseCents) / table.Postgres.StorageCentsPerGB
+	base, err := Price(ShapeInput{Product: "postgres", Name: "d",
+		Shape: map[string]any{"size": "dev", "storage_gb": int(maxExtra)}})
+	if err != nil {
+		t.Skipf("could not construct a shape at the storage ceiling (%v) — the table changed shape", err)
+	}
+	if money.MaxMonthly-base.MonthlyCents.Int64() >= table.Postgres.HACents {
+		t.Skipf("storage alone leaves %d cents of headroom, more than the HA surcharge (%d) — this case no longer tips on HA",
+			money.MaxMonthly-base.MonthlyCents.Int64(), table.Postgres.HACents)
+	}
+	if _, err := Price(ShapeInput{Product: "postgres", Name: "d",
+		Shape: map[string]any{"size": "dev", "storage_gb": int(maxExtra), "ha": true}}); err == nil {
+		t.Fatal("the HA surcharge pushed the price past the ceiling and was accepted — a dropped guard here prices the service at $0.00, a free service rather than a visibly wrong one")
+	} else {
+		var se ShapeError
+		if !errors.As(err, &se) {
+			t.Fatalf("want a ShapeError, got %v", err)
+		}
 	}
 }

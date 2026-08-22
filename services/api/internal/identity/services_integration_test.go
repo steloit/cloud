@@ -2258,3 +2258,90 @@ func TestTheActivityFeedHidesItselfFromPrincipalsWithoutStanding(t *testing.T) {
 		t.Fatalf("SSE: a member lacking observe.read got %d, want 403", got)
 	}
 }
+
+// A row poisoned by the PRE-O16 overflow must make the spend cap fail CLOSED.
+//
+// O16's headline claim, and it was entirely unpinned: its QA review mutated five
+// separate fail-closed arms — the `committed` and `limit` re-validations, the
+// not-representable branch, UpdateService's prior-price arm, and the
+// ErrStoredAmountUnrepresentable → 409 map — and ALL FIVE survived the suite.
+// The behaviour was correct; nothing forced it to stay correct.
+//
+// Not hypothetical: before O16, `postgres {storage_gb: 1e18}` returned 200 with
+// monthly_total_cents = -5340232221128652948 and that value was PERSISTED.
+// enforceBudget projects against SumOrgMonthlyEstimate, so one such row left the
+// org's committed run-rate at ~-5.3e18 and its cap bypassed for every later
+// create. After O16 the same row must REFUSE — with a problem+json carrying a
+// remediation, because "contact support" with no message is not a remediation.
+func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "failclosed@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"failclosedco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := func(name string) (int, string) {
+		r, b := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"web","name":"`+name+`","shape":{"size":"standard-1"}}]}`, ownerCk)
+		if r.StatusCode != 200 {
+			t.Fatalf("createEstimate: %d %s", r.StatusCode, b)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(b), &est)
+		r2, b2 := w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"`+name+`","product":"web","estimate_id":"`+est.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+		return r2.StatusCode, b2
+	}
+
+	code, b := create("first")
+	if code != 201 {
+		t.Fatalf("the first service must create normally: %d %s", code, b)
+	}
+	var one struct{ Id string }
+	_ = json.Unmarshal([]byte(b), &one)
+
+	// Poison it with exactly the value main produced, then give the org a cap so
+	// enforceBudget runs at all (no budget row means uncapped).
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET monthly_estimate_cents = $2 WHERE id = $1`, one.Id, int64(-5340232221128652948)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`INSERT INTO budgets (org_id, limit_cents) VALUES ($1,$2)
+		 ON CONFLICT (org_id) DO UPDATE SET limit_cents = $2`, org.Id, int64(10000)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = w.pool.Exec(context.Background(), `DELETE FROM budgets WHERE org_id=$1`, org.Id)
+	})
+
+	code, b = create("second")
+	if code != 409 {
+		t.Fatalf("a create against an org holding an unrepresentable stored price returned %d %s — want 409. "+
+			"Before O16 this returned 201, because the negative committed total made every projection look far under the cap; "+
+			"a permissive answer here IS the spend-cap bypass", code, b)
+	}
+	if !strings.Contains(b, `"remediation"`) {
+		t.Fatalf("the 409 carries no remediation: %s — every problem+json must (AGENTS.md hard rule)", b)
+	}
+	var refused int
+	if err := w.pool.QueryRow(ctx,
+		`SELECT count(*) FROM services WHERE env_id=$1 AND name='second'`, env.ID).Scan(&refused); err != nil {
+		t.Fatal(err)
+	}
+	if refused != 0 {
+		t.Fatal("the refused create still inserted a row — a fail-closed cap that provisions anyway is not fail-closed")
+	}
+}

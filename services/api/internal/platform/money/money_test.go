@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/bits"
 	"testing"
 	"time"
 )
@@ -82,9 +83,22 @@ func TestMulIntIsChecked(t *testing.T) {
 	if _, err := unit.MulInt(math.MaxInt64); !errors.Is(err, ErrOverflow) {
 		t.Fatalf("MaxInt64 instances must overflow, got %v", err)
 	}
-	// A 64×64 product whose LOW half alone looks harmless — the case a
-	// naive `if lo > max` check without inspecting `hi` would wave through.
-	if _, err := MustFromInt(2).MulInt(math.MaxInt64/2 + 2); !errors.Is(err, ErrOverflow) {
+	// A 64×64 product whose LOW half alone looks harmless — the case a naive
+	// `if lo > max` check without inspecting `hi` waves through.
+	//
+	// The multiplier is DERIVED so the product genuinely exceeds 2^64. An earlier
+	// version used 2 × (MaxInt64/2 + 2) = 2^63 + 2, which is BELOW 2^64: hi is
+	// zero there, so it died on the `lo` arm and proved nothing about the `hi`
+	// arm its own comment named. Deleting `hi != 0` survived the entire suite,
+	// and `postgres {storage_gb: 368934881474191033}` then priced at 1934 cents.
+	// The example has to meet the standard of the rule it teaches.
+	const unitCents = 3
+	overflowing := int64(math.MaxUint64/unitCents) + 1 // unitCents × this >= 2^64
+	hi, lo := bits.Mul64(unitCents, uint64(overflowing))
+	if hi == 0 {
+		t.Fatalf("this case no longer exercises the hi arm: %d × %d has hi=0, lo=%d", unitCents, overflowing, lo)
+	}
+	if _, err := MustFromInt(unitCents).MulInt(overflowing); !errors.Is(err, ErrOverflow) {
 		t.Fatalf("a product that wraps into a small positive must overflow, got %v", err)
 	}
 	if _, err := unit.MulInt(-1); !errors.Is(err, ErrNegative) {
@@ -254,5 +268,25 @@ func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
 	// And the ceiling it produces genuinely survives that period.
 	if got := MaxMonthly * longest; got <= 0 || got/longest != MaxMonthly {
 		t.Fatalf("the maximum accepted rate wraps across %s: %d × %d = %d", when, MaxMonthly, longest, got)
+	}
+}
+
+// SurvivesBillingMonth answers the question metering.Rollup implicitly asks of
+// every rate it accumulates. Pinned at the boundary, because a `return true`
+// implementation would satisfy its only production caller.
+func TestSurvivesBillingMonthHoldsExactlyToTheCeiling(t *testing.T) {
+	for _, n := range []int64{0, 1, 1900, MaxMonthly} {
+		if !MustFromInt(n).SurvivesBillingMonth() {
+			t.Fatalf("%d is representable but does not survive a billing month — the type invariant is broken", n)
+		}
+	}
+	// MaxMonthly is the LAST value for which it holds. Checked against the raw
+	// product rather than against the method, so this cannot pass by agreeing
+	// with itself.
+	if hi, lo := bits.Mul64(uint64(MaxMonthly), uint64(secondsInLongestMonth)); hi != 0 || lo > uint64(math.MaxInt64) {
+		t.Fatalf("MaxMonthly × a month already leaves int64 (hi=%d lo=%d) — the ceiling is derived wrong", hi, lo)
+	}
+	if hi, lo := bits.Mul64(uint64(MaxMonthly+1), uint64(secondsInLongestMonth)); hi == 0 && lo <= uint64(math.MaxInt64) {
+		t.Fatal("one cent past MaxMonthly still fits a billing month — the derivation is not tight")
 	}
 }
