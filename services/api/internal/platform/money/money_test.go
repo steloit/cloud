@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/bits"
 	"testing"
 	"time"
 )
@@ -42,7 +43,7 @@ func TestTheCeilingIsInclusiveAndSurvivesAFullBillingMonth(t *testing.T) {
 	// Runtime values, not constants: Go rejects a constant expression that
 	// overflows at COMPILE time, so a constant version of this makes the
 	// regression unbuildable rather than red — which reads as a broken test.
-	secs, max := SecondsInLongestMonth, MaxMonthly
+	secs, max := secondsInLongestMonth, MaxMonthly
 	weighted := max * secs
 	if weighted <= 0 || weighted/secs != max {
 		t.Fatalf("the maximum amount wraps when weighted across a month: %d × %d = %d — metering.Rollup performs exactly this multiplication",
@@ -82,9 +83,22 @@ func TestMulIntIsChecked(t *testing.T) {
 	if _, err := unit.MulInt(math.MaxInt64); !errors.Is(err, ErrOverflow) {
 		t.Fatalf("MaxInt64 instances must overflow, got %v", err)
 	}
-	// A 64×64 product whose LOW half alone looks harmless — the case a
-	// naive `if lo > max` check without inspecting `hi` would wave through.
-	if _, err := MustFromInt(2).MulInt(math.MaxInt64/2 + 2); !errors.Is(err, ErrOverflow) {
+	// A 64×64 product whose LOW half alone looks harmless — the case a naive
+	// `if lo > max` check without inspecting `hi` waves through.
+	//
+	// The multiplier is DERIVED so the product genuinely exceeds 2^64. An earlier
+	// version used 2 × (MaxInt64/2 + 2) = 2^63 + 2, which is BELOW 2^64: hi is
+	// zero there, so it died on the `lo` arm and proved nothing about the `hi`
+	// arm its own comment named. Deleting `hi != 0` survived the entire suite,
+	// and `postgres {storage_gb: 368934881474191033}` then priced at 1934 cents.
+	// The example has to meet the standard of the rule it teaches.
+	const unitCents = 3
+	overflowing := int64(math.MaxUint64/unitCents) + 1 // unitCents × this >= 2^64
+	hi, lo := bits.Mul64(unitCents, uint64(overflowing))
+	if hi == 0 {
+		t.Fatalf("this case no longer exercises the hi arm: %d × %d has hi=0, lo=%d", unitCents, overflowing, lo)
+	}
+	if _, err := MustFromInt(unitCents).MulInt(overflowing); !errors.Is(err, ErrOverflow) {
 		t.Fatalf("a product that wraps into a small positive must overflow, got %v", err)
 	}
 	if _, err := unit.MulInt(-1); !errors.Is(err, ErrNegative) {
@@ -216,11 +230,11 @@ func TestSubRefusesToGoNegative(t *testing.T) {
 // multiplies it — not against itself.
 //
 // Ported from estimates (f970477) along with the constant it guards: it was
-// written when `SecondsInLongestMonth` lived in `engine.go`, and it belongs
+// written when `secondsInLongestMonth` lived in `engine.go`, and it belongs
 // wherever that constant lives, because it is the ONLY check that the constant
 // is not merely self-consistent.
 //
-// `SecondsInLongestMonth` had one representation in the pricing engine and
+// `secondsInLongestMonth` had one representation in the pricing engine and
 // another in `metering.Rollup`, which multiplies a rate by the REAL elapsed
 // seconds of a period. Changing the constant from 31 days to 30 survived every
 // package, because the ceiling and the test that checked it moved together. The
@@ -247,12 +261,48 @@ func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
 			}
 		}
 	}
-	if SecondsInLongestMonth < longest {
-		t.Fatalf("SecondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
-			SecondsInLongestMonth, when, longest)
+	if secondsInLongestMonth < longest {
+		t.Fatalf("secondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
+			secondsInLongestMonth, when, longest)
 	}
 	// And the ceiling it produces genuinely survives that period.
 	if got := MaxMonthly * longest; got <= 0 || got/longest != MaxMonthly {
 		t.Fatalf("the maximum accepted rate wraps across %s: %d × %d = %d", when, MaxMonthly, longest, got)
+	}
+}
+
+// SurvivesBillingMonth answers the question metering.Rollup implicitly asks of
+// every rate it accumulates. It has NO production caller yet (O19 is the task
+// that would add one); today only tests use it.
+//
+// That makes a negative case mandatory rather than nice-to-have. An earlier
+// version of this test asserted only positives, so `return true` satisfied it —
+// reproducing, in the test written to close the MulInt blocker, the exact defect
+// that blocker WAS. The negative below uses `Cents{v: math.MaxInt64}`, a value no
+// constructor can produce; it is reachable only because this test is
+// `package money`, which is the point.
+func TestSurvivesBillingMonthHoldsExactlyToTheCeiling(t *testing.T) {
+	for _, n := range []int64{0, 1, 1900, MaxMonthly} {
+		if !MustFromInt(n).SurvivesBillingMonth() {
+			t.Fatalf("%d is representable but does not survive a billing month — the type invariant is broken", n)
+		}
+	}
+	// THE discriminating case: an amount that cannot survive a billing month must
+	// answer false. Without this, `func (c Cents) SurvivesBillingMonth() bool {
+	// return true }` passes the whole suite.
+	if (Cents{v: math.MaxInt64}).SurvivesBillingMonth() {
+		t.Fatal("MaxInt64 cents claims to survive a billing month — the method is not actually checking")
+	}
+	if (Cents{v: MaxMonthly + 1}).SurvivesBillingMonth() {
+		t.Fatal("one cent past the ceiling claims to survive a billing month — the method is not tight")
+	}
+	// MaxMonthly is the LAST value for which it holds. Checked against the raw
+	// product rather than against the method, so this cannot pass by agreeing
+	// with itself.
+	if hi, lo := bits.Mul64(uint64(MaxMonthly), uint64(secondsInLongestMonth)); hi != 0 || lo > uint64(math.MaxInt64) {
+		t.Fatalf("MaxMonthly × a month already leaves int64 (hi=%d lo=%d) — the ceiling is derived wrong", hi, lo)
+	}
+	if hi, lo := bits.Mul64(uint64(MaxMonthly+1), uint64(secondsInLongestMonth)); hi == 0 && lo <= uint64(math.MaxInt64) {
+		t.Fatal("one cent past MaxMonthly still fits a billing month — the derivation is not tight")
 	}
 }

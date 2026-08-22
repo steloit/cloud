@@ -160,15 +160,12 @@ func (h *Handlers) responseError(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, ErrAssistantUserScoped):
 		problem.Write(w, r, problem.PermissionDenied("org-key principal",
 			"The assistant is a user surface — sign in as a user (browser session or personal token)."))
-	// A handler that has already decided the exact response carries it here.
-	// This case is FIRST so a pre-decided problem is never re-derived by a later
-	// arm — a denial mapped to 404 by problem.FromDenial must not be caught by
-	// the generic AccessDeniedError → 403 arm below and turned back into an
-	// existence oracle.
-	case errors.As(err, new(problemError)):
-		var pe problemError
-		errors.As(err, &pe)
-		problem.Write(w, r, pe.p)
+	// NOTE: a handler that has already decided its exact response (problemError,
+	// e.g. a denial mapped to 404 by problem.FromDenial) never reaches this
+	// switch at all — problem.Carrier is resolved at the TOP of responseError,
+	// and problemError satisfies it. That is what stops such a problem being
+	// re-derived into a 403 oracle by the arm below; do not add a case here for
+	// it. An earlier version of this branch did, and the arm was dead on arrival.
 	case errors.As(err, new(AccessDeniedError)):
 		var ad AccessDeniedError
 		errors.As(err, &ad)

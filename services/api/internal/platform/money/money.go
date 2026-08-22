@@ -36,15 +36,15 @@ import (
 	"strconv"
 )
 
-// SecondsInLongestMonth is what a monthly rate can be multiplied by downstream.
+// secondsInLongestMonth is what a monthly rate can be multiplied by downstream.
 //
-// Exported so MaxMonthly's derivation can be pinned against the arithmetic that
-// actually multiplies it — `metering.Rollup`'s `weighted += secs * rate`, over a
-// real calendar month — rather than against itself. A test that re-derives the
-// ceiling from this constant proves nothing; one that derives the longest REAL
-// month from `AddDate(0, 1, 0)` and checks this constant covers it proves the
-// thing that matters. See TestTheBillingMonthConstantCoversTheLongestRealPeriod.
-const SecondsInLongestMonth = int64(31 * 24 * 60 * 60)
+// UNEXPORTED, deliberately. An earlier revision exported it so a test could pin
+// MaxMonthly's derivation — a false reason, since money_test.go is `package
+// money` and reads it either way. What the export actually bought was one line
+// in another package doing `price * money.SecondsInLongestMonth`: a raw int64
+// multiply, in the codebase whose whole point is that those do not compile.
+// Callers that need the question answered get SurvivesBillingMonth below.
+const secondsInLongestMonth = int64(31 * 24 * 60 * 60)
 
 // MaxMonthly is the largest monthly amount this platform can carry through its
 // WHOLE money path without wrapping — not merely the largest one multiply
@@ -62,7 +62,7 @@ const SecondsInLongestMonth = int64(31 * 24 * 60 * 60)
 // past which the platform's integers stop being able to represent the answer,
 // which is arithmetic. Anything below it that is merely unaffordable is the hard
 // spend cap's business.
-const MaxMonthly = int64(math.MaxInt64) / SecondsInLongestMonth
+const MaxMonthly = int64(math.MaxInt64) / secondsInLongestMonth
 
 // ErrOverflow is returned by any operation whose result would leave the
 // representable range. It is deliberately one error for both directions: a
@@ -178,6 +178,18 @@ func Sum(amounts ...Cents) (Cents, error) {
 		total = next
 	}
 	return total, nil
+}
+
+// SurvivesBillingMonth reports whether this amount, treated as a monthly rate,
+// can be multiplied by the longest billing month without leaving int64 — the
+// question `metering.Rollup` implicitly asks of every rate it accumulates.
+//
+// It exists so no caller needs the raw constant to ask it. By the type's
+// invariant this is true for every Cents, so a false here means the invariant
+// is broken, not that the caller supplied something too big.
+func (c Cents) SurvivesBillingMonth() bool {
+	hi, lo := bits.Mul64(uint64(c.v), uint64(secondsInLongestMonth))
+	return hi == 0 && lo <= uint64(math.MaxInt64)
 }
 
 // Cmp orders two amounts: -1, 0 or +1.

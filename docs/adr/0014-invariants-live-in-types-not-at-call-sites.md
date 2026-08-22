@@ -1,6 +1,16 @@
 # ADR-0014 — Platform invariants live in types, not at call sites
 
 **Status:** Proposed (agent, 2026-07-27) — needs founder ratification
+
+**If the founder declines:** the code stands regardless. `money.Cents` and
+`problem.FromDenial` each close specific, reproduced defects (a spend cap
+permanently bypassable by one authenticated request; a 403/404 divergence
+between two transports of one operation), and those fixes are not contingent on
+the general rule. What would lapse is only the RULE — "where a platform
+invariant can be encoded in a type, it must be" — which would stop binding
+future work. A "no" here is not a request to revert; it is a decision about
+precedent.
+
 **Deciders:** Founder
 **Relates to:** ADR-025 (money is integer cents), ADR-0008 (review pipeline),
 `contexts/api-conventions.md` (404-not-403 for no-standing)
@@ -72,7 +82,10 @@ points.** It matches how GitHub answers a private repository you cannot see.
   round had looked at. That exhaustive search is now free and repeats on every
   change.
 - **Two live defects fell out of the conversion**: the JSON decoder accepted a
-  quoted number (`"5800"`), making the wire contract quietly bivalent; and
+  quoted number (`"5800"`) — this is about `money.Cents`'s OWN decoder, not the
+  HTTP wire: no client could ever have sent it, because request bodies decode
+  through the generated `*int` types. Corrected after review; the original
+  wording implied a live API defect the history does not support; and
   valkey's GB rounding used `float64`, which loses precision above 2^53 on
   caller-supplied input.
 - **Two paths now fail closed rather than computing on garbage.** `enforceBudget`

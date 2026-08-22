@@ -57,14 +57,6 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 	if err != nil {
 		return err
 	}
-	// The PROJECTION is checked arithmetic. `current + newMonthlyCents` wrapping
-	// does not merely mis-answer one request: it answers "under the cap" for a
-	// request that is astronomically over it, and — because the wrapped value is
-	// then persisted into monthly_estimate_cents and summed by
-	// SumOrgMonthlyEstimate — every LATER projection for that org wraps too. One
-	// request disables the org's spend cap permanently. Overflow is treated as
-	// over-cap, which is the only safe direction: a number we cannot represent is
-	// not a number we can prove is affordable.
 	// The PROJECTION is money arithmetic, so it cannot wrap — and the SUMMANDS
 	// are re-validated on the way in, which is the part that matters most.
 	// `committed` comes from SumOrgMonthlyEstimate over stored rows; if any row
@@ -74,40 +66,72 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 	// later projection wrapped too.
 	feeAmt, feeErr := money.FromInt(planFee)
 	committedAmt, cErr := money.FromInt(committed)
-	if feeErr != nil || cErr != nil {
+	// `limit` goes through FromInt too. It is a STORED value like the others, and
+	// leaving it as a raw int64 on the right-hand side of the comparison meant an
+	// out-of-range limit_cents was evaluated silently while an out-of-range
+	// committed failed closed — the same input class treated two ways.
+	limitAmt, lErr := money.FromInt(limit)
+	if feeErr != nil || cErr != nil || lErr != nil {
 		return problemError{p: problem.Conflict(
 			[]string{"this organization's committed monthly spend is not a valid amount"},
-			"Contact support: a stored monthly estimate is outside the representable range, so the spend cap cannot be evaluated safely.")}
+			"Contact support: a stored monthly estimate or budget is outside the representable range, so the spend cap cannot be evaluated safely.")}
 	}
 	current, curErr := feeAmt.Add(committedAmt)
 	projected, projErr := current.Add(newMonthly)
 	// Overflow is treated as OVER CAP — the only safe direction: a number we
 	// cannot represent is not a number we can prove is affordable.
-	if curErr != nil || projErr != nil || projected.Int64() > limit {
+	notRepresentable := curErr != nil || projErr != nil
+	if notRepresentable || projected.GreaterThan(limitAmt) {
 		// F9 flagship: an ENFORCED bound, refused at accept time (402) with the
 		// arithmetic shown — never an alert-only. Every cap hit lands on the
 		// events spine (AC3) so "the cap is real" is auditable, not just a UI toast.
+		// On the not-representable branch `current` and `projected` are Zero,
+		// because that is what a failed checked add returns. Printing them would
+		// put "current $0.00, projected $0.00" on the audit spine for precisely
+		// the anomalous case the spine exists to record — AC3 asks that the cap
+		// being real be AUDITABLE, and a row of zeros is worse than no row.
+		detail := fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
+			limitAmt.Int64(), current.Int64(), newMonthly.Int64(), projected.Int64())
+		if notRepresentable {
+			// current_cents and projected_cents are OMITTED, not null. Both mean
+			// "not computable", and using two encodings for that in one object is
+			// how a consumer gets it wrong: a reader shaped like
+			// budget_integration_test.go's (`ProjectedCents int64`) decodes null
+			// to 0 — indistinguishable from a real zero, which is precisely the
+			// "row of zeros" this branch exists to avoid. Absence uniformly means
+			// not computable, and `reason` carries the why.
+			detail = fmt.Sprintf(`{"cap_cents":%d,"requested_cents":%d,"reason":"not_representable"}`,
+				limitAmt.Int64(), newMonthly.Int64())
+		}
 		s.record(ctx, events.Input{
 			OrgID: orgID, Kind: "billing", Via: "system", Actor: "system",
 			Action: "billing.spend_cap_reached", Subject: orgID,
-			Detail: []byte(fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
-				limit, current.Int64(), newMonthly.Int64(), projected.Int64())),
+			Detail: []byte(detail),
 		})
 		// The hard spend cap is a 402 quota_exceeded (the x-error-catalog's
 		// sanctioned "hard quota: fails with remediation" — NOT a new error
 		// class): an ENFORCED bound refused at accept time with the arithmetic,
 		// never an alert-only.
-		return problemError{p: problem.QuotaHard(
-			fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
-				projected, current, newMonthly, dollars(limit)),
-			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
+		msg := fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
+			projected, current, newMonthly, limitAmt)
+		remediation := "Raise the budget in Billing, or provision a smaller shape — nothing running is affected."
+		if notRepresentable {
+			// Do NOT claim the projection exceeds the cap: this branch is reached
+			// precisely because the projection could not be computed. And do not
+			// offer "raise the budget" — raising it cannot resolve an arithmetic
+			// overflow, and api-conventions requires each failure to name a next
+			// step that can actually work.
+			msg = fmt.Sprintf("this service is priced at %s, and your organization's committed monthly spend cannot be evaluated — the total is outside the range the platform can represent exactly",
+				newMonthly)
+			// NOT "a stored estimate is out of range" — this branch is reached
+			// only after feeErr/cErr/lErr all passed, so every stored value is in
+			// range by construction and it is their SUM that overflows. Had a
+			// stored value been out of range, the 409 above would have answered.
+			remediation = "Provision a smaller shape, or contact support: the total of this organization's committed monthly estimates is larger than the platform can represent exactly."
+		}
+		return problemError{p: problem.QuotaHard(msg, remediation)}
 	}
 	return nil
-}
-
-// dollars renders integer cents as $D.CC for the cap's shown arithmetic.
-func dollars(cents int64) string {
-	return fmt.Sprintf("$%d.%02d", cents/100, ((cents%100)+100)%100)
 }
 
 // transitions is the closed status machine. deleting is terminal (the
@@ -259,6 +283,13 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	// estimate usable — better DX, same law.
 	priced, pricedLines, err := est.PricedShapes(ctx, in.EstimateID)
 	if err != nil {
+		// A stored amount the money type refuses is not a server fault — answer
+		// with the remediation (re-price) rather than a bare 500.
+		if errors.Is(err, estimates.ErrStoredAmountUnrepresentable) {
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate holds a monthly amount outside the representable range"},
+				"Create a new estimate for the same configuration and provision from that one — this estimate was priced before the platform bounded monetary arithmetic.")}
+		}
 		return store.Service{}, err
 	}
 	// The gate binds to the CONTRACTED CONFIGURATION, not to a price.

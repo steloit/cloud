@@ -108,6 +108,19 @@ never hand-written · demo data from `19-canon` only.
   `cp -R` the module, mutate the copy, delete it. If you nonetheless mutate the tree,
   **say so plainly in the PR** — ADR-0008 makes disclosure the operative obligation,
   because a mutate-then-restore is otherwise invisible to everyone downstream.
+- **A worktree is not a commit, and `git push` only pushes commits.** O16 (#310) merged
+  the money primitive but NONE of its two review rounds: the fixes were made in a
+  `git worktree`, never committed, `git push` sent only the pre-existing commit, the PR
+  merged that, and `git worktree remove --force` then destroyed the rest. The PR
+  description claimed all of it. **Commit after each review round, before pushing, and
+  run `git status` in the worktree before removing it.**
+  The tell is one line, and it is the one you are tempted to route around: plain
+  `git worktree remove` REFUSES with *"contains modified or untracked files, use --force
+  to delete it"*. **Needing `--force` at all IS the warning** — that message is the review
+  round you are about to delete. (Two things that are NOT tells, both measured: the push
+  reported a perfectly normal range, because the merge-up commit was genuinely new; and
+  `--force` prints nothing on success whether or not it destroyed anything. Comparing
+  `origin/<branch>` to `HEAD` does not help either — uncommitted work is in neither.)
 - Never mix restructuring and feature work in one commit.
 
 ## Don't read (token discipline)

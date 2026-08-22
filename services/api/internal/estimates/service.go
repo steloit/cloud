@@ -12,6 +12,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
+	"github.com/steloit/cloud/services/api/internal/platform/money"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
@@ -36,6 +37,12 @@ type Created struct {
 	Row   store.Estimate
 	Lines []Line
 }
+
+// ErrStoredAmountUnrepresentable is returned when a STORED monetary value fails
+// to decode because it is outside the range money.Cents admits. Distinct because
+// the remediation is distinct: the row was written by a version of this code that
+// could produce an unrepresentable amount, so the way forward is to re-price.
+var ErrStoredAmountUnrepresentable = errors.New("estimates: a stored monetary amount is outside the representable range")
 
 // Create prices the shapes and persists the estimate. envID/orgID may be
 // empty (a pre-project pricing preview) — such an estimate can never be
@@ -121,7 +128,22 @@ func (s *Service) PricedShapes(ctx context.Context, estimateID string) ([]ShapeI
 	}
 	var lines []Line
 	if len(row.Lines) > 0 {
+		// A decode failure here MIGHT be an out-of-range stored amount —
+		// Cents.UnmarshalJSON refuses anything outside [0, MaxMonthly], which is
+		// exactly what a row written before the money migration can hold, and a
+		// bare 500 tells that caller nothing.
+		//
+		// But only THAT case. Wrapping unconditionally labelled every decode
+		// failure — a truncated blob, a schema change, anything future — as an
+		// unrepresentable amount, so the handler answered 409 "re-price this
+		// estimate" and a genuine corruption never reached problem.Internal with
+		// an event_id. That is an outage disguised as a client error, which is
+		// the same defect this package's own FromDenial pass-through test exists
+		// to prevent for 404s.
 		if err := json.Unmarshal(row.Lines, &lines); err != nil {
+			if errors.Is(err, money.ErrOverflow) || errors.Is(err, money.ErrNegative) {
+				return nil, nil, fmt.Errorf("%w: %w", ErrStoredAmountUnrepresentable, err)
+			}
 			return nil, nil, fmt.Errorf("estimates: stored lines: %w", err)
 		}
 	}
