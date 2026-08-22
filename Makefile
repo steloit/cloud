@@ -3,7 +3,7 @@
 OAPI := go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0
 SPEC := docs/product/08-api/openapi.yaml
 
-.PHONY: gen gen-go gen-ts gen-canon
+.PHONY: gen gen-go gen-sql gen-ts gen-canon migrate-new
 
 gen: gen-go gen-ts
 
@@ -15,7 +15,19 @@ gen-go:
 
 SQLC := go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
 
+# The rm is not tidiness — it is what makes the CI drift gate able to see a
+# DELETED query. sqlc writes output but never removes stale output, and the gate
+# can only diff what the generator writes. So deleting db/queries/mfa.sql left
+# internal/identity/store/mfa.sql.go on disk, still compiling and still callable
+# with six live query functions, and the gate reported GREEN. That is US-1.3a's
+# property ("the SQL that executes is the SQL that was reviewed") approached from
+# deletion instead of edit. A RENAME was already caught, because the new file
+# appears and stages; only deletion slipped through.
+#
+# Sweeping the directory and regenerating makes a deleted query show up as a
+# staged deletion, which the gate's `git diff --cached --exit-code` fails on.
 gen-sql:
+	rm -f services/api/internal/identity/store/*.sql.go 	      services/api/internal/identity/store/models.go 	      services/api/internal/identity/store/db.go
 	cd services/api && $(SQLC) generate
 
 # gen-canon syncs the canon fixtures into every consumer copy. Pure shell (no
