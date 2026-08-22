@@ -28,6 +28,12 @@ type AssistantThread struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type BellScanned struct {
+	EventID      string
+	ScannedAt    pgtype.Timestamptz
+	Unrenderable bool
+}
+
 type Binding struct {
 	ID             string
 	SourceID       string

@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimBellEvent = `-- name: ClaimBellEvent :one
+INSERT INTO bell_scanned (event_id)
+VALUES ($1)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING event_id
+`
+
+// Claim an event for projection. Returns no row when another replica already
+// claimed it, so exactly one fans out.
+//
+// Unlike ClaimWebhookDelivery this claim is held INSIDE the fan-out transaction
+// — which is only safe because the bell does no network I/O. A crash rolls the
+// claim back with the partial fan-out, so a later run re-notifies EVERY member
+// rather than leaving members 4..10 of a 10-member org silently un-rung.
+//
+// The cost, stated plainly: a second replica BLOCKS on the speculative index
+// entry until the winner's tx ends, so replicas serialize per batch.
+func (q *Queries) ClaimBellEvent(ctx context.Context, eventID string) (string, error) {
+	row := q.db.QueryRow(ctx, claimBellEvent, eventID)
+	var event_id string
+	err := row.Scan(&event_id)
+	return event_id, err
+}
+
 const claimWebhookDelivery = `-- name: ClaimWebhookDelivery :one
 INSERT INTO webhook_deliveries (webhook_id, event_id, id, status, attempts)
 VALUES ($1, $2, $3, 'pending', 1)
@@ -82,6 +106,47 @@ func (q *Queries) CreateWebhook(ctx context.Context, arg CreateWebhookParams) (W
 		&i.KekID,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getDeployNotificationContext = `-- name: GetDeployNotificationContext :one
+SELECT d.number,
+       env.name AS env_name,
+       COALESCE((SELECT u.name FROM users u WHERE u.id = $1), '')::text AS actor_name
+FROM deployments d
+JOIN environments env ON env.id = d.env_id
+JOIN projects p ON p.id = env.project_id
+WHERE d.id = $2 AND p.org_id = $3
+`
+
+type GetDeployNotificationContextParams struct {
+	ActorID      string
+	DeploymentID string
+	OrgID        string
+}
+
+type GetDeployNotificationContextRow struct {
+	Number    int32
+	EnvName   string
+	ActorName string
+}
+
+// US-10.3: the presentation data N1's deploy title needs, resolved during
+// projection (founder ruling 2026-07-20, Option A: render once, persist the
+// rendered title — a notification is a historical fact, and a later rename must
+// not rewrite it).
+//
+// Local reads only, inside the fan-out tx. actor_name is COALESCEd to ” rather
+// than substituted: an absent name makes the frame UNRENDERABLE, and the
+// projection skips it instead of inventing copy.
+// Org-fenced: the deployment must belong to the event's org. The subject always
+// does today, but an unfenced lookup would render another tenant's environment
+// name into a title fanned to this org's members. Fencing is architectural, not
+// conditional on the current call path being safe.
+func (q *Queries) GetDeployNotificationContext(ctx context.Context, arg GetDeployNotificationContextParams) (GetDeployNotificationContextRow, error) {
+	row := q.db.QueryRow(ctx, getDeployNotificationContext, arg.ActorID, arg.DeploymentID, arg.OrgID)
+	var i GetDeployNotificationContextRow
+	err := row.Scan(&i.Number, &i.EnvName, &i.ActorName)
 	return i, err
 }
 
@@ -261,6 +326,81 @@ func (q *Queries) ListOrgMemberRecipients(ctx context.Context, orgID string) ([]
 	return items, nil
 }
 
+const listPendingBellEvents = `-- name: ListPendingBellEvents :many
+SELECT e.id, e.org_id, e.kind, e.via, e.actor, e.action, e.subject, e.at, e.detail
+FROM events e
+LEFT JOIN bell_scanned bs ON bs.event_id = e.id
+WHERE bs.event_id IS NULL
+ORDER BY e.at ASC, e.id ASC
+LIMIT 100
+`
+
+// US-10.3: the bell projection scan. A pure anti-join against bell_scanned —
+// deliberately WITHOUT a time bound.
+//
+// `e.at >= <watermark>` would be wrong here, not merely slower: events.at
+// defaults to now(), which is TRANSACTION START time, so a write tx that opens
+// before a tick and commits after it lands below any watermark and is skipped
+// permanently and silently. An unscanned event simply has no ledger row, so it
+// is picked up whenever it becomes visible, however late that is.
+//
+// Ordered by (at, id) because ids.New is random hex and `at` collides freely
+// under batch insert; the pair is total. Served by events_at_id_idx.
+//
+// COST — MEASURED, not reasoned. Two earlier descriptions of this plan (an
+// index-probe walk from the oldest row) were written from inspection and were
+// both WRONG. EXPLAIN (ANALYZE) at 200k spine rows in steady state:
+//
+//	Parallel Hash Anti Join
+//	  -> Parallel Seq Scan on events
+//	  -> Parallel Hash -> Parallel Seq Scan on bell_scanned
+//
+// events_at_id_idx is NOT used. There is no early exit: LIMIT sits above a Sort
+// above a COMPLETED anti-join, so the whole ledger is hashed every tick and the
+// first scaling wall is work_mem (the hash spills to disk), not CPU. Measured
+// latency: 10k rows 3.8ms · 110k 31ms · 610k 514ms — roughly linear, reaching
+// the 10s tick period near 10M events.
+//
+// Consequence to settle BEFORE this ships: the migration takes a SHARE lock on
+// `events` — blocking every mutating API call — to build an index this query
+// never uses, then pays that index's write amplification on the platform's
+// hottest append path forever. Either the query is reshaped so the index earns
+// its lock, or the index does not ship.
+//
+// The floor-less shape is still correct and must stay: an `at` bound silently
+// drops transactions that open before a tick and commit after it. The durable
+// fix is a ledger-derived min-unscanned cursor plus pruning behind it, which
+// bounds the scan without reintroducing that bug.
+func (q *Queries) ListPendingBellEvents(ctx context.Context) ([]Event, error) {
+	rows, err := q.db.Query(ctx, listPendingBellEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Kind,
+			&i.Via,
+			&i.Actor,
+			&i.Action,
+			&i.Subject,
+			&i.At,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingWebhookEvents = `-- name: ListPendingWebhookEvents :many
 SELECT e.id, e.org_id, e.kind, e.via, e.actor, e.action, e.subject, e.at, e.detail, w.id AS webhook_id
 FROM events e
@@ -355,6 +495,17 @@ func (q *Queries) ListWebhooks(ctx context.Context, orgID string) ([]Webhook, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const markBellEventUnrenderable = `-- name: MarkBellEventUnrenderable :exec
+UPDATE bell_scanned SET unrenderable = true WHERE event_id = $1
+`
+
+// Flag a worthy-but-unrenderable event so a later ruling on its copy can be
+// applied retroactively (a targeted DELETE re-queues exactly these rows).
+func (q *Queries) MarkBellEventUnrenderable(ctx context.Context, eventID string) error {
+	_, err := q.db.Exec(ctx, markBellEventUnrenderable, eventID)
+	return err
 }
 
 const markNotificationsRead = `-- name: MarkNotificationsRead :exec
