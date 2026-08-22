@@ -83,8 +83,15 @@ func (f *fakeQ) OrgForService(context.Context, string) (string, error) { return 
 
 // fakeTrans records edges and enforces the one rule the reconciler depends on:
 // an edge is applied at most once per (id, from→to).
+//
+// It has NO mutex of its own, deliberately. Transition read-modify-writes
+// q.services, so that map must have exactly ONE owner; two mutexes each
+// guarding half the accesses exclude nothing (Q10/O14 — the detector caught
+// Transition writing q.services while GetService/MarkObserved read it under
+// q.mu). Everything fakeTrans mutates — calls, edges, and q.services — is
+// therefore guarded by q.mu. No fakeQ *method* is called from here, so taking
+// q.mu directly cannot deadlock against one that also takes it.
 type fakeTrans struct {
-	mu     sync.Mutex
 	calls  int
 	edges  []string
 	q      *fakeQ
@@ -92,8 +99,8 @@ type fakeTrans struct {
 }
 
 func (t *fakeTrans) Transition(_ context.Context, svc store.Service, to, via, _, _ string) (store.Service, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.q.mu.Lock()
+	defer t.q.mu.Unlock()
 	if t.failTo != "" && to == t.failTo {
 		return store.Service{}, errors.New("illegal edge")
 	}
