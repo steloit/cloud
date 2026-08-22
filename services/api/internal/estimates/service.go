@@ -100,21 +100,32 @@ func (s *Service) Accept(ctx context.Context, estimateID, envID string) (store.E
 
 // Shapes returns what an estimate priced, without touching acceptance —
 // callers pre-check coverage before burning the one-shot Accept.
-func (s *Service) Shapes(ctx context.Context, estimateID string) ([]ShapeInput, error) {
+
+// PricedShapes returns the stored shapes AND the lines priced alongside them,
+// index-aligned (PriceAll preserves order). The gate needs the line to compare
+// against the price the customer was actually SHOWN — recomputing from the
+// current table can only ever agree with itself.
+func (s *Service) PricedShapes(ctx context.Context, estimateID string) ([]ShapeInput, []Line, error) {
 	row, err := s.q.GetEstimate(ctx, estimateID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, problemError{p: problem.Conflict(
+			return nil, nil, problemError{p: problem.Conflict(
 				[]string{"estimate not found"},
 				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var shapes []ShapeInput
 	if err := json.Unmarshal(row.Services, &shapes); err != nil {
-		return nil, fmt.Errorf("estimates: stored shapes: %w", err)
+		return nil, nil, fmt.Errorf("estimates: stored shapes: %w", err)
 	}
-	return shapes, nil
+	var lines []Line
+	if len(row.Lines) > 0 {
+		if err := json.Unmarshal(row.Lines, &lines); err != nil {
+			return nil, nil, fmt.Errorf("estimates: stored lines: %w", err)
+		}
+	}
+	return shapes, lines, nil
 }
 
 func textOrNull(s string) pgtype.Text {

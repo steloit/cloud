@@ -2,8 +2,10 @@ package provisioning
 
 import (
 	"encoding/json"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
@@ -119,5 +121,106 @@ func TestDesiredDocEdgeCases(t *testing.T) {
 	// empty product still produces valid JSON (no panic)
 	if !json.Valid(desiredDoc("", "", "", nil, nil, nil, true)) {
 		t.Fatal("empty product produced invalid JSON")
+	}
+}
+
+// overrideInstances is the whole read-side expiry contract, and two of US-3.8's
+// acceptance criteria rest entirely on it: "a pin with NO expiry is not
+// honoured" and "an expired pin is never shipped to the cell even before the
+// sweep runs". Every one of its five liveness branches previously survived
+// mutation — nothing executed the function at all.
+func TestOverrideLiveness(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339Nano) }
+
+	for _, tc := range []struct {
+		name     string
+		raw      string
+		wantN    int
+		wantLive bool
+		why      string
+	}{
+		{"absent", "", 0, false, "no override at all"},
+		{"empty object", `{}`, 0, false, "no instances"},
+		{"malformed json", `{not json`, 0, false, "unparseable"},
+		{"zero instances", `{"instances":0,"expires_at":"` + at(time.Hour) + `"}`, 0, false,
+			"a pin of 0 is not a pin"},
+		{"negative instances", `{"instances":-5,"expires_at":"` + at(time.Hour) + `"}`, 0, false,
+			"openapi declares no minimum, so this floor is the only guard against a negative price"},
+		{"no expires_at", `{"instances":9,"reason":"x"}`, 0, false,
+			"unset must not mean forever — D22 makes the pin temporary"},
+		{"unparseable expires_at", `{"instances":9,"expires_at":"not-a-date"}`, 0, false,
+			"an unreadable expiry is not a live pin"},
+		{"expired an hour ago", `{"instances":9,"expires_at":"` + at(-time.Hour) + `"}`, 0, false,
+			"past its window"},
+		{"exactly at expiry", `{"instances":9,"expires_at":"` + at(0) + `"}`, 0, false,
+			"the window is half-open: at the boundary the pin is over"},
+		{"one nanosecond before expiry", `{"instances":9,"expires_at":"` + at(time.Nanosecond) + `"}`, 9, true,
+			"still inside the window"},
+		{"live", `{"instances":9,"reason":"load","expires_at":"` + at(time.Hour) + `"}`, 9, true,
+			"the ordinary case"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, live := overrideInstances([]byte(tc.raw), now)
+			if live != tc.wantLive {
+				t.Fatalf("live=%v, want %v — %s", live, tc.wantLive, tc.why)
+			}
+			if n != tc.wantN {
+				t.Fatalf("instances=%d, want %d", n, tc.wantN)
+			}
+		})
+	}
+}
+
+// desiredDoc is a RENDERER, not a filter: it embeds whatever pin it is handed
+// and consults no expiry. That is deliberate — the liveness decision belongs to
+// the one caller that also prices the pin — and it is the reason
+// `TestTheDesiredDocNeverCarriesADeadPin` (identity, integration) has to drive
+// UpdateService rather than this function.
+//
+// An earlier version of this test applied `overrideInstances` to the input
+// itself and then asserted the doc came out unpinned. It passed for the same
+// reason a mirror is flat: it had COPIED the production guard into the test
+// body, so deleting that guard from services.go left it green. What it actually
+// pinned was that the two functions COMPOSE — worth keeping, but not what its
+// name claimed, and the class it was named for was uncovered while it reported
+// covered.
+func TestDesiredDocEmbedsThePinItIsHanded(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		override []byte
+		wantPin  bool
+	}{
+		{"a pin is rendered verbatim", []byte(`{"instances":9,"reason":"x"}`), true},
+		{"an expired pin is rendered too — this function does not judge",
+			[]byte(`{"instances":9,"expires_at":"2000-01-01T00:00:00Z"}`), true},
+		{"nil is the only thing that omits it", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := desiredDoc("web", "app", "env-x", []byte(`{"size":"standard-1"}`), nil, tc.override, false)
+			var d map[string]any
+			if err := json.Unmarshal(doc, &d); err != nil {
+				t.Fatal(err)
+			}
+			if _, present := d["override"]; present != tc.wantPin {
+				t.Fatalf("override in desired = %v, want %v: %s", present, tc.wantPin, doc)
+			}
+		})
+	}
+}
+
+// repriceSpan's IsBilling guard carries US-3.6's invariant through this new code
+// path: metering opens at `ready`, never before. Without it a PATCH on a
+// still-provisioning service emits an OPEN span, and the rollup accrues an open
+// span to the cutoff — billing a service that never ran.
+func TestIsBillingGatesTheStatusesThatHaveAnOpenSpan(t *testing.T) {
+	for status, want := range map[string]bool{
+		"ready": true, "degraded": true,
+		"provisioning": false, "failed": false, "suspended": false, "deleting": false, "": false,
+	} {
+		if got := metering.IsBilling(status); got != want {
+			t.Fatalf("IsBilling(%q) = %v, want %v — a rate change is only meaningful while a span is open, and emitting one otherwise bills a service that never ran",
+				status, got, want)
+		}
 	}
 }

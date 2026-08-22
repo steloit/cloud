@@ -8,7 +8,9 @@ package reconcile_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,6 +56,30 @@ func seedGraph(t *testing.T, pool *pgxpool.Pool, q *store.Queries) store.Environ
 		t.Fatal(err)
 	}
 	return env
+}
+
+// createWebSvc makes a service whose catalog shape PRICES an instance count, so
+// a D22 manual pin is legal on it. postgres has no priced instance count and its
+// pins are refused (US-3.8), so a pin test cannot use one.
+func createWebSvc(t *testing.T, pool *pgxpool.Pool, q *store.Queries, prov *provisioning.Service, name string) store.Service {
+	t.Helper()
+	ctx := context.Background()
+	env := seedGraph(t, pool, q)
+	est := estimates.NewService(q)
+	created, err := est.Create(ctx, "org_w", "env_w", []estimates.ShapeInput{
+		{Product: "web", Name: name, Shape: map[string]any{"size": "standard-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := prov.CreateService(ctx, est, env, "org_w", provisioning.CreateServiceInput{
+		Name: name, Product: "web", Shape: map[string]any{"size": "standard-1"},
+		EstimateID: created.Row.ID, ActorID: "usr_w",
+	})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	return svc
 }
 
 func createSvc(t *testing.T, pool *pgxpool.Pool, q *store.Queries, prov *provisioning.Service, name string) store.Service {
@@ -218,13 +244,17 @@ func TestNoOpUpdateStillBumpsGeneration(t *testing.T) {
 func TestOverrideEditReachesCell(t *testing.T) {
 	pool, q := realDB(t)
 	prov := newProvisioning(t, pool, q)
-	svc := createSvc(t, pool, q, prov, "db6")
+	svc := createWebSvc(t, pool, q, prov, "api6")
 	rec := reconcile.New(q, prov)
 	if _, err := rec.Writeback(context.Background(), "cell-0", reconcile.Report{ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "ready"}); err != nil {
 		t.Fatal(err)
 	}
-	// Pin instances via override.
-	edited, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, nil, []byte(`{"instances":5,"reason":"load"}`))
+	// Pin instances via override. `expires_at` is REQUIRED: D22 makes the pin
+	// temporary, the API always stamps one, and a pin without an expiry is not
+	// honoured — treating "unset" as "forever" is what made pins permanent.
+	pin := fmt.Sprintf(`{"instances":5,"reason":"load","expires_at":%q}`,
+		time.Now().Add(24*time.Hour).UTC().Format(time.RFC3339))
+	edited, err := prov.UpdateService(context.Background(), mustGet(t, q, svc.ID), "org_w", "usr_w", nil, nil, []byte(pin))
 	if err != nil {
 		t.Fatalf("UpdateService(override): %v", err)
 	}
@@ -259,11 +289,32 @@ func TestUpdateServiceShapeSQLFenceRejectsDeleting(t *testing.T) {
 	}
 	// Call the generated query directly, bypassing UpdateService's Go guard: the
 	// SQL fence WHERE status <> 'deleting' must return zero rows for a deleting row.
+	//
+	// The generation MUST be the row's current one. US-3.8 added `AND generation
+	// = $7` to this query, and while `Generation` was left at its zero value that
+	// fence alone returned zero rows — so this test passed without the deleting
+	// fence ever being consulted, and deleting `AND status <> 'deleting'` from
+	// the query left it green. Every other route into this statement is stopped
+	// by the Go pre-check in UpdateService, so this test is the ONLY owner of the
+	// atomic backstop for that TOCTOU. Read the generation fresh: DeleteService
+	// bumps it.
+	deleting := mustGet(t, q, svc.ID)
 	_, err := q.UpdateServiceShape(context.Background(), store.UpdateServiceShapeParams{
-		ID: svc.ID, Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
+		ID: svc.ID, Generation: deleting.Generation,
+		Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
 	})
 	if !errorsIsNoRows(err) {
 		t.Fatalf("the SQL fence must reject an edit to a deleting row (zero rows), got %v", err)
+	}
+	// ...and the same call at the same generation against a NON-deleting row must
+	// succeed. Without this the two fences are not separable: a query that
+	// rejected everything would satisfy the assertion above.
+	live := createSvc(t, pool, q, prov, "db7-live")
+	if _, err := q.UpdateServiceShape(context.Background(), store.UpdateServiceShapeParams{
+		ID: live.ID, Generation: live.Generation,
+		Scaling: []byte(`{"mode":"auto"}`), Desired: []byte(`{"product":"postgres"}`),
+	}); err != nil {
+		t.Fatalf("the same edit must succeed on a live row at the right generation: %v", err)
 	}
 }
 
@@ -368,5 +419,215 @@ func TestMeteringStartsAtReadyE2E(t *testing.T) {
 	}
 	if mustGet(t, q, svc.ID).Status != "ready" {
 		t.Fatal("service did not reach ready")
+	}
+}
+
+// US-3.6 headline: a provisioning attempt that FAILS never bills. Metering opens
+// only on the ready edge (D10), so a service that goes provisioning → failed
+// must have ZERO usage events — and a subsequent retry that succeeds must open
+// exactly ONE span, not two.
+func TestFailedProvisioningNeverBills(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-fail")
+	rec := reconcile.New(q, prov)
+
+	// The cell reports the provisioning attempt failed.
+	if _, err := rec.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: svc.ID, ObservedGeneration: svc.Generation, Status: "failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGet(t, q, svc.ID).Status; got != "failed" {
+		t.Fatalf("status %q, want failed", got)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM usage_events WHERE service_id=$1`, svc.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a FAILED provisioning billed %d usage event(s) — D10: metering starts at ready, never before", n)
+	}
+
+	// Retry: failed → provisioning → ready must open EXACTLY ONE span.
+	row := mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "provisioning", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "ready", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	var edges []string
+	rows, err := pool.Query(ctx, `SELECT edge FROM usage_events WHERE service_id=$1 ORDER BY at`, svc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		edges = append(edges, e)
+	}
+	if len(edges) != 1 || edges[0] != "open" {
+		t.Fatalf("a failed→retry→ready sequence must open exactly one span, got %v", edges)
+	}
+}
+
+// The money-losing sibling of "a failure never bills": a service that reaches
+// ready and LATER fails must CLOSE its span. Without a close edge the span
+// stays open and the customer is billed for a service that is not running —
+// the same class of defect as billing a failure, in the opposite direction.
+//
+// The legal path is ready → degraded → failed (ADR-024; `ready` has no direct
+// edge to `failed`). `degraded` is still a BILLING state, so the close must
+// land on the degraded → failed edge, not earlier.
+func TestFailureAfterReadyClosesTheSpan(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-close")
+
+	row := mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "ready", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "degraded", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	// degraded still bills, so nothing may have closed yet.
+	if got := spanEdges(t, pool, svc.ID); len(got) != 1 || got[0] != "open" {
+		t.Fatalf("ready→degraded produced %v, want [open] — degraded is still a billing state", got)
+	}
+
+	row = mustGet(t, q, svc.ID)
+	if _, err := prov.Transition(ctx, row, "failed", "system", "system", "org_w"); err != nil {
+		t.Fatal(err)
+	}
+	if got := spanEdges(t, pool, svc.ID); len(got) != 2 || got[0] != "open" || got[1] != "close" {
+		t.Fatalf("degraded→failed produced %v, want [open close] — an unclosed span bills a service that is not running", got)
+	}
+}
+
+func spanEdges(t *testing.T, pool *pgxpool.Pool, serviceID string) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT edge FROM usage_events WHERE service_id=$1 ORDER BY at`, serviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var edges []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			t.Fatal(err)
+		}
+		edges = append(edges, e)
+	}
+	return edges
+}
+
+// The clear's `status <> 'deleting'` fence, driven through the exact
+// interleaving that reaches it.
+//
+// This fence was recorded as untestable defence-in-depth, on the reasoning that
+// "every path that starts a delete also bumps generation, so the generation
+// fence always fires first." That reasoning is FALSE, and DeleteService is its
+// own counterexample: it does BumpServiceGeneration (gen→N+1) and only THEN
+// Transition→deleting, via SetServiceStatus, which does not touch generation.
+// Two non-transactional writes. A sweep that lists the row in between arrives at
+// the clear with a generation that MATCHES — so without this fence the clear
+// succeeds, rewriting desired WITHOUT deleting:true and bumping generation
+// again, and the cell converges an in-flight teardown back into existence.
+//
+// The window DeleteService's own comment documents for crashes is equally open
+// to the sweeper. Recording an arm as unreachable without checking the reason is
+// how a live fence gets filed as decoration.
+func TestTheClearFenceRejectsARowThatStartedDeletingMidSweep(t *testing.T) {
+	pool, q := realDB(t)
+	prov := newProvisioning(t, pool, q)
+	ctx := context.Background()
+	svc := createSvc(t, pool, q, prov, "db-midsweep")
+
+	pin := `{"instances":3,"reason":"x","expires_at":"` +
+		time.Now().Add(-time.Hour).UTC().Format(time.RFC3339) + `"}`
+	if _, err := pool.Exec(ctx, `UPDATE services SET override = $2::jsonb WHERE id = $1`, svc.ID, pin); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drive DeleteService's TWO WRITES with the sweeper's read interposed between
+	// them — which is the whole reachability claim, and asserting it is the point
+	// of this test. An earlier version listed BEFORE the delete and hand-fed the
+	// generation, which proved the fence fires but left "the sweeper can list a
+	// row already carrying the post-bump generation" as prose. If those two
+	// writes are ever made one transaction (a carried atomicity finding,
+	// services.go), that version would still have passed while the comment it
+	// supports became false.
+	//
+	// Caveat, stated because the earlier comment overclaimed: driving the writes
+	// by hand does NOT protect against DeleteService being made one transaction
+	// — this version does not call DeleteService at all, so it has that blind
+	// spot too, slightly more so. What it does buy is that all three legs of the
+	// reachability argument now fail if they stop being true, instead of one.
+	// The atomicity leg is not observable from outside DeleteService, and a
+	// comment is its right home.
+	before := mustGet(t, q, svc.ID)
+	if _, err := q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{
+		ID: svc.ID, Desired: []byte(`{"product":"postgres","deleting":true}`)}); err != nil {
+		t.Fatal(err)
+	}
+	// Write 1 done, write 2 not yet: status is still provisioning, so the sweeper
+	// lists — and what it reads is the POST-BUMP generation.
+	listed, err := q.ListExpiredOverrides(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read *store.Service
+	for i := range listed {
+		if listed[i].ID == svc.ID {
+			read = &listed[i]
+		}
+	}
+	if read == nil {
+		t.Fatal("a dead pin on a row mid-delete was not listed — if that is now intended, this fence is unreachable and the comment on it is wrong")
+	}
+	if read.Generation == before.Generation {
+		t.Fatalf("the sweeper read generation %d, the same as before the bump — the window this fence covers depends on the read happening AFTER it", read.Generation)
+	}
+	// Write 2: status flips, generation untouched.
+	if _, err := q.SetServiceStatus(ctx, store.SetServiceStatusParams{
+		ID: svc.ID, Status: "provisioning", Status_2: "deleting"}); err != nil {
+		t.Fatal(err)
+	}
+	after := mustGet(t, q, svc.ID)
+	if after.Generation != read.Generation {
+		t.Fatalf("the status flip moved generation (%d → %d); if SetServiceStatus now bumps, the generation fence alone would stop the sweeper and this fence's reason has changed",
+			read.Generation, after.Generation)
+	}
+	if after.Status != "deleting" {
+		t.Fatalf("status %q, want deleting", after.Status)
+	}
+	// The sweeper now clears using the generation IT read — which, because
+	// SetServiceStatus does not bump, is still the row's generation.
+	_, err = q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
+		ID: svc.ID, MonthlyEstimateCents: 100, Desired: []byte(`{"product":"web"}`),
+		Generation: after.Generation,
+	})
+	if !errorsIsNoRows(err) {
+		t.Fatalf("the clear was not refused on a deleting row (got %v) — it has just replaced the teardown's desired doc with one that does not say deleting, and bumped generation, so the cell will converge the service back into existence", err)
+	}
+	final := mustGet(t, q, svc.ID)
+	var d map[string]any
+	_ = json.Unmarshal(final.Desired, &d)
+	if d["deleting"] != true {
+		t.Fatalf("the teardown's desired doc was overwritten: %s", final.Desired)
+	}
+	if final.Override == nil {
+		t.Fatal("the pin was cleared on a deleting row")
 	}
 }

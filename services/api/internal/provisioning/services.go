@@ -11,9 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -54,6 +56,19 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 	if err != nil {
 		return err
 	}
+	// DEBT MARKER, not a claim: this projection is NOT checked arithmetic, and it
+	// must become so. `current + newMonthlyCents` wraps, and a wrapped projection
+	// is NEGATIVE — which reads as UNDER the cap. Worse, the wrapped value is
+	// persisted and then summed by SumOrgMonthlyEstimate, so every later
+	// projection for that org wraps too: one request disables the cap
+	// permanently.
+	//
+	// Owned by O16 (priority: critical), which names this as its first item. The
+	// fix is not reachable from an instance pin — it needs a stored row already
+	// out of range, which requires the postgres/valkey pricing arms to wrap
+	// first, and those are O16's too. Stated here because an earlier version of
+	// this comment described the CHECKED implementation that moved to O16, and a
+	// comment asserting the defect is already fixed is how it stays unfixed.
 	current := planFee + committed
 	projected := current + newMonthlyCents
 	if projected > limit {
@@ -230,18 +245,93 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	// Coverage pre-check BEFORE burning the one-shot estimate (estimate rows
 	// are immutable, so this is race-free): a mistyped create keeps the
 	// estimate usable — better DX, same law.
-	priced, err := est.Shapes(ctx, in.EstimateID)
+	priced, pricedLines, err := est.PricedShapes(ctx, in.EstimateID)
 	if err != nil {
 		return store.Service{}, err
 	}
-	matched := false
-	for _, sh := range priced {
-		if sh.Product == in.Product && priceOf(sh) == line.MonthlyCents {
-			matched = true
-			break
+	// The gate binds to the CONTRACTED CONFIGURATION, not to a price.
+	//
+	// Matching on (product, price) was substitutable: prices collide — a
+	// postgres `dev` with 78 GB and a `standard` both come to 5800¢ — so a
+	// caller could price one configuration and provision the other, in either
+	// direction, and the gate agreed because the number agreed (US-3.7).
+	//
+	// estimates.Canonical resolves defaults, so the same configuration spelled
+	// differently still matches; what it cannot do is let a DIFFERENT
+	// configuration through because it happens to cost the same.
+	want, err := estimates.Canonical(estimates.ShapeInput{
+		Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: in.Shape,
+	})
+	if err != nil {
+		var se estimates.ShapeError
+		if errors.As(err, &se) {
+			return store.Service{}, problemError{p: problem.ValidationFailed(
+				[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
 		}
+		return store.Service{}, err
+	}
+	matched := false
+	// A stored shape we cannot read must not condemn its SIBLINGS. Failing the
+	// whole estimate on the first bad shape made the outcome depend on array
+	// order: the same estimate would refuse or succeed depending on whether the
+	// unreadable shape sat before or after the one being created.
+	sawUnreadable := false
+	for i, sh := range priced {
+		got, cerr := estimates.Canonical(sh)
+		if cerr != nil {
+			// A stored shape we cannot canonicalize is an internal
+			// inconsistency — but estimate rows are IMMUTABLE, so "retry" (the
+			// 500 remediation) can never succeed. The actionable answer is the
+			// same as any unusable estimate: get a fresh one. The cause is
+			// logged rather than surfaced.
+			slog.ErrorContext(ctx, "provisioning: stored estimate shape is not canonicalizable",
+				"estimate", in.EstimateID, "index", i, "err", cerr)
+			sawUnreadable = true
+			continue
+		}
+		if got != want {
+			continue
+		}
+		// The price the customer was SHOWN must still be the price they pay.
+		// Comparing against a freshly computed price could only ever agree with
+		// itself; the stored line is what was on their screen, so a pricing
+		// table that moved under a live estimate is caught here.
+		//
+		// A missing line is an internal inconsistency, never a pass: skipping
+		// the check would provision at the CURRENT price with no conflict —
+		// silently failing open in a billing guard.
+		if i >= len(pricedLines) {
+			// KNOWN DEAD BRANCH, deliberately kept: `estimates.lines` is NOT
+			// NULL and PriceAll preserves length, so this is unreachable today
+			// and no test covers it (a `if false` here survives the suite —
+			// stated so it is not mistaken for tested).
+			//
+			// Same reasoning as the un-canonicalisable shape above: fail
+			// CLOSED, but with remediation the customer can act on. Estimate
+			// rows are immutable, so "retry" could never succeed.
+			slog.ErrorContext(ctx, "provisioning: estimate has fewer lines than shapes; cannot verify the price shown",
+				"estimate", in.EstimateID, "shapes", len(priced), "lines", len(pricedLines))
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate can no longer be used"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
+		if pricedLines[i].MonthlyCents != line.MonthlyCents {
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this shape has been repriced since the estimate was issued"},
+				"Create a fresh estimate for this environment and accept it — the price you were shown is the price you pay.")}
+		}
+		matched = true
+		break
 	}
 	if !matched {
+		if sawUnreadable {
+			// The requested shape matched nothing readable, and at least one
+			// stored shape could not be read — so we cannot honestly say the
+			// estimate does not cover it. Say what is actually true.
+			return store.Service{}, problemError{p: problem.Conflict(
+				[]string{"this estimate can no longer be used"},
+				"Create a fresh estimate for this environment and accept it — nothing provisions without one.")}
+		}
 		return store.Service{}, problemError{p: problem.Conflict(
 			[]string{"the estimate does not cover this shape"},
 			"Estimate the exact shape you are creating, accept it, then create — the estimate IS the contract.")}
@@ -257,7 +347,16 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		return store.Service{}, err
 	}
 
-	shapeJSON, err := json.Marshal(in.Shape)
+	// Persist the RESOLVED shape, not the raw request map: what is stored — and
+	// what the cell is handed — must be the configuration that was priced and
+	// contracted, with defaults explicit rather than implied.
+	resolvedShape, err := estimates.Resolve(estimates.ShapeInput{
+		Product: in.Product, Intent: in.Intent, Name: in.Name, Shape: in.Shape,
+	})
+	if err != nil {
+		return store.Service{}, err
+	}
+	shapeJSON, err := json.Marshal(resolvedShape)
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
 	}
@@ -288,15 +387,6 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		Detail: []byte(`{"name":` + strconv.Quote(in.Name) + `,"product":` + strconv.Quote(in.Product) + `,"estimate":` + strconv.Quote(in.EstimateID) + `}`),
 	})
 	return row, nil
-}
-
-// priceOf prices a stored estimate shape (already validated at estimate time).
-func priceOf(sh estimates.ShapeInput) int64 {
-	l, err := estimates.Price(sh)
-	if err != nil {
-		return -1
-	}
-	return l.MonthlyCents
 }
 
 // Transition moves a service along a legal edge, atomically (the SQL guard
@@ -362,6 +452,181 @@ func (s *Service) ServiceOrg(ctx context.Context, serviceID string) (store.Servi
 	return svc, orgID, nil
 }
 
+// RunOverrideExpiry clears manual pins past their 24h expiry and rebuilds the
+// desired doc so the cell converges back to the unpinned count.
+//
+// The expiry has to be swept, not merely filtered on read: `desired` is rebuilt
+// only when someone edits the service, and generation is what makes the cell
+// re-poll. A pin nobody touches again would otherwise render its instance count
+// forever — which is what made "temporary" untrue and, with it, the argument
+// for not charging for the capacity.
+func (s *Service) RunOverrideExpiry(ctx context.Context, every time.Duration, log *slog.Logger) {
+	sweep := func() {
+		rows, err := s.q.ListExpiredOverrides(ctx)
+		if err != nil {
+			// ERROR, not warn: while this fails no pin anywhere expires, and
+			// the only symptom is a log line.
+			log.Error("override expiry sweep could not list expired pins; NO pin is expiring", "err", err)
+			return
+		}
+		for _, row := range rows {
+			if err := s.expireOverride(ctx, row); err != nil {
+				log.Error("an expired pin could not be fully cleared", "service", row.ID, "err", err)
+			} else {
+				log.Info("manual override expired; converging back to the unpinned count", "service", row.ID)
+			}
+		}
+	}
+	sweep() // once at startup: a ticker does not fire immediately
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
+}
+
+// expireOverride clears one pin: unpinned price, unpinned desired doc, and the
+// generation bump, in ONE statement — then re-cuts the billing span so the
+// customer stops paying the pinned rate the moment the capacity goes away.
+func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
+	var shape map[string]any
+	_ = json.Unmarshal(row.Shape, &shape)
+	base, err := estimates.Price(estimates.ShapeInput{
+		Product: row.Product, Intent: row.Intent.String, Name: row.Name, Shape: shape,
+	})
+	if err != nil {
+		return fmt.Errorf("base price: %w", err)
+	}
+	ns, err := s.resolveNamespace(ctx, row.EnvID)
+	if err != nil {
+		return fmt.Errorf("namespace: %w", err)
+	}
+	// Resolve everything the post-commit work needs BEFORE committing. A lookup
+	// that fails after the UPDATE leaves the pin cleared and the span still
+	// billing the pinned rate — with the row now unlistable (`override IS
+	// NULL`), so no later sweep retries it and nothing detects it.
+	orgID, err := s.q.OrgForService(ctx, row.ID)
+	if err != nil {
+		return fmt.Errorf("org lookup: %w", err)
+	}
+	prior := row.MonthlyEstimateCents
+	updated, err := s.q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
+		ID:                   row.ID,
+		MonthlyEstimateCents: base.MonthlyCents,
+		Desired:              desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
+		Generation:           row.Generation,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The row moved under us — a concurrent edit. Not an error: the
+			// next tick re-lists it if it is still pinned and still expired.
+			return nil
+		}
+		return err
+	}
+	// The post-commit work runs on a context that CANNOT be cancelled by the
+	// sweeper stopping. The clear has already committed; if shutdown cancels
+	// between the commit and the spine write, the release is dropped and the
+	// activity feed shows capacity pinned and never given back — with no error
+	// anywhere, since `record` discards its own. Same reasoning as US-3.6's
+	// idempotency recorder, which hit this as a live defect.
+	ctx = context.WithoutCancel(ctx)
+	s.repriceSpan(ctx, orgID, updated, prior, updated.MonthlyEstimateCents)
+	// The expiry is a state change like any other, so it goes to the SPINE, not
+	// only to a log line. Applying a pin records `service.updated` carrying the
+	// operator's reason (below); without this the activity feed shows capacity
+	// being pinned and never released, and the only account of the release is a
+	// log the customer cannot see. `Via: "system"` because no actor asked for it
+	// — the clock did. The expired pin travels in the detail: it is the answer to
+	// "what was released, and what reason had been given for it".
+	s.record(ctx, events.Input{
+		OrgID: orgID, Kind: "scale", Via: "system", Actor: "system",
+		Action: "service.updated", Subject: updated.ID,
+		Detail: []byte(`{"override_expired":` + string(row.Override) + `}`),
+	})
+	return nil
+}
+
+// repriceSpan makes a mid-life rate change reach the INVOICE.
+//
+// Billing derives solely from `usage_events.rate_cents`, which is snapshotted
+// when a span opens and which the rollup multiplies by every second of that
+// span. So changing `services.monthly_estimate_cents` moves the forward-looking
+// cap and the API response and NOTHING ELSE: the open span keeps billing at the
+// rate it opened with. A pin that raised capacity 9x was billed at 1x.
+//
+// A rate change is therefore a close-at-the-old-rate plus an open-at-the-new —
+// the shape the rollup's open/close pairing already expects. No span is open
+// outside a billing status, so there is nothing to re-cut there.
+func (s *Service) repriceSpan(ctx context.Context, orgID string, svc store.Service, oldCents, newCents int64) {
+	if s.meter == nil || oldCents == newCents || !metering.IsBilling(svc.Status) {
+		return
+	}
+	env, err := s.q.GetEnvironment(ctx, svc.EnvID)
+	if err != nil {
+		slog.ErrorContext(ctx, "reprice: environment lookup failed; the span keeps the old rate and the invoice will be wrong",
+			"service", svc.ID, "err", err)
+		return
+	}
+	tags := metering.Tags{OrgID: orgID, ProjectID: env.ProjectID, EnvID: svc.EnvID, ServiceID: svc.ID}
+	s.meter.MustEmitSpan(ctx, tags, "close", svc.Product, oldCents)
+	s.meter.MustEmitSpan(ctx, tags, "open", svc.Product, newCents)
+}
+
+// overrideInstances reports the pinned instance count of a LIVE override.
+//
+// D22 makes the pin temporary: it carries a reason and auto-expires in 24h. The
+// expiry was being written and never read — nothing anywhere consulted
+// `expires_at` — so a "temporary" pin was permanent, which is also what removed
+// the only argument for not charging for the capacity it provisions.
+//
+// Returns (0, false) for an absent, malformed, or expired override.
+//
+// Two of the checks below are EQUIVALENT MUTANTS — `len(raw) == 0` and
+// `ExpiresAt == ""` can both be deleted with no observable change, because the
+// Unmarshal and the time.Parse under them already fail on those inputs. No test
+// can distinguish them and none pretends to. They stay because they say what
+// the rule IS ("unset is not forever"), rather than leaving it as a side effect
+// of a parser erroring. That equivalence is CONDITIONAL on the parse staying
+// strict: relax time.Parse to accept more layouts, or make an empty expiry mean
+// "no constraint", and `ExpiresAt == ""` becomes load-bearing again — while
+// mutation testing has it filed as equivalent and will not re-flag it.
+func overrideInstances(raw []byte, now time.Time) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var o struct {
+		Instances int    `json:"instances"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	// The `o.Instances < 1` half is now UNREACHABLE from production: the handler
+	// refuses `override.instances < 1` with a 422 before anything reaches here
+	// (services_http.go). It stays as the service layer's own floor — this
+	// function is also the read side for rows planted by a migration or a
+	// support script, which the handler never sees — and it is covered by
+	// TestOverrideLiveness. Noted because this file records which arms are
+	// reachable and why, and an unmarked one is how a live guard gets filed as
+	// decoration.
+	if err := json.Unmarshal(raw, &o); err != nil || o.Instances < 1 {
+		return 0, false
+	}
+	if o.ExpiresAt == "" {
+		// A pin with no expiry is not a temporary pin. Refuse to honour it
+		// rather than treat "unset" as "forever".
+		return 0, false
+	}
+	exp, err := time.Parse(time.RFC3339, o.ExpiresAt)
+	if err != nil || !now.Before(exp) {
+		return 0, false
+	}
+	return o.Instances, true
+}
+
 // UpdateService — shape/scaling are desired-state edits (repriced); the
 // manual override requires a reason and auto-expires in 24h (D22).
 func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, actorID string, shape map[string]any, scaling, override []byte) (store.Service, error) {
@@ -385,12 +650,20 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		for k, v := range shape {
 			current[k] = v
 		}
-		merged, err := json.Marshal(current)
+		// Persist the RESOLVED merged shape, exactly as create does. Storing a
+		// raw map here and a resolved one there would mean the same
+		// configuration is spelled two ways depending on how the service got
+		// there — and the identity that gates provisioning is computed from the
+		// resolved form.
+		resolvedMerged, err := estimates.Resolve(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
 		if err != nil {
-			return store.Service{}, err
-		}
-		line, err := estimates.Price(estimates.ShapeInput{Product: svc.Product, Name: svc.Name, Shape: current})
-		if err != nil {
+			// Resolve is now the FIRST validator of the merged shape — the
+			// Price call that used to be here owned the ShapeError → 422
+			// conversion as a second job nobody had written down. Without this,
+			// a client typo (`{"bogus":1}`, `{"size":123}`) became a 500 with
+			// an event id and "contact support" instead of the field that is
+			// wrong, while the same input still returned 422 on
+			// POST /v1/estimates — one class of error, two answers.
 			var se estimates.ShapeError
 			if errors.As(err, &se) {
 				return store.Service{}, problemError{p: problem.ValidationFailed(
@@ -398,20 +671,62 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 			}
 			return store.Service{}, err
 		}
-		params.Shape = merged
-		params.MonthlyEstimateCents = pgtype.Int8{Int64: line.MonthlyCents, Valid: true}
-		// T11.6 hard cap: a scale-UP raises committed monthly spend and MUST
-		// respect the cap exactly like a create — otherwise the cap is trivially
-		// bypassed by scaling an existing service up. The run-rate already
-		// includes this service's OLD cost, so only the increase is projected (a
-		// scale-down is always allowed).
-		if delta := line.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
-			if err := s.enforceBudget(ctx, orgID, delta); err != nil {
-				return store.Service{}, err
-			}
+		merged, err := json.Marshal(resolvedMerged)
+		if err != nil {
+			return store.Service{}, err
 		}
+		params.Shape = merged
 	}
 	params.Scaling = scaling
+
+	// Price the EFFECTIVE post-edit configuration, unconditionally.
+	//
+	// Doing this only inside the shape branch and the live-pin branch left a
+	// hole the moment "any PATCH clears the pin" became real: `PATCH {"scaling":…}`
+	// or `PATCH {}` released the capacity but `monthly_estimate_cents` kept the
+	// PINNED rate — and the row was then unsweepable (`override IS NULL`), so
+	// nothing ever restored it. The customer paid the pinned rate forever for
+	// capacity that was gone, and the phantom charged against their hard cap.
+	effShapeRaw := svc.Shape
+	if params.Shape != nil {
+		effShapeRaw = params.Shape
+	}
+	var effShapeMap map[string]any
+	_ = json.Unmarshal(effShapeRaw, &effShapeMap)
+	priceIn := estimates.ShapeInput{
+		Product: svc.Product, Intent: svc.Intent.String, Name: svc.Name, Shape: effShapeMap,
+	}
+	var effLine estimates.Line
+	var priceErr error
+	if pinned, live := overrideInstances(override, time.Now()); live {
+		// Founder ruling (2026-07-27): pinned capacity is METERED, so the pin
+		// is priced through the engine and refused when the catalog cannot
+		// price it.
+		effLine, priceErr = estimates.PriceWithInstances(priceIn, pinned)
+	} else {
+		// No live pin: the effective price is the configuration's base — which
+		// is what RELEASES a pinned rate, whether or not the shape changed.
+		effLine, priceErr = estimates.Price(priceIn)
+	}
+	if priceErr != nil {
+		var se estimates.ShapeError
+		if errors.As(priceErr, &se) {
+			return store.Service{}, problemError{p: problem.ValidationFailed(
+				[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
+		}
+		return store.Service{}, priceErr
+	}
+	// T11.6 hard cap: any increase in committed monthly spend — a scale-up or a
+	// pin — must clear the cap exactly like a create. Only the increase is
+	// projected, since the run-rate already includes this service's old cost;
+	// a decrease is always allowed.
+	if delta := effLine.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+		if err := s.enforceBudget(ctx, orgID, delta); err != nil {
+			return store.Service{}, err
+		}
+	}
+	params.MonthlyEstimateCents = pgtype.Int8{Int64: effLine.MonthlyCents, Valid: true}
+
 	params.Override = override
 	// US-1.3a: rebuild desired from the effective post-edit state and let the
 	// query bump generation, so the cell re-reconciles. Effective shape/scaling
@@ -424,29 +739,69 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	if scaling != nil {
 		effScaling = scaling
 	}
-	effOverride := svc.Override
-	if override != nil {
-		effOverride = override
+	// The desired doc carries EXACTLY what the column gets. UpdateServiceShape
+	// sets `override = sqlc.narg('override')` unconditionally, so a PATCH with
+	// no override key NULLs the column — and keeping svc.Override in the doc
+	// left the pin rendering forever, unsweepable (the sweep matches only
+	// `override IS NOT NULL`) and un-un-pinnable, since that PATCH is the only
+	// way a customer clears one.
+	effOverride := override
+	// Never ship an EXPIRED pin to the cell. Without this an override written
+	// once keeps its instance count forever, because nothing else consults
+	// expires_at and the doc is only rebuilt when someone edits the service.
+	if _, live := overrideInstances(effOverride, time.Now()); !live {
+		effOverride = nil
 	}
 	ns, err := s.resolveNamespace(ctx, svc.EnvID)
 	if err != nil {
 		return store.Service{}, err
 	}
 	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, effShape, effScaling, effOverride, false)
+	priorCents := svc.MonthlyEstimateCents
+	params.Generation = svc.Generation
 	row, err := s.q.UpdateServiceShape(ctx, params)
 	if err != nil {
-		// The SQL fence `status <> 'deleting'` is the atomic backstop for the Go
-		// guard above: a delete that raced in after the read returns zero rows.
+		// Zero rows means the row moved under us: either a delete raced in
+		// (the `status <> 'deleting'` fence) or a concurrent edit did (the
+		// generation fence). Both are "re-read and retry" — writing anyway
+		// would overwrite the other edit's shape, doc and PRICE from a stale
+		// read, leaving the column, the cell and the invoice each holding a
+		// different answer.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return store.Service{}, problemError{p: problem.Conflict(
-				[]string{"the service is being deleted"},
-				"Wait for deletion to complete; a deleting service cannot be edited.")}
+				[]string{"the service changed while this request was in flight"},
+				"Re-read the service and retry; it was deleted or edited concurrently.")}
 		}
 		return store.Service{}, err
 	}
+	// Post-commit, so the context must not be cancellable. The row is already
+	// written; a client disconnecting between here and the two calls below would
+	// leave the price changed with the span still billing the OLD rate — the
+	// precise defect repriceSpan exists to prevent — and the pin's reason would
+	// never reach the spine, with no error anywhere, since `record` discards its
+	// own and MustEmitSpan only logs. expireOverride's structurally identical
+	// block got this treatment first; this one is ten lines away and was missed.
+	//
+	// KNOWN UNCOVERED: deleting this line survives mutation. Forcing it needs a
+	// client disconnect in the window between the commit and the two calls
+	// below, which no deterministic test can place — an already-cancelled
+	// context fails the write instead, and a short deadline is a race. Recorded
+	// rather than claimed, and the same is true of expireOverride's copy.
+	ctx = context.WithoutCancel(ctx)
+	// The rate the customer PAYS follows the row. Without this a pin (or a
+	// scale-up) changes monthly_estimate_cents while the open span keeps
+	// billing at the pre-change rate — nine instances provisioned, one billed.
+	s.repriceSpan(ctx, orgID, row, priorCents, row.MonthlyEstimateCents)
+	// The pin's REASON is the whole audit value of an affordance that
+	// provisions capacity outside the normal estimate path, so it reaches the
+	// spine rather than being recorded as a bare "service.updated".
+	detail := []byte(`{}`)
+	if len(override) > 0 {
+		detail = []byte(`{"override":` + string(override) + `}`)
+	}
 	s.record(ctx, events.Input{
 		OrgID: orgID, Kind: "scale", Via: "user", Actor: actorID,
-		Action: "service.updated", Subject: svc.ID,
+		Action: "service.updated", Subject: svc.ID, Detail: detail,
 	})
 	return row, nil
 }

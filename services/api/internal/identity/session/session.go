@@ -1,7 +1,14 @@
-// Package session owns server-side sessions: opaque cookie tokens (raw value
-// never stored — sha256 hash only), secure cookie attributes, and the
-// context plumbing that lets strict handlers set cookies and read the
-// authenticated principal.
+// Package session owns server-side sessions: opaque cookie tokens, secure
+// cookie attributes, and the context plumbing that lets strict handlers set
+// cookies and read the authenticated principal.
+//
+// The `sessions` table stores only a sha256 hash of the token — the raw value
+// is never written there. It IS, however, held elsewhere for a bounded window:
+// signup's 201 sets the cookie, and since US-3.6a (ADR-0013) an idempotent
+// replay of that signup must reproduce the same `Set-Cookie`, so the raw token
+// lives envelope-encrypted in `idempotency_keys` for the 24h replay window.
+// That is a deliberate, founder-ratified widening — recorded here because a
+// blanket "the raw token is never stored" would now be false.
 package session
 
 import (
