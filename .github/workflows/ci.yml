@@ -101,12 +101,50 @@ jobs:
           make gen-canon
           git add -A -- services packages apps
           git diff --cached --exit-code -- services packages apps
-      - name: Build + vet + test
+      # gofmt BEFORE the build, so a formatting failure reports as itself rather
+      # than as a confusing test failure. `go vet` does not check formatting, so
+      # nothing in this pipeline has ever reported it: two test files sat
+      # unformatted on the base branch until O13 went looking.  O13
+      - name: gofmt (every Go module)
         run: |
-          cd services/api && go build ./... && go vet ./... && go test ./...
-          cd ../cell-agent && go build ./... && go vet ./... && go test ./...
+          set -euo pipefail
+          # DERIVED from the repo, not retyped. The list was hardcoded here and
+          # again in the test step below; a fifth module would silently get no
+          # gofmt, no vet, no test and no -race, and nothing would say so. The
+          # QA review confirmed the four are complete TODAY and that a module
+          # outside them is invisible to this loop.
+          for m in $(git ls-files '*/go.mod' | xargs -n1 dirname); do
+            # 2>&1, and the exit-status check, are both load-bearing: gofmt writes
+            # PARSE errors to stderr and lists nothing on stdout, so the obvious
+            # `out="$(gofmt -l "$m")"` reports CLEAN for a file that does not
+            # parse. Caught by mutating a file into a syntax error and watching
+            # this step pass. `go build` would still fail such a commit, but a
+            # gate that answers "clean" for input it could not read is a gate
+            # that lies, and the next person to reuse this loop inherits it.
+            if ! out="$(gofmt -l "$m" 2>&1)"; then
+              echo "::error::gofmt could not read $m (a file may not parse):"; echo "$out"; exit 1
+            fi
+            [ -z "$out" ] || { echo "::error::unformatted Go files in $m:"; echo "$out"; exit 1; }
+          done
+      - name: Build + vet + test
+        # -race, and this is the decision O13 asked for rather than a default.
+        # It had never run in CI at all, which is how O14 (a data race in the
+        # reconcile test fixture) reached the base branch and sat there a month.
+        # Measured cost on this suite: ~4 min without, ~9 min with — identity
+        # 274-332s and reconcile 113-129s dominate, and both are container-bound
+        # rather than CPU-bound, so the detector is not the whole delta. Five
+        # minutes is worth a detector that runs on every PR instead of never.
+        #
+        # -timeout 30m, explicitly: the default is 10 MINUTES PER PACKAGE, and
+        # internal/identity measured 346s serially and EXCEEDED 600s under
+        # contention on an M-series Mac (US-3.8). A hosted runner is slower. That
+        # failure presents as a broken suite rather than as "raise the limit",
+        # which is the kind of failure that gets diagnosed wrong.
+        run: |
+          cd services/api && go build ./... && go vet ./... && go test -race -timeout 30m ./...
+          cd ../cell-agent && go build ./... && go vet ./... && go test -race -timeout 10m ./...
           cd ../../packages/contracts/go && go build ./...
-          cd ../../../apps/cli && go build ./... && go vet ./... && go test ./...
+          cd ../../../apps/cli && go build ./... && go vet ./... && go test -race -timeout 10m ./...
   infra:
     runs-on: ubuntu-latest
     steps:
