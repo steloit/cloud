@@ -57,17 +57,17 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 
 - Retyping a canon number in a test (import from packages/canon; drift must fail, not fork).
 - **A shared map has exactly ONE owner; two mutexes each guarding half the accesses exclude
-  nothing.** `reconcile_test.go`'s `fakeTrans.Transition` read-modify-wrote `fakeQ.services` under
-  `fakeTrans.mu`, while `fakeQ.GetService`/`MarkObserved` read and wrote the same map under
-  `fakeQ.mu`. Every access was "locked" and none was excluded, so the one test that spawns
-  goroutines to prove exactly-once writeback (`TestConcurrentWritebackAppliesOnce`) raced. The
-  test double, not the production code, was the defect — and it corrupted precisely the property
-  the double exists to check. Give the shared state one owner and say so in a comment, since
-  nothing enforces it. **This class has now been found twice**: `internal/platform/idempotency`'s
-  `fakeStore` carries the single-`mu` fix from the same finding, and the reconcile fixture
-  rediscovered it a month later (US-3.7's review filed Q10, US-3.8's filed O14, neither aware of
-  the other). It survived that long because CI runs `go test ./...` with no `-race` (O13), so
-  locally the interleaving needs `-count=20` to show up — a single run passes.
+  nothing.** `reconcile_test.go`'s `fakeTrans` wrote `fakeQ.services` under its own mutex while
+  `fakeQ` read it under another — every access "locked", none excluded. The double, not the
+  production code, corrupted the very property it exists to check. Found TWICE (Q10 and O14
+  independently; `platform/idempotency`'s `fakeStore` carries the same fix). CI was flaking at
+  ~1%, not passing: a plain run hits `fatal error: concurrent map read and map write` ~1/100,
+  killing the whole binary. `-race` catches it in one run; CI has none (O13).
+- **A mutation result is only evidence about the INVOCATION it was measured at.** Q10's
+  one-owner fix also serialised the calls the test existed to interleave. Killing-mutation
+  detection at CI's plain `go test ./...`: **18/100 before, 3/100 after, 100/100 once a
+  barrier forced all N callers past the pre-check.** Implementer and architecture review both
+  measured at `-count=50` — which CI never runs. Quote the invocation beside the rate.
 - Inventing demo/seed data outside canon (ADR-026 violation).
 - Testing the happy path of a four-state surface only (fault-inject the other three).
 - Weakening an invariant to make a feature fit (that's a canon decision for founders, e.g. the X1 $208 case).
