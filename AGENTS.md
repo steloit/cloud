@@ -1,6 +1,9 @@
 # Steloit Cloud — Agent Guide
 
-The Steloit developer cloud: the console (built), the control plane, data plane, and CLI (being built).
+The Steloit developer cloud — **AI-native infrastructure**: it reads an application, recommends and
+prices the infrastructure it needs, then runs it, so developers don't have to become infrastructure
+experts (positioning owner: `docs/product/17-brand/messaging.md`;
+`docs/plan/positioning-v2.md`). The console (built), the control plane, data plane, and CLI (being built).
 **This repository is the single source of truth.** GitHub Issues and the Project board are *generated
 views* — never edit them; edit the files here and run sync.
 

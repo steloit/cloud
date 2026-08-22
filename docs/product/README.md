@@ -7,6 +7,8 @@ Everything required to build the Steloit developer-cloud console, for human engi
 - `00-sources/Steloit-Console-Screens.html` — **152 validated frames** (1440×900) of every page, state, and overlay. Frame labels are authoritative one-line purposes; frame ids (W3, B10, U6, DB7, AI3…) are the cross-reference currency used throughout this package.
 - `00-sources/Steloit-Console-Design-Spec.md` — the design spec: every decision, rule, and reversal, with reasoning.
 
+**Positioning (2026-08-22 · `docs/plan/positioning-v2.md`):** Steloit is **AI-native infrastructure** — it reads an application, recommends and prices the infrastructure it needs, then runs it. Positioning, messaging, audience, and taglines are owned by `17-brand/messaging.md`; the constitution behind them is `18-philosophy/product-philosophy.md` §1 and §3. Nothing here is a testing, QA, or production-readiness product.
+
 **Current product model (2026-07-18):** the managed-service enum is `[postgres, valkey, web, worker]`; Storage & AI are external **Bindings**; queue is a **Postgres capability** (pgmq); the public catalog sells **outcome intents resolved by the Composer**. Authority: `18-philosophy/decisions.md` ADR-034/037/038/039/040 — read those entries before trusting any product-surface example in the derived docs (frames reconcile via ruling S9).
 
 ## How to use this package (agents: read this)

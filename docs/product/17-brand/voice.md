@@ -1,6 +1,6 @@
 # Voice & writing guide
 
-For every word the frames don't already own. Existing microcopy is spec — copied verbatim, never paraphrased. This guide governs **new** words: the next error message, empty state, email, doc page, release note. The persona is the **candid engineer** (brand.md): candid · composed · exact · structural. The one test, from the constitution: *what does the reader know after this sentence?*
+For every word the frames don't already own. Existing microcopy is spec — copied verbatim, never paraphrased. This guide governs **new** words: the next error message, empty state, email, doc page, release note. The persona is the **candid engineer** (brand.md): candid · composed · exact · structural. The two tests, from the constitution: *what infrastructure work does this sentence remove?* and *what does the reader know after it?* New words should pass at least one — and never claim the first while quietly requiring the reader to do the work anyway.
 
 ## The register, in five rules
 
@@ -13,6 +13,7 @@ For every word the frames don't already own. Existing microcopy is spec — copi
 ## Vocabulary discipline
 
 - **Banned:** blazingly, seamless, magical, powerful, effortless, "simply/just" (if it were simple they wouldn't be reading), delightful, oops, whoops, "we're sorry for any inconvenience" (either say what happened or say nothing).
+- **Banned as claims, not just as style:** "fixed pricing" / "flat pricing" / "predictable pricing" (we back a *cap* and an *exact estimate* — say those); anything implying we test, score, lint, or certify the customer's code (a different product; see messaging.md). "Zero config" is allowed only where a surface genuinely has none — point at the absence, don't assert it.
 - **Required precision:** the glossary's terms exactly (18-philosophy/glossary.md) — a branch is not a copy, silence is not mute, `ready` not "running". New nouns register in the glossary before first use.
 - **Casing:** sentence case everywhere (headings, buttons, labels); products and primitives capitalized only when named as such.
 - **Mono means copyable** — ids, commands, URLs, env vars, money in tables. If it can be pasted into a terminal, it is mono; if it's mono, it had better paste correctly.
@@ -21,7 +22,7 @@ For every word the frames don't already own. Existing microcopy is spec — copi
 
 - **UI microcopy** — tersest; the words are load-bearing spec ("shown once", "no silent limbo"). New microcopy states the contract at the moment of doubt: the best examples put the rule *inside* the surface ("billing starts at ready, never at click").
 - **Docs** — structured by developer question, not product noun (the question-ownership rule applied to writing). Every task page ends with the CLI equivalent. Present tense, second person, no "we".
-- **Marketing** — proof over claims: real product UI, canon numbers, the enemy named (bill shock, silent limbo, the mystery deploy). First person plural allowed; superlatives still banned — the screenshot makes the argument.
+- **Marketing** — proof over claims: real product UI, canon numbers, the enemy named (infrastructure homework first; then bill shock, silent limbo, the mystery deploy). First person plural allowed; superlatives still banned — the screenshot makes the argument. Positioning and the story order are owned by `messaging.md`; marketing consumes it and never re-ranks it.
 - **Email/transactional** — see 22-emails/. An email is an event with a deep link; it earns its interruption or it isn't sent.
 
 ## Before / after

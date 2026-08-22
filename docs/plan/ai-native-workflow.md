@@ -319,9 +319,10 @@ Service creation is impossible without an accepted estimate — enforced at the 
 layer, so no client (console, CLI, SDK, future) can bypass it.
 
 ## Why
-"Estimate before provision" is the product's founding promise (constitution:
-"know before you deploy"). If this gate has a bypass, the first invoice that
-surprises a design partner destroys the only story we have.
+"Estimate before provision" is how the platform earns the right to make
+infrastructure decisions on the developer's behalf (constitution §3: certainty is
+the capability that makes the promise acceptable). If this gate has a bypass, the
+first invoice that surprises a design partner takes the trust with it.
 
 ## Read first
 - docs/product/05-features/feature-specs.md §F2 — the business rule and its edge cases (5 min)

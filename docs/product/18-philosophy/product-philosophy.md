@@ -2,20 +2,33 @@
 
 This is the constitution above the specs. The rest of this package records *what* was decided; this document records *why*, in a form that governs decisions not yet made. The existing specs are its precedent — every rule here is already embodied in shipped frames and invariants, cited where it lives. If a future decision conflicts with this document, that conflict is a finding to surface and resolve, never to paper over.
 
+> **Amended Aug 2026 — positioning v2 (founder-directed; `docs/plan/positioning-v2.md`).** §1 and §3 are rewritten. The
+> v1 North Star was *eliminate uncertainty in operating modern infrastructure*, and the v1 external
+> promise was *Know before you deploy*. Certainty did not stop being true; it stopped being the
+> whole answer. The problem the platform leads with is now the **operating gap** that AI-accelerated
+> software creation opened. Certainty is retained, in full, as the capability that makes the new
+> promise safe to accept. §§2, 4–8 are unchanged — the grammar, question-ownership, and
+> show-your-work rules were never a function of the wedge. Amendment recorded on the record, as
+> this document requires of itself.
+
 ---
 
 ## North Star
 
-> **Steloit exists to eliminate uncertainty in operating modern infrastructure. Every product, feature, API, and interaction should help developers know more, guess less, and remain in control.**
+> **Steloit exists so that the people who build software can run it in production and keep it there — without becoming infrastructure experts. Every product, feature, API, and interaction should remove infrastructure work from the developer, or prove what the platform did on their behalf.**
+
+The North Star is stated as a *need*, not as a market segment: it does not matter whether the code was written by hand, by a team, or by an AI. What AI changed is the **volume and the urgency** — far more software is now produced than can be operated — which is why §1 leads with it. That is the why-now, not a qualifier on who we serve.
 
 Everything below derives from this sentence, in order. Each layer answers a different audience's question, and each inherits from the one above:
 
 ```
-North Star            eliminate uncertainty
+North Star            close the operating gap
   ↓
 Internal principle    Show your work.          → how the team builds
   ↓                   (What did we stop hiding?)
-External promise      Know before you deploy.  → what customers gain
+External promise      Build with AI. Deploy    → what customers gain
+                      and run it without
+                      becoming an infra expert.
   ↓
 Company strategy      Don't break the grammar. → what not to build
   ↓
@@ -34,11 +47,19 @@ Implementation        specs · components · API · tests
 
 ## 1. Why Steloit exists
 
-Developers operate infrastructure under uncertainty. What will this cost? What is actually running? Why did the deploy fail? Where did this request go? Who changed this? Why doesn't the invoice match what I saw yesterday? Can I trust AI with production?
+**The cost of writing software collapsed. The cost of running it did not.** AI made software creation dramatically faster, and put it in reach of people who never intended to become infrastructure engineers. The result is a widening gap: far more applications get written than get deployed, configured, secured, monitored, scaled, and paid for correctly. That gap is now the bottleneck, and it is the problem Steloit exists to close.
 
-Every platform answers these questions *after* something happens — the invoice arrives, the deploy breaks, the audit is requested. **Steloit answers them before they become problems.** We are not building another cloud platform; we are building the cloud platform that removes uncertainty.
+The work on the far side of that gap is the same work it always was — VM sizing, Kubernetes, networking, load balancers, database provisioning, cache configuration, TLS and DNS, secrets, backups, monitoring, scaling rules, and cloud billing. None of it is why anyone built the application. **A developer should not have to understand any of it to run their software in production.** That sentence is the product.
 
-Our innovation is rarely new machinery. Competitors already have rollout gates, query plans, retry queues, and pricing formulas — internally, hidden. **Steloit's innovation is exposing the machinery.** That is defensible because it compounds across the platform and cannot be copied with a feature: matching it requires redesigning a platform's whole relationship with its users.
+Steloit closes the gap by *understanding the application*: point the platform at a repository, and it works out what the application is, what it needs to run, what that will cost, and how to operate it once it is live. The developer stays in charge — they accept a recommendation and a price — but they are never handed infrastructure homework as the price of admission.
+
+### The uncertainty problem, retained
+
+Closing the gap is only worth anything if the result can be trusted, and infrastructure is where trust goes to die: What will this cost? What is actually running? Why did the deploy fail? Who changed this? Why doesn't the invoice match what I saw yesterday? Can I trust AI with production?
+
+Every platform answers these questions *after* something happens — the invoice arrives, the deploy breaks, the audit is requested. **Steloit answers them before they become problems.** This was the v1 North Star and it is now the discipline that makes the v2 promise safe: the more the platform does on the developer's behalf, the less excusable it is for the platform to be opaque. Automation without evidence is just a different kind of surprise.
+
+Our innovation is rarely new machinery. Competitors already have rollout gates, query plans, retry queues, and pricing formulas — internally, hidden. **Steloit's innovation is understanding the application well enough to make the infrastructure decisions, and then exposing every one of them.** Both halves are required; either alone has been built before.
 
 ---
 
@@ -50,7 +71,7 @@ The philosophy has a generative question — the one that turns it from a value 
 
 > **What did we stop hiding?**
 
-Don't ask "what feature should we build?" Ask "what is hidden today that developers deserve to see?" That question produced the rollout timeline, the query plan, the invoice math, the deployment gates, the AI evidence, the retry history, the branch lineage. It will produce the next ten. The chain reads: *Show your work → What did we stop hiding? → Know before you deploy.*
+Don't ask "what feature should we build?" Ask "what is hidden today that developers deserve to see?" That question produced the rollout timeline, the query plan, the invoice math, the deployment gates, the AI evidence, the retry history, the branch lineage. It will produce the next ten. The chain reads: *Show your work → What did we stop hiding? → what did the platform decide for me, and why?*
 
 | Surface | The work it shows |
 |---|---|
@@ -65,13 +86,27 @@ Don't ask "what feature should we build?" Ask "what is hidden today that develop
 
 This phrase is not marketing. It never appears as a headline; it appears as behavior.
 
-## 3. External promise — *Know before you deploy*
+## 3. External promise — *Build with AI. Deploy and run it without becoming an infrastructure expert.*
 
-For customers. It says **what they gain** — phrased as the user's state ("now I know"), never the vendor's virtue ("we're honest"). Claims of honesty invite skepticism; a state of knowledge is falsifiable on contact with the product, which is where we win.
+For customers. It says **what they gain** — phrased as the user's state, never the vendor's virtue. The promise is falsifiable on contact: either they got their application running without learning Kubernetes, or they didn't.
 
-The before-moment leads the marketing because it is when the buyer decides: estimate before provision, policy dry-runs, alert backtests, template prices at birth. But the promise runs the whole lifecycle — know **before** (estimate, dry-run, backtest), know **during** (provisioning steps, rollout gates, live canary), know **after** (invoice reconciles to the sidebar, audit log, why-it-fired). The promise must visibly not expire at the deploy button.
+The promise runs a loop, not a moment:
 
-Billing is the proof, not the product. Nobody wakes up wanting honest billing; they wake up needing to deploy an application. The unit of first deployment is therefore **the app, not a service** — a web service, its database, its wiring, one price on the confirm. Certainty must arrive at the speed of the fastest competitor: an estimate that feels like power, never like a checkout interstitial.
+```
+repository → understand the application → detect stack and requirements
+           → recommend infrastructure → project the cost
+           → [human accepts] → provision → deploy
+           → configure (database · cache · networking · TLS · secrets · backups)
+           → monitor → scale → operate
+```
+
+Every arrow is the platform's work, not the developer's. The one place a human is required is the accept — and that is deliberate, permanent, and the subject of the four laws (§9).
+
+**Certainty is the capability that makes the promise acceptable.** *Know before you deploy* is no longer the headline; it is the reason anyone would let a platform make these decisions. It runs the same lifecycle it always did — know **before** (projection, estimate, dry-run, backtest), **during** (provisioning steps, rollout gates, live canary), **after** (invoice reconciles to the sidebar, audit log, why-it-fired) — and it must visibly not expire at the deploy button.
+
+**Two cost objects, never conflated.** A **projection** is a range derived from reading a repository before any shape exists ("$41–58/mo"); it is labelled projected and never presented as a guarantee. An **estimate** is exact, attaches to an accepted shape, and equals the invoice ("one arithmetic", §9). The only cost guarantee we make is **the cap**: a bound the customer sets and the platform enforces. We do not say "fixed", "flat", or "predictable pricing" — the architecture backs a bound and an exact estimate, and those are what we claim.
+
+Billing is the proof, not the product. Nobody wakes up wanting honest billing; they wake up needing to run an application. The unit of first deployment is therefore **the app, not a service** — a web service, its database, its wiring, one price on the confirm. Certainty must arrive at the speed of the fastest competitor: an estimate that feels like power, never like a checkout interstitial.
 
 ## 4. Company strategy — *We don't ship products that break the grammar*
 
@@ -128,7 +163,7 @@ The corollary for entry points is the spec's own pattern: **many doors, one room
 
 Run every proposed feature through these questions. A feature that can't answer them isn't ready.
 
-1. **"…so you know ___?"** — What does the user know after this that they didn't before? If nobody can complete the sentence, the feature is off-thesis.
+1. **"…so you don't have to ___?"** or **"…so you know ___?"** — What infrastructure work does this remove, or what does the user know after it that they didn't before? A feature that completes neither sentence is off-thesis. (Note which one it completes: the first is the primary test, the second the certainty test.)
 2. **What did we stop hiding?** — Prefer exposing existing machinery over adding new surfaces. Show-the-work features are cheaper and more on-brand than new-dashboard features.
 3. **Which question does this own?** — And confirm no existing surface owns it (§5).
 4. **Does it pass the grammar?** — Composes the anatomy, uses the interaction tiers, one arithmetic, status language, microcopy discipline (§4).
@@ -156,6 +191,8 @@ The constitution. When the team grows, nobody will remember every discussion —
 - **We never duplicate ownership of a developer question.**
 - **We never build two rooms for one job.** Many doors, one room — entry points may multiply, canonical surfaces may not.
 - **We never make the developer think in infrastructure to buy an outcome.** The catalog sells Products; the Composer composes; dependencies are satisfied by composition, never surfaced as homework.
+- **We never require infrastructure expertise to run an application.** Anything the platform can work out from the application, it works out — VM sizing, networking, TLS, backups, scaling rules. Where a decision genuinely needs the developer, we ask one question in their vocabulary, never in the cloud's.
+- **We never present a projection as a guarantee.** A range is labelled a range; an estimate is exact and binds; only the cap is enforced. "Fixed pricing" is a sentence we cannot back, so it is a sentence we do not write.
 - **We never silently change a product's semantics.** Execution models are replaceable; semantic contracts are not — a semantic change ships as a new named variant, consented through its estimate.
 - **We never leave a failure state without a way forward.** No silent limbo, no dead ends.
 - **We never capture secrets in templates, and we never reveal a token twice.**
