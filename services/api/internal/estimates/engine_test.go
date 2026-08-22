@@ -11,7 +11,8 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/steloit/cloud/services/api/internal/platform/money"
 
 	"github.com/steloit/cloud/services/api/internal/canon"
 )
@@ -55,10 +56,10 @@ func TestCanonArithmetic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("canon %s: %v", s.Name, err)
 		}
-		if line.MonthlyCents != s.MonthlyEstimateCent {
+		if line.MonthlyCents.Int64() != s.MonthlyEstimateCent {
 			t.Fatalf("canon %s prices to %d, canon says %d", s.Name, line.MonthlyCents, s.MonthlyEstimateCent)
 		}
-		total += line.MonthlyCents
+		total += line.MonthlyCents.Int64()
 	}
 	// The $208 anchor is IMPORTED from the shared canon package (Q2), not
 	// retyped — the same number the console/invoice layers assert.
@@ -92,7 +93,7 @@ func TestCheckoutStackTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 12600 {
+	if total.Int64() != 12600 {
 		t.Fatalf("checkout-stack must be $126 (12600), got %d", total)
 	}
 }
@@ -110,14 +111,14 @@ func TestEngineRules(t *testing.T) {
 		t.Fatalf("web default intent: %+v", l)
 	}
 	// explicit intent survives (jobs rides postgres)
-	if l, _ = Price(ShapeInput{Product: "postgres", Intent: "jobs", Shape: map[string]any{"size": "dev", "storage_gb": 4}}); l.Intent != "jobs" || l.MonthlyCents != 2100 {
+	if l, _ = Price(ShapeInput{Product: "postgres", Intent: "jobs", Shape: map[string]any{"size": "dev", "storage_gb": 4}}); l.Intent != "jobs" || l.MonthlyCents.Int64() != 2100 {
 		t.Fatalf("jobs line: %+v", l)
 	}
 	// HA is +$19 (C2)
 	base, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}})
 	ha, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "ha": true}})
-	if ha.MonthlyCents-base.MonthlyCents != 1900 {
-		t.Fatalf("HA delta: %d", ha.MonthlyCents-base.MonthlyCents)
+	if ha.MonthlyCents.Int64()-base.MonthlyCents.Int64() != 1900 {
+		t.Fatalf("HA delta: %d", ha.MonthlyCents.Int64()-base.MonthlyCents.Int64())
 	}
 	// unknown product / size fail loudly with the field named
 	if _, err := Price(ShapeInput{Product: "gpu"}); err == nil {
@@ -128,11 +129,11 @@ func TestEngineRules(t *testing.T) {
 	}
 	// Dev pays for every GB; Standard's canon-derived 50 GB allowance holds
 	devTen, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "storage_gb": 10}})
-	if devTen.MonthlyCents != 2400 {
+	if devTen.MonthlyCents.Int64() != 2400 {
 		t.Fatalf("dev+10GB must be $24: %d", devTen.MonthlyCents)
 	}
 	stdSixty, _ := Price(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "standard", "storage_gb": 60}})
-	if stdSixty.MonthlyCents != 5800+10*50 {
+	if stdSixty.MonthlyCents.Int64() != 5800+10*50 {
 		t.Fatalf("standard+60GB: %d", stdSixty.MonthlyCents)
 	}
 }
@@ -159,13 +160,13 @@ func TestEstimateLineGrammar(t *testing.T) {
 		if l.Basis != "fixed" && l.Basis != "usage_projection" {
 			t.Fatalf("estimate line %q violates the §74 grammar: basis=%q (want fixed|usage_projection)", l.Name, l.Basis)
 		}
-		if l.MonthlyCents < 0 { // integer cents (int64) end-to-end (ADR-025)
+		if l.MonthlyCents.Int64() < 0 { // integer cents (int64) end-to-end (ADR-025)
 			t.Fatalf("estimate line %q has negative cents: %d", l.Name, l.MonthlyCents)
 		}
-		sum += l.MonthlyCents
+		sum += l.MonthlyCents.Int64()
 	}
-	if sum != total {
-		t.Fatalf("estimate lines do not sum to the total: Σ %d ≠ %d", sum, total)
+	if sum != total.Int64() {
+		t.Fatalf("estimate lines do not sum to the total: Σ %d ≠ %d", sum, total.Int64())
 	}
 	if len(lines) == 0 {
 		t.Fatal("no estimate lines checked — the grammar assertion is inert")
@@ -189,7 +190,7 @@ func TestCanonicalIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if a.MonthlyCents != b.MonthlyCents {
+		if a.MonthlyCents.Int64() != b.MonthlyCents.Int64() {
 			t.Fatalf("the fixture is not a price collision any more (%d vs %d) — pick a live one", a.MonthlyCents, b.MonthlyCents)
 		}
 		ca, err := Canonical(dev78)
@@ -263,7 +264,7 @@ func TestCanonicalIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.MonthlyCents != basePrice.MonthlyCents && id == baseID {
+			if p.MonthlyCents.Int64() != basePrice.MonthlyCents.Int64() && id == baseID {
 				t.Fatalf("%v prices differently (%d vs %d) but shares the identity %q — the bill can change without the contract changing",
 					v, p.MonthlyCents, basePrice.MonthlyCents, id)
 			}
@@ -426,7 +427,7 @@ func TestEveryProductPricesWithAnEmptyShape(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s cannot be priced with defaults alone: %v — a declared default is not a valid catalog value", product, err)
 			}
-			if line.MonthlyCents <= 0 {
+			if line.MonthlyCents.Int64() <= 0 {
 				t.Fatalf("%s prices at %d with defaults — a zero floor means a default silently costs nothing", product, line.MonthlyCents)
 			}
 		})
@@ -449,7 +450,7 @@ func TestUnsetUnpricedFieldIsADifferentContract(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		return base.MonthlyCents == other.MonthlyCents
+		return base.MonthlyCents.Int64() == other.MonthlyCents.Int64()
 	}
 	for product, fields := range shapeSchema {
 		for key, spec := range fields {
@@ -615,19 +616,23 @@ func TestResolvedDefaultsAreExactlyTheDeclaredConfiguration(t *testing.T) {
 	}
 }
 
-// The instance count is bounded — US-3.8's one inseparable arithmetic guard,
-// because a pin's price reaches metering.Rollup through repriceSpan, and a
-// wrapped price is a DECREASE, which the spend cap does not enforce on.
+// Every priced dimension is bounded, not just the one that was reported.
 //
-// The postgres and valkey arms of the same switch wrap identically and are NOT
-// fixed here: they are pre-existing, reachable with no pin involved, and they
-// belong to O16 with the money.Cents type that makes the class uncompilable.
-func TestThePricedInstanceCountRefusesWhatItCannotRepresent(t *testing.T) {
+// The overflow was found on `override.instances`, fixed in the web/worker arm,
+// and the two sibling arms of the same switch kept wrapping — postgres
+// `storage_gb` returned a price of -5340232221128652948, which then poisoned
+// the org's committed run-rate and disabled its spend cap for every later
+// create. This asserts the class, one case per priced dimension.
+func TestEveryPricedDimensionRefusesWhatItCannotRepresent(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		in      ShapeInput
 		wantFld string
 	}{
+		{"postgres storage", ShapeInput{Product: "postgres", Name: "d",
+			Shape: map[string]any{"size": "dev", "storage_gb": int(1) << 60}}, "shape.storage_gb"},
+		{"valkey memory", ShapeInput{Product: "valkey", Name: "c",
+			Shape: map[string]any{"memory_mb": int(1) << 60}}, "shape.memory_mb"},
 		{"web instances", ShapeInput{Product: "web", Name: "a",
 			Shape: map[string]any{"size": "standard-1", "instances": int(1) << 60}}, "shape.instances"},
 		{"worker instances", ShapeInput{Product: "worker", Name: "w",
@@ -646,6 +651,69 @@ func TestThePricedInstanceCountRefusesWhatItCannotRepresent(t *testing.T) {
 	}
 }
 
+// The AGGREGATE is bounded too. Bounding each line moved the wrap up a level
+// rather than removing it: two individually legal lines produced a negative
+// monthly_total_cents over HTTP, and the total is what the customer accepts,
+// what is persisted, and what the estimate gate compares.
+func TestAnEstimateTotalCanNeverWrap(t *testing.T) {
+	sz := table.Web.Sizes["standard-1"]
+	max := int((money.MaxMonthly - sz.ServiceBaseCents) / sz.InstanceCents)
+	in := []ShapeInput{
+		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": max}},
+		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": max}},
+	}
+	lines, total, err := PriceAll(in)
+	if err == nil {
+		t.Fatalf("two individually-legal lines produced total=%d from lines %d + %d — the total is the number the customer accepts and the gate compares",
+			total.Int64(), lines[0].MonthlyCents.Int64(), lines[1].MonthlyCents.Int64())
+	}
+	var se ShapeError
+	if !errors.As(err, &se) {
+		t.Fatalf("want a ShapeError, got %v", err)
+	}
+	// A pair that DOES fit still prices, and the total is the sum.
+	lines, total, err = PriceAll([]ShapeInput{
+		{Product: "web", Name: "a", Shape: map[string]any{"size": "standard-1", "instances": 2}},
+		{Product: "web", Name: "b", Shape: map[string]any{"size": "standard-1", "instances": 3}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := money.Sum(lines[0].MonthlyCents, lines[1].MonthlyCents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total.Cmp(want) != 0 {
+		t.Fatalf("total %d is not the sum of %d and %d", total.Int64(), lines[0].MonthlyCents.Int64(), lines[1].MonthlyCents.Int64())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ported forward from main (e4be740, f970477), which added these AFTER the
+// platform architecture was extracted to O16. They were written against the
+// local `maxMonthlyCents`; that constant is now `money.MaxMonthly`, so they
+// assert on the type's ceiling instead. Nothing else about them changed.
+//
+// `TestThePricedInstanceCountRefusesWhatItCannotRepresent` is deliberately NOT
+// ported: `TestEveryPricedDimensionRefusesWhatItCannotRepresent` above is a
+// strict superset of it — same two instance cases, plus the postgres and valkey
+// arms that were the whole reason this migration exists.
+// ---------------------------------------------------------------------------
+
+// cheapestInstanceCents is the catalog's lowest priced instance, used to DERIVE
+// the floor below rather than retype it as a literal.
+func cheapestInstanceCents() int64 {
+	cheapest := int64(0)
+	for _, sizes := range []map[string]computeSize{table.Web.Sizes, table.Worker.Sizes} {
+		for _, sz := range sizes {
+			if sz.InstanceCents > 0 && (cheapest == 0 || sz.InstanceCents < cheapest) {
+				cheapest = sz.InstanceCents
+			}
+		}
+	}
+	return cheapest
+}
+
 // The instance ceiling sits where REPRESENTABILITY stops, not where a business
 // decision would put it — and the boundary is asserted from both sides.
 //
@@ -657,9 +725,7 @@ func TestThePricedInstanceCountRefusesWhatItCannotRepresent(t *testing.T) {
 // ceiling its own comment forbids it from having.
 //
 // Every expectation is DERIVED from the embedded pricing table and from
-// maxMonthlyCents, never retyped, and never by calling maxPriceableInstances —
-// asserting a function against itself is the mirror this repo already records
-// against a test that re-implemented the guard it was named for.
+// money.MaxMonthly, never retyped.
 func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
 	for _, product := range []string{"web", "worker"} {
 		sizes := table.Web.Sizes
@@ -668,24 +734,22 @@ func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
 		}
 		for size, sz := range sizes {
 			if sz.InstanceCents <= 0 {
-				// LOUD, not skipped. maxPriceableInstances marks this arm as
-				// unreachable from the shipped catalog; the day it becomes
-				// reachable is the day that mark stops being true, and a silent
-				// `continue` would drop this size's coverage at exactly that
-				// moment without saying so.
-				t.Fatalf("%s/%s prices at 0 per instance — the unreachable arm in maxPriceableInstances is now LIVE, so its comment is stale and this test no longer covers this size", product, size)
+				// LOUD, not skipped. A size priced at 0 per instance means the
+				// catalog changed shape, and a silent `continue` would drop this
+				// size's coverage at exactly that moment without saying so.
+				t.Fatalf("%s/%s prices at 0 per instance — this test no longer covers this size", product, size)
 			}
-			max := (maxMonthlyCents - sz.ServiceBaseCents) / sz.InstanceCents
+			max := (money.MaxMonthly - sz.ServiceBaseCents) / sz.InstanceCents
 			t.Run(product+"/"+size, func(t *testing.T) {
 				// A ceiling low enough to be a product decision is a product
 				// decision, whatever the comment says. The floor is DERIVED from
 				// the catalog's cheapest priced instance rather than a literal:
-				// a literal 1e9 trips the moment an expensive size is added
-				// (instance_cents > 3443), which would report "commercial
-				// ceiling" for what is really "we added a bigger machine". The
-				// message names both readings, because the test cannot tell them
-				// apart and should not pretend to.
-				floor := maxMonthlyCents / (cheapestInstanceCents() * 1000)
+				// a literal 1e9 trips the moment an expensive size is added,
+				// which would report "commercial ceiling" for what is really
+				// "we added a bigger machine". The message names both readings,
+				// because the test cannot tell them apart and should not pretend
+				// to.
+				floor := money.MaxMonthly / (cheapestInstanceCents() * 1000)
 				if max < floor {
 					t.Fatalf("%s/%s refuses above %d instances (floor %d) — either the ceiling has become a commercial limit, which the engine does not impose (founder, 2026-07-27), or this size is expensive enough that the floor needs re-deriving. Decide which; do not just lower the floor.",
 						product, size, max, floor)
@@ -696,13 +760,13 @@ func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
 					t.Fatalf("the largest representable count (%d) was refused: %v", max, err)
 				}
 				want := sz.ServiceBaseCents + max*sz.InstanceCents
-				if at.MonthlyCents != want {
-					t.Fatalf("price at the boundary = %d, want %d", at.MonthlyCents, want)
+				if at.MonthlyCents.Int64() != want {
+					t.Fatalf("price at the boundary = %d, want %d", at.MonthlyCents.Int64(), want)
 				}
 				// The whole reason for the derivation: this price is multiplied
 				// by a month of seconds in metering.Rollup.
-				if at.MonthlyCents <= 0 || at.MonthlyCents*secondsInLongestMonth <= 0 {
-					t.Fatalf("the boundary price %d does not survive a billing month", at.MonthlyCents)
+				if p := at.MonthlyCents.Int64(); p <= 0 || p*money.SecondsInLongestMonth <= 0 {
+					t.Fatalf("the boundary price %d does not survive a billing month", p)
 				}
 				if _, err := Price(ShapeInput{Product: product, Name: "x",
 					Shape: map[string]any{"size": size, "instances": int(max + 1)}}); err == nil {
@@ -732,16 +796,14 @@ func TestAPinIsPriceableOnlyWhereTheShapeDeclaresInstances(t *testing.T) {
 			if !tc.ok {
 				var se ShapeError
 				if !errors.As(err, &se) || se.Field != "override.instances" {
-					t.Fatalf("a pin on %s must be refused naming override.instances, got %v / %v", tc.product, line.MonthlyCents, err)
+					t.Fatalf("a pin on %s must be refused naming override.instances, got %v / %v", tc.product, line.MonthlyCents.Int64(), err)
 				}
 				// The DETAIL is the contract, not just the field. Removing the
 				// priced-field check still produces an override.instances error —
 				// `resolve` rejects `instances` as an unknown key for these
 				// products — but the message becomes "unknown shape field", which
 				// tells the operator their request was malformed rather than that
-				// the capacity cannot be METERED. The founder ruling (2026-07-27)
-				// is that the refusal exists because the catalog cannot price the
-				// capacity; a message that says otherwise misreports why.
+				// the capacity cannot be METERED.
 				if !strings.Contains(se.Detail, "metered") {
 					t.Fatalf("a pin on %s is refused with %q — it must say the capacity could not be METERED, which is the reason it is refused, not that the field is unknown", tc.product, se.Detail)
 				}
@@ -755,64 +817,9 @@ func TestAPinIsPriceableOnlyWhereTheShapeDeclaresInstances(t *testing.T) {
 				sizes = table.Worker.Sizes
 			}
 			sz := sizes["standard-1"]
-			if want := sz.ServiceBaseCents + 3*sz.InstanceCents; line.MonthlyCents != want {
-				t.Fatalf("pinned price = %d, want %d", line.MonthlyCents, want)
+			if want := sz.ServiceBaseCents + 3*sz.InstanceCents; line.MonthlyCents.Int64() != want {
+				t.Fatalf("pinned price = %d, want %d", line.MonthlyCents.Int64(), want)
 			}
 		})
 	}
-}
-
-// The billing-month constant is pinned against the arithmetic that actually
-// multiplies it — not against itself.
-//
-// `secondsInLongestMonth` had one representation in `engine.go` and another in
-// `metering.Rollup`, which multiplies a rate by the REAL elapsed seconds of a
-// period. Changing the constant from 31 days to 30 survived every package,
-// because the ceiling and the test that checked it moved together. The
-// consequence was not academic: a 30-day constant admits a rate of
-// 3,558,399,704,200 cents/month, and multiplying that by a real 31-day period
-// gives 9.53e18, which wraps to -8,915,926,305,980,271,616 in
-// `weighted += secs * rate` — persisted as `quota_usage.rate_cents`, the number
-// billing derives charges from.
-//
-// So this derives the longest real period from the same `AddDate(0, 1, 0)`
-// arithmetic `metering.periodBounds` uses, across a leap year and a non-leap
-// year, and asserts the constant covers it. Two representations, one invariant,
-// and now the test depends on the one the constant does not control.
-func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
-	var longest int64
-	var when string
-	for _, year := range []int{2024, 2026} { // leap and non-leap
-		for month := 1; month <= 12; month++ {
-			start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
-			// The same expression periodBounds uses to find a period's end.
-			secs := int64(start.AddDate(0, 1, 0).Sub(start).Seconds())
-			if secs > longest {
-				longest, when = secs, start.Format("2006-01")
-			}
-		}
-	}
-	if secondsInLongestMonth < longest {
-		t.Fatalf("secondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
-			secondsInLongestMonth, when, longest)
-	}
-	// And the ceiling it produces genuinely survives that period.
-	if got := maxMonthlyCents * longest; got <= 0 || got/longest != maxMonthlyCents {
-		t.Fatalf("the maximum accepted rate wraps across %s: %d × %d = %d", when, maxMonthlyCents, longest, got)
-	}
-}
-
-// cheapestInstanceCents is the lowest per-instance rate in the shipped catalog,
-// so the commercial-ceiling floor scales with the catalog instead of with a
-// literal that a new size invalidates.
-func cheapestInstanceCents() int64 {
-	cheapest := int64(0)
-	for _, sizes := range []map[string]computeSize{table.Web.Sizes, table.Worker.Sizes} {
-		for _, sz := range sizes {
-			if sz.InstanceCents > 0 && (cheapest == 0 || sz.InstanceCents < cheapest) {
-				cheapest = sz.InstanceCents
-			}
-		}
-	}
-	return cheapest
 }

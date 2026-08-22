@@ -26,6 +26,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/ids"
+	"github.com/steloit/cloud/services/api/internal/platform/money"
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
@@ -35,7 +36,7 @@ import (
 // bound. Over the bound → refuse with the arithmetic shown. Uncapped (no row or
 // a null limit) → always proceeds. Running services are NEVER touched — the cap
 // pauses new provisioning only (US-11.5: cancel/pause ≠ delete).
-func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCents int64) error {
+func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly money.Cents) error {
 	budget, err := s.q.GetBudget(ctx, orgID)
 	if errors.Is(err, pgx.ErrNoRows) || !budget.LimitCents.Valid {
 		return nil // uncapped
@@ -56,22 +57,33 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 	if err != nil {
 		return err
 	}
-	// DEBT MARKER, not a claim: this projection is NOT checked arithmetic, and it
-	// must become so. `current + newMonthlyCents` wraps, and a wrapped projection
-	// is NEGATIVE — which reads as UNDER the cap. Worse, the wrapped value is
-	// persisted and then summed by SumOrgMonthlyEstimate, so every later
-	// projection for that org wraps too: one request disables the cap
-	// permanently.
-	//
-	// Owned by O16 (priority: critical), which names this as its first item. The
-	// fix is not reachable from an instance pin — it needs a stored row already
-	// out of range, which requires the postgres/valkey pricing arms to wrap
-	// first, and those are O16's too. Stated here because an earlier version of
-	// this comment described the CHECKED implementation that moved to O16, and a
-	// comment asserting the defect is already fixed is how it stays unfixed.
-	current := planFee + committed
-	projected := current + newMonthlyCents
-	if projected > limit {
+	// The PROJECTION is checked arithmetic. `current + newMonthlyCents` wrapping
+	// does not merely mis-answer one request: it answers "under the cap" for a
+	// request that is astronomically over it, and — because the wrapped value is
+	// then persisted into monthly_estimate_cents and summed by
+	// SumOrgMonthlyEstimate — every LATER projection for that org wraps too. One
+	// request disables the org's spend cap permanently. Overflow is treated as
+	// over-cap, which is the only safe direction: a number we cannot represent is
+	// not a number we can prove is affordable.
+	// The PROJECTION is money arithmetic, so it cannot wrap — and the SUMMANDS
+	// are re-validated on the way in, which is the part that matters most.
+	// `committed` comes from SumOrgMonthlyEstimate over stored rows; if any row
+	// holds a value outside the representable range (which a past wrap could
+	// leave behind, and did), FromInt refuses and the cap fails CLOSED. Before
+	// this, one wrapped row disabled an org's cap permanently, because every
+	// later projection wrapped too.
+	feeAmt, feeErr := money.FromInt(planFee)
+	committedAmt, cErr := money.FromInt(committed)
+	if feeErr != nil || cErr != nil {
+		return problemError{p: problem.Conflict(
+			[]string{"this organization's committed monthly spend is not a valid amount"},
+			"Contact support: a stored monthly estimate is outside the representable range, so the spend cap cannot be evaluated safely.")}
+	}
+	current, curErr := feeAmt.Add(committedAmt)
+	projected, projErr := current.Add(newMonthly)
+	// Overflow is treated as OVER CAP — the only safe direction: a number we
+	// cannot represent is not a number we can prove is affordable.
+	if curErr != nil || projErr != nil || projected.Int64() > limit {
 		// F9 flagship: an ENFORCED bound, refused at accept time (402) with the
 		// arithmetic shown — never an alert-only. Every cap hit lands on the
 		// events spine (AC3) so "the cap is real" is auditable, not just a UI toast.
@@ -79,7 +91,7 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 			OrgID: orgID, Kind: "billing", Via: "system", Actor: "system",
 			Action: "billing.spend_cap_reached", Subject: orgID,
 			Detail: []byte(fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
-				limit, current, newMonthlyCents, projected)),
+				limit, current.Int64(), newMonthly.Int64(), projected.Int64())),
 		})
 		// The hard spend cap is a 402 quota_exceeded (the x-error-catalog's
 		// sanctioned "hard quota: fails with remediation" — NOT a new error
@@ -87,7 +99,7 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthlyCen
 		// never an alert-only.
 		return problemError{p: problem.QuotaHard(
 			fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
-				dollars(projected), dollars(current), dollars(newMonthlyCents), dollars(limit)),
+				projected, current, newMonthly, dollars(limit)),
 			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
 	}
 	return nil
@@ -366,7 +378,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		Intent:               pgtype.Text{String: line.Intent, Valid: true},
 		Shape:                shapeJSON,
 		ProvisioningSteps:    provisioningSteps(),
-		MonthlyEstimateCents: line.MonthlyCents,
+		MonthlyEstimateCents: line.MonthlyCents.Int64(),
 		EstimateID:           pgtype.Text{String: in.EstimateID, Valid: true},
 		// US-1.3a/US-3.3: desired populated at creation with the resolved cell
 		// namespace; the row is outstanding so the cell picks it up next poll.
@@ -517,7 +529,7 @@ func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
 	prior := row.MonthlyEstimateCents
 	updated, err := s.q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
 		ID:                   row.ID,
-		MonthlyEstimateCents: base.MonthlyCents,
+		MonthlyEstimateCents: base.MonthlyCents.Int64(),
 		Desired:              desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
 		Generation:           row.Generation,
 	})
@@ -720,12 +732,26 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	// pin — must clear the cap exactly like a create. Only the increase is
 	// projected, since the run-rate already includes this service's old cost;
 	// a decrease is always allowed.
-	if delta := effLine.MonthlyCents - svc.MonthlyEstimateCents; delta > 0 {
+	// The STORED price is re-validated on the way in: a row left out of range by
+	// a past wrap must not become the baseline an increase is measured against.
+	// Sub is reached only when the new price is strictly greater, so it cannot
+	// go negative.
+	priorAmt, priorErr := money.FromInt(svc.MonthlyEstimateCents)
+	if priorErr != nil {
+		return store.Service{}, problemError{p: problem.Conflict(
+			[]string{"this service's stored monthly estimate is not a valid amount"},
+			"Contact support: the stored price is outside the representable range, so a change cannot be priced against it.")}
+	}
+	if effLine.MonthlyCents.GreaterThan(priorAmt) {
+		delta, err := effLine.MonthlyCents.Sub(priorAmt)
+		if err != nil {
+			return store.Service{}, err
+		}
 		if err := s.enforceBudget(ctx, orgID, delta); err != nil {
 			return store.Service{}, err
 		}
 	}
-	params.MonthlyEstimateCents = pgtype.Int8{Int64: effLine.MonthlyCents, Valid: true}
+	params.MonthlyEstimateCents = pgtype.Int8{Int64: effLine.MonthlyCents.Int64(), Valid: true}
 
 	params.Override = override
 	// US-1.3a: rebuild desired from the effective post-edit state and let the

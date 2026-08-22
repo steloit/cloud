@@ -98,7 +98,7 @@ func (h *Handlers) CreateEstimate(ctx context.Context, req gen.CreateEstimateReq
 			Name         *string      `json:"name,omitempty"`
 			Product      *gen.Product `json:"product,omitempty"`
 		}{}
-		basis, name, cents := l.Basis, l.Name, int(l.MonthlyCents)
+		basis, name, cents := l.Basis, l.Name, int(l.MonthlyCents.Int64())
 		intent, product := gen.Intent(l.Intent), gen.Product(l.Product)
 		line.Basis, line.Name, line.MonthlyCents = &basis, &name, &cents
 		line.Intent, line.Product = &intent, &product
