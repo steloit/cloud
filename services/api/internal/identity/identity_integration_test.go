@@ -37,6 +37,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/platform/db"
 	"github.com/steloit/cloud/services/api/internal/platform/idempotency"
 	"github.com/steloit/cloud/services/api/internal/platform/ratelimit"
+	"github.com/steloit/cloud/services/api/internal/platform/testenv"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/secrets"
 	"github.com/steloit/cloud/services/api/internal/subscription"
@@ -67,7 +68,7 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 		tcpostgres.WithSQLDriver("pgx"),
 	)
 	if err != nil {
-		t.Skipf("container runtime unavailable (CI runs this): %v", err)
+		testenv.SkipOrFail(t, err) // skip locally, FAIL in CI — see the package doc
 	}
 	t.Cleanup(func() { _ = pg.Terminate(context.Background()) })
 	_ = wait.ForLog // keep import if strategies change

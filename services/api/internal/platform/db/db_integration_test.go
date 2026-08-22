@@ -9,6 +9,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/steloit/cloud/services/api/internal/platform/db"
+	"github.com/steloit/cloud/services/api/internal/platform/testenv"
 )
 
 // runPG starts a throwaway server at the given image and returns its URL.
@@ -19,7 +20,7 @@ func runPG(t *testing.T, image string) string {
 		tcpostgres.WithDatabase("app"), tcpostgres.WithUsername("app"), tcpostgres.WithPassword("app"),
 		tcpostgres.BasicWaitStrategies(), tcpostgres.WithSQLDriver("pgx"))
 	if err != nil {
-		t.Skipf("container runtime unavailable (CI runs this): %v", err)
+		testenv.SkipOrFail(t, err) // skip locally, FAIL in CI — see the package doc
 	}
 	t.Cleanup(func() { _ = pg.Terminate(context.Background()) })
 	url, err := pg.ConnectionString(ctx, "sslmode=disable")
