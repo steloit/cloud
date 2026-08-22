@@ -88,6 +88,16 @@ jobs:
       - name: Generate (drift fails the build — §16/§17)
         run: |
           make gen-go
+          # gen-sql, not just gen-go: oapi-codegen regenerates the CONTRACT, but
+          # db/queries/*.sql -> internal/*/store/*.sql.go has its own generator,
+          # and only the generated file executes. Without this line a .sql edit
+          # that never reached sqlc ships a query nobody reviewed, and every test
+          # still passes because the tests run the generated file. US-1.3a was
+          # the near-miss: a `AND status <> 'deleting'` fence present in the .sql
+          # and absent from services.sql.go, so the security close was dead code.
+          # sqlc is pinned (Makefile) — a version bump reformats generated output
+          # and would fail this gate for the wrong reason.  O7.
+          make gen-sql
           make gen-canon
           git add -A -- services packages apps
           git diff --cached --exit-code -- services packages apps
