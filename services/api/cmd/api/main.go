@@ -222,17 +222,21 @@ func main() {
 	}
 	logger.Info("email provider", "provider", mailProvider.Name())
 	dispatcher := mailer.NewDispatcher(mailProvider, queries, identity.NewMailDirectory(queries, cfg.ConsoleBaseURL, kek), cfg.EmailFrom)
-	go dispatcher.RunOutbox(ctx, 10*time.Second)
 	// T11.2: the subscription lifecycle sweep (dunning/anchor progression).
 	subs := subscription.NewService(queries, recorder)
-	go subs.RunLifecycle(ctx, time.Hour)
 	// T10.3: the notification routing matrix. The webhook route runs off the
 	// spine via a durable outbox (signed, SSRF-guarded, bounded retry).
 	router := notify.NewRouter(queries, kek).WithTxer(notify.NewPoolTxer(pool))
-	go router.RunOutbox(ctx, 10*time.Second)
-	// US-10.3: the bell projection. Notification-worthy spine events fan onto
-	// per-user bell rows exactly once, tracked by the bell_scanned ledger.
-	go router.RunBell(ctx, 10*time.Second)
+	// US-3.6 / S7: idempotent mutating POSTs. Constructed here rather than at its
+	// use site so every background worker exists before the registry is built.
+	idemSvc := idempotency.New(queries, kek)
+
+	// Every long-lived goroutine this process runs, started in one place. See
+	// backgroundWorkers for why the registry exists.
+	for name, run := range backgroundWorkers(dispatcher, subs, router, idemSvc, prov, logger) {
+		logger.Info("starting background worker", "worker", name)
+		go run(ctx)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -266,13 +270,7 @@ func main() {
 	// response"), and only a layer holding the raw request and response bodies
 	// can honor that literally. It engages only for a declared operation
 	// carrying an Idempotency-Key, so ordinary traffic (and SSE) is untouched.
-	idemSvc := idempotency.New(queries, kek)
-	// The 24h window is a promise, not just a read filter: without a sweep the
-	// table grows without bound and recorded response bodies outlive the window.
-	go idemSvc.RunSweeper(ctx, time.Hour, logger)
-	// D22: manual instance-pins auto-expire in 24h. Sweeping is what makes that
-	// true — clearing the pin bumps generation so the cell converges back.
-	go prov.RunOverrideExpiry(ctx, 5*time.Minute, logger)
+	// (idemSvc itself is constructed above, with the other workers.)
 	idem := idempotency.Middleware(idemSvc, svc)
 
 	srv := &http.Server{
@@ -287,5 +285,56 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		logger.Error("server exited", "err", err)
 		os.Exit(1)
+	}
+}
+
+// backgroundWorkers is every long-lived goroutine the API starts in production.
+//
+// WHY A REGISTRY. Before this, each worker was a bare `go x.Run(ctx, …)` line
+// in main, and `cmd/api` had no test files at all — so DELETING one of those
+// lines left `go test ./...` fully green. The behaviour of each worker is well
+// covered (the pin-expiry ticker and the idempotency sweeper both have tests
+// that drive them directly), but every one of those tests starts the goroutine
+// itself. Nothing asserted that anything ever starts them in production. The
+// failure mode is the whole feature dark in production with a green suite:
+// manual pins that never expire (capacity provisioned indefinitely, priced as
+// "temporary"), and idempotency records outliving their 24h window unbounded.
+//
+// Adding a worker here and letting main range over it IS the registration. A
+// worker missing from this map is not running, and main_test.go asserts the map
+// by name — so a deletion is a test failure, not a silent no-op.
+//
+// Deliberately NOT a source-text assertion: pinning the literal text of main is
+// brittle and tests the formatter, not the wiring. This returns a value, so the
+// test enumerates the real thing.
+//
+// The interval belongs here with the worker, not at the call site, so the two
+// cannot drift apart.
+func backgroundWorkers(
+	dispatcher *mailer.Dispatcher,
+	subs *subscription.Service,
+	router *notify.Router,
+	idemSvc *idempotency.Service,
+	prov *provisioning.Service,
+	logger *slog.Logger,
+) map[string]func(context.Context) {
+	return map[string]func(context.Context){
+		// T10.4: email is Event-driven; this drains the outbox.
+		"mailer.outbox": func(ctx context.Context) { dispatcher.RunOutbox(ctx, 10*time.Second) },
+		// T11.2: dunning / billing-anchor progression.
+		"subscription.lifecycle": func(ctx context.Context) { subs.RunLifecycle(ctx, time.Hour) },
+		// T10.3: signed, SSRF-guarded, bounded-retry webhook delivery.
+		"notify.outbox": func(ctx context.Context) { router.RunOutbox(ctx, 10*time.Second) },
+		// US-10.3: spine events fan onto per-user bell rows exactly once.
+		"notify.bell": func(ctx context.Context) { router.RunBell(ctx, 10*time.Second) },
+		// US-3.6: the 24h idempotency window is a promise, not just a read
+		// filter — without this the table grows without bound and recorded
+		// response bodies outlive the window they were promised to expire in.
+		"idempotency.sweeper": func(ctx context.Context) { idemSvc.RunSweeper(ctx, time.Hour, logger) },
+		// D22: manual instance-pins auto-expire in 24h. Sweeping is what makes
+		// that true — clearing the pin bumps generation so the cell converges
+		// back. Without it a pin is permanent, which is the unbounded-billing
+		// defect US-3.8 closed in the code and could not close here.
+		"provisioning.override-expiry": func(ctx context.Context) { prov.RunOverrideExpiry(ctx, 5*time.Minute, logger) },
 	}
 }

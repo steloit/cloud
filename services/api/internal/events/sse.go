@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -66,18 +67,40 @@ func eventsPathEnv(path string) (string, bool) {
 
 func (s *Streamer) serve(w http.ResponseWriter, r *http.Request, envID string) {
 	ctx := r.Context()
-	orgID, err := s.Envs.OrgForEnv(ctx, envID)
-	if err != nil {
-		problem.Write(w, r, problem.NotFound("environment"))
-		return
-	}
+	// PRINCIPAL FIRST, then the env lookup. Reversed, this leaks env existence to
+	// a caller with NO CREDENTIALS AT ALL: a fabricated env answered 404 and a
+	// real one answered 401, so anonymous GET was a cheaper oracle than the
+	// authenticated one the 404-for-no-standing conversion below was added to
+	// close. The JSON half of this same operation checks the principal first,
+	// and the two halves must not disagree — that disagreement is exactly what
+	// made the conversion necessary in the first place.
 	p, ok := s.Principal(ctx, r)
 	if !ok {
 		problem.Write(w, r, problem.AuthFailed("no credentials", "Sign in or pass a bearer token."))
 		return
 	}
+	orgID, err := s.Envs.OrgForEnv(ctx, envID)
+	if err != nil {
+		// Distinguish "no such env" from a real failure, as the JSON half does;
+		// mapping every error to 404 hides outages as not-founds.
+		if !errors.Is(err, ErrEnvNotFound) {
+			problem.Write(w, r, problem.Internal(problem.NewEventID()))
+			return
+		}
+		problem.Write(w, r, problem.NotFound("environment"))
+		return
+	}
 	scope := rbac.Scope{OrgID: orgID, EnvID: envID}
 	if err := s.Authorize(ctx, p, "observe.read", scope); err != nil {
+		// The SAME mapping the JSON half of this operation uses. This endpoint is
+		// `listEvents` over SSE; when the two halves classify denials
+		// differently, one request header becomes an existence oracle for any env
+		// id — which is exactly what happened when this conversion lived at the
+		// call site and was added to only one of them.
+		if p, ok := problem.FromDenial(err, "environment", "Ask an org admin for observe access."); ok {
+			problem.Write(w, r, p)
+			return
+		}
 		problem.Write(w, r, problem.PermissionDenied(err.Error(), "Ask an org admin for observe access."))
 		return
 	}

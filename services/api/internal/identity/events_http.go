@@ -61,6 +61,14 @@ func (h *Handlers) ListEvents(ctx context.Context, req gen.ListEventsRequestObje
 		return nil, err
 	}
 	if err := h.authz.Require(ctx, p, "observe.read", rbac.Scope{OrgID: orgID, EnvID: req.EnvPathParam}); err != nil {
+		// One mapping for every enforcement point (problem.FromDenial): no
+		// standing → 404 indistinguishable from a missing env, has standing but
+		// lacks the permission → an honest 403. Not re-implemented here, because
+		// re-implementing it is how the SSE half of this same operation ended up
+		// answering 403 where this half answered 404.
+		if p, ok := problem.FromDenial(err, "environment", "Ask an org admin for observe access."); ok {
+			return nil, problemError{p: p}
+		}
 		return nil, err
 	}
 	cursor := ""

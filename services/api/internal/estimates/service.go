@@ -68,7 +68,7 @@ func (s *Service) Create(ctx context.Context, orgID, envID string, shapes []Shap
 		EnvID:      textOrNull(envID),
 		Services:   shapesJSON,
 		Lines:      linesJSON,
-		TotalCents: total,
+		TotalCents: total.Int64(),
 		ExpiresAt:  pgtype.Timestamptz{Time: time.Now().Add(TTL), Valid: true},
 	})
 	if err != nil {
