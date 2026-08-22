@@ -131,10 +131,11 @@ jobs:
         # SKIP into a FAILURE. Without it, internal/reconcile, internal/identity
         # and internal/platform/db each t.Skipf when Docker is unavailable and
         # the package still prints `ok` — so the job is green having run nothing.
-        # Both gates below rest on those containers actually starting: -race was
-        # added because the detector had never run (and the race it caught lived
-        # in one of these packages), and -timeout 30m is derived from identity
-        # measuring ~350s. A silent skip voids both while reporting success.  O23
+        # -timeout 30m below is derived from identity measuring ~350s, which is
+        # meaningless for a suite that skips; and -race never examines the
+        # container-backed concurrency suites at all, which is where the next
+        # such defect lives. (NOT where the last one did: O14's race was in
+        # reconcile_test.go's in-memory fakes and runs either way.)  O23
         env:
           STELOIT_REQUIRE_CONTAINERS: "1"
         # -race, and this is the decision O13 asked for rather than a default.
