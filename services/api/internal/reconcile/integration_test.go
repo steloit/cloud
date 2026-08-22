@@ -8,8 +8,9 @@ package reconcile_test
 // a BEHIND report (the AC's literal scenario) and an impossible AHEAD report.
 //
 // Runs in CI (Docker present). Locally it needs a reachable daemon —
-// DOCKER_HOST set for colima. It t.Skipf's when no runtime is found; a skip is
-// NOT a pass, so the gated evidence is a CI green or a local run with Docker.
+// DOCKER_HOST set for colima. With no runtime it SKIPS locally and FAILS in CI,
+// because CI sets STELOIT_REQUIRE_CONTAINERS (O23): a skip is not a pass, and in
+// CI the two are indistinguishable at the job level.
 
 import (
 	"context"
@@ -25,6 +26,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
+	"github.com/steloit/cloud/services/api/internal/platform/testenv"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/reconcile"
 	"github.com/steloit/cloud/services/api/internal/secrets"
@@ -39,7 +41,7 @@ func realDB(t *testing.T) (*pgxpool.Pool, *store.Queries) {
 		tcpostgres.WithDatabase("app"), tcpostgres.WithUsername("app"), tcpostgres.WithPassword("app"),
 		tcpostgres.BasicWaitStrategies(), tcpostgres.WithSQLDriver("pgx"))
 	if err != nil {
-		t.Skipf("container runtime unavailable (CI runs this): %v", err)
+		testenv.SkipOrFail(t, err) // skip locally, FAIL in CI — see the package doc
 	}
 	t.Cleanup(func() { _ = pg.Terminate(context.Background()) })
 	url, err := pg.ConnectionString(ctx, "sslmode=disable")
