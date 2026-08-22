@@ -272,13 +272,29 @@ func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
 }
 
 // SurvivesBillingMonth answers the question metering.Rollup implicitly asks of
-// every rate it accumulates. Pinned at the boundary, because a `return true`
-// implementation would satisfy its only production caller.
+// every rate it accumulates. It has NO production caller yet (O19 is the task
+// that would add one); today only tests use it.
+//
+// That makes a negative case mandatory rather than nice-to-have. An earlier
+// version of this test asserted only positives, so `return true` satisfied it —
+// reproducing, in the test written to close the MulInt blocker, the exact defect
+// that blocker WAS. The negative below uses `Cents{v: math.MaxInt64}`, a value no
+// constructor can produce; it is reachable only because this test is
+// `package money`, which is the point.
 func TestSurvivesBillingMonthHoldsExactlyToTheCeiling(t *testing.T) {
 	for _, n := range []int64{0, 1, 1900, MaxMonthly} {
 		if !MustFromInt(n).SurvivesBillingMonth() {
 			t.Fatalf("%d is representable but does not survive a billing month — the type invariant is broken", n)
 		}
+	}
+	// THE discriminating case: an amount that cannot survive a billing month must
+	// answer false. Without this, `func (c Cents) SurvivesBillingMonth() bool {
+	// return true }` passes the whole suite.
+	if (Cents{v: math.MaxInt64}).SurvivesBillingMonth() {
+		t.Fatal("MaxInt64 cents claims to survive a billing month — the method is not actually checking")
+	}
+	if (Cents{v: MaxMonthly + 1}).SurvivesBillingMonth() {
+		t.Fatal("one cent past the ceiling claims to survive a billing month — the method is not tight")
 	}
 	// MaxMonthly is the LAST value for which it holds. Checked against the raw
 	// product rather than against the method, so this cannot pass by agreeing

@@ -93,7 +93,14 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 		detail := fmt.Sprintf(`{"cap_cents":%d,"current_cents":%d,"requested_cents":%d,"projected_cents":%d}`,
 			limitAmt.Int64(), current.Int64(), newMonthly.Int64(), projected.Int64())
 		if notRepresentable {
-			detail = fmt.Sprintf(`{"cap_cents":%d,"requested_cents":%d,"projected_cents":null,"reason":"not_representable"}`,
+			// current_cents and projected_cents are OMITTED, not null. Both mean
+			// "not computable", and using two encodings for that in one object is
+			// how a consumer gets it wrong: a reader shaped like
+			// budget_integration_test.go's (`ProjectedCents int64`) decodes null
+			// to 0 — indistinguishable from a real zero, which is precisely the
+			// "row of zeros" this branch exists to avoid. Absence uniformly means
+			// not computable, and `reason` carries the why.
+			detail = fmt.Sprintf(`{"cap_cents":%d,"requested_cents":%d,"reason":"not_representable"}`,
 				limitAmt.Int64(), newMonthly.Int64())
 		}
 		s.record(ctx, events.Input{
@@ -107,12 +114,18 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 		// never an alert-only.
 		msg := fmt.Sprintf("this raises your monthly spend to %s (current %s + this service %s), above your %s cap",
 			projected, current, newMonthly, limitAmt)
+		remediation := "Raise the budget in Billing, or provision a smaller shape — nothing running is affected."
 		if notRepresentable {
-			msg = fmt.Sprintf("this service is priced at %s, which the platform cannot add to your committed monthly spend without exceeding what it can represent — so it is refused, above your %s cap",
-				newMonthly, limitAmt)
+			// Do NOT claim the projection exceeds the cap: this branch is reached
+			// precisely because the projection could not be computed. And do not
+			// offer "raise the budget" — raising it cannot resolve an arithmetic
+			// overflow, and api-conventions requires each failure to name a next
+			// step that can actually work.
+			msg = fmt.Sprintf("this service is priced at %s, and your organization's committed monthly spend cannot be evaluated — the total is outside the range the platform can represent exactly",
+				newMonthly)
+			remediation = "Provision a smaller shape, or contact support: a stored monthly estimate on this organization is out of range and the run-rate cannot be totalled."
 		}
-		return problemError{p: problem.QuotaHard(msg,
-			"Raise the budget in Billing, or provision a smaller shape — nothing running is affected.")}
+		return problemError{p: problem.QuotaHard(msg, remediation)}
 	}
 	return nil
 }

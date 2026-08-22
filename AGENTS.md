@@ -113,8 +113,14 @@ never hand-written · demo data from `19-canon` only.
   `git worktree`, never committed, `git push` sent only the pre-existing commit, the PR
   merged that, and `git worktree remove --force` then destroyed the rest. The PR
   description claimed all of it. **Commit after each review round, before pushing, and
-  check `git status` before removing any worktree** — `--force` means it. The tell is a
-  push that reports an unchanged range, or `--force` on a remove that prints nothing.
+  run `git status` in the worktree before removing it.**
+  The tell is one line, and it is the one you are tempted to route around: plain
+  `git worktree remove` REFUSES with *"contains modified or untracked files, use --force
+  to delete it"*. **Needing `--force` at all IS the warning** — that message is the review
+  round you are about to delete. (Two things that are NOT tells, both measured: the push
+  reported a perfectly normal range, because the merge-up commit was genuinely new; and
+  `--force` prints nothing on success whether or not it destroyed anything. Comparing
+  `origin/<branch>` to `HEAD` does not help either — uncommitted work is in neither.)
 - Never mix restructuring and feature work in one commit.
 
 ## Don't read (token discipline)

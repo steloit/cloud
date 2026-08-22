@@ -2344,4 +2344,136 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 	if refused != 0 {
 		t.Fatal("the refused create still inserted a row — a fail-closed cap that provisions anyway is not fail-closed")
 	}
+
+	// --- the other three arms this branch adds or rewrites ------------------
+	//
+	// O26's review found that pinning only the `committed` re-validation left
+	// FOUR of the five fail-closed arms surviving mutation — including two this
+	// branch introduces. Each is driven here, because the behaviour was correct
+	// and nothing was holding it there.
+
+	// (a) UpdateService's PRIOR-PRICE arm. A poisoned stored price must not
+	// become the baseline an increase is measured against. Without the guard,
+	// money.FromInt's error is ignored and the delta is computed from a garbage
+	// prior — the wrapped row silently sets the reference point.
+	r, b2 := w.patch(t, "/v1/services/"+one.Id,
+		`{"shape":{"size":"standard-1","instances":4}}`, ownerCk)
+	if r.StatusCode != 409 {
+		t.Fatalf("PATCHing a service whose stored price is unrepresentable returned %d %s — want 409; "+
+			"a permissive answer prices the change against a garbage baseline", r.StatusCode, b2)
+	}
+	if !strings.Contains(b2, `"remediation"`) {
+		t.Fatalf("the PATCH 409 carries no remediation: %s", b2)
+	}
+	// WHICH arm answered is the assertion, not merely that something did.
+	// Removing the prior-price guard still yields a 409 here — enforceBudget's
+	// `committed` re-validation catches the same poisoned row one step later —
+	// so a status-code-only check cannot tell the two apart and the guard
+	// survives mutation. The messages differ: this arm names THIS SERVICE's
+	// stored estimate, the other names the ORGANIZATION's committed spend.
+	if !strings.Contains(b2, "this service's stored monthly estimate") {
+		t.Fatalf("the PATCH 409 did not come from the prior-price guard: %s — "+
+			"if it says \"committed monthly spend\" then enforceBudget caught it instead, "+
+			"which means the guard that stops a garbage baseline is not the thing holding", b2)
+	}
+
+	// (b) The NOT-REPRESENTABLE branch of enforceBudget. Dropping
+	// `notRepresentable ||` makes an overflowing projection compare Zero > limit
+	// = false, i.e. FAIL OPEN — the exact defect O16 exists to close. Drive it
+	// with a committed total at the ceiling so the projection cannot be summed.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET monthly_estimate_cents = $2 WHERE id = $1`, one.Id, int64(3443612618300)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE budgets SET limit_cents = $2 WHERE org_id = $1`, org.Id, int64(3443612618300)); err != nil {
+		t.Fatal(err)
+	}
+	code, b = create("third")
+	if code != 402 {
+		t.Fatalf("a create whose projection cannot be represented returned %d %s — want 402. "+
+			"Overflow must be treated as OVER cap: a number we cannot represent is not one we can prove is affordable, "+
+			"and without that arm the projection compares Zero > limit and FAILS OPEN", code, b)
+	}
+	if !strings.Contains(b, "not_representable") && !strings.Contains(b, "cannot be evaluated") {
+		t.Fatalf("the 402 does not say the projection was not computable: %s", b)
+	}
+
+	// (c) An out-of-range stored BUDGET (`lErr`). `limit` is a stored value like
+	// the others; leaving it unchecked meant an out-of-range limit_cents was
+	// evaluated silently while an out-of-range committed failed closed.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET monthly_estimate_cents = 100 WHERE id = $1`, one.Id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE budgets SET limit_cents = $2 WHERE org_id = $1`, org.Id, int64(-1)); err != nil {
+		t.Fatal(err)
+	}
+	code, b = create("fourth")
+	if code != 409 {
+		t.Fatalf("a create against an org whose stored budget is out of range returned %d %s — want 409; "+
+			"the same input class must not be treated two ways", code, b)
+	}
+
+	// (d) A poisoned ESTIMATE, not a poisoned service. Cents.UnmarshalJSON
+	// refuses an out-of-range stored `lines` amount, and that must surface as a
+	// 409 telling the caller to re-price — not as a bare 500 they can only
+	// retry into. Nothing else in the suite writes such a row, so without this
+	// the ErrStoredAmountUnrepresentable map is unreachable and its removal
+	// survives every test.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE budgets SET limit_cents = 100000000 WHERE org_id = $1`, org.Id); err != nil {
+		t.Fatal(err)
+	}
+	r5, b5 := w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"poisoned","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if r5.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", r5.StatusCode, b5)
+	}
+	var poisonedEst struct{ Id string }
+	_ = json.Unmarshal([]byte(b5), &poisonedEst)
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE estimates SET lines = $2::jsonb WHERE id = $1`, poisonedEst.Id,
+		`[{"name":"poisoned","product":"web","intent":"app","monthly_cents":-5340232221128652948,"basis":"fixed","egress_note":null}]`); err != nil {
+		t.Fatal(err)
+	}
+	r6, b6 := w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"poisoned","product":"web","estimate_id":"`+poisonedEst.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if r6.StatusCode != 409 {
+		t.Fatalf("creating from an estimate whose stored lines hold an unrepresentable amount returned %d %s — want 409. "+
+			"A bare 500 tells the caller nothing and they can only retry into it", r6.StatusCode, b6)
+	}
+	if !strings.Contains(b6, "representable") {
+		t.Fatalf("the 409 does not name the cause: %s", b6)
+	}
+
+	// (e) The other side of (d): a decode failure that is NOT a money-range
+	// problem must stay a 500 with an event_id, not become a "re-price this
+	// estimate" 409. An earlier version wrapped every json.Unmarshal error as
+	// unrepresentable, so a truncated or schema-drifted blob was diagnosed as a
+	// money problem and a genuine corruption never reached problem.Internal —
+	// an outage disguised as a client error.
+	r7, b7 := w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"corrupt","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if r7.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", r7.StatusCode, b7)
+	}
+	var corruptEst struct{ Id string }
+	_ = json.Unmarshal([]byte(b7), &corruptEst)
+	// Valid JSON, wrong shape: `name` is a number. Not a money error.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE estimates SET lines = $2::jsonb WHERE id = $1`, corruptEst.Id,
+		`[{"name":12345,"product":"web","monthly_cents":100}]`); err != nil {
+		t.Fatal(err)
+	}
+	r8, b8 := w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"corrupt","product":"web","estimate_id":"`+corruptEst.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if r8.StatusCode != 500 {
+		t.Fatalf("a CORRUPT stored lines blob returned %d %s — want 500. It is not a money-range problem, "+
+			"and diagnosing it as one hides an outage behind a client error the caller cannot act on", r8.StatusCode, b8)
+	}
+	if strings.Contains(b8, "representable") {
+		t.Fatalf("a corrupt blob was reported as an unrepresentable amount: %s", b8)
+	}
 }
