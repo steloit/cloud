@@ -123,7 +123,11 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 			// step that can actually work.
 			msg = fmt.Sprintf("this service is priced at %s, and your organization's committed monthly spend cannot be evaluated — the total is outside the range the platform can represent exactly",
 				newMonthly)
-			remediation = "Provision a smaller shape, or contact support: a stored monthly estimate on this organization is out of range and the run-rate cannot be totalled."
+			// NOT "a stored estimate is out of range" — this branch is reached
+			// only after feeErr/cErr/lErr all passed, so every stored value is in
+			// range by construction and it is their SUM that overflows. Had a
+			// stored value been out of range, the 409 above would have answered.
+			remediation = "Provision a smaller shape, or contact support: the total of this organization's committed monthly estimates is larger than the platform can represent exactly."
 		}
 		return problemError{p: problem.QuotaHard(msg, remediation)}
 	}

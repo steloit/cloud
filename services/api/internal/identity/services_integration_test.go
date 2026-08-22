@@ -17,6 +17,7 @@ import (
 
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/platform/money"
 )
 
 func TestServices(t *testing.T) {
@@ -2382,11 +2383,11 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 	// = false, i.e. FAIL OPEN — the exact defect O16 exists to close. Drive it
 	// with a committed total at the ceiling so the projection cannot be summed.
 	if _, err := w.pool.Exec(ctx,
-		`UPDATE services SET monthly_estimate_cents = $2 WHERE id = $1`, one.Id, int64(3443612618300)); err != nil {
+		`UPDATE services SET monthly_estimate_cents = $2 WHERE id = $1`, one.Id, money.MaxMonthly); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.pool.Exec(ctx,
-		`UPDATE budgets SET limit_cents = $2 WHERE org_id = $1`, org.Id, int64(3443612618300)); err != nil {
+		`UPDATE budgets SET limit_cents = $2 WHERE org_id = $1`, org.Id, money.MaxMonthly); err != nil {
 		t.Fatal(err)
 	}
 	code, b = create("third")
@@ -2395,8 +2396,37 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 			"Overflow must be treated as OVER cap: a number we cannot represent is not one we can prove is affordable, "+
 			"and without that arm the projection compares Zero > limit and FAILS OPEN", code, b)
 	}
-	if !strings.Contains(b, "not_representable") && !strings.Contains(b, "cannot be evaluated") {
+	// `not_representable` lives in the SPINE payload, never in the API body, so
+	// asserting on it here would be a condition describing something it does not
+	// own — the shape of the dead switch arm this branch's first round removed.
+	if !strings.Contains(b, "cannot be evaluated") {
 		t.Fatalf("the 402 does not say the projection was not computable: %s", b)
+	}
+	// The spine payload is the audit record, and the omit-not-null fix is only
+	// real if something reads it. Decode into a map and assert ABSENCE — `null`
+	// would decode to 0 in a typed reader, which is the "row of zeros" the fix
+	// exists to avoid, so zero-ness is not the check.
+	var capDetail []byte
+	if err := w.pool.QueryRow(ctx,
+		`SELECT detail FROM events WHERE org_id=$1 AND action='billing.spend_cap_reached'
+		 ORDER BY at DESC LIMIT 1`, org.Id).Scan(&capDetail); err != nil {
+		t.Fatal(err)
+	}
+	var capFields map[string]any
+	if err := json.Unmarshal(capDetail, &capFields); err != nil {
+		t.Fatalf("the spine payload is not valid JSON: %s", capDetail)
+	}
+	if _, present := capFields["projected_cents"]; present {
+		t.Fatalf("projected_cents is present on the not-representable branch: %s — "+
+			"it must be OMITTED, not null: a consumer typed int64 reads null as 0, "+
+			"indistinguishable from a real zero", capDetail)
+	}
+	if _, present := capFields["current_cents"]; present {
+		t.Fatalf("current_cents is present on the not-representable branch: %s — "+
+			"absence must uniformly mean not computable", capDetail)
+	}
+	if capFields["reason"] != "not_representable" {
+		t.Fatalf("the spine payload does not carry the reason: %s", capDetail)
 	}
 
 	// (c) An out-of-range stored BUDGET (`lErr`). `limit` is a stored value like
@@ -2446,6 +2476,31 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 	}
 	if !strings.Contains(b6, "representable") {
 		t.Fatalf("the 409 does not name the cause: %s", b6)
+	}
+
+	// The OTHER half of the conditional. money.Cents refuses both directions, and
+	// case (d) above only drives ErrNegative — reducing the guard to
+	// `errors.Is(err, money.ErrNegative)` alone survived it. A POSITIVE
+	// out-of-range value is not hypothetical: O16's own evidence records
+	// `PriceAll of two such lines -> +7766279631452245720`, which is exactly the
+	// shape a legacy row can hold, and it would have fallen to the plain 500.
+	r9, b9 := w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"web","name":"toobig","shape":{"size":"standard-1"}}]}`, ownerCk)
+	if r9.StatusCode != 200 {
+		t.Fatalf("createEstimate: %d %s", r9.StatusCode, b9)
+	}
+	var tooBigEst struct{ Id string }
+	_ = json.Unmarshal([]byte(b9), &tooBigEst)
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE estimates SET lines = $2::jsonb WHERE id = $1`, tooBigEst.Id,
+		`[{"name":"toobig","product":"web","intent":"app","monthly_cents":7766279631452245720,"basis":"fixed","egress_note":null}]`); err != nil {
+		t.Fatal(err)
+	}
+	r10, b10 := w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"toobig","product":"web","estimate_id":"`+tooBigEst.Id+`","shape":{"size":"standard-1"}}`, ownerCk)
+	if r10.StatusCode != 409 {
+		t.Fatalf("a stored amount ABOVE MaxMonthly returned %d %s — want 409, same as a negative one. "+
+			"Both are out of range and both need the same remediation", r10.StatusCode, b10)
 	}
 
 	// (e) The other side of (d): a decode failure that is NOT a money-range
