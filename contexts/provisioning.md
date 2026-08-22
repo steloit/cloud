@@ -107,7 +107,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   name the pre-failing tests, or copy from the repo root when the sweep touches those packages.
   A reviewer who skips the baseline spends the session chasing a red they introduced.
 - **If the same invariant must hold at more than one site, give it one owner — and prefer an owner
-  the compiler enforces (O16; ADR-0014 proposed).** US-3.8 spent six review rounds on ONE error repeated: a guard
+  the compiler enforces (ADR-0014).** US-3.8 spent six review rounds on ONE error repeated: a guard
   applied per-site instead of made unrepresentable. An overflow bound went into one arm of a
   three-arm pricing switch (the siblings kept wrapping, and a wrapped price disabled the org's spend
   cap permanently); a 404-for-no-standing conversion went into one transport of a two-transport
@@ -117,10 +117,11 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   compile at all. **The question after writing any guard is not "is this one right" — it is "how many
   places must be right, and what stops the next one being missed?"** If the answer is "a reviewer",
   the design is wrong.
-  *What ships today, so this entry is not misread as describing it:* US-3.8 keeps the ONE-ARM bound
-  deliberately — the sibling arms and the whole-class `money.Cents` fix are O16, split out because a
-  platform primitive should not ride a feature branch (founder, 2026-07-27). A reader arriving at
-  `engine.go` from here is looking at a ratified deferral, not at the mistake.
+  *What ships today:* the whole class, via O16. `money.Cents` is live and every priced dimension
+  goes through it, so the sibling arms this entry describes as still wrapping no longer can. The
+  deferral this note previously recorded (US-3.8 keeping only the one-arm bound, founder 2026-07-27)
+  is closed — kept in the history here because the deferral was ratified and its closure is the
+  evidence the entry is about.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column

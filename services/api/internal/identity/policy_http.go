@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 
 	"github.com/steloit/cloud/services/api/internal/httpapi/gen"
 	"github.com/steloit/cloud/services/api/internal/identity/rbac"
@@ -132,13 +131,9 @@ func (h *Handlers) policyScoped(ctx context.Context, policyID string, perm rbac.
 		return store.Policy{}, err
 	}
 	if _, err := h.requireOrg(ctx, pol.OrgID, perm, mutating); err != nil {
-		var ad AccessDeniedError
-		// A principal with no standing in the org — a non-member (membership:none)
-		// or an org key scoped to a different org (key:…) — must not learn the
-		// policy exists: 404, not a 403 oracle. A member who merely lacks the
-		// permission (role:…) gets the honest 403.
-		if errors.As(err, &ad) && (strings.HasPrefix(ad.DeniedBy, "membership:") || strings.HasPrefix(ad.DeniedBy, "key:")) {
-			return store.Policy{}, notFoundError{what: "policy"}
+		// One mapping for every enforcement point — see problem.FromDenial.
+		if p, ok := problem.FromDenial(err, "policy", "Ask an org admin for access to policies."); ok {
+			return store.Policy{}, problemError{p: p}
 		}
 		return store.Policy{}, err
 	}
