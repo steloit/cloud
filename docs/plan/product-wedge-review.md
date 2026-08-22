@@ -1,6 +1,15 @@
 # Product Wedge Review — Is Database Branching the Right Bet?
 
-**Status:** Analysis for founder decision · 2026-07-18 · Requested as an aggressive first-principles challenge before building branching as a core capability.
+> **Superseded as a narrative ruling (2026-08-22 · `docs/plan/positioning-v2.md`).** §7's recommendation — lead with
+> certainty, wedge on the masked PR preview — is no longer the standing narrative. Positioning v2
+> leads with the **operating gap**: applications get written far faster than they get run.
+> Certainty demotes from *the* differentiator to an important capability; the masked-preview loop
+> demotes from wedge to capability. **Everything else in this document stands**: the evidence
+> sweeps, the commercial record of branching, §6's cost/value math, and the conclusion that
+> branching is mechanism and never identity — v2 only strengthens that last one. Read it as the
+> record of why branching is not the pitch; read `docs/plan/positioning-v2.md` for what the pitch is.
+
+**Status:** Analysis for founder decision · 2026-07-18 · superseded in part 2026-08-22 (`docs/plan/positioning-v2.md`) · Requested as an aggressive first-principles challenge before building branching as a core capability.
 **Evidence:** two research sweeps (competitive/commercial outcomes; raw developer-demand discourse 2024–26, ~70 primary sources) + the strategy corpus (constitution, messaging.md, the design-partner pitch, GOV-002, unit economics).
 
 ---
