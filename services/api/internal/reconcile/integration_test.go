@@ -8,8 +8,9 @@ package reconcile_test
 // a BEHIND report (the AC's literal scenario) and an impossible AHEAD report.
 //
 // Runs in CI (Docker present). Locally it needs a reachable daemon —
-// DOCKER_HOST set for colima. It t.Skipf's when no runtime is found; a skip is
-// NOT a pass, so the gated evidence is a CI green or a local run with Docker.
+// DOCKER_HOST set for colima. With no runtime it SKIPS locally and FAILS in CI,
+// because CI sets STELOIT_REQUIRE_CONTAINERS (O23): a skip is not a pass, and in
+// CI the two are indistinguishable at the job level.
 
 import (
 	"context"
