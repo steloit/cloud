@@ -9,8 +9,8 @@ func TestBillingEdge(t *testing.T) {
 		{"provisioning", "ready", "open"},
 		{"suspended", "ready", "open"},
 		{"failed", "provisioning", ""},
-		{"ready", "degraded", ""},  // still billing
-		{"degraded", "ready", ""},  // still billing
+		{"ready", "degraded", ""}, // still billing
+		{"degraded", "ready", ""}, // still billing
 		{"ready", "suspended", "close"},
 		{"ready", "deleting", "close"},
 		{"degraded", "deleting", "close"},

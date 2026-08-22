@@ -217,6 +217,15 @@ func nonEmpty(s, fallback string) string {
 // imports `events`.
 type deniedNoStanding interface {
 	AccessDeniedNoStanding() bool
+	// AccessDeniedReason names what denied the request (a role, a policy), and
+	// is what the 403 shows the customer.
+	//
+	// Separate from Error() on purpose. Error() is for logs and carries a Go
+	// package prefix — using it as the response detail put
+	// "identity: access denied: role:billing" on the API surface, leaking an
+	// internal package name and changing the string the central mapper had been
+	// emitting ("role:billing").
+	AccessDeniedReason() string
 }
 
 // FromDenial maps an authorization failure to the response it must produce.
@@ -249,7 +258,7 @@ func FromDenial(err error, resource, remediation string) (Problem, bool) {
 	if d.AccessDeniedNoStanding() {
 		return NotFound(resource), true
 	}
-	return PermissionDenied(err.Error(), remediation), true
+	return PermissionDenied(d.AccessDeniedReason(), remediation), true
 }
 
 // errorsAs is errors.As, wrapped so this file states its one dependency on the

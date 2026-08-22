@@ -42,7 +42,7 @@ func TestTheCeilingIsInclusiveAndSurvivesAFullBillingMonth(t *testing.T) {
 	// Runtime values, not constants: Go rejects a constant expression that
 	// overflows at COMPILE time, so a constant version of this makes the
 	// regression unbuildable rather than red — which reads as a broken test.
-	secs, max := SecondsInLongestMonth, MaxMonthly
+	secs, max := secondsInLongestMonth, MaxMonthly
 	weighted := max * secs
 	if weighted <= 0 || weighted/secs != max {
 		t.Fatalf("the maximum amount wraps when weighted across a month: %d × %d = %d — metering.Rollup performs exactly this multiplication",
@@ -216,11 +216,11 @@ func TestSubRefusesToGoNegative(t *testing.T) {
 // multiplies it — not against itself.
 //
 // Ported from estimates (f970477) along with the constant it guards: it was
-// written when `SecondsInLongestMonth` lived in `engine.go`, and it belongs
+// written when `secondsInLongestMonth` lived in `engine.go`, and it belongs
 // wherever that constant lives, because it is the ONLY check that the constant
 // is not merely self-consistent.
 //
-// `SecondsInLongestMonth` had one representation in the pricing engine and
+// `secondsInLongestMonth` had one representation in the pricing engine and
 // another in `metering.Rollup`, which multiplies a rate by the REAL elapsed
 // seconds of a period. Changing the constant from 31 days to 30 survived every
 // package, because the ceiling and the test that checked it moved together. The
@@ -247,9 +247,9 @@ func TestTheBillingMonthConstantCoversTheLongestRealPeriod(t *testing.T) {
 			}
 		}
 	}
-	if SecondsInLongestMonth < longest {
-		t.Fatalf("SecondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
-			SecondsInLongestMonth, when, longest)
+	if secondsInLongestMonth < longest {
+		t.Fatalf("secondsInLongestMonth is %d but %s is %d seconds — the ceiling would admit a rate whose real-month product wraps in metering.Rollup's `weighted += secs * rate`",
+			secondsInLongestMonth, when, longest)
 	}
 	// And the ceiling it produces genuinely survives that period.
 	if got := MaxMonthly * longest; got <= 0 || got/longest != MaxMonthly {

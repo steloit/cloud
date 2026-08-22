@@ -765,8 +765,8 @@ func TestTheInstanceCeilingIsRepresentabilityNotPolicy(t *testing.T) {
 				}
 				// The whole reason for the derivation: this price is multiplied
 				// by a month of seconds in metering.Rollup.
-				if p := at.MonthlyCents.Int64(); p <= 0 || p*money.SecondsInLongestMonth <= 0 {
-					t.Fatalf("the boundary price %d does not survive a billing month", p)
+				if !at.MonthlyCents.SurvivesBillingMonth() || at.MonthlyCents.IsZero() {
+					t.Fatalf("the boundary price %s does not survive a billing month", at.MonthlyCents)
 				}
 				if _, err := Price(ShapeInput{Product: product, Name: "x",
 					Shape: map[string]any{"size": size, "instances": int(max + 1)}}); err == nil {

@@ -23,6 +23,12 @@ type AccessDeniedError struct{ DeniedBy string }
 
 func (e AccessDeniedError) Error() string { return "identity: access denied: " + e.DeniedBy }
 
+// AccessDeniedReason is the customer-facing half of the same fact: what denied
+// the request, with no Go package prefix. problem.FromDenial shows this in the
+// 403; Error() above stays the log form. Keeping them separate is what stops
+// "identity: access denied: role:billing" reaching the API surface.
+func (e AccessDeniedError) AccessDeniedReason() string { return e.DeniedBy }
+
 // AccessDeniedNoStanding reports whether the principal has NO STANDING in the
 // org — a non-member, or a key that does not authorize here — as opposed to a
 // member who merely lacks the permission.
