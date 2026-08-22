@@ -108,7 +108,12 @@ jobs:
       - name: gofmt (every Go module)
         run: |
           set -euo pipefail
-          for m in services/api services/cell-agent apps/cli packages/contracts/go; do
+          # DERIVED from the repo, not retyped. The list was hardcoded here and
+          # again in the test step below; a fifth module would silently get no
+          # gofmt, no vet, no test and no -race, and nothing would say so. The
+          # QA review confirmed the four are complete TODAY and that a module
+          # outside them is invisible to this loop.
+          for m in $(git ls-files '*/go.mod' | xargs -n1 dirname); do
             # 2>&1, and the exit-status check, are both load-bearing: gofmt writes
             # PARSE errors to stderr and lists nothing on stdout, so the obvious
             # `out="$(gofmt -l "$m")"` reports CLEAN for a file that does not
