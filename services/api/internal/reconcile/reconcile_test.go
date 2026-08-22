@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
@@ -23,6 +25,21 @@ type fakeQ struct {
 	rows      []store.ListDesiredForCellRow
 	heartbeat int
 	observed  int
+
+	// afterRead runs at the end of GetService, OUTSIDE q.mu, and is nil in every
+	// test but the concurrency one. It exists because giving q.services one owner
+	// (Q10) also serialised GetService against Transition, which made the
+	// concurrent test mostly stop exercising the window it is named for: the
+	// second goroutine now reads status="ready" and Writeback's own
+	// `rep.Status != svc.Status` pre-check filters it before Transition is
+	// reached. Measured, at CI's plain `go test ./...`: removing the fixture's
+	// exactly-once guard went undetected 97 runs in 100.
+	//
+	// So the test releases all N callers only once all N have READ, which forces
+	// every one of them past the pre-check and into Transition. Deterministic
+	// instead of luck-dependent. Must run outside the lock — blocking while
+	// holding q.mu would deadlock on the first caller.
+	afterRead func()
 }
 
 func (f *fakeQ) GetCell(_ context.Context, id string) (store.Cell, error) {
@@ -72,19 +89,30 @@ func (f *fakeQ) TouchCellHeartbeat(_ context.Context, _ string) error {
 
 func (f *fakeQ) GetService(_ context.Context, id string) (store.Service, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if s, ok := f.services[id]; ok {
-		return s, nil
+	svc, ok := f.services[id]
+	f.mu.Unlock()
+	if f.afterRead != nil {
+		f.afterRead() // outside the lock, deliberately — see the field comment
 	}
-	return store.Service{}, pgx.ErrNoRows
+	if !ok {
+		return store.Service{}, pgx.ErrNoRows
+	}
+	return svc, nil
 }
 
 func (f *fakeQ) OrgForService(context.Context, string) (string, error) { return "org_1", nil }
 
 // fakeTrans records edges and enforces the one rule the reconciler depends on:
 // an edge is applied at most once per (id, from→to).
+//
+// It has NO mutex of its own, deliberately. Transition read-modify-writes
+// q.services, so that map must have exactly ONE owner; two mutexes each
+// guarding half the accesses exclude nothing (Q10/O14 — the detector caught
+// Transition writing q.services while GetService/MarkObserved read it under
+// q.mu). Everything fakeTrans mutates — calls, edges, and q.services — is
+// therefore guarded by q.mu. No fakeQ *method* is called from here, so taking
+// q.mu directly cannot deadlock against one that also takes it.
 type fakeTrans struct {
-	mu     sync.Mutex
 	calls  int
 	edges  []string
 	q      *fakeQ
@@ -92,8 +120,8 @@ type fakeTrans struct {
 }
 
 func (t *fakeTrans) Transition(_ context.Context, svc store.Service, to, via, _, _ string) (store.Service, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.q.mu.Lock()
+	defer t.q.mu.Unlock()
 	if t.failTo != "" && to == t.failTo {
 		return store.Service{}, errors.New("illegal edge")
 	}
@@ -242,17 +270,82 @@ func TestStatusWritebackIsIdempotent(t *testing.T) {
 	}
 }
 
+// Exactly one of N concurrent identical writebacks applies the status edge.
+//
+// DETERMINISTIC, not opportunistic. An N-way barrier inside GetService holds
+// every caller until all N have read the row, so all N observe
+// status="provisioning", all N clear Writeback's `rep.Status != svc.Status`
+// pre-check, and all N reach Transition. Exactly-once is then a property of the
+// FROM-guard rather than of whichever goroutine happened to be scheduled first.
+//
+// Without the barrier this test degraded into near-uselessness after Q10 gave
+// q.services a single owner: at CI's plain `go test ./...`, deleting the
+// fixture's exactly-once guard went undetected in 97 runs out of 100. With it,
+// deleting that guard yields calls==8 on every run.
+//
+// Errors are counted, not discarded. The sibling test in this package
+// (TestIdempotencyConcurrentDoubleSubmitHasOneWinner) warns about exactly this:
+// "1 owner + 1 replay + 10 errors would otherwise pass". Asserting only on
+// tr.calls would let 1 winner + 7 arbitrary failures look identical to 1 winner
+// + 7 clean conflict losers.
 func TestConcurrentWritebackAppliesOnce(t *testing.T) {
-	s, _, tr := newFixture()
+	const n = 8
+	s, q, tr := newFixture()
+
+	// The barrier. Fails loudly rather than hanging for the package timeout if
+	// fewer than n callers ever arrive.
+	var arrived atomic.Int64
+	release := make(chan struct{})
+	stuck := make(chan struct{})
+	q.afterRead = func() {
+		if arrived.Add(1) == n {
+			close(release)
+		}
+		select {
+		case <-release:
+		case <-stuck:
+			t.Errorf("only %d of %d callers reached GetService — the barrier never released", arrived.Load(), n)
+		}
+	}
+
+	var mu sync.Mutex
+	winners, losers := 0, 0
 	var wg sync.WaitGroup
-	for range 8 {
+	for range n {
 		wg.Go(func() {
-			_, _ = s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3, Status: "ready"})
+			_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3, Status: "ready"})
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				winners++
+			} else {
+				losers++
+			}
 		})
 	}
-	wg.Wait()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		close(stuck)
+		<-done
+		t.Fatal("concurrent writeback deadlocked")
+	}
+
 	if tr.calls != 1 {
 		t.Fatalf("concurrent writebacks applied the edge %d times, want exactly 1", tr.calls)
+	}
+	if winners != 1 || losers != n-1 {
+		t.Fatalf("got %d winners and %d losers, want exactly 1 and %d — a run where six callers "+
+			"errored for unrelated reasons would satisfy an assertion on tr.calls alone", winners, losers, n-1)
+	}
+	// The row the callers were fighting over ends in the state exactly one of
+	// them drove it to. Asserting the edge count without this leaves open that
+	// the edge applied once and then something undid it.
+	if got := q.services["svc_a"]; got.Status != "ready" || got.ObservedGeneration != 3 {
+		t.Fatalf("after %d concurrent writebacks the row is status=%q observed=%d, want ready/3",
+			n, got.Status, got.ObservedGeneration)
 	}
 }
 

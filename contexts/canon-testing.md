@@ -56,6 +56,18 @@ Each lands as an automated scenario when its epic ships (mapping in docs/plan/im
 ## Mistake bank
 
 - Retyping a canon number in a test (import from packages/canon; drift must fail, not fork).
+- **A shared map has exactly ONE owner; two mutexes each guarding half the accesses exclude
+  nothing.** `reconcile_test.go`'s `fakeTrans.Transition` read-modify-wrote `fakeQ.services` under
+  `fakeTrans.mu`, while `fakeQ.GetService`/`MarkObserved` read and wrote the same map under
+  `fakeQ.mu`. Every access was "locked" and none was excluded, so the one test that spawns
+  goroutines to prove exactly-once writeback (`TestConcurrentWritebackAppliesOnce`) raced. The
+  test double, not the production code, was the defect — and it corrupted precisely the property
+  the double exists to check. Give the shared state one owner and say so in a comment, since
+  nothing enforces it. **This class has now been found twice**: `internal/platform/idempotency`'s
+  `fakeStore` carries the single-`mu` fix from the same finding, and the reconcile fixture
+  rediscovered it a month later (US-3.7's review filed Q10, US-3.8's filed O14, neither aware of
+  the other). It survived that long because CI runs `go test ./...` with no `-race` (O13), so
+  locally the interleaving needs `-count=20` to show up — a single run passes.
 - Inventing demo/seed data outside canon (ADR-026 violation).
 - Testing the happy path of a four-state surface only (fault-inject the other three).
 - Weakening an invariant to make a feature fit (that's a canon decision for founders, e.g. the X1 $208 case).
