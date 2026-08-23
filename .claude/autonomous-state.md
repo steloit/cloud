@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-23 · `main` @ `db3cfdf` · CI green · **4 open PRs**
+**Updated:** 2026-08-23 (late) · `main` @ `0f3bc15` · CI green · **3 open PRs + US-3.3e unopened**
 
 ---
 
@@ -18,10 +18,10 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 | PR | task | state |
 |---|---|---|
-| **#320** | US-3.3a | round 11 pushed, CI green. Eleven rounds, all blocking, all correct. |
-| **#322** | T3.4c | round 3 pushed, CI green. |
-| **#323** | US-3.3f | NetworkPolicy ENFORCEMENT (Dataplane V2). CI running. |
-| **—** | US-3.3e | `task/US-3.3e`, stacked on US-3.3a. Reviewer returned **5 blockers**; QA still running. Do not edit that worktree until it reports. |
+| **#320** | US-3.3a | **round 12** pushed (`9c7885c`). FROM-aware `statusFor`, shared status artifact, counts corrected. reviewer+qa RUNNING. |
+| **#322** | T3.4c | round 3 (`aac654e`), CI green. Needs a re-review before merge — its rounds were never posted to the PR. |
+| **#323** | US-3.3f | `39a50b3`, CI green. reviewer+qa RUNNING (re-review after blocker fixes). |
+| **—** | US-3.3e | `task/US-3.3e` @ `6e42624`, stacked on US-3.3a. All 7 blockers closed; **PR not opened yet** (waiting on #320). |
 
 **Stacking:** US-3.3e branches from US-3.3a. Merge order must be
 US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
@@ -42,30 +42,32 @@ next `high` from the ready queue: **O19**, **O9**, **T1.4a**, **US-10.7**.
 (merged, #321) · US-3.3e envelope (free 1/2Gi/10Gi · pro 8/16Gi/100Gi ·
 business 12/24Gi/200Gi · enterprise 16/32Gi/250Gi, per environment).
 
-## GCP access is DEGRADED
+## GCP access
 
-`gcloud` is now active as `admin@humanetechnologies.in`, which lacks
-`container.clusters.list` on `steloit-dev`; `hashir@humanetechnologies.in` needs
-an interactive reauth (`! gcloud auth login`). So the earlier "zero GKE clusters"
-evidence **cannot currently be re-verified** — do not build reasoning on it.
-US-3.3e's backfill is written to be correct either way rather than assuming an
-empty fleet.
+`gcloud` is active as **hashir@humanetechnologies.in** (the founder's instruction:
+never `admin@`). Re-verified 2026-08-23: `container clusters list --project
+steloit-dev` → `[]`, exit 0, and `projects describe` proves the credential works.
+ADC is saved; the quota project `humane-dev-493708` lacks `serviceusage.services.use`,
+so pass `--billing-project=steloit-dev`.
 
 ## Do NOT redo
 
 - **US-3.3a's namespace half.** `services/api/go.mod` has **no `k8s.io/*`**, so
   control-plane-side creation is an architecture delta (D6/ADR-0001). Agent-side,
   in `internal/driver/tenancy`, applied before the service manifests.
-- **D7's policy objects were withdrawn on purpose** to US-3.3c/d/e. NetworkPolicy
-  is **not enforced** on the cell (`infra/modules/gke-cell` is GKE Standard, no
-  `network_policy`, no `ADVANCED_DATAPATH`), the allow-set would fence CNPG off
-  Workload Identity / GCS / the apiserver, and the LimitRange would cap every
-  managed Postgres at 512Mi. `tenancy.Render`'s package doc records why.
-- **There are ZERO GKE clusters in `steloit-dev`** (`gcloud container clusters
-  list --format=json` → `[]`, exit 0; `projects describe` proves the credential
-  works). `infra/modules/gke-cell` has never been applied. So US-3.3a's AC 3
-  ("proven without the runbook's preflight") is **not** provable yet, and
-  US-3.3c's pod-to-pod assertions need a cell first.
+- **D7's policy objects were withdrawn on purpose.** Two of the three are BACK:
+  US-3.3e reinstates the ResourceQuota and the LimitRange (`defaultRequest` only —
+  a `default` would cap every managed Postgres, since `cluster.yaml.tmpl` declares
+  no resources). NetworkPolicy is still withheld: not enforced on the cell today
+  (#323 turns it on) and the allow-set would fence CNPG off Workload Identity /
+  GCS / the apiserver. `tenancy.Render`'s package doc records the current split.
+- **Only STORAGE actually binds** in the quota today; cpu/memory bind as a
+  pod-count proxy until US-3.3d makes the Cluster declare its own resources.
+- **There are ZERO GKE clusters in `steloit-dev`** — re-verified 2026-08-23 under
+  `hashir@`. `infra/modules/gke-cell` has never been applied, which is what makes
+  #323's create-time-only Dataplane V2 flip free. US-3.3a's AC 3 ("proven without
+  the runbook's preflight") is **not** provable yet, and US-3.3c's pod-to-pod
+  assertions need a cell first.
 - **O2's module is INERT** (`billing_account` defaults `""`, no tfvars sets it),
   `currency_code` is deliberately DELETED (the server supplies it), and the
   amount is a required env variable with no default so `plan` refuses.
@@ -86,6 +88,13 @@ These are in `contexts/provisioning.md` in full. The short form:
    generalisation and is a weakening.
 4. **Never merge on your own read of a pending review.**
 5. `git worktree remove` refusing and naming `--force` IS the warning.
+6. **A count restated is not a count measured.** US-3.3a published "59 distinct"
+   and "one short fixture kept"; counting mechanically gave **61 distinct** (34+29
+   entries, 2 duplicates) and **four** fixture lengths. Re-derive every number you
+   repeat — a figure carried forward from a previous round is an assertion.
+7. **Pin duplicated knowledge against a SHARED ARTIFACT, not against a copy of the
+   other side.** Round 11 had each module compare its table to a hardcoded literal
+   of the other's; the other side was never read, so widening it failed nothing.
 
 ## Conventions
 
