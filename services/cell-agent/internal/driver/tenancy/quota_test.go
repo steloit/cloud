@@ -73,17 +73,33 @@ func TestEveryPlanRendersItsAuthoritativeEnvelope(t *testing.T) {
 			if q.Metadata.Namespace != ns {
 				t.Fatalf("the ResourceQuota is scoped to %q, want %q", q.Metadata.Namespace, ns)
 			}
-			// Exactly the three dimensions, exactly the catalog's values.
+			// Exactly the two dimensions that ship, exactly the catalog's values.
 			for key, wantVal := range map[string]string{
-				"requests.cpu":     want.CPU,
-				"requests.memory":  want.Memory,
-				"requests.storage": want.Storage,
+				"requests.cpu":    want.CPU,
+				"requests.memory": want.Memory,
 			} {
 				if got := q.Spec.Hard[key]; got != wantVal {
 					t.Errorf("%s = %q, want plans.json's %q", key, got, wantVal)
 				}
 			}
-			if len(q.Spec.Hard) != 3 {
+			// requests.storage IS WITHDRAWN and its absence is pinned, not
+			// tolerated — the same shape as US-3.3a's withdrawal of the D7
+			// policies. The founder's storage number is real and is carried in
+			// the desired doc; what is missing is the API's ability to PREDICT
+			// the PVC the cell will create, so it cannot refuse a create that
+			// will not fit. Measured: estimates.Resolve returns storage_gb 0 for
+			// dev, standard AND performance, while the driver renders 10Gi, 32Gi
+			// and 128Gi from its own size table. Rendering the ceiling anyway
+			// means a free org can be sold a `standard` (32Gi against 10Gi), or
+			// a SECOND dev (10+10 against 10), and the service then sits in
+			// provisioning forever with no writeback. US-3.3i owns turning it on.
+			if _, present := q.Spec.Hard["requests.storage"]; present {
+				t.Errorf("requests.storage is being rendered again. It is enforced by admission, " +
+					"and nothing at the API layer can predict the PVC size, so a create that " +
+					"cannot fit is accepted, priced, billed and then never admitted. Turn it on " +
+					"with US-3.3i, together with the gate.")
+			}
+			if len(q.Spec.Hard) != 2 {
 				t.Errorf("spec.hard has %d keys (%v) — an extra dimension is one nobody approved, "+
 					"a missing one is unbounded", len(q.Spec.Hard), q.Spec.Hard)
 			}

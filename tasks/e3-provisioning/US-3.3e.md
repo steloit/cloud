@@ -12,6 +12,8 @@ module: M4 Provisioning
 contexts: [provisioning]
 files:
   - services/cell-agent/internal/driver/tenancy/**
+  - services/api/internal/platform/db/migrations/**
+  - services/api/internal/identity/**
   - services/cell-agent/internal/render/**
   - services/cell-agent/internal/kube/**
   - services/api/internal/billing/**
@@ -63,8 +65,19 @@ problems:
 - [x] The envelope is read from the founder-owned source, per plan — not retyped.
 - [x] All four plans render their own envelope; no two plans share one, so a
   wrong-plan render is detectable.
-- [x] CPU, memory and PVC/storage are each rendered and admission-enforced, in
-  the environment's own namespace. **But only storage BINDS today**:
+- [x] CPU and memory are rendered and admission-enforced in the environment's
+  own namespace. **PVC/storage is NOT** — withheld, and its absence pinned by a
+  test. Review reproduced the reason live: a FREE org could be sold a `standard`
+  postgres (32Gi PVC against a 10Gi envelope) and a SECOND `dev` (10+10 against
+  10), both **201**, both then unadmittable, both sitting in `provisioning`
+  forever with no writeback. The API cannot refuse what it cannot predict —
+  `estimates.Resolve` returns `storage_gb: 0` for every catalog size while the
+  driver renders 10/32/128 Gi from a table it owns. **US-3.3i** owns turning it
+  on together with the API-layer gate; **T3.4c** is its dependency.
+
+  And what binds today is therefore only a pod-count proxy: `cluster.yaml.tmpl`
+  declares no `resources:`, so every CNPG container is admitted at the
+  LimitRange's `defaultRequest` (US-3.3d). **But only storage BINDS today**:
   `cluster.yaml.tmpl` declares no `resources:`, so every CNPG container is
   admitted at the LimitRange's `defaultRequest` and the cpu/memory ceilings act
   as a pod-count proxy rather than as compute the customer paid for. US-3.3d

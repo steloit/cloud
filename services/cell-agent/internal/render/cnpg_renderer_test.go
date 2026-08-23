@@ -372,7 +372,9 @@ func TestNamespaceSurvivesTheWire(t *testing.T) {
 	if quota == nil {
 		t.Fatal("no ResourceQuota was applied — the environment has no ceiling")
 	}
-	for _, want := range []string{`requests.cpu: "8"`, "requests.memory: 16Gi", "requests.storage: 100Gi"} {
+	// The envelope's two RENDERED dimensions. storage is carried in the doc and
+	// deliberately not rendered (US-3.3e / US-3.3i), so it cannot be asserted here.
+	for _, want := range []string{`requests.cpu: "8"`, "requests.memory: 16Gi"} {
 		if !bytes.Contains(quota, []byte(want)) {
 			t.Fatalf("the envelope did not survive the wire: %q missing from\n%s", want, quota)
 		}
@@ -561,14 +563,22 @@ func TestTheRenderedQuotaComesFromTheDocNotTheRenderer(t *testing.T) {
 			if quota == nil {
 				t.Fatal("no ResourceQuota applied")
 			}
+			// storage is deliberately NOT among these: US-3.3e withholds
+			// requests.storage because the API cannot predict the PVC the cell
+			// will create, so it cannot refuse an order that will not fit
+			// (US-3.3i). The doc still CARRIES it — the value below is the
+			// founder's — which is why the fixture sets it and the assertion
+			// list does not.
 			for _, want := range []string{
 				`requests.cpu: "` + tc.cpu + `"`,
 				"requests.memory: " + tc.mem,
-				"requests.storage: " + tc.sto,
 			} {
 				if !bytes.Contains(quota, []byte(want)) {
 					t.Errorf("%s: %q missing — the renderer is not reading the doc:\n%s", tc.plan, want, quota)
 				}
+			}
+			if bytes.Contains(quota, []byte("requests.storage")) {
+				t.Errorf("%s: requests.storage is rendered again — see US-3.3i:\n%s", tc.plan, quota)
 			}
 			// And emphatically NOT pro's, which every other fixture uses.
 			if bytes.Contains(quota, []byte(`requests.cpu: "8"`)) && tc.cpu != "8" {

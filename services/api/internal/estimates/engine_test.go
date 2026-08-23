@@ -894,3 +894,29 @@ func TestThePostgresHASurchargeIsBoundedToo(t *testing.T) {
 		}
 	}
 }
+
+// THE PREMISE BEHIND WITHHOLDING requests.storage (US-3.3e / US-3.3i).
+//
+// The storage half of the founder's envelope is not rendered, because the API
+// cannot predict the PVC the cell will create and therefore cannot refuse an
+// order that will not fit. This pins the half of that premise which lives here:
+// the control plane resolves NO storage figure for any catalog size, so there is
+// nothing to compare an envelope against.
+//
+// It is written to FAIL the day that changes — T3.4c makes storage_gb size the
+// PVC — because that is exactly when US-3.3i becomes possible and the withheld
+// quota should come back.
+func TestTheControlPlaneStillCannotPredictThePVCSize(t *testing.T) {
+	for _, size := range []string{"dev", "standard", "performance"} {
+		out, _, err := resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": size}})
+		if err != nil {
+			t.Fatalf("%s: %v", size, err)
+		}
+		gb, _ := out["storage_gb"].(int)
+		if gb != 0 {
+			t.Fatalf("%s now resolves storage_gb=%d. If that is the size the driver renders, the "+
+				"control plane CAN predict the PVC — turn requests.storage back on and add the "+
+				"API-layer gate (US-3.3i), and delete this test.", size, gb)
+		}
+	}
+}

@@ -217,6 +217,29 @@ metadata:
 		// actually allocate capacity: a pod requesting 1 CPU occupies 1 CPU of
 		// schedulable capacity whether or not it uses it, so bounding requests
 		// bounds the plan's real allocation.
+		//
+		// requests.storage IS WITHDRAWN, and this is the same withdrawal US-3.3a
+		// made of the D7 policies, for the same class of reason: shipping an
+		// enforcement whose preconditions do not exist.
+		//
+		// The founder's storage number is real and is carried all the way here
+		// in the desired doc — but the API CANNOT PREDICT WHAT PVC THE CELL WILL
+		// CREATE, so it cannot refuse a create that will not fit. Measured on
+		// this branch: `estimates.Resolve` returns `storage_gb: 0` for dev,
+		// standard AND performance, while `cnpg.storageForShape` renders 10Gi,
+		// 32Gi and 128Gi from a size table the DRIVER owns. Rendering the
+		// ceiling anyway means the API prices a shape, returns 201, starts
+		// billing it, and admission then refuses the PVC — the service sits in
+		// `provisioning` forever with no writeback and no alert. A free org
+		// ordering a `standard` (32Gi against 10Gi), or a SECOND dev (10Gi+10Gi
+		// against 10Gi), both did exactly that.
+		//
+		// Enforcing it needs the rendered size to be derivable from the catalog
+		// both planes read — which is T3.4c (storage_gb actually sizes the PVC)
+		// plus a catalog-owned floor for the sizes whose minimum the driver
+		// currently owns alone. Duplicating that table in services/api would put
+		// a data-plane sizing rule in the control plane, which is the boundary
+		// this whole design exists to keep. Filed as US-3.3i.
 		{Kind: "ResourceQuota", Name: "env-quota", YAML: []byte(fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -226,8 +249,7 @@ spec:
   hard:
     requests.cpu: "%s"
     requests.memory: %s
-    requests.storage: %s
-`, s.Namespace, s.Quota.CPU, s.Quota.Memory, s.Quota.Storage))},
+`, s.Namespace, s.Quota.CPU, s.Quota.Memory))},
 
 		// THE PAIR. A ResourceQuota constraining requests.cpu/memory REJECTS any
 		// pod that declares neither — that is what enforcement being real means
