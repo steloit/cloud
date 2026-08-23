@@ -315,3 +315,49 @@ func TestTeardownRefusesAProductThisDriverDoesNotOwn(t *testing.T) {
 		t.Errorf("deleted postgres-shaped objects for a valkey service: %v", a.deleted)
 	}
 }
+
+// THE PRICED storage_gb MUST REACH THE APPLIED MANIFEST — asserted here, at the
+// renderer, and read out of the YAML rather than the spec struct.
+//
+// T3.4c proved the DRIVER sizes the PVC from `storage_gb`. Nothing proved its
+// only production caller hands it one: measured, `storage_gb` appeared ZERO times
+// anywhere in this package, and deleting the key on the way from the desired doc
+// to the driver left the entire cell-agent suite green. That is exactly the shape
+// of the original defect — the driver read `shape["storage"]`, which the API's
+// schema forbids, so the priced value was never read and every customer got the
+// size default. Proving the driver right while leaving the wire between them
+// unpinned is how that survived.
+//
+// float64, not int: this value arrives from JSON, so the production type is what
+// the test must use.
+func TestTheDesiredDocsStorageSizesTheAppliedCluster(t *testing.T) {
+	for _, tc := range []struct {
+		storage any
+		want    string
+	}{
+		{float64(200), "200Gi"},
+		{float64(78), "78Gi"},
+		{float64(50), "50Gi"},
+	} {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+		s.Desired["shape"] = map[string]any{"size": "standard", "storage_gb": tc.storage}
+
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatalf("storage_gb=%v: %v", tc.storage, err)
+		}
+		var cluster string
+		for _, doc := range a.applied["acme--prod"] {
+			if strings.Contains(string(doc), "kind: Cluster") {
+				cluster = string(doc)
+			}
+		}
+		if cluster == "" {
+			t.Fatalf("storage_gb=%v: no Cluster was applied", tc.storage)
+		}
+		if !strings.Contains(cluster, tc.want) {
+			t.Errorf("storage_gb=%v: the applied Cluster does not carry %s — the priced storage "+
+				"never reached the manifest:\n%s", tc.storage, tc.want, cluster)
+		}
+	}
+}

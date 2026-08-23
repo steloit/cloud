@@ -2763,3 +2763,220 @@ func TestStorageCannotBeReducedBecauseAVolumeCannotShrink(t *testing.T) {
 		t.Fatalf("an unrelated shape PATCH was refused: %v", err)
 	}
 }
+
+// THE PRICED STORAGE MUST SURVIVE EVERY DESIRED-DOC REWRITE, not just create.
+//
+// Measured: `UpdateService`'s desired doc shipping `storage_gb: 0`, and
+// `expireOverride`'s doing the same, BOTH survived the full container-backed
+// suite — only the create path was pinned. Downstream that is not a cosmetic
+// drift: the driver floors a 0 to the size's included GB, so a 200 GB service
+// re-renders as 50Gi, the CSI driver REFUSES the shrink, and the row stays
+// outstanding forever with nothing written back. A PATCH that does not mention
+// storage would silently do that.
+func TestEveryDesiredDocRewriteKeepsThePricedStorage(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ck, uid := w.signupUser(t, "storage-doc@example.com")
+
+	resp, body := w.post(t, "/v1/orgs", `{"name":"storageco"}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const shape = `{"size":"standard","storage_gb":200}`
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":`+shape+`}]}`, ck)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":`+shape+`}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var svcRow struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svcRow)
+
+	storageOf := func(t *testing.T, label string) {
+		t.Helper()
+		var shapeDoc, desired map[string]any
+		if err := w.pool.QueryRow(ctx, `SELECT shape, desired FROM services WHERE id = $1`,
+			svcRow.Id).Scan(&shapeDoc, &desired); err != nil {
+			t.Fatal(err)
+		}
+		if got := shapeDoc["storage_gb"]; got != float64(200) {
+			t.Errorf("%s: stored shape storage_gb = %v, want 200", label, got)
+		}
+		ds, _ := desired["shape"].(map[string]any)
+		if ds == nil {
+			t.Fatalf("%s: the desired doc has no shape", label)
+		}
+		if got := ds["storage_gb"]; got != float64(200) {
+			t.Errorf("%s: DESIRED doc storage_gb = %v, want 200 — the driver floors a 0 to the "+
+				"size's included GB, the CSI driver refuses the shrink, and the row stays "+
+				"outstanding forever", label, got)
+		}
+	}
+	storageOf(t, "after create")
+
+	// A PATCH that does not mention storage at all.
+	if _, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svcRow.Id), org.Id, uid,
+		map[string]any{"size": "standard", "ha": true}, nil, nil); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	storageOf(t, "after a PATCH that never mentions storage")
+
+	// ...and the override-expiry sweep, which rebuilds the doc from the stored shape.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET override = $2::jsonb WHERE id = $1`, svcRow.Id,
+		`{"instances":3,"reason":"test","expires_at":"2020-01-01T00:00:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	// RunOverrideExpiry sweeps once at startup and then on a ticker, so it is
+	// driven as the production code runs it and polled until the pin clears.
+	sweepCtx, stop := context.WithCancel(ctx)
+	go w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.DiscardHandler))
+	t.Cleanup(stop)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var override []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id = $1`,
+			svcRow.Id).Scan(&override); err != nil {
+			t.Fatal(err)
+		}
+		if len(override) == 0 || string(override) == "null" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the expired pin was never cleared")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	storageOf(t, "after the override-expiry sweep")
+}
+
+// THE SHIPPED RATCHET MIGRATION, ROW BY ROW.
+//
+// The sibling test executes the same file, but asserts through a PRICE
+// comparison — so a migration that is uniformly wrong (every legacy row raised
+// to ten times the included GB, say) prices both sides identically and passes.
+// Measured against the pre-round-4 file: six behavioural mutations of this SQL
+// survived the whole suite, including `included_gb * 10`, `GREATEST` → `LEAST`,
+// dropping the `desired` half, and neutering the UPDATE entirely.
+//
+// One row per representation, each asserted by VALUE and by whether its
+// generation moved.
+func TestTheShippedRatchetMigrationRowByRow(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ck, uid := w.signupUser(t, "ratchet-rows@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetco"}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prj, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type row struct {
+		id, shape string
+		wantGB    any // nil = the key must be absent
+		wantMoved bool
+	}
+	rows := []row{
+		{"svc_r_absent", `{"size":"standard"}`, float64(50), true},
+		{"svc_r_zero", `{"size":"standard","storage_gb":0}`, float64(50), true},
+		{"svc_r_str78", `{"size":"standard","storage_gb":"78"}`, float64(78), true},
+		{"svc_r_50gi", `{"size":"standard","storage_gb":"50Gi"}`, float64(50), true},
+		{"svc_r_frac", `{"size":"standard","storage_gb":32.5}`, float64(50), true},
+		{"svc_r_huge", `{"size":"standard","storage_gb":3000000000}`, float64(3000000000), false},
+		{"svc_r_ok200", `{"size":"standard","storage_gb":200}`, float64(200), false},
+		{"svc_r_dev4", `{"size":"dev","storage_gb":4}`, float64(4), false},
+		{"svc_r_valkey", `{"size":"standard","storage_gb":0}`, float64(0), false}, // not postgres
+	}
+	before := map[string]int64{}
+	for _, r := range rows {
+		product := "postgres"
+		if r.id == "svc_r_valkey" {
+			product = "valkey"
+		}
+		if _, err := w.pool.Exec(ctx,
+			`INSERT INTO services (id, env_id, name, product, status, shape, desired, cell_id, generation, observed_generation)
+			 VALUES ($1, $2, $3, $4::text, 'ready', $5::jsonb,
+			         jsonb_build_object('product', $4::text, 'shape', $5::jsonb), 'cell-0', 7, 7)`,
+			r.id, env.ID, r.id, product, r.shape); err != nil {
+			t.Fatalf("seed %s: %v", r.id, err)
+		}
+		before[r.id] = 7
+	}
+	_ = prj
+
+	migration, err := os.ReadFile("../platform/db/migrations/20260823120000_postgres_storage_ratchet.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("the shipped migration aborted on legacy rows: %v", err)
+	}
+
+	for _, r := range rows {
+		var shape, desired map[string]any
+		var gen int64
+		if err := w.pool.QueryRow(ctx,
+			`SELECT shape, desired, generation FROM services WHERE id = $1`, r.id).
+			Scan(&shape, &desired, &gen); err != nil {
+			t.Fatalf("%s: %v", r.id, err)
+		}
+		if got := shape["storage_gb"]; got != r.wantGB {
+			t.Errorf("%s: shape.storage_gb = %v (%T), want %v", r.id, got, got, r.wantGB)
+		}
+		ds, _ := desired["shape"].(map[string]any)
+		if ds == nil {
+			t.Errorf("%s: the desired doc lost its shape", r.id)
+		} else if got := ds["storage_gb"]; got != r.wantGB {
+			t.Errorf("%s: DESIRED shape.storage_gb = %v, want %v — the cell renders from this "+
+				"document, not from `shape`", r.id, got, r.wantGB)
+		}
+		if moved := gen > before[r.id]; moved != r.wantMoved {
+			t.Errorf("%s: generation moved=%v (%d → %d), want moved=%v. The agent polls "+
+				"observed_generation < generation, so a row corrected without a bump is fixed "+
+				"in the database and NOT on the cell.", r.id, moved, before[r.id], gen, r.wantMoved)
+		}
+	}
+
+	// Idempotent: a re-run must not bump anything a second time.
+	after := map[string]int64{}
+	for _, r := range rows {
+		var g int64
+		_ = w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id = $1`, r.id).Scan(&g)
+		after[r.id] = g
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		var g int64
+		_ = w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id = $1`, r.id).Scan(&g)
+		if g != after[r.id] {
+			t.Errorf("%s: a second run bumped generation %d → %d", r.id, after[r.id], g)
+		}
+	}
+}
