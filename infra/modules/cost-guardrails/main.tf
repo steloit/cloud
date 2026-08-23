@@ -22,13 +22,28 @@ resource "google_billing_budget" "cell" {
 
   budget_filter {
     projects = ["projects/${var.project_id}"]
+    # EXPLICIT. The discovery doc marks calendarPeriod "Optional" and documents no
+    # default, while the provider documents "Exactly one of calendar_period,
+    # custom_period must be provided" — and the module set neither. MONTH is not a
+    # new choice: it is what the live budget already uses and what a "monthly
+    # budget" means in both other representations. An earlier version of the O2
+    # writeup asserted MONTH was the API default; that was unsupported.
+    calendar_period = "MONTH"
   }
 
   amount {
     specified_amount {
-      # Must match the billing account's currency; the API rejects anything else.
-      currency_code = var.budget_currency
-      units         = tostring(floor(var.monthly_budget_usd))
+      # currency_code is DELIBERATELY UNSET. Google's discovery doc: "currency_code
+      # is optional. If specified when creating a budget, it must match the
+      # currency of the billing account... The currency_code is provided on
+      # output." So the server supplies the account's own currency, correctly,
+      # with no input required and no way to get it wrong. Setting it is the ONLY
+      # path to an apply-time failure.
+      #
+      # Which means `units` is denominated in WHATEVER THE ACCOUNT USES — not
+      # dollars. See the variable's docstring; the amount/currency pairing is a
+      # founder decision recorded in O2, not something this module can infer.
+      units = tostring(floor(var.monthly_budget_units))
     }
   }
 

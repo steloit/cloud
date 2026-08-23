@@ -12,27 +12,22 @@ variable "billing_account" {
   default     = ""
 }
 
-variable "monthly_budget_usd" {
+variable "monthly_budget_units" {
   type        = number
-  description = "Budget amount the 50/80/100% alerts fire against (trial-credit sized; capacity, set by the env)"
-}
-
-variable "budget_currency" {
-  type        = string
   description = <<-EOT
-    Currency for the budget amount. MUST equal the billing account's own currency —
-    the Cloud Billing Budget API rejects any other value; this is not a choice.
+    Budget amount the 50/80/100% alerts fire against, in the BILLING ACCOUNT'S OWN
+    CURRENCY — not dollars.
 
-    Left as a variable rather than hardcoded because the hardcoded "USD" contradicted
-    the only observable evidence: the sole budget on billing account
-    016006-61AFB9-0DD7E7 is denominated in INR. The account's currency could not be
-    read directly (the Cloud Billing API is not enabled on steloit-dev), so this is
-    NOT asserted as USD-is-wrong — it is asserted that a hardcoded value which
-    disagrees with the only live sample will fail at apply time, and the value
-    belongs where whoever supplies `billing_account` (P1) can set it in the same
-    breath. See O2.
+    Renamed from monthly_budget_usd because that name was load-bearing and wrong:
+    currency_code is unset (the server supplies the account currency), so a value
+    chosen as dollars becomes that many rupees, yen or pesos. 300 on an INR account
+    is about US$3.60, and the alerts would fire permanently.
+
+    The amount and the account currency are a PAIR, and choosing them is a founder
+    decision — see O2. See docs/founder-config.md for the account identifiers.
   EOT
 }
+
 
 variable "alert_emails" {
   type        = list(string)

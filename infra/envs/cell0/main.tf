@@ -71,13 +71,12 @@ module "cnpg" {
 }
 
 module "cost_guardrails" {
-  source             = "../../modules/cost-guardrails"
-  project_id         = var.project_id
-  cell_id            = var.cell_id
-  billing_account    = var.billing_account
-  monthly_budget_usd = 700
-  budget_currency    = var.budget_currency
-  alert_emails       = var.alert_emails
+  source               = "../../modules/cost-guardrails"
+  project_id           = var.project_id
+  cell_id              = var.cell_id
+  billing_account      = var.billing_account
+  monthly_budget_units = 700
+  alert_emails         = var.alert_emails
 }
 
 module "observability" {
