@@ -85,8 +85,30 @@ evidence US-3.3a mistook for isolation.
 - [x] Asserted by a test against the planned resource, not by reading main.tf or
   a plan by hand — `terraform test` with a mocked provider, credential-free, in CI.
 - [x] The mutually-exclusive `network_policy` block is asserted absent.
-- [x] Denied connections are logged.
+- [x] **Each ENV's planned value** is asserted, not just the module's literal.
+  The two are different representations: with the module reading a variable and
+  `envs/dev` passing `LEGACY_DATAPATH`, the module test, `fmt -check` and both
+  `validate`s are all green while dev deploys with no enforcement. Measured, and
+  the env tests turn it red.
+- [ ] Denied connections are logged. **AUTHORED, NOT APPLIED.** Nothing in the
+  repo applies `infra/k8s/policy/network-logging.yaml` — the only apply paths are
+  `module.cnpg`'s `kubernetes_manifest` resources for `k8s/storage/` and
+  `k8s/control-plane/`, and `k8s/policy/` is wired to nothing. The sibling
+  ClusterImagePolicy has the identical gap, already recorded in
+  `spec-change-proposals.md`. Ticking this was the PR's own thesis — *rendered,
+  stored and enforced are three different things* — reproduced one layer up:
+  **authored is not applied.** The YAML gate is content-blind, so five mutations
+  of this file (deny.log false, a bogus apiVersion, a misspelled kind, a
+  different name, an empty spec) all pass; content assertions are added below,
+  but they pin the FILE, not that anything reads it.
 - [ ] A pod in env A cannot reach a pod in env B — **US-3.3c**, needs a cell.
+
+## Decision record
+
+The datapath choice is an **ADR** (`docs/adr/0015-cell-datapath-dataplane-v2.md`),
+not a Terraform comment. It is create-time irreversible, it accepts three
+known-issue classes, and `docs/architecture.md` has no networking section at all —
+ADR-0012 set the bar for something far more reversible.
 
 ## Outcome
 
@@ -97,7 +119,9 @@ Making the module testable required one production change: `output
 "cluster_ca_certificate"` indexed `master_auth[0]`, a computed block list that is
 empty until the API answers, so the module could not be evaluated by **any**
 harness short of a real apply. It is `one()` + `try()` now — which is also the
-better failure (an empty kubeconfig field rather than a plan-time index crash).
+better failure (a null that both envs' `base64decode()` rejects loudly, rather than a plan-time
+index error inside the module — measured; an earlier revision claimed "an empty
+kubeconfig field", which is simply false).
 
 Four mutations RED on a verified-GREEN baseline: the setting removed, set to
 `LEGACY_DATAPATH`, `network_policy` added alongside it, and Workload Identity

@@ -19,14 +19,7 @@
 # index master_auth[0]. Supplying it keeps the plan whole so the assertions below
 # are about the cluster's CONFIGURATION rather than about mock plumbing.
 mock_provider "google-beta" {}
-
-mock_provider "google" {
-  mock_resource "google_container_cluster" {
-    defaults = {
-      endpoint = "10.0.0.1"
-    }
-  }
-}
+mock_provider "google" {}
 
 variables {
   project_id            = "steloit-test"
@@ -44,20 +37,22 @@ variables {
   workload_max_nodes    = 5
 }
 
-# `apply` against a MOCKED provider: nothing is created, no credentials are used,
 # and computed attributes are populated so the module's outputs resolve. `plan`
 # leaves them unknown, which this module's master_auth[0] output cannot survive.
+# `apply` against MOCKED providers — nothing is created and no credentials are
+# used. It is needed because several assertions below reference COMPUTED
+# attributes (the node service account's email, and the node pools' nested
+# config blocks), which are unknown under `plan` and make the condition
+# unevaluatable.
+#
+# An earlier revision also used `apply`, but justified it with a claim about
+# `master_auth[0]` that is no longer true and was never the reason. It also
+# carried two blocks of mock scaffolding for master_auth, both verified INERT by
+# deletion: `override_resource.values` cannot populate a computed nested block
+# list. They are gone rather than left to teach the next reader a false model of
+# how this harness works.
 run "the_cell_enforces_network_policy" {
   command = apply
-
-  # master_auth is a computed block list; a mocked provider returns it empty and
-  # this module's output indexes [0]. Overridden per-run so the plan resolves.
-  override_resource {
-    target = google_container_cluster.cell
-    values = {
-      master_auth = [{ cluster_ca_certificate = "bW9jaw==" }]
-    }
-  }
 
   assert {
     condition     = google_container_cluster.cell.datapath_provider == "ADVANCED_DATAPATH"
@@ -71,6 +66,51 @@ run "the_cell_enforces_network_policy" {
   assert {
     condition     = length(google_container_cluster.cell.network_policy) == 0
     error_message = "network_policy is set alongside ADVANCED_DATAPATH. GKE rejects that combination outright; Dataplane V2 already enforces NetworkPolicy, and the legacy Calico path must not be enabled with it."
+  }
+
+  # WORKLOAD IDENTITY HAS TWO REPRESENTATIONS. The cluster-level pool is useless
+  # if a node pool exposes the raw GCE metadata server — pods then get the NODE
+  # service account instead of a workload identity. Deleting GKE_METADATA from
+  # all three pools was a green mutation while this assertion passed.
+  assert {
+    condition = alltrue([for p in [
+      google_container_node_pool.core,
+      google_container_node_pool.db_storage,
+      google_container_node_pool.workload,
+      ] : one(one(p.node_config).workload_metadata_config).mode == "GKE_METADATA"
+    ])
+    error_message = "a node pool exposes the raw GCE metadata server — cluster-level Workload Identity does nothing for pods on it, so WAL archiving has no credential path and the D7 metadata-server allowance protects nothing."
+  }
+
+  # The dedicated least-privilege node SA. Without it the pools fall back to the
+  # DEFAULT COMPUTE SA, which this module's own comment calls
+  # "project-Editor-adjacent" — and a node compromise on the pool running
+  # customer code then walks around both gVisor and NetworkPolicy. Deleting it
+  # from all three pools was green.
+  assert {
+    condition = alltrue([for p in [
+      google_container_node_pool.core,
+      google_container_node_pool.db_storage,
+      google_container_node_pool.workload,
+      ] : one(p.node_config).service_account == google_service_account.node.email
+    ])
+    error_message = "a node pool runs as the default compute service account, which is project-Editor-adjacent; a node compromise on the customer-code pool would yield broad project credentials."
+  }
+
+  # gVisor on the pool that runs customer code. INF-001 D7: customer code ALWAYS
+  # runs under GKE Sandbox. Removing sandbox_config, and removing the sandbox
+  # taint, were both green — this file claims the D7 isolation scope and covered
+  # one third of it.
+  assert {
+    condition     = one(one(google_container_node_pool.workload.node_config).sandbox_config).sandbox_type == "gvisor"
+    error_message = "the workload pool does not run gVisor — INF-001 D7 requires customer code to run under GKE Sandbox."
+  }
+
+  # A1.6's floor-1 invariant, stated in main.tf and in the variable description
+  # and pinned by nothing: min_node_count = 0 was green.
+  assert {
+    condition     = one(google_container_node_pool.core.autoscaling).min_node_count >= 1
+    error_message = "the core pool can scale to zero; A1.6 requires a floor of 1 (api + operators + observability never go away)."
   }
 
   # Workload Identity is what lets a customer's Postgres reach its WAL bucket

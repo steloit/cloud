@@ -170,14 +170,29 @@ jobs:
           terraform -chdir=infra/envs/dev validate
           terraform -chdir=infra/envs/cell0 init -backend=false -input=false
           terraform -chdir=infra/envs/cell0 validate
-      - name: Terraform module tests (credential-free, mocked providers)
+      - name: Terraform tests (credential-free, mocked providers)
+        shell: bash
         run: |
           # `terraform validate` checks syntax and types; it cannot check a VALUE.
-          # These assert against the planned resource — e.g. that the cell enables
-          # NetworkPolicy enforcement at all, which US-3.3a found nothing did while
-          # every manifest and every test looked correct.
+          # These assert against the planned resource — e.g. that each ENV's cell
+          # enables NetworkPolicy enforcement, which US-3.3a found nothing did
+          # while every manifest and every test looked correct.
+          #
+          # `shell: bash` and the emptiness guard are both load-bearing. GitHub's
+          # default is `bash -e {0}` with NO pipefail, and `-e` does not fire on a
+          # failing command substitution in a `for` header — so a renamed tests/
+          # directory, a moved module, or a broken git would skip the loop
+          # entirely and reach `exit $fail` with 0. That is failing OPEN exactly
+          # when the gate did not run, the same shape the authority-paths step
+          # above documents about itself.
+          set -o pipefail
+          dirs=$(git ls-files 'infra/**/*.tftest.hcl' 'infra/**/*.tftest.json'                    | xargs -n1 dirname | sed 's#/tests$##' | sort -u)
+          if [ -z "$dirs" ]; then
+            echo "::error::no terraform test files found — this gate did not run"
+            exit 1
+          fi
           fail=0
-          for d in $(git ls-files 'infra/**/*.tftest.hcl' | xargs -n1 dirname | sed 's#/tests$##' | sort -u); do
+          for d in $dirs; do
             echo "::group::terraform test $d"
             terraform -chdir="$d" init -backend=false -input=false >/dev/null
             terraform -chdir="$d" test || fail=1
@@ -188,6 +203,22 @@ jobs:
       - name: k8s manifests parse (always)
         run: |
           python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/k8s/**/*.yaml', recursive=True)]"
+          # A parse is CONTENT-BLIND: deny.log=false, a bogus apiVersion, a
+          # misspelled kind, a different metadata.name and an empty spec all
+          # parse. Nothing applies this file yet (US-3.3f AC 4 is explicitly
+          # unticked for that), so these assertions pin the file itself until
+          # something does.
+          python3 - <<'PY'
+          import yaml
+          d = yaml.safe_load(open('infra/k8s/policy/network-logging.yaml'))
+          assert d['apiVersion'] == 'networking.gke.io/v1alpha1', d['apiVersion']
+          assert d['kind'] == 'NetworkLogging', d['kind']
+          # GKE PRE-CREATES this object on every Dataplane V2 cluster; any other
+          # name is a second object that logs nothing.
+          assert d['metadata']['name'] == 'default', d['metadata']['name']
+          assert d['spec']['cluster']['deny']['log'] is True
+          assert d['spec']['cluster']['allow']['log'] is False
+          PY
       - name: Spike scripts + manifests (when present)
         run: |
           if [ -d infra/spike ]; then

@@ -88,6 +88,25 @@ var ciGates = []ciGate{
 		why: "the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
 	{task: "§16/§17", job: "go", runContains: "git diff --cached --exit-code -- services packages apps",
 		why: "the generators are a no-op that looks busy without the diff that compares their output"},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: `terraform -chdir="$d" test || fail=1`,
+		why: "terraform validate cannot check a VALUE. This is the only gate asserting that " +
+			"each cell enables NetworkPolicy enforcement — without it the API server stores " +
+			"D7's policies and drops nothing, which is the defect US-3.3a withdrew for.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "exit $fail",
+		why:         "the loop reports per-module failures ONLY through this; `exit 0` fails the gate OPEN",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "this gate did not run",
+		why: "GitHub's default shell has no pipefail and -e does not fire on a failing command " +
+			"substitution in a for header, so empty discovery would skip every test and exit 0. " +
+			"The emptiness guard is the only thing that makes that loud.",
+	},
 	{task: "O13", job: "go", runContains: "gofmt -l",
 		why: "go vet does not check formatting, so nothing else in this pipeline reports it"},
 	{task: "O13", job: "go", runContains: "git ls-files '*/go.mod'",

@@ -63,12 +63,21 @@ resource "google_container_cluster" "cell" {
   # (cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2). The legacy
   # alternative is Calico via `network_policy`, which we do not use.
   #
-  # THIS IS A CREATE-TIME DECISION. Google documents no migration path for an
-  # existing Standard cluster; changing it later means rebuilding the cluster and
-  # its node pools. There are currently ZERO clusters in this project
-  # (`gcloud container clusters list --format=json` → `[]`), so it costs nothing
-  # now and a full rebuild at any later point. That asymmetry is the reason this
-  # lands before the policies it enables.
+  # THIS IS A CREATE-TIME DECISION (ADR-0015). Google documents no migration path
+  # for an existing Standard cluster; changing it later rebuilds the cluster and
+  # its node pools.
+  #
+  # The premise is that no cell exists yet. Corroborated but DATED: this module
+  # has never been applied (no env has completed the README bootstrap, so no
+  # state exists), and infra/spike/results/teardown.log's orphan sweep shows an
+  # empty cluster listing as of 2026-07-19. It is not a present-tense verified
+  # fact — an earlier revision of this comment asserted one.
+  #
+  # If a cell DOES exist, the two envs differ sharply: cell0 sets
+  # deletion_protection = true, so a forced replacement aborts at apply, loudly.
+  # dev sets it to FALSE, so a routine apply would destroy and recreate the
+  # cluster and every node pool with no barrier but someone reading the plan.
+  # Read the first plan for "must be replaced" before applying to dev.
   #
   # Known Dataplane V2 caveats we are accepting, from Google's own list: NetworkPolicy
   # `endPort` (port RANGES) is silently not enforced on affected versions — read a
