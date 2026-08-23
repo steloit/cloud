@@ -18,7 +18,6 @@ files:
   - docs/adr/0015-cell-datapath-dataplane-v2.md
   - services/api/internal/platform/testenv/wiring_test.go
   - .github/workflows/ci.yml
-  - tasks/e3-provisioning/US-3.3c.md
   - tasks/e3-provisioning/US-3.3f.md
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/infra/modules/gke-cell\" && terraform init -backend=false && terraform test"

@@ -84,9 +84,12 @@ decision for the first real cell.
   and does not apply. The current D7 set uses single ports only; US-3.3c carries
   an AC that `tenancy.Render` must *refuse* a policy carrying `endPort`, so the
   constraint has an owner where policies are written rather than living in prose.
-  (That task did not exist when this line was first written — it asserted an owner
-  it had not filed. `tasks/e3-provisioning/US-3.3c.md` exists now and carries the
-  AC; the citation resolves.)
+  (This line asserted an owner without checking. US-3.3c DOES exist — filed with
+  US-3.3a's security review, on `task/US-3.3a` (PR #320), which is **not an
+  ancestor of this branch**, which is why a review of this branch alone could not
+  find it. The `endPort` AC is being appended there rather than here, since that
+  is where the file lives; until #320 merges, this citation resolves only on that
+  branch.)
 - Hairpin connections can drop; `hostPort` conflicts with the NodePort range.
   Neither affects the D7 set (no `hostPort`).
 
