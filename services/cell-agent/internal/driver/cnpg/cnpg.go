@@ -125,12 +125,27 @@ func asGB(v any) (int, bool) {
 //
 // One owner for naming: this returns exactly the Kind/Name pairs Render does, so
 // teardown addresses what create applied.
-func (d *Driver) Objects(s driver.Spec) driver.Manifests {
+// IT CARRIES RENDER'S ENTRY GUARDS. Replacing Render with Objects on the
+// teardown path dropped both of them, and that was measured: a `valkey` service
+// in `deleting` converged to "gone" and issued Delete for `Cluster/svc-cache01`
+// and `ScheduledBackup/svc-cache01-nightly` — postgres-shaped objects for a
+// product this driver does not own — where before it returned an error and
+// refused to report gone. There is ONE renderer for all four products
+// (cmd/cell-agent has no dispatch), so `[postgres, valkey, web, worker]` all
+// route here, and "a teardown that cannot enumerate its objects must NOT report
+// gone" was made unreachable for the reason it was written.
+func (d *Driver) Objects(s driver.Spec) (driver.Manifests, error) {
+	if s.Product != "postgres" {
+		return nil, fmt.Errorf("cnpg: not a postgres product: %q", s.Product)
+	}
+	if err := requireName(s.Name, s.Namespace); err != nil {
+		return nil, err
+	}
 	name := dnsName(s.Name)
 	return driver.Manifests{
 		{Kind: "Cluster", Name: name},
 		{Kind: "ScheduledBackup", Name: name + "-nightly"},
-	}
+	}, nil
 }
 
 type clusterData struct {

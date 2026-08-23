@@ -284,6 +284,16 @@ func resolve(in ShapeInput) (map[string]any, string, error) {
 			// It also keeps "the same configuration spelled with its defaults
 			// written out must not be refused" true, which is a property the
 			// estimate gate is built on.
+			// REJECT A NEGATIVE BEFORE THE FLOOR HIDES IT. The floor made
+			// Price's `storage_gb < 0` arm unreachable for every known size —
+			// measured, `storage_gb: -100` resolved to 50 and priced normally on
+			// create and on POST /v1/estimates, where it used to be a 422 field
+			// error. A wrong TYPE is rejected twenty lines above rather than
+			// defaulted, for the reason stated there; a wrong SIGN had quietly
+			// stopped being.
+			if cur, ok := out["storage_gb"].(int); ok && cur < 0 {
+				return nil, "", ShapeError{Field: "shape.storage_gb", Detail: "must be >= 0"}
+			}
 			if cur, ok := out["storage_gb"].(int); !ok || cur < sz.IncludedGB {
 				out["storage_gb"] = sz.IncludedGB
 			}

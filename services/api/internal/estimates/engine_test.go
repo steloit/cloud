@@ -894,3 +894,44 @@ func TestThePostgresHASurchargeIsBoundedToo(t *testing.T) {
 		}
 	}
 }
+
+// A NEGATIVE storage_gb IS A FIELD ERROR, NOT A FLOOR.
+//
+// The included-GB floor (`max(declared, included)`) made Price's own
+// `storage_gb < 0` arm unreachable for every known size: measured, -100 and -1
+// resolved to 50/50/0 and priced normally on create AND on POST /v1/estimates,
+// where they had been 422s. A wrong TYPE is rejected rather than defaulted —
+// engine.go says so and calls it load-bearing — and a wrong SIGN had quietly
+// stopped being. On PATCH it errored only by accident of the shrink check, with
+// the wrong message.
+func TestANegativeStorageIsRefusedAtEverySize(t *testing.T) {
+	for _, size := range []string{"dev", "standard", "performance"} {
+		for _, gb := range []int{-1, -100} {
+			_, _, err := resolve(ShapeInput{
+				Product: "postgres",
+				Shape:   map[string]any{"size": size, "storage_gb": gb},
+			})
+			if err == nil {
+				t.Errorf("%s with storage_gb=%d was accepted — the floor coerced a negative into "+
+					"a positive instead of refusing it", size, gb)
+				continue
+			}
+			var se ShapeError
+			if !errors.As(err, &se) || se.Field != "shape.storage_gb" {
+				t.Errorf("%s/%d: err = %v, want a shape.storage_gb field error", size, gb, err)
+			}
+		}
+	}
+	// ...and zero is still accepted, resolving to the included floor: it is a
+	// legal way to spell "give me what the plan includes".
+	out, _, err := resolve(ShapeInput{
+		Product: "postgres",
+		Shape:   map[string]any{"size": "standard", "storage_gb": 0},
+	})
+	if err != nil {
+		t.Fatalf("storage_gb=0 was refused: %v", err)
+	}
+	if out["storage_gb"] != 50 {
+		t.Fatalf("storage_gb=0 resolved to %v, want the included 50", out["storage_gb"])
+	}
+}

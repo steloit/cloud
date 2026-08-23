@@ -35,7 +35,7 @@ type cnpgDriver interface {
 	Render(driver.Spec) (driver.Manifests, error)
 	// Objects names what a service owns without rendering it, so teardown cannot
 	// fail for a reason that only applies to creating a volume (T3.4c).
-	Objects(driver.Spec) driver.Manifests
+	Objects(driver.Spec) (driver.Manifests, error)
 }
 
 // NewCNPGRenderer — cell, gsaEmail, walBucket are the agent's own placement
@@ -144,18 +144,19 @@ func terminal(status string) bool {
 // accident, since nothing in the Driver contract promises namespace-independent
 // names.
 //
-// The error return is currently UNREACHABLE: Driver.Objects names objects
-// without rendering them and cannot fail. It is kept because the signature is
-// the contract a future driver whose Objects needs I/O would use, and because
-// the caller's "a teardown that cannot enumerate its objects must NOT report
-// gone" arm is the behaviour we want if that ever becomes reachable.
+// The error return is REACHABLE, and an earlier revision of this comment said it
+// was not. Objects carries Driver.Render's two entry guards — the product check
+// and requireName — because dropping them here is what let a `valkey` service in
+// `deleting` converge to "gone" while deleting postgres-shaped objects. There is
+// one renderer for all four products, so the caller's "a teardown that cannot
+// enumerate its objects must NOT report gone" arm is live, not aspirational.
 func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
 	return r.pg.Objects(driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
 		Instances: instancesOf(svc.Desired), Cell: r.cell,
 		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
-	}), nil
+	})
 }
 
 // statusFromPhase maps a CNPG cluster phase to the ADR-024 vocabulary using an

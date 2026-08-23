@@ -287,3 +287,31 @@ func keysOf(m map[string][][]byte) []string {
 	}
 	return out
 }
+
+// TEARDOWN MUST NOT DELETE OBJECTS FOR A PRODUCT THIS DRIVER DOES NOT OWN.
+//
+// There is ONE renderer for all four products (cmd/cell-agent has no dispatch),
+// so `[postgres, valkey, web, worker]` all reach this code. Replacing Render with
+// Objects on the teardown path dropped Render's two entry guards, and measured:
+// a `valkey` service in `deleting` converged to "gone" and issued Delete for
+// `Cluster/svc-...` and `ScheduledBackup/svc-...-nightly` — postgres shapes for a
+// product that has none. Reporting "gone" then marks the service deleted and
+// stops its metering while whatever actually runs it keeps running.
+func TestTeardownRefusesAProductThisDriverDoesNotOwn(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+	s.Product = "valkey"
+	s.Desired["product"] = "valkey"
+
+	status, err := newRenderer(a).Converge(context.Background(), s)
+	if err == nil {
+		t.Fatalf("a valkey teardown was accepted and converged to %q", status)
+	}
+	if status == "gone" {
+		t.Error("reported gone for a product this driver does not own — the service is marked " +
+			"deleted and its metering stops while the real resource keeps running")
+	}
+	if len(a.deleted) != 0 {
+		t.Errorf("deleted postgres-shaped objects for a valkey service: %v", a.deleted)
+	}
+}

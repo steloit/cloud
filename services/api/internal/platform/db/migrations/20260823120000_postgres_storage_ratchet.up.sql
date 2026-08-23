@@ -49,15 +49,40 @@
 -- is raised to included_gb, which is the safe floor and what the driver renders
 -- anyway.
 
-CREATE OR REPLACE FUNCTION pg_temp.storage_gb_of(v jsonb) RETURNS int
+-- BOTH arms are guarded, and the type is bigint.
+--
+-- An earlier revision guarded only the STRING arm and cast the number arm bare.
+-- A JSON number is not necessarily an integer: `{"storage_gb": 32.5}` raises
+-- `invalid input syntax for type integer`, and `3000000000` raises `out of range
+-- for type integer` — either aborts the whole migration and leaves
+-- schema_migrations dirty, which is a deploy stop. Both values come from the
+-- same pre-US-3.7 verbatim-persist path as the string case this function was
+-- written for, so "legacy rows may be badly typed" applied to one arm and was
+-- presupposed away for the other.
+--
+-- bigint, not integer, so a value above 2^31 is carried rather than failing
+-- validation and being silently floored back to included_gb.
+CREATE OR REPLACE FUNCTION pg_temp.storage_gb_of(v jsonb) RETURNS bigint
 LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE
-    WHEN v IS NULL OR jsonb_typeof(v) = 'null' THEN 0
-    WHEN jsonb_typeof(v) = 'number' THEN (v #>> '{}')::int
-    WHEN jsonb_typeof(v) = 'string' AND pg_input_is_valid(v #>> '{}', 'integer')
-      THEN (v #>> '{}')::int
-    ELSE 0
+    WHEN v IS NULL OR jsonb_typeof(v) = 'null' THEN 0::bigint
+    WHEN jsonb_typeof(v) IN ('number', 'string') AND pg_input_is_valid(v #>> '{}', 'bigint')
+      THEN (v #>> '{}')::bigint
+    ELSE 0::bigint
   END
+$$;
+
+-- Is this value already a well-typed JSON number? A row can be at or above the
+-- floor and still be WRONGLY TYPED — `{"size":"standard","storage_gb":"78"}` is
+-- the legacy shape this migration exists for, and 78 >= 50, so a floor-only
+-- predicate skips it and leaves the string in place. Downstream that string
+-- makes estimates.Resolve reject EVERY shape PATCH on the service (including
+-- ones that do not touch storage), makes the override-expiry sweep error on the
+-- row forever, and makes the driver render 50Gi for a service declaring 78 —
+-- the under-provisioning this task closes, left intact for its own example.
+CREATE OR REPLACE FUNCTION pg_temp.storage_gb_typed(v jsonb) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT v IS NOT NULL AND jsonb_typeof(v) = 'number'
 $$;
 
 UPDATE services
@@ -74,7 +99,17 @@ SET
             true
         )
         ELSE desired
-    END
+    END,
+    -- THE GENERATION MUST MOVE OR THE CELL NEVER SEES THIS. The agent polls
+    -- `WHERE cell_id = $1 AND observed_generation < generation`, and the repo's
+    -- own invariant (db/queries/reconcile.sql) is that every desired-state edit
+    -- bumps it. Without this the row is corrected in the database and NOT on the
+    -- cell: a legacy `standard` keeps its 32Gi volume while the row and the bill
+    -- both say 50 GB — the declared-vs-provisioned split this task exists to
+    -- close — until some unrelated PATCH happens to bump it. Measured: 8 rows
+    -- rewritten, every generation unchanged and still equal to
+    -- observed_generation.
+    generation = services.generation + 1
 FROM (VALUES
     ('dev', 0),
     ('standard', 50),
@@ -82,4 +117,12 @@ FROM (VALUES
 ) AS v(size, included_gb)
 WHERE services.product = 'postgres'
   AND services.shape ->> 'size' = v.size
-  AND pg_temp.storage_gb_of(services.shape -> 'storage_gb') < v.included_gb;
+  AND (
+        -- below the floor, in either representation...
+        pg_temp.storage_gb_of(services.shape -> 'storage_gb') < v.included_gb
+        OR pg_temp.storage_gb_of(services.desired -> 'shape' -> 'storage_gb') < v.included_gb
+        -- ...or at/above it but WRONGLY TYPED, which is the legacy `"78"` class.
+        OR NOT pg_temp.storage_gb_typed(services.shape -> 'storage_gb')
+        OR (services.desired ? 'shape'
+            AND NOT pg_temp.storage_gb_typed(services.desired -> 'shape' -> 'storage_gb'))
+      );

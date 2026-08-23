@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -2544,8 +2545,17 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 // PATCH priced 1900 — two customers, one resulting configuration, two prices,
 // decided by signup date.
 //
-// 4400 is the right answer, and it is the catalog's own arithmetic rather than a
-// new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
+// 4400 is TODAY'S ARITHMETIC, and this test pins it as such — not as a ruling.
+// What the customer should PAY for a size downgrade while storage is retained is
+// recorded as ❓ NEEDS FOUNDER INPUT in docs/founder-config.md §5, with three
+// live options, one of which (refuse the downgrade) would make this test fail.
+// That is the correct outcome if it is ruled: the test would be updated with the
+// ruling. Stated here because an earlier revision called 4400 "the right
+// answer", which frames an open pricing question as settled — the one thing
+// implementation must never do (founder, 2026-07-27).
+//
+// What is NOT open is the arithmetic below, which is the catalog's own rather
+// than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
 // expansion only, and a request below .status.capacity is rejected), so the
 // customer keeps the 50Gi volume and pays for the 50 GB beyond dev's zero
 // included. Billing 1900 would be giving away storage the cluster is still
@@ -2612,16 +2622,27 @@ func TestASizeDowngradePricesTheSameWhicheverProvenanceTheRowHas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Apply the ratchet the migration applies. (The migration itself runs at
-	// startup; this reproduces its statement against the row seeded above, so the
-	// test proves the STATEMENT reconciles the two provenances, not merely that
-	// migrations ran.)
-	if _, err := w.pool.Exec(ctx, `
-		UPDATE services SET shape = jsonb_set(shape, '{storage_gb}',
-			to_jsonb(GREATEST(COALESCE((shape ->> 'storage_gb')::int, 0), 50)), true)
-		WHERE product = 'postgres' AND shape ->> 'size' = 'standard'
-		  AND COALESCE((shape ->> 'storage_gb')::int, 0) < 50`); err != nil {
-		t.Fatal(err)
+	// EXECUTE THE SHIPPED MIGRATION, not a paraphrase of it.
+	//
+	// An earlier version of this test hand-copied a DIFFERENT statement —
+	// `COALESCE((shape ->> 'storage_gb')::int, 0)`, the unguarded cast the branch
+	// had already replaced — under a comment claiming it "reproduces its
+	// statement". So the real SQL had zero coverage, and two defects in it were
+	// invisible: an unguarded cast on the JSON-number arm (a fractional or
+	// out-of-int-range legacy value aborts the whole migration and leaves
+	// schema_migrations dirty), and a floor-only WHERE that skipped the string
+	// `"78"` — the very class the migration was written for.
+	//
+	// The migration runs at startup against an EMPTY database, where an UPDATE
+	// that matches nothing is indistinguishable from a correct one. This runs it
+	// again, against rows that exist.
+	migration, err := os.ReadFile(
+		"../platform/db/migrations/20260823120000_postgres_storage_ratchet.up.sql")
+	if err != nil {
+		t.Fatalf("the ratchet migration is missing: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("the shipped migration did not execute against seeded rows: %v", err)
 	}
 
 	priceAfterDowngrade := func(id string) int64 {
