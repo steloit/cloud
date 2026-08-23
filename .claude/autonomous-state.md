@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 (early) · `main` @ `ac844dc` · **5 open PRs, all CI-green**
+**Updated:** 2026-08-24 · **3 of 5 PRs MERGED** (US-3.3f, US-3.3a, O19) · 2 open
 
 ---
 
@@ -18,25 +18,25 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 | PR | task | state |
 |---|---|---|
-| **#320** | US-3.3a | **round 15.** r12 was reverted as a regression; r14 restored task sections a bad span-replace deleted; r15 closed Observe's addressing (exact path, not suffix) + the teardown desired-flag arm. Both reviewers passed the earlier state ("safe to merge"); a focused check of r14-r15 is RUNNING. |
-| **#322** | T3.4c | **round 4.** Three migration blockers fixed and verified on real postgres: no generation bump, an unguarded cast that ABORTS the migration, and a WHERE that skipped its own `"78"` example. Plus a teardown that deleted postgres objects for a `valkey` service. |
-| **#323** | US-3.3f | **round 6.** CI gate pinned by EXECUTING it; discovery keys off the module source; the CA text pin had the bypass it existed to prevent. |
-| **#324** | US-3.3e | green, stacked on #320. Unreviewed since its blockers were closed. |
-| **#325** | O19 | **round 3.** `money.Accrual` (128-bit); the hard cap's own `SpendToDate` wrapped NEGATIVE (disabling the cap) and now saturates. |
+| ~~#320~~ | US-3.3a | **MERGED.** 16 rounds. r12 was a regression (reverted in r13). |
+| **#322** | T3.4c | **round 5.** 3 migration blockers + a teardown deleting another product's objects, all fixed and verified on real postgres. QA in flight from before ADR-0016. |
+| ~~#323~~ | US-3.3f | **MERGED.** CI gate pinned by EXECUTING it. |
+| **#324** | US-3.3e | conflict with main resolved (one import line). CI watched. `requests.storage` WITHDRAWN — see US-3.3i. |
+| ~~#325~~ | O19 | **MERGED.** `money.Accrual`; my SpendToDate justification was false and the invoice saturation was worse than the wrap — both corrected in r4. |
 
 **Stacking:** US-3.3e branches from US-3.3a. Merge order must be
 US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
 
 ## Next action
 
-Merge order: **#320 → #324** (stacked); #322, #323, #325 independent. #324 needs a
-review pass on its final state before merging. Then the ready queue: **O9**,
-**T1.4a**, **US-10.7**, and the tasks this session filed (**US-3.3h**, **O30**,
-**O31**, **O32**, **US-3.3c**).
+Land **#322** and **#324**. Then the ready queue: **O9**, **T1.4a**, **US-10.7**,
+and this session's filings: **US-3.3c/d/g/h/i**, **O30**, **O31**, **O32**.
 
-**Merge-time conflicts to expect:** #320, #323 and #325 all touch
-`services/api/internal/platform/testenv/wiring_test.go` and/or `.github/workflows/ci.yml`.
-Different hunks; resolve deliberately.
+**ADR-0016 (founder, 2026-08-24) changes how reviews run:** both reviewers, but
+**ONCE per PR on the final diff**, scoped to **code and behavioural claims only**.
+Task-file narrative, counts and citations are the implementer's own pass. The
+biggest lever is not the pipeline though — **do the task and nothing more**: four
+rounds this session went to undoing an improvement nobody asked for.
 
 ## Blocked on a human
 
