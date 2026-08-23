@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -429,31 +430,33 @@ metadata:
 	}
 }
 
-// EVERY manifest, not just the first.
+// EVERY manifest at EVERY index, not just the first.
 //
 // Both of Apply's guards were pinned only for a single-element slice, and the
 // covered element is the worst possible one: Converge passes
 // [tenancy Namespace, Cluster, ScheduledBackup], so element 0 is the manifest
 // the agent writes itself and elements 1..n are the driver's — the only ones
-// that carry a metadata.namespace at all. Restricting either guard to
-// manifests[0] left the whole suite green.
-func TestApplyGuardsEveryManifestNotJustTheFirst(t *testing.T) {
-	nsManifest := []byte(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: env-mine
-`)
-	cases := map[string]struct {
-		second []byte
-		names  string
+// that carry a metadata.namespace at all.
+//
+// The first repair drove a 2-element slice, which pinned index 1 and nothing
+// else: restricting either guard to `_mi < 2` still survived, and production
+// passes THREE. The offender's index is parameterised here so the property is
+// "any index", not "the index I happened to write a case for".
+func TestApplyGuardsEveryManifestAtEveryIndex(t *testing.T) {
+	filler := func(name string) []byte {
+		return []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: " + name + "\n  namespace: env-mine\n")
+	}
+	offenders := map[string]struct {
+		yaml  []byte
+		names string
 	}{
-		"a later manifest declaring another namespace": {[]byte(`apiVersion: v1
+		"declaring another namespace": {[]byte(`apiVersion: v1
 kind: Secret
 metadata:
   name: stolen
   namespace: env-victim
 `), "env-victim"},
-		"a later manifest carrying two documents": {[]byte(`apiVersion: v1
+		"carrying two documents": {[]byte(`apiVersion: v1
 kind: Secret
 metadata:
   name: ok
@@ -465,28 +468,59 @@ metadata:
   name: smuggled
   namespace: env-victim
 `), "2 YAML documents"},
+		"cluster-scoped but namespaced": {[]byte(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: env-mine
+  namespace: env-somewhere
+`), "cluster-scoped"},
 	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			var got []capture
-			srv := serverCapturing(t, 200, `{}`, &got)
-			c := NewClientForTest(srv.URL, "tok", srv.Client())
 
-			err := c.Apply(context.Background(), "env-mine", [][]byte{nsManifest, tc.second})
-			if err == nil {
-				t.Fatal("Apply accepted it — the guard only covers manifests[0]")
+	// Slice lengths up to 4 — Converge applies 3 today, and the guard must not
+	// depend on how many the driver happens to render.
+	for label, off := range offenders {
+		for n := 1; n <= 4; n++ {
+			for idx := 0; idx < n; idx++ {
+				t.Run(fmt.Sprintf("%s/len%d/at%d", label, n, idx), func(t *testing.T) {
+					manifests := make([][]byte, n)
+					for i := range manifests {
+						manifests[i] = filler(fmt.Sprintf("ok%d", i))
+					}
+					manifests[idx] = off.yaml
+
+					var got []capture
+					srv := serverCapturing(t, 200, `{}`, &got)
+					c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+					err := c.Apply(context.Background(), "env-mine", manifests)
+					if err == nil {
+						t.Fatalf("Apply accepted an offending manifest at index %d of %d", idx, n)
+					}
+					if !strings.Contains(err.Error(), off.names) {
+						t.Fatalf("the error must name the defect of the manifest at index %d: %v", idx, err)
+					}
+					for _, g := range got {
+						if strings.Contains(g.body, "env-victim") || strings.Contains(g.body, "smuggled") ||
+							strings.Contains(g.body, "env-somewhere") {
+							t.Fatalf("the offending manifest at index %d was sent: %s", idx, g.body)
+						}
+					}
+				})
 			}
-			if !strings.Contains(err.Error(), tc.names) {
-				t.Fatalf("the error must name what was wrong with the SECOND manifest: %v", err)
-			}
-			// The first manifest is legitimate and may already have been sent;
-			// what must not happen is the offending one reaching the server.
-			for _, g := range got {
-				if strings.Contains(g.body, "env-victim") || strings.Contains(g.body, "smuggled") {
-					t.Fatalf("the offending manifest was sent: %s", g.body)
-				}
-			}
-		})
+		}
+	}
+
+	// Positive control: a legitimate slice of the same shapes must all apply, or
+	// every case above would be satisfied by an Apply that refuses everything.
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+	clean := [][]byte{filler("a"), filler("b"), filler("c")}
+	if err := c.Apply(context.Background(), "env-mine", clean); err != nil {
+		t.Fatalf("a legitimate 3-manifest apply was refused: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 applies, got %d", len(got))
 	}
 }
 
