@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-23 · `main` @ `17c7d08` · CI green
+**Updated:** 2026-08-23 · `main` @ `db3cfdf` · CI green · **4 open PRs**
 
 ---
 
@@ -18,24 +18,38 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 | PR | task | state |
 |---|---|---|
-| **#320** | US-3.3a | **review round 8.** Rounds 1–7 were ALL blocking and all correct. Do not merge until round 8 reports. |
-| **#322** | T3.4c | architecture review running; CI pending. |
+| **#320** | US-3.3a | round 11 pushed, CI green. Eleven rounds, all blocking, all correct. |
+| **#322** | T3.4c | round 3 pushed, CI green. |
+| **#323** | US-3.3f | NetworkPolicy ENFORCEMENT (Dataplane V2). CI running. |
+| **—** | US-3.3e | `task/US-3.3e`, stacked on US-3.3a. Reviewer returned **5 blockers**; QA still running. Do not edit that worktree until it reports. |
+
+**Stacking:** US-3.3e branches from US-3.3a. Merge order must be
+US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
 
 ## Next action
 
 Land #322 (T3.4c) and #320 (US-3.3a) once their reviews report. Then take the
 next `high` from the ready queue: **O19**, **O9**, **T1.4a**, **US-10.7**.
 
-## Blocked on a human — do not guess
+## Blocked on a human
 
 | # | decision | where |
 |---|---|---|
-| 1 | **US-3.3e**: the per-plan, per-environment CPU / memory / PVC / Service ceiling. `docs/founder-config.md` §5 owns quota knobs and has no such row. US-3.3a's constants were plan-independent, contradicting `plans.json`. | `tasks/e3-provisioning/US-3.3e.md` (`blocked`) |
-| 2 | **O2 cost guardrail** — six decisions: the budget amount, the currency pairing, the thresholds, `alert_emails` (empty everywhere), whether the live `steloit-dev tripwire` or terraform is authoritative, and whether the module should be applied at all. Purely technical drift/fail-closed work may proceed. | `tasks/eops/O2.md` |
+| 1 | **O2 cost guardrail.** The founder gave ₹1,000/mo at 50/80/100 and "use the existing ops recipient", then said an **updated spec is coming**. Nothing has been written for O2 — `task/O2` worktree is clean. WAIT for it. | `tasks/eops/O2.md` |
+| 2 | **A SIZE downgrade's price** while storage is retained (T3.4c). Not ruled; three options recorded with market evidence. | `docs/founder-config.md` §5 |
 
-**Answered 2026-08-23:** T3.4c → unset `storage_gb` means the size's
-`included_gb` (50 GB for standard), implemented in #322. ADR-0014 → **ratified**,
-merged in #321; the rule now binds and reviews may cite it.
+**Answered 2026-08-23:** T3.4c `included_gb` semantics · ADR-0014 **ratified**
+(merged, #321) · US-3.3e envelope (free 1/2Gi/10Gi · pro 8/16Gi/100Gi ·
+business 12/24Gi/200Gi · enterprise 16/32Gi/250Gi, per environment).
+
+## GCP access is DEGRADED
+
+`gcloud` is now active as `admin@humanetechnologies.in`, which lacks
+`container.clusters.list` on `steloit-dev`; `hashir@humanetechnologies.in` needs
+an interactive reauth (`! gcloud auth login`). So the earlier "zero GKE clusters"
+evidence **cannot currently be re-verified** — do not build reasoning on it.
+US-3.3e's backfill is written to be correct either way rather than assuming an
+empty fleet.
 
 ## Do NOT redo
 
