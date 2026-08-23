@@ -35,15 +35,71 @@ func TestUnsetStorageResolvesToTheSizesIncludedGB(t *testing.T) {
 		t.Fatalf("an explicit storage_gb was overwritten: got %v, want 78", got["storage_gb"])
 	}
 
-	// An explicitly-supplied zero is still the customer's declaration and must
-	// not be silently raised — only ABSENCE means "the included amount".
-	got, _, err = resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "standard", "storage_gb": 0}})
+	// A DECLARED value below the included amount resolves UP to it. An earlier
+	// version of this test asserted the opposite — that an explicit 0 is
+	// preserved — and that was wrong twice over: it left the declared shape
+	// saying 0 while the volume was 50, the very declared-vs-provisioned split
+	// this task closes; and it broke "the same configuration spelled with its
+	// defaults written out must not be refused", which the estimate gate is
+	// built on (TestEstimateGateRefusesAPriceCollidingShape spells
+	// `{size: standard, ha: false, storage_gb: 0}` and must still match an
+	// estimate for `{size: standard}`).
+	//
+	// You cannot receive less than what the size includes, so 0, 30 and 50 on a
+	// standard are ONE contract.
+	for _, below := range []int{0, 1, 30, 49} {
+		got, _, err = resolve(ShapeInput{Product: "postgres",
+			Shape: map[string]any{"size": "standard", "storage_gb": below}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got["storage_gb"] != 50 {
+			t.Fatalf("storage_gb %d on a standard resolved to %v, want the included 50 — "+
+				"a customer cannot receive less than the size includes", below, got["storage_gb"])
+		}
+	}
+	// dev includes 0, so 0 stays 0 there — the rule is the catalog's, not a constant.
+	got, _, err = resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev", "storage_gb": 0}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got["storage_gb"] != 0 {
-		t.Fatalf("an explicit 0 was rewritten to %v — absence and zero are different "+
-			"declarations, and the driver floors the volume at included_gb anyway", got["storage_gb"])
+		t.Fatalf("dev includes 0 GB but storage_gb resolved to %v", got["storage_gb"])
+	}
+}
+
+// The property the estimate gate is built on: the same contract spelled with its
+// defaults written out must canonicalise identically. This is what
+// TestEstimateGateRefusesAPriceCollidingShape exercises end-to-end, and it is
+// what a naive "default only when unset" broke.
+func TestSpellingTheDefaultsOutIsTheSameContract(t *testing.T) {
+	for _, spelled := range []map[string]any{
+		{"size": "standard"},
+		{"size": "standard", "storage_gb": 0},
+		{"size": "standard", "storage_gb": 50},
+		{"size": "standard", "ha": false, "storage_gb": 0},
+	} {
+		a, err := Canonical(ShapeInput{Product: "postgres", Name: "db", Shape: map[string]any{"size": "standard"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := Canonical(ShapeInput{Product: "postgres", Name: "db", Shape: spelled})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a != b {
+			t.Fatalf("%v is a different contract from {size: standard}:\n  %s\n  %s", spelled, a, b)
+		}
+	}
+	// And a real purchase above the included amount is still distinct.
+	a, _ := Canonical(ShapeInput{Product: "postgres", Name: "db", Shape: map[string]any{"size": "standard"}})
+	c, err := Canonical(ShapeInput{Product: "postgres", Name: "db",
+		Shape: map[string]any{"size": "standard", "storage_gb": 78}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == c {
+		t.Fatal("50 GB and 78 GB share an identity")
 	}
 }
 

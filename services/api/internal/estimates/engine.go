@@ -272,14 +272,24 @@ func resolve(in ShapeInput) (map[string]any, string, error) {
 	// The price is unchanged: Price charges `storage_gb - included_gb` only when
 	// positive, so 50 - 50 = 0 extra. A test pins that.
 	if in.Product == "postgres" {
-		if _, present := in.Shape["storage_gb"]; !present || in.Shape["storage_gb"] == nil {
-			size, _ := out["size"].(string)
-			if sz, known := table.Postgres.Sizes[size]; known {
+		size, _ := out["size"].(string)
+		if sz, known := table.Postgres.Sizes[size]; known {
+			// max(declared, included), not "included when unset". A customer who
+			// declares LESS than the size includes still receives the included
+			// amount — that is what "included" means — so 0 and 30 and 50 on a
+			// standard are one contract, not three. Resolving only the unset case
+			// left a state where the declared shape said 0 and the volume was 50,
+			// which is the same declared-vs-provisioned split this task closes.
+			//
+			// It also keeps "the same configuration spelled with its defaults
+			// written out must not be refused" true, which is a property the
+			// estimate gate is built on.
+			if cur, ok := out["storage_gb"].(int); !ok || cur < sz.IncludedGB {
 				out["storage_gb"] = sz.IncludedGB
 			}
-			// An unknown size keeps the schema default; Price rejects the size
-			// by name a moment later, which is the better error.
 		}
+		// An unknown size keeps the schema default; Price rejects the size by
+		// name a moment later, which is the better error.
 	}
 
 	intent := in.Intent

@@ -100,6 +100,8 @@ anywhere is a bug.
 | Hard spend cap (per-org budget) | a product **feature** — an org sets its own bound (T11.6) | feature-specs §31 |
 | Founder org default budget | — | ❓ (if the founder's own org wants a cap) |
 | Money representation | integer cents end-to-end | ADR-025 |
+| **Postgres `included_gb` semantics** | storage the customer **GETS**, not merely "not charged extra". An unset — or lower — `storage_gb` resolves UP to the size's `included_gb` (**50 GB** for `standard` and `performance`, 0 for `dev`), so 0/30/50 on a standard are one contract. The price is unchanged: only `storage_gb - included_gb` above zero is billed. | **founder 2026-08-23** · T3.4c · `estimates/pricing.json` |
+| **Per-environment resource envelope** (CPU / memory / PVC / Service ceiling, per plan) | — | ❓ **NEEDS FOUNDER INPUT** — blocks US-3.3e. US-3.3a shipped plan-independent constants (8/16 CPU, 16/32Gi, 16 PVCs, 32 Services) in a driver, contradicting the tiering in `plans.json`; they were withdrawn rather than guessed. A 3-instance CNPG cluster uses 3 PVCs and 3 Services, so 16 PVCs caps an environment at ~5 HA clusters with no error surface. |
 
 ## 6 · Engineering governance (founder-ratified operating rules)
 

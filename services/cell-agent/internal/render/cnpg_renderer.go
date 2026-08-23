@@ -33,6 +33,9 @@ type CNPGRenderer struct {
 // so the renderer is testable and the driver is swappable per product later).
 type cnpgDriver interface {
 	Render(driver.Spec) (driver.Manifests, error)
+	// Objects names what a service owns without rendering it, so teardown cannot
+	// fail for a reason that only applies to creating a volume (T3.4c).
+	Objects(driver.Spec) driver.Manifests
 }
 
 // NewCNPGRenderer — cell, gsaEmail, walBucket are the agent's own placement
@@ -72,7 +75,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// contains characters k8s rejects, and addressing the wrong name makes Delete
 	// 404 → "already gone" → report gone while a real cluster keeps running.
 	if svc.Status == "deleting" || asBool(svc.Desired["deleting"]) {
-		objs, err := r.renderedObjects(svc, namespace)
+		objs, err := r.teardownObjects(svc, namespace)
 		if err != nil {
 			// A teardown that cannot enumerate its objects must NOT report gone —
 			// that would mark the service deleted while its cluster keeps running.
@@ -140,6 +143,15 @@ func terminal(status string) bool {
 // the REAL namespace and product (a fabricated placeholder would be sound only
 // by accident — nothing in the Driver contract promises namespace-independent
 // names) and propagates errors rather than silently returning nothing.
+func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
+	return r.pg.Objects(driver.Spec{
+		Name: svc.ID, Namespace: namespace, Product: svc.Product,
+		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
+		Instances: instancesOf(svc.Desired), Cell: r.cell,
+		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
+	}), nil
+}
+
 func (r *CNPGRenderer) renderedObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
 	return r.pg.Render(driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,

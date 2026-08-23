@@ -113,6 +113,26 @@ func asGB(v any) (int, bool) {
 	return 0, false
 }
 
+// Objects is the kind+name set a service owns, WITHOUT rendering it.
+//
+// Teardown needs names, not volumes, and it must not be able to fail for a
+// sizing reason: T3.4c made storageForShape refuse an uncatalogued size, which
+// through Render also made such a service UNDELETABLE — its cluster kept running
+// and UpdateService refuses a row that is already `deleting`. That is reachable
+// by ordinary deploy skew: the API accepts a size the moment it is in
+// pricing.json, while a cell still on the previous agent binary has no
+// includedFloorGB entry for it.
+//
+// One owner for naming: this returns exactly the Kind/Name pairs Render does, so
+// teardown addresses what create applied.
+func (d *Driver) Objects(s driver.Spec) driver.Manifests {
+	name := dnsName(s.Name)
+	return driver.Manifests{
+		{Kind: "Cluster", Name: name},
+		{Kind: "ScheduledBackup", Name: name + "-nightly"},
+	}
+}
+
 type clusterData struct {
 	Name, Namespace, Cell, GSAEmail, WALBucket, StorageSize string
 	Instances                                               int

@@ -127,3 +127,54 @@ func TestDeletingAFailedServiceLeavesNothingBehind(t *testing.T) {
 		t.Fatalf("deleting a FAILED service stranded %d object(s): %v", len(a.live), a.live)
 	}
 }
+
+// A SERVICE MUST STAY DELETABLE WHATEVER ITS SIZE.
+//
+// T3.4c made the driver refuse an uncatalogued size, which is right for CREATE —
+// silently sizing an unknown size is how `performance` shipped with the smallest
+// volume. But teardown ran through the same Render call, so the refusal made such
+// a service UNDELETABLE: its cluster kept running, and UpdateService refuses a
+// row that is already `deleting`.
+//
+// This is reachable by ordinary deploy skew, with no bad actor: the API accepts a
+// size the moment it is in pricing.json, while a cell still on the previous agent
+// binary has no includedFloorGB entry for it. The cross-module catalog test
+// cannot see it, because it binds the two FILES, not the two BINARIES.
+func TestAServiceWithAnUncatalogedSizeIsStillDeletable(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	ctx := context.Background()
+
+	// Create with a size this binary knows, so there is something to tear down.
+	if _, err := r.Converge(ctx, svc("svc_db01", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.live) == 0 {
+		t.Fatal("nothing was applied — this test would prove nothing")
+	}
+
+	// Now the row's shape names a size this binary does not know: a newer catalog
+	// against an older agent.
+	del := svc("svc_db01", "deleting")
+	del.Desired["shape"] = map[string]any{"size": "performance-2"}
+
+	status, err := r.Converge(ctx, del)
+	if err != nil {
+		t.Fatalf("teardown refused a service whose size this binary does not know — the "+
+			"cluster keeps running and the row cannot be edited out of `deleting`: %v", err)
+	}
+	if status != "gone" {
+		t.Fatalf("teardown reported %q, want gone", status)
+	}
+	if len(a.deleted) == 0 {
+		t.Fatal("teardown deleted nothing")
+	}
+
+	// And CREATE with that same size must still be refused — the fix must not
+	// have turned the refusal off, only moved it off the teardown path.
+	create := svc("svc_db02", "provisioning")
+	create.Desired["shape"] = map[string]any{"size": "performance-2"}
+	if _, err := r.Converge(ctx, create); err == nil {
+		t.Fatal("create accepted an uncatalogued size — the refusal was removed, not relocated")
+	}
+}
