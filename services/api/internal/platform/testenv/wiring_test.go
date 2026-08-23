@@ -81,7 +81,14 @@ func TestCIWorkflowArmsEveryGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read ci.yml: %v — this check must not pass by failing to look", err)
 	}
-	ci := string(b)
+	// COMMENTS STRIPPED, and this is the difference between a pin and theatre.
+	//
+	// Searching the whole file passes when a needle survives only in prose. Every
+	// gate here is DOCUMENTED next to itself — `-race` appears in three comments,
+	// `-timeout 30m` in two, `gofmt -l` in one — so deleting the executable line
+	// and leaving the comment kept the first version of this test green with all
+	// three gates gone from the run. Verified by doing exactly that.
+	ci := stripYAMLComments(string(b))
 	for _, g := range ciGates {
 		if !strings.Contains(ci, g.needle) {
 			t.Errorf("ci.yml no longer contains %q (added by %s)\n"+
@@ -91,6 +98,25 @@ func TestCIWorkflowArmsEveryGate(t *testing.T) {
 				g.needle, g.task, g.why)
 		}
 	}
+}
+
+// stripYAMLComments removes whole-line `#` comments so a gate needle can only
+// match something that actually runs.
+//
+// Whole-line only, deliberately: an inline `#` inside a shell `run:` block can be
+// part of a command (a URL fragment, a printf), and dropping the tail of such a
+// line could hide a real gate and produce a FALSE RED. Every comment in ci.yml
+// that mentions a gate is a whole-line one, which is the case that matters.
+func stripYAMLComments(s string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // Required's semantics, pinned separately from the wiring: the gate is armed by
