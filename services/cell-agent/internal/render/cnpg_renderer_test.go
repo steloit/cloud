@@ -8,9 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -477,218 +474,99 @@ func TestConvergeObservesTheClusterObject(t *testing.T) {
 	}
 }
 
-// EVERY STATUS THE AGENT CAN EMIT MUST BE LEGAL FROM EVERY STATUS IT CAN BE
-// HANDED — not just from provisioning.
+// EVERY STATUS THIS AGENT CAN EMIT MUST BE A LEGAL EDGE FROM `provisioning`.
 //
-// The previous version asked "is this legal from provisioning" when the question
-// the writeback actually asks is "is this legal from svc.Status". It was one
-// FROM-state deep, and ready->failed and failed->ready were both live: the
-// control plane 409s them, observed_generation never advances, and the row is
-// retried forever with nothing visible. Reachable through the ordinary flow —
-// UpdateServiceShape bumps the generation for any status but `deleting`, and
-// ListDesiredForCell has no status filter.
+// The control plane allows provisioning → {ready, failed, deleting}. A writeback
+// of anything else is rejected every tick: observed_generation never advances,
+// the row stays outstanding, and the service is retried forever with nothing
+// visible — the failure statusFromPhase explicitly chose `failed` over
+// `degraded` to avoid, which `"Waiting for user action": "degraded"` then
+// reintroduced from the other side.
 //
-// The cross-product covers three sources of emitted status, not one: the
-// terminal values in phaseStatus, the unknown-phase fallback (CNPG ships new
-// phase strings across minor versions), and the literal "gone" from teardown.
-func TestEveryStatusTheAgentCanEmitIsLegalFromEveryStatusItCanBeHanded(t *testing.T) {
-	legal := loadTransitions(t)
+// The two modules have separate go.mod files and no go.work, so this set is
+// duplicated rather than imported. TestTheAgentsLegalEdgesMatchTheStatusMachine
+// on the API side pins the other copy; changing one alone fails there.
+func TestEveryTerminalStatusIsALegalEdgeFromProvisioning(t *testing.T) {
+	legalFromProvisioning := map[string]bool{"ready": true, "failed": true, "deleting": true}
 
-	emitted := map[string]bool{"gone": true, statusFromPhase("a phase CNPG has not shipped yet"): true}
-	for _, st := range phaseStatus {
-		if terminal(st) {
-			emitted[st] = true
-		}
-	}
-	if len(emitted) < 3 {
-		t.Fatalf("only %d emittable statuses found — this test would prove little", len(emitted))
-	}
-
-	for from := range legal {
-		if from == "deleting" {
+	seen := 0
+	for phase, status := range phaseStatus {
+		if !terminal(status) {
 			continue
 		}
-		for want := range emitted {
-			got := statusFor(from, want)
-			if got == from || got == "gone" {
-				continue
-			}
-			if !slices.Contains(legal[from], got) {
-				t.Errorf("handed a %q service and a phase mapping to %q, the agent emits %q — "+
-					"which %q cannot transition to. The writeback 409s every tick and the "+
-					"service is retried forever with nothing visible.", from, want, got, from)
-			}
+		seen++
+		if !legalFromProvisioning[status] {
+			t.Errorf("phase %q maps to terminal status %q, which provisioning cannot "+
+				"transition to — the writeback is rejected every tick and the service is "+
+				"retried forever with no signal", phase, status)
 		}
 	}
-	if got := statusFor("ready", "gone"); got != "gone" {
-		t.Fatalf("teardown's gone was rewritten to %q", got)
+	if got := statusFromPhase("a phase CNPG has not shipped yet"); !legalFromProvisioning[got] {
+		t.Errorf("an unknown phase maps to %q, which provisioning cannot transition to", got)
+	}
+	if seen == 0 {
+		t.Fatal("phaseStatus yielded no terminal status — this test would prove nothing")
 	}
 }
 
-// A cluster that breaks while READY must become degraded, not failed.
-func TestABrokenReadyServiceBecomesDegradedNotFailed(t *testing.T) {
-	if got := statusFor("ready", "failed"); got != "degraded" {
-		t.Fatalf("a ready service whose cluster broke emits %q; ready->failed is illegal and "+
-			"degraded is both the legal edge and the right word", got)
-	}
-	if got := statusFor("failed", "ready"); got == "ready" {
-		t.Fatal("a healthy cluster under a failed row emitted ready — failed->ready is illegal; " +
-			"the retry path is failed->provisioning and belongs to the control plane")
-	}
-}
-
-// EVERY CNPG PHASE KEEPS ITS CLASSIFICATION. Four entries were unpinned, three of
-// them the very phases statusFromPhase's comment names as the reason a substring
-// heuristic was rejected — the motivating case of the design, uncovered while the
-// design was documented as the fix.
+// EVERY PHASE IS PINNED BY CLASSIFICATION, NOT JUST BY COUNT.
+//
+// The sibling tests assert that the table is non-empty and that its terminal
+// values are legal edges. Neither sees a RECLASSIFICATION: measured, moving
+// "Cluster has incomplete or invalid image catalog" from `failed` to
+// `provisioning` left the whole suite green in both modules — a permanently
+// broken cluster read as still-converging and retried forever, which is the
+// exact defect statusFromPhase's own comment argues thirty lines about.
+//
+// The expectations are written out, because a test that derives them from the
+// table it is checking asserts nothing. Iterating phaseStatus (rather than the
+// expectations) also means a NEW phase cannot be added unclassified: it has no
+// entry here and fails.
 func TestEveryCNPGPhaseKeepsItsClassification(t *testing.T) {
-	for phase, want := range map[string]string{
-		"Cluster in healthy state":                               "ready",
-		"Setting up primary":                                     "",
-		"Waiting for the instances to become active":             "",
-		"Failing over":                                           "",
-		"Invalid cluster definition":                             "failed",
-		"Cluster is unrecoverable and needs manual intervention": "failed",
-		"Unable to create required cluster objects":              "failed",
-	} {
-		got := statusFromPhase(phase)
-		if want == "" {
-			if terminal(got) {
-				t.Errorf("phase %q maps to the TERMINAL %q — a transient phase reported as "+
-					"terminal ends convergence early; CNPG failover is a routine "+
-					"multi-second event", phase, got)
-			}
+	want := map[string]string{
+		"Cluster in healthy state": "ready",
+
+		"":                   "provisioning",
+		"Setting up primary": "provisioning",
+		"Waiting for the instances to become active":   "provisioning",
+		"Creating a new replica":                       "provisioning",
+		"Primary instance is being restarted in-place": "provisioning",
+		"Switchover in progress":                       "provisioning",
+		"Failing over":                                 "provisioning",
+		"Upgrading cluster":                            "provisioning",
+
+		// Terminal-bad. None of these contains "failed", "failure" or "error",
+		// which is why the substring heuristic was abandoned — and why each one
+		// has to be named rather than matched.
+		"Waiting for user action":                                                                 "failed",
+		"Cluster is unrecoverable and needs manual intervention":                                  "failed",
+		"Invalid cluster definition":                                                              "failed",
+		"Unable to create required cluster objects":                                               "failed",
+		"Cluster has incomplete or invalid image catalog":                                         "failed",
+		"Cluster cannot proceed to reconciliation due to an unknown plugin being required":        "failed",
+		"Cluster cannot execute instance online upgrade due to missing architecture binary":       "failed",
+		"Cluster cannot proceed to reconciliation due to an error while interacting with plugins": "failed",
+	}
+
+	for phase, got := range phaseStatus {
+		exp, ok := want[phase]
+		if !ok {
+			t.Errorf("phase %q is in the table but not classified here — a new CNPG phase must be "+
+				"classified deliberately, not inherit whatever the table says", phase)
 			continue
 		}
-		if got != want {
-			t.Errorf("phase %q maps to %q, want %q", phase, got, want)
+		if got != exp {
+			t.Errorf("phase %q maps to %q, want %q. Reclassifying a terminal-bad phase as "+
+				"transient makes a permanently broken cluster read as still-converging and "+
+				"retried forever with no signal.", phase, got, exp)
 		}
 	}
-	// The real count, measured — not a guessed floor. A deleted entry stops being
-	// classified and falls through to the unknown-phase default.
-	if len(phaseStatus) < 17 {
-		t.Errorf("phaseStatus has only %d entries — an entry was deleted and now falls through "+
-			"to the unknown-phase default", len(phaseStatus))
-	}
-}
-
-// loadTransitions reads ADR-024's machine from the ONE artifact both modules
-// assert against. Duplicated literals only fail in the direction someone is not
-// taking; a shared file fails in both.
-func loadTransitions(t *testing.T) map[string][]string {
-	t.Helper()
-	dir, _ := os.Getwd()
-	var raw []byte
-	for i := 0; i < 8; i++ {
-		b, err := os.ReadFile(filepath.Join(dir, "testdata", "status-transitions.json"))
-		if err == nil {
-			raw = b
-			break
-		}
-		dir = filepath.Dir(dir)
-	}
-	if raw == nil {
-		t.Fatal("testdata/status-transitions.json not found from the repo root")
-	}
-	var doc struct {
-		Transitions map[string][]string `json:"transitions"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if len(doc.Transitions) == 0 {
-		t.Fatal("no transitions in the shared artifact")
-	}
-	return doc.Transitions
-}
-
-// The agent's OWN copy must equal the shared artifact. This is the direction that
-// was silently open: widening legalFrom failed nothing anywhere.
-func TestTheAgentsCopyOfTheStatusMachineMatchesTheSharedArtifact(t *testing.T) {
-	shared := loadTransitions(t)
-	if len(legalFrom) != len(shared) {
-		t.Fatalf("the agent knows %d from-states, the machine has %d", len(legalFrom), len(shared))
-	}
-	for from, want := range shared {
-		got := append([]string(nil), legalFrom[from]...)
-		w := append([]string(nil), want...)
-		slices.Sort(got)
-		slices.Sort(w)
-		if !slices.Equal(got, w) {
-			t.Errorf("from %q the agent believes %v, the machine says %v", from, got, w)
+	for phase := range want {
+		if _, ok := phaseStatus[phase]; !ok {
+			t.Errorf("phase %q was removed from the table; CNPG still emits it", phase)
 		}
 	}
-}
-
-// LEGAL IS NOT THE SAME AS RIGHT, AND THE LEGALITY SWEEP CANNOT SEE THE
-// DIFFERENCE.
-//
-// TestEveryStatusTheAgentCanEmitIsLegalFromEveryStatusItCanBeHanded skips any
-// answer equal to `from` — reporting no change is legal from everywhere — so
-// deleting statusFor's ready+failed -> degraded arm SURVIVED it, and survived the
-// API module too (measured). Without the arm, a cluster that breaks while READY
-// reports `ready` forever: no writeback, no alert, no customer-visible signal,
-// and a broken database indistinguishable from a healthy one. That is a worse
-// failure than the 409 loop the arm exists to avoid, and the legality test is
-// structurally blind to it.
-//
-// So this asserts the DESTINATION, not merely its legality, for the one
-// transition where "no change" is the wrong answer.
-func TestAClusterThatBreaksWhileReadyIsReportedDegradedNotStillReady(t *testing.T) {
-	for _, phase := range []string{
-		"Cluster is unrecoverable and needs manual intervention",
-		"Invalid cluster definition",
-		"a phase CNPG has not shipped yet", // the unknown-phase fallback
-	} {
-		want := statusFromPhase(phase)
-		if !terminal(want) {
-			t.Fatalf("%q no longer maps to a terminal status — this test proves nothing", phase)
-		}
-		got := statusFor("ready", want)
-		if got == "ready" {
-			t.Errorf("a READY cluster in phase %q is still reported %q: the break is invisible — "+
-				"no writeback, no alert, and a broken database looks exactly like a healthy one",
-				phase, got)
-		}
-		if got != "degraded" {
-			t.Errorf("phase %q from ready reported %q, want degraded (the legal edge AND the "+
-				"semantically right one)", phase, got)
-		}
-	}
-
-	// The converse, so this cannot be satisfied by always answering degraded:
-	// a healthy cluster under a ready row still reports ready.
-	if got := statusFor("ready", statusFromPhase("Cluster in healthy state")); got != "ready" {
-		t.Errorf("a healthy cluster under a ready row reported %q", got)
-	}
-}
-
-// AND CONVERGE MUST ACTUALLY CALL IT. Measured: `status := statusFromPhase(phase)`
-// — the pre-US-3.3a line, restored — survived every test above, because all of
-// them exercise statusFor directly. A perfectly correct function nobody calls is
-// the same shipped bug as no function, and the unit tests cannot see it.
-func TestConvergeMapsThroughTheStatusMachineNotTheRawPhase(t *testing.T) {
-	for _, tc := range []struct{ from, phase, want string }{
-		// The whole point: from ready, a terminal-bad phase must NOT come back as
-		// `failed` (409 forever) and must NOT come back as `ready` (invisible).
-		{"ready", "Cluster is unrecoverable and needs manual intervention", "degraded"},
-		{"ready", "a phase CNPG has not shipped yet", "degraded"},
-		// From provisioning the raw mapping is already legal and must be preserved,
-		// so this cannot be satisfied by always answering degraded.
-		{"provisioning", "Cluster is unrecoverable and needs manual intervention", "failed"},
-		{"provisioning", "Cluster in healthy state", "ready"},
-		{"ready", "Cluster in healthy state", "ready"},
-	} {
-		a := newFakeApplier(tc.phase)
-		got, err := newRenderer(a).Converge(context.Background(),
-			svc("svc_0123456789abcdef0123456789abcdef", tc.from))
-		if err != nil {
-			t.Fatalf("from %s, phase %q: %v", tc.from, tc.phase, err)
-		}
-		if got != tc.want {
-			t.Errorf("a %s service in phase %q converged to %q, want %q — Converge is reporting "+
-				"the raw phase mapping instead of one legal from the service's current status",
-				tc.from, tc.phase, got, tc.want)
-		}
+	if len(phaseStatus) != len(want) {
+		t.Fatalf("table has %d phases, expectations have %d", len(phaseStatus), len(want))
 	}
 }

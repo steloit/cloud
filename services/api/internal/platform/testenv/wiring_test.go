@@ -92,17 +92,23 @@ var ciGates = []ciGate{
 		why: "go vet does not check formatting, so nothing else in this pipeline reports it"},
 	{task: "O13", job: "go", runContains: "git ls-files '*/go.mod'",
 		why: "the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
-	{task: "O13", job: "go", runContains: "go test -race -timeout 30m ./...",
-		why: "the detector had never run in CI; O14 reached the base branch and sat there a month"},
+	{task: "O13", job: "go", runContains: "go test -count=1 -race -timeout 30m ./...",
+		why: "the detector had never run in CI; O14 reached the base branch and sat there a month. " +
+			"The -count=1 is part of the needle deliberately (US-3.3a): cmd/go only tracks fixtures " +
+			"under a test's OWN package directory, so an edit to a repo-root or cross-module fixture " +
+			"comes back `ok (cached)` — measured green in both modules for a change that is RED with " +
+			"-count=1, and setup-go restores GOCACHE across commits. Dropping the flag fails OPEN. " +
+			"Note this must be pinned through EXECUTABLE text: runContains matches against " +
+			"stripShellComments, so a gate can never be armed by a comment"},
 	{task: "O13", job: "go", runContains: `out="$(gofmt -l "$m" 2>&1)"`,
 		why: "the exit-status/stderr capture: gofmt reports CLEAN on stdout for a file that does not parse"},
 	{task: "§17", job: "go", runContains: "make gen-go",
 		why: "the oapi contract generator"},
 	{task: "§17", job: "go", runContains: "make gen-canon",
 		why: "the canon fixtures copy"},
-	{task: "T3.4", job: "go", runContains: "cd ../cell-agent && go build ./... && go vet ./... && go test -race",
+	{task: "T3.4", job: "go", runContains: "cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race",
 		why: "the cell-agent module is otherwise unbuilt and untested in CI"},
-	{task: "E5", job: "go", runContains: "apps/cli && go build ./... && go vet ./... && go test -race",
+	{task: "E5", job: "go", runContains: "apps/cli && go build ./... && go vet ./... && go test -count=1 -race",
 		why: "the CLI module is otherwise unbuilt and untested in CI"},
 	{task: "O23", job: "go", envKey: "STELOIT_REQUIRE_CONTAINERS",
 		why: "without it a missing container runtime is a SKIP and the job goes green having run nothing"},

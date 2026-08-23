@@ -206,93 +206,53 @@ to `degraded`, but the control plane allows `provisioning → {ready, failed,
 deleting}` only. The writeback is rejected every tick, `observed_generation`
 never advances, and the service is retried forever with nothing visible — the
 exact failure `statusFromPhase` argues against thirty lines below, arrived at
-from the other side. Now `failed`.
+from the other side. Now `failed` — and that is ALL that shipped of it, because round 12 tried to go
+further and made it worse.
 
-Pinning it took two attempts, and the first is the finding. Round 11 "pinned both
-sides" by having each module compare its own table to a **hardcoded literal of the
-other's** — the cell side was never read, so widening `legalFrom` failed nothing
-anywhere, which is exactly the edit a red legal-edge test invites.
-`testdata/status-transitions.json` is now the ONE artifact both modules assert
-against, in full, both directions. Separate go.mod files and no go.work mean the
-knowledge must be duplicated; what changed is that the duplication is detectable.
+**Round 12 is reverted, and the revert is the lesson.** It added a
+`statusFor(from, want)` and a copy of the transition table to the AGENT, with a
+repo-root JSON artifact to keep the copies honest. Three measured problems:
 
-**And the check was one FROM-state deep.** `statusFromPhase` reads only the phase,
-so it answered identically whatever state the row was in, while the writeback asks
-"is this legal from `svc.Status`". `ready → failed` and `failed → ready` were both
-live and both 409 forever — reachable normally, since `UpdateServiceShape` bumps
-the generation for any status but `deleting` and `ListDesiredForCell` has no
-status filter. `statusFor(from, want)` now maps onto a legal edge (`ready` + a bad
-phase → `degraded`, also the right answer) and reports NO CHANGE where none
-exists rather than inventing one.
+- **It collapsed the transient guard.** `statusFor("ready","provisioning")`
+  finds no legal edge and returns `from`; `ready` IS terminal, so Converge's
+  `!terminal(status)` BLOCKER never fired. A READY service observed in
+  `Upgrading cluster` reported `"ready", nil` instead of `ErrNotConverged` —
+  the agent declaring a generation converged mid-apply, `observed_generation`
+  advancing, the row leaving the outstanding set. Strictly worse than the 409
+  loop it replaced, and reachable through the exact flow the fix cited.
+- **The premise for the artifact was false.** "Separate go.mod files, so neither
+  module can import the other" — `apps/cli/go.mod` already imports
+  `packages/contracts/go` across that boundary with a `replace`, and
+  `docs/architecture.md` says the cell-agent does too. I asserted an
+  architectural constraint without checking the repo that contradicts it.
+- **It deleted the test that caught its own headline incident.** The replacement
+  cross-product skips any answer where `got == from`, and the
+  `"Waiting for user action": "degraded"` mutation — cited three times as the
+  motivating live consequence — became a SURVIVOR. A sweep that treats "no
+  change" as always-legal cannot see the case where no change is the wrong
+  answer.
 
-**Boot validation, in three representations.** `RECONCILER_CELL` was unvalidated,
-so a typo booted cleanly then failed every converge with no writeback. Validating
-it was not enough: the *call* was unpinned (`cmd/` had no tests), and then `main`
-**honouring** the result was unpinned too — `if err := run(...); false` was green
-and the agent would exit **0**, which an orchestrator reads as "completed". A
-test that hoisted `signal.NotifyContext` into `main()` also changed behaviour I
-described as unchanged: a SIGTERM during boot would be absorbed and exit 0.
-Reverted, ordering verified byte-identical to `origin/main`, and SIGTERM is now
-pinned by a subprocess test that kills two further green mutations.
+The real fix belongs in `reconcile.Writeback`, which is the only place holding
+both `from` and the machine, and where a data-plane copy of a control-plane
+state machine is not a plane leak (ADR-0001 D9/A2.5). Filed as **US-3.3h** with
+the design and the five ACs, including the two survivors QA found in the
+reverted version (`suspended` silently auto-resuming, and an unknown `from`
+being echoed back outside the vocabulary).
 
-## Negative evidence — sixty-one mutations, and corrections to four earlier tables
+**What round 13 keeps:** every CNPG phase pinned by CLASSIFICATION, not just by
+count — reclassifying `"Cluster has incomplete or invalid image catalog"` from
+`failed` to `provisioning` was green in both modules, and a permanently broken
+cluster read as still-converging is the defect `statusFromPhase`'s own comment
+argues thirty lines about. Pre-existing, closed here.
 
-**An earlier mutation table was invalid and is withdrawn.** Round 3's came from
-`cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
-module-only copy has a **RED baseline** (three `parity_test.go` cases need the
-repo root) — so every row reported RED whether the mutation was caught or not.
-That is the mistake bank entry directly above the one this branch added,
-violated in the same round. Of its 25 rows, 24 were genuinely RED and one GREEN.
-
-A RED baseline can only manufacture false REDs, never false GREENs, so every
-*survivor* found in rounds 1–3 stands; what was unreliable was the evidence that
-the fixes worked. Everything below was re-measured on ONE harness — a scaffolded
-repo root with a GREEN no-mutation baseline asserted before and after every row,
-each mutation carrying an assert-it-applied guard.
-
-The sweep has since caught two defects in the tests themselves: a `run()` that
-HUNG for 10 minutes instead of failing, and — this round — a legal-edge test I
-had accidentally reverted with a `git checkout` while undoing an unrelated
-mangled edit. It survived because it no longer existed.
-
-**Every row is now enumerated in the PR**, in ONE table, rather than split across
-two documents — because the split is what produced the count errors below. What
-is kept here is the part a table cannot carry: which earlier tables were wrong.
-
-**And the count itself was wrong, twice, in the same way.** "59 distinct over 60
-mutations" and "32 rows here plus 29 in the PR" were both asserted without
-counting: the task-file table held **34** once-GREEN rows, not 32. Counted
-mechanically (normalise column one, fuzzy-match across the two tables): **34 + 29
-= 63 entries, 2 verbatim duplicates — the `ValidateCell` call and `main` ignoring
-`run`'s error, exactly the two named earlier — so 61 DISTINCT.** The published 59
-was low by two, and every restatement of it re-asserted the miscount rather than
-re-deriving it. A number repeated from a previous round is not evidence; this one
-is reproducible from the two tables.
-
-*(Round 9 note: an earlier version claimed the PR "listed them in full" when it
-named six categories in a sentence. Round 12: it now genuinely does.)*
-
-## Accepted survivors — measured green, deliberately not closed
-
-Named here because an unrecorded survivor is indistinguishable from one nobody
-looked for.
-
-| survivor | why it stands |
-|---|---|
-| `Apply` guards skipped for index ≥ **12** | Any hand-written sweep has a ceiling; this one is 12, against a largest-ever batch of 8 (`7e94f26`). **This was published as "≥ 16" for one round while the sweep already ran to 12** — the ceiling was lowered in the same commit that widened the fixtures, and four claims were not updated. Corrected here and measured: ≥ 12 GREEN, ≥ 13 GREEN, ≥ 16 vacuous. The real close is a property test over random `n` and random composition, filed with US-3.3c. |
-| `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
-| ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
-| the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
-
-## Outcome
-
-Shipped: the environment's Kubernetes namespace, created agent-side on every
-converge (level-triggered), with `resourcePath` taught cluster-scoped routing and
-`Apply`/`Delete` taught to refuse what they cannot address. **D7's policy objects
-are NOT here** — implemented, then withdrawn to US-3.3c/d/e once the security
-review showed the cell enforces no NetworkPolicy, the allow-set would fence CNPG
-off Workload Identity, GCS and the apiserver, and the LimitRange would cap every
-managed Postgres at 512Mi.
+**And `-count=1` in CI, which is not hygiene.** cmd/go only tracks fixtures a
+test opens under its OWN package directory, so an edit to a repo-root or
+cross-module fixture comes back `ok (cached)`. Measured: the artifact edit this
+round was built to catch was green in both modules on a warm cache and RED in
+both with `-count=1`, and `actions/setup-go` restores GOCACHE across commits. It
+failed OPEN. The flag is pinned through the executable text of three `ciGates`
+needles — `runContains` matches against `stripShellComments`, so a gate can
+never be armed by a comment, which is the harness working as designed.
 
 Six review rounds, every one blocking, and the pattern is the finding: **each
 round I verified the representation I had just edited and not the one that

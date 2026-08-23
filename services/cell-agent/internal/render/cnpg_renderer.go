@@ -180,7 +180,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	if err != nil {
 		return "", fmt.Errorf("render: observe %s: %w", manifests[0].Name, err)
 	}
-	status := statusFor(svc.Status, statusFromPhase(phase))
+	status := statusFromPhase(phase)
 	// BLOCKER: the Renderer contract requires a TERMINAL status. Reporting a
 	// transient `provisioning` would advance observed_generation, drop the row
 	// out of the outstanding set (observed < generation), and the service would
@@ -191,55 +191,6 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 		return "", fmt.Errorf("%w: %s is %q (phase %q)", ErrNotConverged, manifests[0].Name, status, phase)
 	}
 	return status, nil
-}
-
-// legalFrom is ADR-024's status machine, the subset the agent needs. It is
-// duplicated from services/api's `transitions` because the two modules have
-// separate go.mod files and no go.work; testdata/status-transitions.json is the
-// one artifact both sides assert against, so neither copy can drift silently.
-var legalFrom = map[string][]string{
-	"provisioning": {"ready", "failed", "deleting"},
-	"ready":        {"degraded", "suspended", "deleting"},
-	"degraded":     {"ready", "failed", "deleting"},
-	"failed":       {"provisioning", "deleting"},
-	"suspended":    {"ready", "deleting"},
-	"deleting":     {},
-}
-
-// statusFor maps a phase-derived status onto one that is LEGAL from the
-// service's CURRENT status.
-//
-// statusFromPhase reads only the CNPG phase, so it answered the same way
-// whatever state the row was in — and the control plane rejects an illegal
-// edge, leaving observed_generation un-advanced and the row outstanding,
-// retried forever with nothing visible. Reachable through the ordinary product
-// flow: UpdateServiceShape bumps the generation for any status except
-// `deleting`, and ListDesiredForCell has no status filter, so a PATCH on a
-// READY service hands the agent a ready row. Any terminal-bad phase — or any
-// phase string this table does not know, since the fallback is `failed` and
-// CNPG ships new phases across minor versions — then wedges it.
-//
-// A cluster that broke while READY is `degraded`, which is both the legal edge
-// and the semantically right one. Where no legal edge exists the agent reports
-// NO CHANGE rather than inventing one: a healthy cluster under a `failed` row
-// is the control plane's retry path (failed → provisioning), not the agent's.
-func statusFor(from, want string) string {
-	// `gone` is observation-only — the reconciler maps it to "" rather than
-	// treating it as a transition, so it is in no transition list and must pass
-	// through untouched. Without this it falls to the no-change branch below and
-	// a completed teardown reports the service's old status forever.
-	if from == "" || want == from || want == "gone" {
-		return want
-	}
-	for _, ok := range legalFrom[from] {
-		if ok == want {
-			return want
-		}
-	}
-	if want == "failed" && from == "ready" {
-		return "degraded"
-	}
-	return from
 }
 
 // ErrNotConverged aliases the agent's sentinel so the loop can errors.Is it:

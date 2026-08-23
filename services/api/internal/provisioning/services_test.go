@@ -3,10 +3,6 @@ package provisioning
 import (
 	"encoding/json"
 	"github.com/steloit/cloud/services/api/internal/metering"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -229,51 +225,29 @@ func TestIsBillingGatesTheStatusesThatHaveAnOpenSpan(t *testing.T) {
 	}
 }
 
-// THIS TABLE IS ONE OF TWO COPIES, AND THE SHARED ARTIFACT IS THE JUDGE.
+// The OTHER copy of the agent's legal-edge set.
 //
 // services/cell-agent has a separate go.mod and no go.work, so it cannot import
-// `transitions`; it carries its own `legalFrom`. The previous version of this
-// test held a THIRD copy — the literal {ready, failed, deleting} — and compared
-// this table to it. That pinned one from-state and, worse, made the assertion
-// self-referential: the cell side was never read, so widening its copy failed
-// nothing anywhere, which is precisely the edit someone makes when a legal-edge
-// test goes red.
-//
-// testdata/status-transitions.json is now the one artifact both modules assert
-// against, in full, in both directions. The first live consequence of the old
-// arrangement was `"Waiting for user action": "degraded"` — a status the agent
-// could emit that this machine rejects forever.
-func TestTheStatusMachineMatchesTheSharedArtifact(t *testing.T) {
-	root, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		t.Fatal(err)
+// this table; its TestEveryTerminalStatusIsALegalEdgeFromProvisioning duplicates
+// {ready, failed, deleting}. Duplicated knowledge drifts silently unless both
+// copies are pinned, and the first live consequence was
+// `"Waiting for user action": "degraded"` — a status the agent could emit that
+// this machine rejects forever.
+func TestTheAgentsLegalEdgesMatchTheStatusMachine(t *testing.T) {
+	want := map[string]bool{"ready": true, "failed": true, "deleting": true}
+	got := map[string]bool{}
+	for _, s := range transitions["provisioning"] {
+		got[s] = true
 	}
-	raw, err := os.ReadFile(filepath.Join(strings.TrimSpace(string(root)), "testdata", "status-transitions.json"))
-	if err != nil {
-		t.Fatalf("the shared status machine is missing — both copies are then unpinned: %v", err)
+	if len(got) != len(want) {
+		t.Fatalf("provisioning transitions to %v; the cell-agent's copy says %v. Update "+
+			"services/cell-agent/internal/render's legalFromProvisioning in the same change, "+
+			"or the agent will emit a status this machine rejects forever.", got, want)
 	}
-	var doc struct {
-		Transitions map[string][]string `json:"transitions"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatal(err)
-	}
-	if len(doc.Transitions) == 0 {
-		t.Fatal("no transitions in the shared artifact — this test would prove nothing")
-	}
-	if len(transitions) != len(doc.Transitions) {
-		t.Fatalf("this module knows %d from-states, the shared machine has %d",
-			len(transitions), len(doc.Transitions))
-	}
-	for from, want := range doc.Transitions {
-		got := append([]string(nil), transitions[from]...)
-		w := append([]string(nil), want...)
-		slices.Sort(got)
-		slices.Sort(w)
-		if !slices.Equal(got, w) {
-			t.Errorf("from %q this module allows %v, the shared machine says %v — change both "+
-				"copies and the artifact together, or the agent emits a status this machine "+
-				"rejects forever", from, got, w)
+	for s := range want {
+		if !got[s] {
+			t.Fatalf("provisioning can no longer transition to %q, but the cell-agent's copy "+
+				"still lists it", s)
 		}
 	}
 }

@@ -152,10 +152,20 @@ jobs:
         # failure presents as a broken suite rather than as "raise the limit",
         # which is the kind of failure that gets diagnosed wrong.
         run: |
-          cd services/api && go build ./... && go vet ./... && go test -race -timeout 30m ./...
-          cd ../cell-agent && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          # -count=1 DISABLES THE TEST CACHE, and it is load-bearing, not hygiene.
+          # cmd/go's cache invalidation tracks files a test opens under its own
+          # package directory. A fixture read from anywhere else — a repo-root
+          # testdata/, a sibling module's file, a migration .sql two directories
+          # up — is NOT a tracked input, so editing it leaves `ok (cached)`.
+          # Measured (US-3.3a QA, 2026-08-23): a PR that changed ONLY a repo-root
+          # JSON fixture two Go modules assert against came back `ok (cached)` in
+          # both, and RED in both with -count=1. actions/setup-go restores GOCACHE
+          # across commits keyed on go.sum, so this is reachable on a real PR, and
+          # it fails OPEN — the cross-module pin reports green while broken.
+          cd services/api && go build ./... && go vet ./... && go test -count=1 -race -timeout 30m ./...
+          cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
           cd ../../packages/contracts/go && go build ./...
-          cd ../../../apps/cli && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          cd ../../../apps/cli && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
   infra:
     runs-on: ubuntu-latest
     steps:
