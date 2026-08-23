@@ -134,7 +134,8 @@ const testNamespace = "env-0123456789abcdef0123456789abcdef"
 // than it claims.
 func envObjectKeys(t *testing.T) map[string]bool {
 	t.Helper()
-	ms, err := tenancy.Render(tenancy.Spec{Namespace: testNamespace, Cell: "cell-0"})
+	ms, err := tenancy.Render(tenancy.Spec{Namespace: testNamespace, Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
 	}

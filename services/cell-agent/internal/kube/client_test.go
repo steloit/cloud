@@ -372,7 +372,11 @@ func TestDeleteRefusesAKindItCannotAddress(t *testing.T) {
 	defer srv.Close()
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
 
-	for _, kind := range []string{"NetworkPolicy", "ResourceQuota", "LimitRange", "Ingress"} {
+	// Kinds genuinely absent from BOTH maps. ResourceQuota and LimitRange used to
+	// be here and are not any more — US-3.3e renders them, so they are addressable
+	// now. A stale entry would make this test assert the refusal of something the
+	// agent legitimately deletes.
+	for _, kind := range []string{"NetworkPolicy", "Ingress", "ConfigMap", "Deployment"} {
 		err := c.Delete(context.Background(), "env-x", kind, "obj")
 		if err == nil {
 			t.Errorf("Delete accepted %s — a 404 from a wrong path reads as 'already gone'", kind)
@@ -612,7 +616,8 @@ const testNS = "env-0123456789abcdef0123456789abcdef"
 func productionManifests(t *testing.T) [][]byte {
 	t.Helper()
 	out := [][]byte{}
-	tm, err := tenancy.Render(tenancy.Spec{Namespace: testNS, Cell: "cell-0"})
+	tm, err := tenancy.Render(tenancy.Spec{Namespace: testNS, Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
 	}

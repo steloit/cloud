@@ -55,11 +55,19 @@ import (
 // customer. What it buys is that the malformed value never reaches a URL or a
 // YAML document. Surfacing a terminal `failed` writeback is a separate gap and
 // is not claimed here.
-// quantity is the closed grammar the control plane emits (billing.validQuantity
-// accepts whole cores and whole Mi/Gi/Ti). Re-checked HERE because this module
-// interpolates the value into a manifest: the two ends of the wire are separate
-// modules, and a value that got past one is not a value the other may assume.
-var quantity = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)?$`)
+// The closed grammar the control plane emits (billing.validQuantity). Re-checked
+// HERE because this module interpolates the value into a manifest: the two ends
+// of the wire are separate modules, and a value that got past one is not a value
+// the other may assume.
+//
+// CPU is unitless whole cores; memory and storage REQUIRE a unit. That split is
+// not cosmetic — an unsuffixed Kubernetes quantity is BYTES, so a memory quota
+// of "16" is sixteen bytes and admits nothing. One shared optional-unit pattern
+// accepted exactly that.
+var (
+	cpuQuantity  = regexp.MustCompile(`^[1-9][0-9]*$`)
+	byteQuantity = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
+)
 
 var rfc1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
@@ -144,12 +152,14 @@ func Render(s Spec) ([]Manifest, error) {
 		return nil, fmt.Errorf("tenancy: no quota envelope for %s — the control plane resolves "+
 			"it from the org's plan; rendering without one leaves the environment unbounded", s.Namespace)
 	}
-	for dim, v := range map[string]string{
-		"cpu": s.Quota.CPU, "memory": s.Quota.Memory, "storage": s.Quota.Storage,
-	} {
-		if !quantity.MatchString(v) {
-			return nil, fmt.Errorf("tenancy: %s quota %q for %s is not a Kubernetes quantity — "+
-				"the API server would reject the ResourceQuota at apply", dim, v, s.Namespace)
+	if !cpuQuantity.MatchString(s.Quota.CPU) {
+		return nil, fmt.Errorf("tenancy: cpu quota %q for %s is not a whole number of cores — "+
+			"the API server would reject the ResourceQuota at apply", s.Quota.CPU, s.Namespace)
+	}
+	for dim, v := range map[string]string{"memory": s.Quota.Memory, "storage": s.Quota.Storage} {
+		if !byteQuantity.MatchString(v) {
+			return nil, fmt.Errorf("tenancy: %s quota %q for %s is not a whole Mi/Gi/Ti quantity — "+
+				"an unsuffixed value means BYTES, which admits nothing", dim, v, s.Namespace)
 		}
 	}
 

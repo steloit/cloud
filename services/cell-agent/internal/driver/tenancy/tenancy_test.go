@@ -8,6 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// proQuota is the `pro` envelope from plans.json, as the control plane resolves
+// and ships it. Tests that are not about the quota still need one, because
+// rendering without an envelope is refused.
+var proQuota = tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}
+
 const (
 	ns   = "env-9f3c1a2b"
 	cell = "cell0"
@@ -15,38 +20,53 @@ const (
 
 func mustRender(t *testing.T) []tenancy.Manifest {
 	t.Helper()
-	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell})
+	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell, Quota: proQuota})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return objs
 }
 
-// The environment's namespace is the object nothing in the system created before
-// US-3.3a — the defect was a 404 on the first converge into a new environment.
-func TestRenderProducesTheNamespace(t *testing.T) {
+// The environment's namespace, its ceiling, and the LimitRange that makes the
+// ceiling usable. The namespace is the object nothing in the system created
+// before US-3.3a — the defect was a 404 on the first converge into a new
+// environment.
+func TestRenderProducesTheEnvironmentsObjects(t *testing.T) {
 	objs := mustRender(t)
-	if len(objs) != 1 {
-		t.Fatalf("want exactly the Namespace, got %d objects: %+v", len(objs), kinds(objs))
+	var got []string
+	for _, m := range objs {
+		got = append(got, m.Kind+"/"+m.Name)
 	}
-	if objs[0].Kind != "Namespace" || objs[0].Name != ns {
-		t.Fatalf("got %s/%s, want Namespace/%s", objs[0].Kind, objs[0].Name, ns)
+	want := []string{
+		"Namespace/" + ns,
+		"ResourceQuota/env-quota",
+		"LimitRange/env-limits",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rendered %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("object %d is %s, want %s — the Namespace must be FIRST (everything after "+
+				"it is namespaced) and the quota must accompany it", i, got[i], want[i])
+		}
 	}
 }
 
-// D7's NetworkPolicies, ResourceQuota and LimitRange are deliberately absent
-// until US-3.3c lands them WITH enforcement and a CNPG allow-set. This pins the
-// absence so it stays a decision: re-adding any of them without changing this
-// test is not possible, and changing it means reading why.
-func TestTheD7PolicyObjectsAreDeliberatelyNotRenderedYet(t *testing.T) {
+// The D7 NETWORK POLICIES are still deliberately absent, and the reason has
+// CHANGED. US-3.3f turned enforcement on (Dataplane V2), so a NetworkPolicy on
+// this cell now really does drop packets — which makes shipping the wrong
+// allow-set MORE dangerous than when it was inert, not less. US-3.3a's set
+// fences CNPG off its metadata server (Workload Identity), GCS (WAL archiving)
+// and the apiserver, so the first Postgres pod would never reach ready.
+//
+// US-3.3c owns them. This pins the absence so it stays a decision.
+func TestTheD7NetworkPoliciesAreStillWithheld(t *testing.T) {
 	for _, m := range mustRender(t) {
-		switch m.Kind {
-		case "NetworkPolicy", "ResourceQuota", "LimitRange":
-			t.Fatalf("%s/%s is rendered again. It must not ship before US-3.3c: "+
-				"NetworkPolicies are not enforced on the cell (gke-cell sets no "+
-				"network_policy / ADVANCED_DATAPATH), the allow-set as written fences "+
-				"CNPG off its metadata server, GCS and the apiserver, and the LimitRange "+
-				"default becomes the hard cap on every managed Postgres.", m.Kind, m.Name)
+		if m.Kind == "NetworkPolicy" {
+			t.Fatalf("%s/%s is rendered. Enforcement is now REAL (US-3.3f), so an allow-set "+
+				"that denies what CNPG needs no longer fails silently — it stops every managed "+
+				"Postgres from reaching ready. US-3.3c owns the correct set.", m.Kind, m.Name)
 		}
 	}
 }
@@ -116,7 +136,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	}
 	for name, v := range badNS {
 		t.Run("namespace/"+name, func(t *testing.T) {
-			if _, err := tenancy.Render(tenancy.Spec{Namespace: v, Cell: cell}); err == nil {
+			if _, err := tenancy.Render(tenancy.Spec{Namespace: v, Cell: cell, Quota: proQuota}); err == nil {
 				t.Fatalf("Render accepted namespace %q", v)
 			}
 		})
@@ -133,7 +153,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	}
 	for name, v := range badCell {
 		t.Run("cell/"+name, func(t *testing.T) {
-			if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: v}); err == nil {
+			if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: v, Quota: proQuota}); err == nil {
 				t.Fatalf("Render accepted cell %q", v)
 			}
 		})
@@ -142,7 +162,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	// The negative half is only meaningful if the positive half still passes:
 	// a Render that refuses everything would satisfy every case above.
 	for _, good := range []string{"env-a", "env-9f3c1a2b", "env-" + strings.Repeat("a", 59)} {
-		if _, err := tenancy.Render(tenancy.Spec{Namespace: good, Cell: cell}); err != nil {
+		if _, err := tenancy.Render(tenancy.Spec{Namespace: good, Cell: cell, Quota: proQuota}); err != nil {
 			t.Fatalf("Render refused a legitimate namespace %q: %v", good, err)
 		}
 	}
@@ -175,7 +195,7 @@ func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
 		"env-0",
 		"env-" + strings.Repeat("f", 59),
 	} {
-		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell}); err != nil {
+		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell, Quota: proQuota}); err != nil {
 			t.Fatalf("the control plane can mint %q and Render refuses it: %v", produced, err)
 		}
 	}
@@ -187,7 +207,7 @@ func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
 // template satisfied a one-value test with the whole suite green.
 func TestTheCellLabelIsTheSpecCellAndNotAConstant(t *testing.T) {
 	for _, c := range []string{"cell-0", "cell-7"} {
-		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: c})
+		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: c, Quota: proQuota})
 		if err != nil {
 			t.Fatal(err)
 		}
