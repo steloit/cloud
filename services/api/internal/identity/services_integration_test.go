@@ -6,7 +6,9 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"io"
 	"log/slog"
 	"net/http"
@@ -2643,5 +2645,100 @@ func TestASizeDowngradePricesTheSameWhicheverProvenanceTheRowHas(t *testing.T) {
 	if gotFresh != want {
 		t.Fatalf("a dev keeping its 50Gi volume priced %d, want %d — the volume cannot shrink, "+
 			"so billing dev's base alone gives away storage the cluster still carries", gotFresh, want)
+	}
+}
+
+// A PVC CANNOT SHRINK, so a PATCH that lowers storage_gb must be refused.
+//
+// The T3.4c ratchet only floored at included_gb; ABOVE that a PATCH silently
+// lowered both the stored value and the bill — measured at dev 200GB → 20
+// dropping 11900c to 2900c — for storage the cluster is still carrying. Worse,
+// the driver then renders the smaller PVC and the CSI driver rejects the shrink,
+// so the row sits outstanding forever with nothing written back. Same defect
+// class as the one the ratchet exists to close, in the opposite direction.
+//
+// Refused, not silently floored: a customer who asks for 20 and gets 200 with no
+// error has been ignored. This is not a pricing decision — nobody's bill moves.
+func TestStorageCannotBeReducedBecauseAVolumeCannotShrink(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "shrink@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"shrinkco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"standard","storage_gb":200}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard","storage_gb":200}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+	before := mustGetSvc(t, w, svc.Id)
+
+	// The reduction is refused, and says what to do instead.
+	_, err = w.prov.UpdateService(ctx, before, org.Id, ownerID,
+		map[string]any{"storage_gb": 20}, nil, nil)
+	if err == nil {
+		t.Fatal("a storage reduction was accepted — the bill drops for a volume that " +
+			"cannot shrink, and the next converge asks the CSI driver for a smaller PVC")
+	}
+	// A FIELD ERROR the customer can act on, not a 500. err.Error() is only
+	// "Validation failed"; the remediation lives in the problem document, which
+	// is what actually reaches the client.
+	var carrier problem.Carrier
+	if !errors.As(err, &carrier) {
+		t.Fatalf("the refusal is not a problem+json field error — a client typo class becomes "+
+			"a 500 with an event id: %v", err)
+	}
+	doc, _ := json.Marshal(carrier.Problem())
+	for _, want := range []string{"shape.storage_gb", "cannot shrink"} {
+		if !strings.Contains(string(doc), want) {
+			t.Fatalf("the problem document does not carry %q — the customer is told no with no "+
+				"reason and no way forward: %s", want, doc)
+		}
+	}
+
+	// Nothing moved: not the stored shape, not the bill.
+	after := mustGetSvc(t, w, svc.Id)
+	if string(after.Shape) != string(before.Shape) {
+		t.Fatalf("the refused PATCH still rewrote the shape:\n before %s\n after  %s", before.Shape, after.Shape)
+	}
+	if after.MonthlyEstimateCents != before.MonthlyEstimateCents {
+		t.Fatalf("the refused PATCH moved the bill %d → %d",
+			before.MonthlyEstimateCents, after.MonthlyEstimateCents)
+	}
+
+	// GROWING is still allowed — a volume can expand, and the bill follows.
+	grown, err := w.prov.UpdateService(ctx, before, org.Id, ownerID,
+		map[string]any{"storage_gb": 300}, nil, nil)
+	if err != nil {
+		t.Fatalf("a storage INCREASE was refused: %v", err)
+	}
+	if grown.MonthlyEstimateCents <= before.MonthlyEstimateCents {
+		t.Fatalf("growing to 300 GB did not raise the bill (%d → %d)",
+			before.MonthlyEstimateCents, grown.MonthlyEstimateCents)
+	}
+	// And an unrelated PATCH is unaffected by the guard.
+	if _, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svc.Id), org.Id, ownerID,
+		map[string]any{"ha": true}, nil, nil); err != nil {
+		t.Fatalf("an unrelated shape PATCH was refused: %v", err)
 	}
 }

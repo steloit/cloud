@@ -188,6 +188,46 @@ func desiredDoc(product, intent, namespace string, shape, scaling, override []by
 	return b
 }
 
+// refuseStorageShrink rejects a PATCH that lowers postgres storage below what
+// the service already has provisioned.
+//
+// It compares the RAW stored value against the RAW merged one, before resolve()
+// applies the included_gb floor: resolve would raise both sides to at least the
+// size's included amount and hide a reduction that happens entirely above it.
+func refuseStorageShrink(storedShape []byte, merged map[string]any) error {
+	var stored map[string]any
+	if json.Unmarshal(storedShape, &stored) != nil || stored == nil {
+		return nil
+	}
+	prior, hadPrior := shapeGB(stored["storage_gb"])
+	next, hasNext := shapeGB(merged["storage_gb"])
+	if !hadPrior || !hasNext || next >= prior {
+		return nil
+	}
+	return problemError{p: problem.ValidationFailed([]problem.FieldError{{
+		Field: "shape.storage_gb",
+		Detail: fmt.Sprintf("cannot be reduced from %d to %d — a volume cannot shrink. "+
+			"Kubernetes supports expansion only, so the %d GB is still provisioned and still "+
+			"billed. Create a new service at the smaller size and migrate the data.", prior, next, prior),
+	}})}
+}
+
+// shapeGB reads a storage_gb that may have arrived as any JSON number shape.
+func shapeGB(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), n == float64(int(n))
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	}
+	return 0, false
+}
+
 // resolveNamespace derives the cell namespace for an environment.
 //
 // It is derived from the environment's ID, NOT from project/env NAMES. Names are
@@ -692,6 +732,22 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		}
 		for k, v := range shape {
 			current[k] = v
+		}
+		// A PVC CANNOT SHRINK, so neither can storage_gb.
+		//
+		// Kubernetes supports volume expansion only and rejects a request below
+		// `.status.capacity`. Without this, `PATCH {"storage_gb":20}` on a 200 GB
+		// service does two bad things at once: it drops the bill (11900c -> 2900c)
+		// for storage the cluster is still carrying, and it makes the driver render
+		// a 20Gi PVC that the CSI driver refuses — leaving the row outstanding
+		// forever with nothing written back.
+		//
+		// Refused rather than silently floored. A customer who asks for 20 and
+		// gets 200 with no error has been ignored; problem+json with a remediation
+		// is this repo's contract, and it is what Cloud SQL does for the same
+		// operation. Note this is NOT a pricing decision — nobody's bill moves.
+		if err := refuseStorageShrink(svc.Shape, current); err != nil {
+			return store.Service{}, err
 		}
 		// Persist the RESOLVED merged shape, exactly as create does. Storing a
 		// raw map here and a resolved one there would mean the same

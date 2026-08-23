@@ -138,11 +138,17 @@ func terminal(status string) bool {
 	return false
 }
 
-// renderedObjects returns the driver-canonical kind+name for a service's
-// objects, so Observe/Delete address exactly what Apply created. It renders with
-// the REAL namespace and product (a fabricated placeholder would be sound only
-// by accident — nothing in the Driver contract promises namespace-independent
-// names) and propagates errors rather than silently returning nothing.
+// teardownObjects returns the driver-canonical kind+name for a service's
+// objects, so Delete addresses exactly what Apply created. It uses the REAL
+// namespace and product — a fabricated placeholder would be sound only by
+// accident, since nothing in the Driver contract promises namespace-independent
+// names.
+//
+// The error return is currently UNREACHABLE: Driver.Objects names objects
+// without rendering them and cannot fail. It is kept because the signature is
+// the contract a future driver whose Objects needs I/O would use, and because
+// the caller's "a teardown that cannot enumerate its objects must NOT report
+// gone" arm is the behaviour we want if that ever becomes reachable.
 func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
 	return r.pg.Objects(driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
@@ -150,15 +156,6 @@ func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace strin
 		Instances: instancesOf(svc.Desired), Cell: r.cell,
 		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
 	}), nil
-}
-
-func (r *CNPGRenderer) renderedObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
-	return r.pg.Render(driver.Spec{
-		Name: svc.ID, Namespace: namespace, Product: svc.Product,
-		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
-		Instances: instancesOf(svc.Desired), Cell: r.cell,
-		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
-	})
 }
 
 // statusFromPhase maps a CNPG cluster phase to the ADR-024 vocabulary using an
