@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 )
 
 //go:embed plans.json
@@ -126,9 +127,29 @@ func (t *Table) PlanFeeCents(plan string) (int, bool) {
 // is exactly the number the overview and invoice show — one arithmetic
 // everywhere (F9). meteredRateCents are the per-meter accrued cents for the
 // current period.
+//
+// IT SATURATES RATHER THAN WRAPPING (O19). This is the number the hard cap
+// enforces against, and a wrapped one is NEGATIVE — which reads as "spend far
+// below the cap" and disables the cap entirely. That is the US-3.8 failure
+// money.go's own header narrates, at the one site that decides whether
+// provisioning is refused. Measured: SpendToDate(2900, MaxInt64/2, MaxInt64/2)
+// returned -9223372036854772910.
+//
+// Saturating, not erroring, because every caller here RENDERS a number — the
+// overview, the invoice line, the cap comparison — and none of them has a
+// sensible "no answer" to show. MaxInt64 is above any real cap, so a saturated
+// value refuses provisioning, which is the safe direction. It cannot be
+// reached by legitimate data: metering.Rollup now fails closed rather than
+// writing an unrepresentable row.
 func SpendToDate(planFeeCents int64, meteredRateCents ...int64) int64 {
 	total := planFeeCents
+	if total < 0 {
+		return math.MaxInt64
+	}
 	for _, c := range meteredRateCents {
+		if c < 0 || total > math.MaxInt64-c {
+			return math.MaxInt64
+		}
 		total += c
 	}
 	return total

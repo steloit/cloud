@@ -200,3 +200,65 @@ func TestTheAccrualRendersValuesAboveTheTopLimbBoundary(t *testing.T) {
 		}
 	}
 }
+
+// A SINGLE PRODUCT WIDER THAN 64 BITS — the type's core claim, and untested.
+//
+// Every accrual the other tests build gets its high word from repeated ADD
+// carries, never from the multiply, so `bits.Mul64` could be replaced with a
+// plain int64 multiply and the whole suite stayed green. That is the one line
+// that makes Accrual different from the accumulator it replaced.
+func TestASingleProductWiderThanSixtyFourBits(t *testing.T) {
+	const tenMonths = int64(10 * 31 * 86400)
+	a, err := NoAccrual.AddMul(MustFromInt(MaxMonthly), tenMonths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.hi == 0 {
+		t.Fatal("one call did not produce a product above 2^64 — bits.Mul64's high word is " +
+			"still unexercised, which is the whole difference between this type and an int64")
+	}
+	want := new(big.Int).Mul(big.NewInt(MaxMonthly), big.NewInt(tenMonths))
+	if a.String() != want.String() {
+		t.Fatalf("one multiply of %d × %d gave %s, want %s", MaxMonthly, tenMonths, a, want)
+	}
+}
+
+// The 128-bit carry arm. Unreachable by accumulating real rates (~1e7 iterations),
+// so it is constructed — otherwise the branch is a claim about fleets rather than
+// a tested path, and deleting it is green.
+func TestTheHundredTwentyEightBitCarryFailsClosed(t *testing.T) {
+	near := Accrual{hi: math.MaxUint64, lo: math.MaxUint64}
+	if _, err := near.AddMul(MustFromInt(1), 1); !errors.Is(err, ErrOverflow) {
+		t.Fatalf("adding to a saturated accrual returned %v, want ErrOverflow — the carry out "+
+			"of 128 bits was dropped", err)
+	}
+	// ...and it does not fire one short of saturation.
+	almost := Accrual{hi: math.MaxUint64, lo: math.MaxUint64 - 1}
+	if _, err := almost.AddMul(MustFromInt(1), 1); err != nil {
+		t.Fatalf("the carry check fired on a representable addition: %v", err)
+	}
+}
+
+// DivSeconds TRUNCATES, and that is a policy, not an accident: every case in the
+// round-trip test divides exactly, so rounding up survived. Stated here so the
+// direction is a decision someone made rather than one nobody noticed.
+func TestDivSecondsTruncatesTowardZero(t *testing.T) {
+	five, _ := NoAccrual.AddMul(MustFromInt(5), 1)
+	if got, err := five.DivSeconds(2); err != nil || got.Int64() != 2 {
+		t.Fatalf("5/2 = %v (err %v), want 2 — truncation, not rounding", got.Int64(), err)
+	}
+	// A month's rate accrued for one second less than the month, spread back over
+	// the month: 2899, not 2900. The customer is never over-charged by rounding.
+	const month = int64(31 * 86400)
+	a, err := NoAccrual.AddMul(MustFromInt(2900), month-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.DivSeconds(month)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Int64() != 2899 {
+		t.Fatalf("a month minus one second at 2900¢ spread back = %d, want 2899", got.Int64())
+	}
+}

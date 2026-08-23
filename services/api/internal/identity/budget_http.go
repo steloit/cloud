@@ -39,10 +39,16 @@ func (s *Service) mtdSpend(ctx context.Context, orgID string) (planFee, metered,
 	if err != nil {
 		return 0, 0, 0, err
 	}
+	// Through SpendToDate, not `+=`: it saturates rather than wrapping (O19), and
+	// a negative month-to-date spend reads as "far below the cap", which disables
+	// the hard cap at the moment it is supposed to refuse. Summing the rows first
+	// with a raw += would have wrapped before this function ever saw them.
+	rows := make([]int64, 0, len(usage))
 	for _, u := range usage {
-		metered += u.RateCents
+		rows = append(rows, u.RateCents)
 	}
-	return planFee, metered, billing.SpendToDate(planFee, metered), nil
+	metered = billing.SpendToDate(0, rows...)
+	return planFee, metered, billing.SpendToDate(planFee, rows...), nil
 }
 
 // monthlyRunRate is the org's committed monthly forecast: plan fee + Σ active

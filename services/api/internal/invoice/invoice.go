@@ -76,7 +76,12 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 		lines = append(lines, Line{Description: plan + " plan", Cents: int64(fee), UsageRef: "plan:" + period})
 		total += int64(fee)
 	}
+	// The metered rows are accumulated through billing.SpendToDate below rather
+	// than with `+=` here: it is the SAME arithmetic the hard cap uses (F9, one
+	// arithmetic everywhere) and, since O19, it saturates instead of wrapping. A
+	// negative invoice total is not a number anyone can act on.
 	// one line per metered accrual (the rollup already priced it into rate_cents).
+	metered := make([]int64, 0, len(usage))
 	for _, u := range usage {
 		if u.RateCents == 0 {
 			continue
@@ -85,8 +90,9 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 			Description: u.Meter, Cents: u.RateCents,
 			UsageRef: "meter:" + u.Meter + ":" + period,
 		})
-		total += u.RateCents
+		metered = append(metered, u.RateCents)
 	}
+	total = billing.SpendToDate(total, metered...)
 
 	linesJSON, err := json.Marshal(lines)
 	if err != nil {
