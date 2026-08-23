@@ -178,17 +178,28 @@ jobs:
           # enables NetworkPolicy enforcement, which US-3.3a found nothing did
           # while every manifest and every test looked correct.
           #
-          # `shell: bash` and the emptiness guard are both load-bearing. GitHub's
-          # default is `bash -e {0}` with NO pipefail, and `-e` does not fire on a
-          # failing command substitution in a `for` header — so a renamed tests/
-          # directory, a moved module, or a broken git would skip the loop
-          # entirely and reach `exit $fail` with 0. That is failing OPEN exactly
-          # when the gate did not run, the same shape the authority-paths step
-          # above documents about itself.
+          # `shell: bash` is load-bearing: GitHub's default is `bash -e {0}` with NO
+          # pipefail. (`shell: bash` is already `-eo pipefail`, so the explicit
+          # set below is redundant and kept only so the property is visible here.)
+          #
+          # DISCOVERY IS COMPARED AGAINST AN EXPECTED SET, not merely checked for
+          # emptiness. Review measured both holes in the emptiness-only version:
+          # deleting ONE env's tests/ directory left the gate green over the
+          # remaining two, and hardcoding `dirs=infra/modules/gke-cell` passed the
+          # Go pin as well — in both cases an env silently stopped being covered.
+          # Every directory that instantiates the cell module must own a test.
           set -o pipefail
           dirs=$(git ls-files 'infra/**/*.tftest.hcl' 'infra/**/*.tftest.json'                    | xargs -n1 dirname | sed 's#/tests$##' | sort -u)
-          if [ -z "$dirs" ]; then
+          expected=$(git grep -l 'module "gke_cell"' -- 'infra/envs/*/main.tf'                    | xargs -n1 dirname | sort -u; echo infra/modules/gke-cell)
+          expected=$(echo "$expected" | sort -u)
+          if [ -z "$dirs" ] || [ -z "$expected" ]; then
             echo "::error::no terraform test files found — this gate did not run"
+            exit 1
+          fi
+          missing=$(comm -23 <(echo "$expected") <(echo "$dirs"))
+          if [ -n "$missing" ]; then
+            echo "::error::these directories instantiate the cell but own no terraform test:"
+            echo "$missing"
             exit 1
           fi
           fail=0
@@ -218,6 +229,12 @@ jobs:
           assert d['metadata']['name'] == 'default', d['metadata']['name']
           assert d['spec']['cluster']['deny']['log'] is True
           assert d['spec']['cluster']['allow']['log'] is False
+          # `delegate` is the OTHER leaf on each side and was pinned by nothing:
+          # flipping either was green. It hands per-namespace override to
+          # NetworkLoggingConfig objects; false keeps this cluster-scoped object
+          # the single answer, which is what "deny is logged everywhere" needs.
+          assert d['spec']['cluster']['deny']['delegate'] is False
+          assert d['spec']['cluster']['allow']['delegate'] is False
           PY
       - name: Spike scripts + manifests (when present)
         run: |

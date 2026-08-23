@@ -46,9 +46,17 @@ Calico means giving up denied-connection logging, and with it the one signal tha
 would have caught US-3.3a's defect from the outside: a default-deny namespace that
 produces *no* denials at all is a namespace whose policies are being ignored.
 
-**Then the timing.** Google documents no migration path for an existing Standard
-cluster, so this is create-time-only — free before the first cell exists, a full
-cluster-and-node-pool rebuild afterwards. Calico is the option whose cost does
+**Then the timing.** Google documents this explicitly — "GKE Dataplane V2 can only
+be enabled when creating a new cluster. Existing clusters cannot be upgraded to use
+GKE Dataplane V2" — so it is create-time-only: free before the first cell exists,
+and afterwards worse than a rebuild. Measured with hashicorp/google 6.50.0 against
+a fabricated state: Terraform plans the CLUSTER as `must be replaced`
+(`~ datapath_provider ... # forces replacement`) but a dependent node pool whose
+`cluster` is a literal name as `will be updated in-place` — `1 to add, 1 to change,
+1 to destroy`. GKE destroys the pools with the cluster regardless, so they are gone
+in fact and un-recreated in state, and recovery is a manual state repair. An
+earlier revision of this ADR said "a full cluster-and-node-pool rebuild", which
+understates it; the correction strengthens the argument rather than weakening it. Calico is the option whose cost does
 *not* depend on that premise, which is a real argument for it; the counter is that
 the premise is **verified** — as of 2026-08-23, `gcloud container clusters list
 --project=steloit-dev` returns `[]` and `gs://steloit-dev-tfstate/dev/default.tfstate`
@@ -58,6 +66,17 @@ timing difference is one-off.
 
 ## Consequences
 
+**One adjacent create-time-only setting, made explicit.** Review asked whether
+Dataplane V2 requires VPC-native. Google's Dataplane V2 page does not list it as a
+prerequisite, so no requirement is claimed here. What is documented is that
+"VPC-native is the default network mode for all new clusters in any available
+version and created through any surface", with routes-based still selectable — and
+network mode, like the datapath, cannot be changed after creation. The module now
+states `ip_allocation_policy {}` rather than inheriting the default, so a change in
+that default, or someone copying the module, cannot silently produce a routes-based
+cell. No secondary ranges are pinned: choosing pod/service CIDRs is a capacity
+decision for the first real cell.
+
 **Accepted known issues**, from Google's own list:
 
 - **NetworkPolicy `endPort` (port RANGES) is silently not enforced.** This is the
@@ -65,6 +84,9 @@ timing difference is one-off.
   and does not apply. The current D7 set uses single ports only; US-3.3c carries
   an AC that `tenancy.Render` must *refuse* a policy carrying `endPort`, so the
   constraint has an owner where policies are written rather than living in prose.
+  (That task did not exist when this line was first written — it asserted an owner
+  it had not filed. `tasks/e3-provisioning/US-3.3c.md` exists now and carries the
+  AC; the citation resolves.)
 - Hairpin connections can drop; `hostPort` conflicts with the NodePort range.
   Neither affects the D7 set (no `hostPort`).
 

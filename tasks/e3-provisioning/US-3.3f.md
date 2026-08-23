@@ -12,11 +12,18 @@ module: M4 Provisioning
 contexts: [provisioning]
 files:
   - infra/modules/gke-cell/**
+  - infra/envs/dev/tests/**
+  - infra/envs/cell0/tests/**
   - infra/k8s/policy/**
+  - docs/adr/0015-cell-datapath-dataplane-v2.md
+  - services/api/internal/platform/testenv/wiring_test.go
   - .github/workflows/ci.yml
+  - tasks/e3-provisioning/US-3.3c.md
   - tasks/e3-provisioning/US-3.3f.md
 verify:
   - "cd \"$(git rev-parse --show-toplevel)/infra/modules/gke-cell\" && terraform init -backend=false && terraform test"
+  - "cd \"$(git rev-parse --show-toplevel)/infra/envs/dev\" && terraform init -backend=false && terraform test"
+  - "cd \"$(git rev-parse --show-toplevel)/infra/envs/cell0\" && terraform init -backend=false && terraform test"
   - "terraform fmt -check -recursive infra"
 owner: agent
 ---
@@ -118,7 +125,10 @@ CI job, and asserts against the planned resource rather than the file's text.
 Making the module testable required one production change: `output
 "cluster_ca_certificate"` indexed `master_auth[0]`, a computed block list that is
 empty until the API answers, so the module could not be evaluated by **any**
-harness short of a real apply. It is `one()` + `try()` now — which is also the
+harness short of a real apply. It is a splat + `one()` now, with **no** `try()` — the
+`try()` was itself removed as a finding (it swallowed every error in the
+expression, including `one()`'s own), and an earlier version of this Outcome
+described the superseded revision. Which is also the
 better failure (a null that both envs' `base64decode()` rejects loudly, rather than a plan-time
 index error inside the module — measured; an earlier revision claimed "an empty
 kubeconfig field", which is simply false).

@@ -40,3 +40,21 @@ output "datapath_provider" {
 output "deletion_protection" {
   value = google_container_cluster.cell.deletion_protection
 }
+
+# The OTHER half of the enforcement invariant, surfaced for the same reason
+# datapath_provider is: ADVANCED_DATAPATH and network_policy are mutually
+# exclusive, and the module test can only prove the module's own literal. Review
+# measured the gap — adding a `legacy_network_policy` variable and setting it in
+# dev left the module test, BOTH env tests, fmt and both validates green, while
+# the real apply is rejected with "Enabling NetworkPolicy for clusters with
+# DatapathProvider=ADVANCED_DATAPATH is not allowed". A plan-level test has no
+# backstop after the plan for that combination, so both halves must be asserted
+# where the deployed artifact is composed.
+output "network_policy" {
+  value = google_container_cluster.cell.network_policy
+}
+
+# VPC-native is create-time only; surfaced so each env asserts what IT plans.
+output "ip_allocation_policy" {
+  value = google_container_cluster.cell.ip_allocation_policy
+}

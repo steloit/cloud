@@ -29,6 +29,11 @@ apiVersion: networking.gke.io/v1alpha1
 kind: NetworkLogging
 metadata:
   name: default
+# `delegate: false` on BOTH sides is deliberate and is asserted in CI. It means
+# per-namespace NetworkLoggingConfig objects may NOT override this cluster-scoped
+# one, so "every denied connection is logged" holds for every namespace including
+# ones created later — a tenant namespace cannot opt itself out of the audit
+# trail. Both fields were previously unpinned and flipping either was green.
 spec:
   cluster:
     allow:

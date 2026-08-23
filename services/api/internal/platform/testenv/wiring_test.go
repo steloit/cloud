@@ -97,8 +97,24 @@ var ciGates = []ciGate{
 	},
 	{
 		task: "US-3.3f", job: "infra",
-		runContains: "exit $fail",
-		why:         "the loop reports per-module failures ONLY through this; `exit 0` fails the gate OPEN",
+		// CONTIGUOUS, deliberately. A bare "exit $fail" needle is satisfied while the
+		// gate is neutered: review measured that inserting `fail=0` on the line before
+		// it leaves every registered needle intact — `|| fail=1`, `exit $fail`, the
+		// "did not run" message — and the step exits 0 with all three terraform suites
+		// failing. Matching the loop's tail THROUGH the exit means any statement
+		// slipped in between breaks the match. This is the same lesson the O6f entry
+		// below records for authority-paths, applied to the step that repeated it.
+		runContains: "  echo \"::endgroup::\"\ndone\nexit $fail",
+		why: "the loop reports per-module failures ONLY through this; `exit 0` — or a " +
+			"`fail=0` inserted between the loop and the exit — fails the gate OPEN",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "these directories instantiate the cell but own no terraform test",
+		why: "emptiness alone is not coverage: deleting ONE env's tests/ directory left the " +
+			"gate green over the remaining dirs, and hardcoding discovery to the module " +
+			"passed too. Discovery is compared against the set of dirs that instantiate " +
+			"the cell, so an env cannot silently stop being covered.",
 	},
 	{
 		task: "US-3.3f", job: "infra",

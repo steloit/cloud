@@ -64,8 +64,18 @@ resource "google_container_cluster" "cell" {
   # alternative is Calico via `network_policy`, which we do not use.
   #
   # THIS IS A CREATE-TIME DECISION (ADR-0015). Google documents no migration path
-  # for an existing Standard cluster; changing it later rebuilds the cluster and
-  # its node pools.
+  # for an existing Standard cluster: "GKE Dataplane V2 can only be enabled when
+  # creating a new cluster. Existing clusters cannot be upgraded to use GKE
+  # Dataplane V2."
+  #
+  # What Terraform actually plans is WORSE than "rebuilds the cluster and its
+  # node pools", which is what an earlier revision of this comment said. Measured
+  # with hashicorp/google 6.50.0 against a fabricated state: the cluster shows
+  # `must be replaced` / `~ datapath_provider ... # forces replacement`, but a
+  # dependent node pool whose `cluster` is a literal name shows `will be updated
+  # in-place` — `Plan: 1 to add, 1 to change, 1 to destroy`. The API destroys the
+  # pools along with the cluster, so they are gone in fact and un-recreated in
+  # state. Recovery is a manual state repair, not a re-apply.
   #
   # The premise is that no cell exists yet. VERIFIED 2026-08-23 against the live
   # project, not inferred: `gcloud container clusters list --project=steloit-dev`
@@ -89,6 +99,26 @@ resource "google_container_cluster" "cell" {
   # connections can drop; hostPort conflicts with the NodePort range. None of these
   # affect the D7 policy set, which uses single ports and no hostPort.
   datapath_provider = "ADVANCED_DATAPATH"
+
+  # VPC-NATIVE, STATED RATHER THAN INHERITED — and this is the same class of
+  # decision as the line above: create-time only, silently defaulted, expensive
+  # to discover later.
+  #
+  # Google's Dataplane V2 page does not list VPC-native as a prerequisite, so
+  # this is NOT claimed as a requirement. What is documented is that "VPC-native
+  # is the default network mode for all new clusters in any available version and
+  # created through any surface", with routes-based still selectable. An empty
+  # ip_allocation_policy block is the provider's way of asking for VPC-native
+  # with GKE-managed secondary ranges — which is what we would get by default
+  # today, written down so that a change in the default, or someone copying this
+  # module, cannot silently produce a routes-based cell that then cannot be
+  # converted.
+  #
+  # No secondary ranges are pinned here on purpose: infra/modules/network defines
+  # none, and choosing pod/service CIDRs is a capacity decision for the first real
+  # cell, not a default to bake in now. Raised by review as an adjacent
+  # create-time-only setting; recorded rather than left implicit.
+  ip_allocation_policy {}
 }
 
 # Core pool: api + operators + observability. Floor 1 (A1.6) — never zero.

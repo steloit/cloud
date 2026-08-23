@@ -15,9 +15,11 @@
 # are currently zero clusters in the project. This is the configuration half,
 # asserted structurally — the honest boundary of what a plan can tell you.
 
-# The mock returns zero-values for computed attributes, and this module's outputs
-# index master_auth[0]. Supplying it keeps the plan whole so the assertions below
-# are about the cluster's CONFIGURATION rather than about mock plumbing.
+# No overrides are needed here: the module's cluster_ca_certificate output is a
+# splat + one(), which yields null over the mock's empty master_auth rather than
+# erroring. (An earlier revision carried override_resource scaffolding and a
+# comment about "master_auth[0]"; both the indexing and the scaffolding are gone,
+# and the comment describing them outlived them by a round.)
 mock_provider "google-beta" {}
 mock_provider "google" {}
 
@@ -98,12 +100,53 @@ run "the_cell_enforces_network_policy" {
   }
 
   # gVisor on the pool that runs customer code. INF-001 D7: customer code ALWAYS
-  # runs under GKE Sandbox. Removing sandbox_config, and removing the sandbox
-  # taint, were both green — this file claims the D7 isolation scope and covered
-  # one third of it.
+  # runs under GKE Sandbox.
+  #
+  # ALL THREE PARTS ARE ASSERTED, because sandbox_config alone is a third of the
+  # mechanism and the other two were measured green: removing the `sandbox` taint
+  # (nothing then keeps ordinary pods off the sandboxed pool, and nothing keeps
+  # customer pods ON it), and removing image_type = "COS_CONTAINERD", which the
+  # module's own comment calls "required by gVisor sandbox". An earlier revision
+  # of this comment NAMED the taint as a green mutation and then did not close
+  # it, which is worse than not having measured it.
   assert {
     condition     = one(one(google_container_node_pool.workload.node_config).sandbox_config).sandbox_type == "gvisor"
     error_message = "the workload pool does not run gVisor — INF-001 D7 requires customer code to run under GKE Sandbox."
+  }
+
+  assert {
+    condition = contains([
+      for t in one(google_container_node_pool.workload.node_config).taint :
+      "${t.key}=${t.value}:${t.effect}"
+    ], "sandbox=gvisor:NO_SCHEDULE")
+    error_message = "the workload pool has no sandbox=gvisor:NO_SCHEDULE taint — gVisor is configured on a pool that anything can land on, so the isolation is advisory."
+  }
+
+  assert {
+    condition = contains([
+      for t in one(google_container_node_pool.db_storage.node_config).taint :
+      "${t.key}=${t.effect}"
+    ], "storage=NO_SCHEDULE")
+    error_message = "the db-storage pool has no storage NO_SCHEDULE taint — general workloads can land on the stateful pool."
+  }
+
+  assert {
+    condition     = one(google_container_node_pool.workload.node_config).image_type == "COS_CONTAINERD"
+    error_message = "the workload pool is not COS_CONTAINERD, which gVisor sandboxing requires."
+  }
+
+  # Least privilege is asserted through the SCOPES as well as the identity: the
+  # node service account assertion above is green with oauth_scopes = [] on the
+  # core and db-storage pools, so it pins who the node is and not what it may do.
+  assert {
+    condition = alltrue([
+      for p in [
+        google_container_node_pool.core,
+        google_container_node_pool.workload,
+        google_container_node_pool.db_storage,
+      ] : contains(one(p.node_config).oauth_scopes, "https://www.googleapis.com/auth/cloud-platform")
+    ])
+    error_message = "a node pool has lost the cloud-platform oauth scope; Workload Identity resolves permissions per-pod, but the node itself still needs this scope to function."
   }
 
   # A1.6's floor-1 invariant, stated in main.tf and in the variable description
