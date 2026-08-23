@@ -13,11 +13,11 @@ func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
 	r := newRenderer(a)
 	// create both objects first
-	if _, err := r.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	// now tear down
-	if _, err := r.Converge(context.Background(), svc("svc_db01", "deleting")); err != nil {
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting")); err != nil {
 		t.Fatal(err)
 	}
 	// the ScheduledBackup must not survive the cluster (it would keep firing
@@ -25,7 +25,7 @@ func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
 	if len(a.deleted) < 2 {
 		t.Fatalf("teardown deleted %d object(s); the driver rendered 2 (Cluster + ScheduledBackup): %v", len(a.deleted), a.deleted)
 	}
-	for _, ns := range []string{"env-9f3c1a2b/Cluster/svc-db01", "env-9f3c1a2b/ScheduledBackup/svc-db01-nightly"} {
+	for _, ns := range []string{"env-0123456789abcdef0123456789abcdef/Cluster/svc-0123456789abcdef0123456789abcdef", "env-0123456789abcdef0123456789abcdef/ScheduledBackup/svc-0123456789abcdef0123456789abcdef-nightly"} {
 		var found bool
 		for _, d := range a.deleted {
 			if d == ns {
@@ -50,7 +50,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 	r := newRenderer(a)
 	ctx := context.Background()
 
-	status, err := r.Converge(ctx, svc("svc_db01", "provisioning"))
+	status, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 		t.Fatalf("a failed CNPG phase must report failed, got %q", status)
 	}
 	liveAfterFailure := len(a.live)
-	firstManifests := append([][]byte(nil), a.applied["env-9f3c1a2b"]...)
+	firstManifests := append([][]byte(nil), a.applied["env-0123456789abcdef0123456789abcdef"]...)
 	if liveAfterFailure == 0 {
 		// Guard against a vacuous pass: if the failed attempt applied nothing,
 		// the "no new objects" check below compares 0 to 0 and proves nothing.
@@ -67,7 +67,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 
 	// The retry: same desired state, cluster now healthy.
 	a.phase = "Cluster in healthy state"
-	status, err = r.Converge(ctx, svc("svc_db01", "provisioning"))
+	status, err = r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 	if a.applies != 2 {
 		t.Fatalf("the retry applied %d times, want 2 — a retry that skips the apply repairs nothing", a.applies)
 	}
-	second := a.applied["env-9f3c1a2b"]
+	second := a.applied["env-0123456789abcdef0123456789abcdef"]
 	if len(second) != len(firstManifests) {
 		t.Fatalf("the retry rendered %d objects, the first attempt %d", len(second), len(firstManifests))
 	}
@@ -103,16 +103,29 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 		if envObjs[k] {
 			continue
 		}
-		if !strings.Contains(k, "svc-db01") {
+		if !strings.Contains(k, "svc-0123456789abcdef0123456789abcdef") {
 			t.Fatalf("retry left an object under an unexpected name: %s", k)
 		}
 	}
 }
 
 // testNamespace is the ADR-0012 shape, sanitize(env_id) — e.g. env_9f3c1a2b
-// becomes env-9f3c1a2b. The fixtures used the pre-ADR-0012 `proj--env` form
+// becomes env-0123456789abcdef0123456789abcdef. The fixtures used the pre-ADR-0012 `proj--env` form
 // (`acme--prod`), which the platform can no longer produce.
-const testNamespace = "env-9f3c1a2b"
+// PRODUCTION-SHAPED IDENTIFIERS. ids.New mints a 32-hex suffix, so a real
+// namespace is `env-<32 hex>` (36 chars) and a real service id `svc_<32 hex>`.
+// These fixtures were `env-9f3c1a2b` (12) and `svc_db01` (8) — three times
+// shorter than anything the platform can produce — so every rule keyed on
+// identifier LENGTH was unpinned. Four such mutations survived, two of which
+// switched off this task's headline behaviours for every real environment: a
+// Delete that no-ops above 12 chars, and a teardown that deletes nothing and
+// still reports gone.
+//
+// Provenance worth recording: ADR-0012 writes the shape as `env_9f3c… →
+// env-9f3c…` with a typographic ELLIPSIS, and the fixture read that elision as
+// a literal. An elided example became the test data (AGENTS.md: examples are
+// normative).
+const testNamespace = "env-0123456789abcdef0123456789abcdef"
 
 // envObjectKeys is the set of objects that belong to the ENVIRONMENT rather than
 // to any service — today the namespace, and whatever US-3.3c adds beside it.
@@ -141,13 +154,13 @@ func TestDeletingAFailedServiceLeavesNothingBehind(t *testing.T) {
 	r := newRenderer(a)
 	ctx := context.Background()
 
-	if _, err := r.Converge(ctx, svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.live) == 0 {
 		t.Fatal("the failed attempt applied nothing — this test would prove nothing")
 	}
-	status, err := r.Converge(ctx, svc("svc_db01", "deleting"))
+	status, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +208,7 @@ func TestTeardownRefusesANamespaceItWouldNotHaveCreated(t *testing.T) {
 		"env-x\nmetadata: injected",
 	} {
 		a := newFakeApplier("Cluster in healthy state")
-		s := svc("svc_db01", "deleting")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
 		s.Desired["namespace"] = bad
 
 		if _, err := newRenderer(a).Converge(context.Background(), s); err == nil {
@@ -209,10 +222,10 @@ func TestTeardownRefusesANamespaceItWouldNotHaveCreated(t *testing.T) {
 	// And the legitimate teardown still works, or the above would be satisfied by
 	// a Converge that refuses every deletion.
 	a := newFakeApplier("Cluster in healthy state")
-	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
-	s := svc("svc_db01", "deleting")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
 	if status, err := newRenderer(a).Converge(context.Background(), s); err != nil {
 		t.Fatalf("a legitimate teardown was refused: %v", err)
 	} else if status != "gone" {
