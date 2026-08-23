@@ -48,9 +48,7 @@ func bootConfig(getenv func(string) string) (cell, base, token string, err error
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	if err := run(ctx, os.Getenv, log); err != nil {
+	if err := run(context.Background(), os.Getenv, log); err != nil {
 		log.Error("boot failed", "err", err)
 		os.Exit(1)
 	}
@@ -64,13 +62,21 @@ func main() {
 // agent would then boot with an empty cell, base and token, which is the exact
 // "every converge fails and nothing is written back" failure the guard exists
 // to prevent.
-// ctx is a parameter, not created inside, so a test can hand run an
-// already-cancelled one. Without that, any mutation that lets a bad config
-// through does not FAIL the test — it reaches a.Run and blocks until Go's 10m
-// test timeout. Measured: mutation 33 (deleting the ValidateCell call) turned a
-// 5-second suite into a 10-minute one. A guard whose failure mode is a hang is
-// still caught, but it is caught the most expensive way available.
-func run(ctx context.Context, getenv func(string) string, log *slog.Logger) error {
+// parent is a parameter so a test can hand run an already-cancelled context.
+// Without it, any mutation that lets a bad config through does not FAIL the test
+// — it reaches a.Run and blocks until Go's 10m default timeout. Measured:
+// mutation 33 (deleting the ValidateCell call) turned a 5-second suite into a
+// 10-minute one at 0% CPU. A guard whose failure mode is a hang is still caught,
+// but the most expensive way available.
+//
+// The signal handler is still installed HERE, after boot, exactly where it was
+// before this refactor. Hoisting it into main() looked equivalent and was not: a
+// SIGTERM arriving during boot would be absorbed by the context, boot would
+// finish, a.Run would return at once and the process would exit **0** — an
+// orchestrator reads that as "completed", where the default disposition would
+// have killed it. Deriving from `parent` keeps production behaviour identical
+// and still lets a cancelled parent short-circuit the loop.
+func run(parent context.Context, getenv func(string) string, log *slog.Logger) error {
 	cell, base, token, err := bootConfig(getenv)
 	if err != nil {
 		return err
@@ -101,6 +107,9 @@ func run(ctx context.Context, getenv func(string) string, log *slog.Logger) erro
 		log.Warn("renderer: ACK (no cluster — desired state is acknowledged, NOTHING is provisioned)", "reason", kerr)
 	}
 	a := agent.New(cell, cp, renderer, log)
+
+	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	log.Info("cell-agent starting", "cell", cell, "control_plane", base, "interval", interval.String())
 	a.Run(ctx, interval)

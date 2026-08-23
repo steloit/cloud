@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The boot-time validation must be pinned where it lives. Deleting the
@@ -98,10 +100,44 @@ func TestRunRefusesToStartOnABadBootConfig(t *testing.T) {
 		})
 	}
 
-	// And in-cluster credentials are still required when a cluster is present.
-	// Outside a cluster kube.NewInCluster fails, so run takes the ACK branch and
-	// would block in a.Run — which is why this test drives only the error paths.
-	// The ACK branch is covered by the positive control in bootConfig's test.
+}
+
+// run's SUCCESS path, which the error cases above cannot reach. Four of run's
+// decisions were unpinned survivors: the ACK fallback renderer, the
+// POLL_INTERVAL_SECONDS parse, the in-cluster credential requirement, and the
+// signal context. An earlier comment here claimed "the ACK branch is covered by
+// the positive control in bootConfig's test" — bootConfig's test never calls
+// run(), so that annotation was false. Two of the four are pinned here; the
+// in-cluster branch needs a cluster and is recorded in the Outcome instead.
+func TestRunTakesTheAckBranchAndHonoursThePollInterval(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	env := map[string]string{
+		"RECONCILER_CELL":       "cell-7",
+		"CONTROL_PLANE_URL":     "http://cp",
+		"RECONCILER_SECRET":     "s3cret",
+		"POLL_INTERVAL_SECONDS": "3",
+	}
+	if err := run(ctx, func(k string) string { return env[k] }, log); err != nil {
+		t.Fatalf("run failed on a valid configuration: %v", err)
+	}
+	out := buf.String()
+	// Outside a cluster kube.NewInCluster fails, so run must fall back to ACK —
+	// and SAY SO. A silent fallback looks like a working agent that provisions
+	// nothing, which is the whole reason the branch logs at Warn.
+	if !strings.Contains(out, "NOTHING is provisioned") {
+		t.Fatalf("run did not announce the ACK fallback: %s", out)
+	}
+	// POLL_INTERVAL_SECONDS must reach the loop, not be parsed and dropped.
+	if !strings.Contains(out, "3s") {
+		t.Fatalf("POLL_INTERVAL_SECONDS=3 did not reach the interval: %s", out)
+	}
+	if !strings.Contains(out, "cell-7") {
+		t.Fatalf("the validated cell did not reach the agent: %s", out)
+	}
 }
 
 // main() must EXIT NON-ZERO when run() returns an error.
@@ -120,7 +156,16 @@ func TestMainExitsNonZeroWhenRunFails(t *testing.T) {
 		main()
 		return // unreachable if main exits as it must
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=TestMainExitsNonZeroWhenRunFails")
+	// A DEADLINE, because this test's own failure mode is the one it exists to
+	// catch. Without it, any mutation that lets a bad config through leaves the
+	// child booting into a.Run with a real signal context, and CombinedOutput
+	// blocks until Go's 10m test timeout at ~1% CPU — mutation 33's failure mode,
+	// moved from the test that was fixed into the test added to replace it.
+	// WaitDelay bounds the wait for the child's pipes after the context fires.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestMainExitsNonZeroWhenRunFails")
+	cmd.WaitDelay = 5 * time.Second
 	cmd.Env = append(os.Environ(),
 		"CELL_AGENT_MAIN_UNDER_TEST=1",
 		"RECONCILER_CELL=cell_0", // not an RFC1123 label — bootConfig must refuse it
@@ -129,6 +174,10 @@ func TestMainExitsNonZeroWhenRunFails(t *testing.T) {
 	)
 	out, err := cmd.CombinedOutput()
 
+	if ctx.Err() != nil {
+		t.Fatalf("main did not exit within the deadline — it booted past validation and blocked "+
+			"in a.Run. output=%s", out)
+	}
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) {
 		t.Fatalf("main exited 0 on an unusable configuration — a crash-looping agent that "+

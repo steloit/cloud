@@ -430,21 +430,31 @@ metadata:
 	}
 }
 
-// EVERY manifest at EVERY index, not just the first.
+// EVERY manifest at EVERY index, at ANY batch length.
 //
-// Both of Apply's guards were pinned only for a single-element slice, and the
-// covered element is the worst possible one: Converge passes
-// [tenancy Namespace, Cluster, ScheduledBackup], so element 0 is the manifest
-// the agent writes itself and elements 1..n are the driver's — the only ones
-// that carry a metadata.namespace at all.
+// The history of this test is the finding. First it drove one element, so
+// restricting either guard to `manifests[0]` was green. Then it drove two, so
+// `_mi < 2` was green. Then it drove up to four, so **`_mi < 4` was green** — a
+// hardcoded ceiling in a test is a constant a mutation can simply match. And the
+// batch is known to be growing: commit 7e94f26 on this branch had tenancy.Render
+// returning six manifests, so Converge applied eight, and US-3.3c restores at
+// least three NetworkPolicies.
 //
-// The first repair drove a 2-element slice, which pinned index 1 and nothing
-// else: restricting either guard to `_mi < 2` still survived, and production
-// passes THREE. The offender's index is parameterised here so the property is
-// "any index", not "the index I happened to write a case for".
-func TestApplyGuardsEveryManifestAtEveryIndex(t *testing.T) {
-	filler := func(name string) []byte {
-		return []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: " + name + "\n  namespace: env-mine\n")
+// So the bound is swept rather than chosen. Converge's element 0 is the manifest
+// the agent writes itself; 1..n are the driver's, the only ones carrying a
+// metadata.namespace — which is why "the first one is checked" is the least
+// useful place for a guard to hold.
+func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
+	// 16 is twice the largest batch this branch has ever applied (commit 7e94f26
+	// rendered six tenancy manifests plus two service ones). It is still a
+	// ceiling: a guard skipping index >= 16 survives this test. Stated rather
+	// than papered over — the fix for a hardcoded bound of 4 is a swept bound,
+	// not a claim of exhaustiveness. A property test over random n is the real
+	// close, and is recorded as a gap.
+	const maxLen = 16
+
+	filler := func(i int) []byte {
+		return []byte(fmt.Sprintf("apiVersion: v1\nkind: Secret\nmetadata:\n  name: ok%d\n  namespace: env-mine\n", i))
 	}
 	offenders := map[string]struct {
 		yaml  []byte
@@ -476,15 +486,13 @@ metadata:
 `), "cluster-scoped"},
 	}
 
-	// Slice lengths up to 4 — Converge applies 3 today, and the guard must not
-	// depend on how many the driver happens to render.
 	for label, off := range offenders {
-		for n := 1; n <= 4; n++ {
+		for n := 1; n <= maxLen; n++ {
 			for idx := 0; idx < n; idx++ {
 				t.Run(fmt.Sprintf("%s/len%d/at%d", label, n, idx), func(t *testing.T) {
 					manifests := make([][]byte, n)
 					for i := range manifests {
-						manifests[i] = filler(fmt.Sprintf("ok%d", i))
+						manifests[i] = filler(i)
 					}
 					manifests[idx] = off.yaml
 
@@ -497,7 +505,15 @@ metadata:
 						t.Fatalf("Apply accepted an offending manifest at index %d of %d", idx, n)
 					}
 					if !strings.Contains(err.Error(), off.names) {
-						t.Fatalf("the error must name the defect of the manifest at index %d: %v", idx, err)
+						t.Fatalf("the error must name the defect at index %d: %v", idx, err)
+					}
+					// ABORT, do not merely refuse. Namespace-first ordering is
+					// load-bearing, so continuing past a refused manifest would
+					// apply everything behind it — a refused Namespace with the
+					// Cluster written anyway. Exactly idx manifests precede the
+					// offender, so exactly idx may have been sent.
+					if len(got) != idx {
+						t.Fatalf("Apply sent %d manifests, want %d — it did not abort at the offender", len(got), idx)
 					}
 					for _, g := range got {
 						if strings.Contains(g.body, "env-victim") || strings.Contains(g.body, "smuggled") ||
@@ -510,17 +526,23 @@ metadata:
 		}
 	}
 
-	// Positive control: a legitimate slice of the same shapes must all apply, or
-	// every case above would be satisfied by an Apply that refuses everything.
-	var got []capture
-	srv := serverCapturing(t, 200, `{}`, &got)
-	c := NewClientForTest(srv.URL, "tok", srv.Client())
-	clean := [][]byte{filler("a"), filler("b"), filler("c")}
-	if err := c.Apply(context.Background(), "env-mine", clean); err != nil {
-		t.Fatalf("a legitimate 3-manifest apply was refused: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 applies, got %d", len(got))
+	// Positive control at every length, or every case above is satisfied by an
+	// Apply that refuses anything past some index.
+	for n := 1; n <= maxLen; n++ {
+		var got []capture
+		srv := serverCapturing(t, 200, `{}`, &got)
+		c := NewClientForTest(srv.URL, "tok", srv.Client())
+		clean := make([][]byte, n)
+		for i := range clean {
+			clean[i] = filler(i)
+		}
+		if err := c.Apply(context.Background(), "env-mine", clean); err != nil {
+			t.Fatalf("a legitimate %d-manifest apply was refused: %v", n, err)
+		}
+		if len(got) != n {
+			t.Fatalf("length %d: expected %d applies, got %d", n, n, len(got))
+		}
+		srv.Close()
 	}
 }
 

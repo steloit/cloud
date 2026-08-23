@@ -87,26 +87,19 @@ So the task's claim held exactly. The live e2e worked because a runbook ran
 
 ## AC 3 is not checked, and why
 
-The AC says **"proven without the runbook's preflight"**. That was ticked on the
-first version of this branch and it should not have been:
-
-- `infra/spike/us33-e2e.sh` **still runs the preflight** (`kubectl get ns || kubectl
-  create ns`). The runbook's NOTE has been corrected, but the preflight itself is
-  left in place deliberately — removing it would make the runbook unrunnable
-  until a cell exists to prove the replacement works.
-- **There is no cell to prove it on.** `gcloud container clusters list
-  --project=steloit-dev --format=json` returns `[]` with exit 0 (a control call,
-  `projects describe` → `steloit-dev ACTIVE`, rules out a silent auth failure).
-  `infra/modules/gke-cell` has never been applied. The US-3.3 live drill ran
-  against a cell that no longer exists.
-- So the evidence for "the namespace is created before anything is applied into
-  it" is a Go test against a fake applier, not a live converge. That is real
-  evidence for the ordering invariant and no evidence at all for the AC as
-  worded.
-
-The live statement is back in `verify:`, marked NOT YET RUN. **US-3.3c** owns
-building a cell with enforcement, and its AC 7 owns turning the runbook into
-something that asserts the boundary rather than creating it.
+The AC says **"proven without the runbook's preflight"**. It was ticked on the
+first version of this branch and should not have been. `infra/spike/us33-e2e.sh`
+still runs the preflight — its NOTE is corrected, but removing the line would make
+the runbook unrunnable until a cell exists to prove the replacement. And **there is
+no cell**: `gcloud container clusters list --project=steloit-dev --format=json`
+returns `[]` with exit 0 (a control call, `projects describe` → `steloit-dev
+ACTIVE`, rules out a silent auth failure), so `infra/modules/gke-cell` has never
+been applied and the US-3.3 live drill ran against a cell that no longer exists.
+The evidence for "the namespace is created before anything is applied into it" is
+a Go test against a fake applier: real evidence for the ordering invariant, none
+at all for the AC as worded. The live statement is back in `verify:`, marked NOT
+YET RUN; US-3.3c AC 7 owns turning the runbook into something that asserts the
+boundary rather than creating it.
 
 ## D7 was implemented and then WITHDRAWN — this is the substance of the task
 
@@ -198,7 +191,29 @@ DELETE URL. `"../../../api/v1/namespaces/kube-system"` was refused on create and
 **accepted on teardown**. One owner (`ValidateNamespace`), called from
 `namespaceOf`, which both paths use.
 
-**Three assertions did not assert what they named,** and two annotations were
+**I WEAKENED A TEST AND CLAIMED THE OPPOSITE.**
+`TestCNPGRendererAppliesRenderedManifests`'s D8 assertion — "the namespace came
+from placement, not a guess" — was changed from `objs[0]`, the CNPG Cluster
+specifically, to a substring search over the **concatenated** applied set. Every
+tenancy manifest also contains `namespace: env-9f3c1a2b`, so the assertion was
+answered by a different object than the one it names: mutating
+`driver.Spec.Namespace` to `env-victim`, rendering one tenant's database into
+another tenant's namespace, left the test **GREEN**. The branch described this
+change as making the test stronger. Widening an assertion from one object to a
+set of objects reads as generalisation and is a weakening. It now parses the
+object containing `kind: Cluster` and compares `metadata.namespace` as a value —
+the first repair was still `strings.Contains`, so `env-9f3c1a2b-shadow` survived
+it in isolation.
+
+**One test genuinely was made stronger.**
+`TestDeletingAFailedServiceLeavesNothingBehind` began failing because the env
+objects survive a service teardown — which is correct: the namespace belongs to
+the environment and other services live in it. Rather than exempt them, it now
+pins **both** directions — no *service* object may remain, and the *environment*
+objects **must** — with the env set DERIVED from `tenancy.Render` rather than
+retyped, so an object added there is covered without anyone remembering.
+
+**Three more assertions did not assert what they named,** and two annotations were
 false. The `steloit.dev/cell` label was never pinned to `Spec.Cell` (the test's
 own constant equalled the hardcoded value); the repaired D8 check was still
 `strings.Contains`, so `-shadow` survived;
@@ -266,7 +281,7 @@ it an already-cancelled one; the suite is back to 2.7s.
 | `clusterScoped["Cluster"]`/`["ScheduledBackup"]` = true | RED |
 | remove the cluster-scoped branch entirely | RED |
 | a namespaced kind with no namespace is accepted | RED |
-| the CNPG Cluster rendered into `env-victim` | RED |
+| the CNPG Cluster rendered into `env-victim` | RED *(was GREEN — the weakened D8 assertion)* |
 | `steloit.dev/environment-id` returns with the truncated value | RED |
 | a NetworkPolicy is re-added to `tenancy.Render` | RED |
 | namespace validation relaxed back to a prefix check | RED |
@@ -280,7 +295,7 @@ it an already-cancelled one; the suite is back to 2.7s.
 | `StatefulSet` routed under the CNPG group (the pre-existing trap) | RED |
 | teardown skips namespace validation (traversal reaches DELETE) | RED |
 | the cell label hardcoded instead of read from `Spec.Cell` | RED |
-| the Cluster namespace gains a `-shadow` suffix | RED |
+| the Cluster namespace gains a `-shadow` suffix | RED *(was GREEN — the first D8 repair was a substring)* |
 | an extra label added to the Namespace | RED |
 | `ValidateCell` accepts anything (a bad `RECONCILER_CELL` boots) | RED |
 | `exactlyOneDocument` refuses everything (control) | RED |
@@ -295,6 +310,11 @@ it an already-cancelled one; the suite is back to 2.7s.
 | `main` exits 0 instead of 1 on a boot failure | RED |
 | an `apiVersions` entry removed for a routable kind | RED |
 | `Apply`'s guards restricted to indices 0–1 (`Converge` passes three) | RED *(was GREEN)* |
+| `Apply`'s guards restricted to indices 0–3 | RED *(was GREEN — the length sweep now runs to 16)* |
+| `Apply`'s guards bypassed for batches longer than 4 | RED |
+| `Apply`'s guards restricted to indices 0–14 | RED |
+| `Apply` continues past a refused manifest instead of aborting | RED |
+| `run` ignores `POLL_INTERVAL_SECONDS` / never announces the ACK fallback | RED |
 
 ## NOT done — AC 2 and AC 4
 

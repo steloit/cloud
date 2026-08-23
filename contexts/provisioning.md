@@ -90,8 +90,8 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   Postgres does not promise WHERE evaluation order (so `CASE` is still right), but that was not the mechanism
   — **naming the wrong cause teaches the wrong reflex** (O11).
 - **Verify the no-mutation baseline is GREEN before believing any mutation result.** A module-only
-  `cp -R` is red on arrival for tests reaching outside the module: `TestCKM3EstimateGatedProvisioning`
-  `EndToEnd` and `TestEveryAssistantHandlerGatesOnPolicy` read `../../../../docs/…` and `apps/cli`;
+  `cp -R` is red on arrival for tests reaching outside the module — `TestCKM3EstimateGatedProvisioningEndToEnd`
+  and `TestEveryAssistantHandlerGatesOnPolicy` read `../../../../docs/…` and `apps/cli`;
   `services/cell-agent`'s three `parity_test.go` cases need the repo root. US-3.3a still shipped a
   25-row table from `cp -R` + `go test ./...` + "any FAIL means killed" — baseline RED, **every** row
   unfalsifiable, a re-run found a claimed RED was GREEN. Copy from the repo root (or scaffold one) for
@@ -127,7 +127,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - **Shipping a constraint without finding what enforces it.** US-3.3a rendered D7's default-deny
   NetworkPolicies and proved every manifest correct, but `infra/modules/gke-cell` is GKE Standard with
   no `network_policy`/`ADVANCED_DATAPATH`: the API server stores them, nothing drops a packet. Rendered,
-  stored and enforced are three representations; the suite covered two. Inert-but-wrong is no no-op
+  stored and enforced are three representations; the suite covered one. Inert-but-wrong is no no-op
   either: the allow-set as written denies what CNPG requires (metadata server → Workload Identity, GCS
   → WAL archiving, apiserver → instance manager), so enabling enforcement WOULD have fenced the first
   Postgres pod. It never did — the objects were withdrawn before merge — but the trigger would have sat
@@ -139,11 +139,11 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   kind absent from the consumer must be REFUSED, and the two key sets asserted EQUAL: the first fix's
   own test could not fail from changing the new map, because every kind it tried was missing from both,
   so the refusal came from the path builder, not the guard it named.
-- **Guard every document, every element, and every path — not the first of each.** Three green
-  survivors in one branch. `yaml.Unmarshal` returns only document 1, so a kind-based absence guard and a
+- **Guard every document, every element, and every path — not the first of each.** Four green
+  survivors in one branch, and the index fix needed two attempts of its own. `yaml.Unmarshal` returns only document 1, so a kind-based absence guard and a
   cross-namespace check both passed while a second document carried an arbitrary object elsewhere. Both
-  were then pinned only for a one-element slice, then only for indices 0–1, while `Converge` applies
-  three and elements 1..n are the driver's — parameterise the offender's index. And `Converge`'s
+  were then pinned only for a one-element slice, then indices 0–1, then 0–3 — a hardcoded ceiling in a
+  test is a constant a mutation can match, so SWEEP the length instead of choosing one. And `Converge`'s
   deleting branch returns before the renderer, so a guard in `Render` covered create only:
   `"../../../api/v1/namespaces/kube-system"` was refused on create and accepted on teardown — the path
-  that `fmt.Sprintf`s it into a DELETE URL.
+  that `fmt.Sprintf`s it into a DELETE URL. One owner, called from the accessor both paths use.
