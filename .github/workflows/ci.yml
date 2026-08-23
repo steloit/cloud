@@ -152,10 +152,31 @@ jobs:
         # failure presents as a broken suite rather than as "raise the limit",
         # which is the kind of failure that gets diagnosed wrong.
         run: |
-          cd services/api && go build ./... && go vet ./... && go test -race -timeout 30m ./...
-          cd ../cell-agent && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          # -count=1 DISABLES THE TEST CACHE, and it is load-bearing, not hygiene.
+          #
+          # THE BOUNDARY IS THE MODULE ROOT. Measured three ways (scratch module
+          # and this repo):
+          #   fixture in the test's own package testdata/   -> edit is caught
+          #   fixture elsewhere in the SAME module          -> edit is caught
+          #   fixture OUTSIDE the module root               -> `ok (cached)`,
+          #                                                    edit is INVISIBLE
+          # Live, with this repo's own wiring_test.go (which reads ci.yml five
+          # directories up, outside services/api): disarming a gate is
+          # `ok (cached)` without the flag and FAIL with it.
+          #
+          # actions/setup-go restores GOCACHE across commits keyed on go.sum, so a
+          # PR touching only such a file could report green while broken. It fails
+          # OPEN, which is the direction that matters. services/cell-agent's
+          # parity_test.go reads repo-root infra/k8s/ and is in the same class.
+          #
+          # (An earlier revision of this comment said such a test is simply
+          # UNCACHEABLE in and out of the module. That was wrong in both halves —
+          # from a probe that read two fixtures in one test and never achieved a
+          # cached run at all.)
+          cd services/api && go build ./... && go vet ./... && go test -count=1 -race -timeout 30m ./...
+          cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
           cd ../../packages/contracts/go && go build ./...
-          cd ../../../apps/cli && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          cd ../../../apps/cli && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
   infra:
     runs-on: ubuntu-latest
     steps:

@@ -224,3 +224,30 @@ func TestIsBillingGatesTheStatusesThatHaveAnOpenSpan(t *testing.T) {
 		}
 	}
 }
+
+// The OTHER copy of the agent's legal-edge set.
+//
+// services/cell-agent has a separate go.mod and no go.work, so it cannot import
+// this table; its TestEveryTerminalStatusIsALegalEdgeFromProvisioning duplicates
+// {ready, failed, deleting}. Duplicated knowledge drifts silently unless both
+// copies are pinned, and the first live consequence was
+// `"Waiting for user action": "degraded"` — a status the agent could emit that
+// this machine rejects forever.
+func TestTheAgentsLegalEdgesMatchTheStatusMachine(t *testing.T) {
+	want := map[string]bool{"ready": true, "failed": true, "deleting": true}
+	got := map[string]bool{}
+	for _, s := range transitions["provisioning"] {
+		got[s] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("provisioning transitions to %v; the cell-agent's copy says %v. Update "+
+			"services/cell-agent/internal/render's legalFromProvisioning in the same change, "+
+			"or the agent will emit a status this machine rejects forever.", got, want)
+	}
+	for s := range want {
+		if !got[s] {
+			t.Fatalf("provisioning can no longer transition to %q, but the cell-agent's copy "+
+				"still lists it", s)
+		}
+	}
+}
