@@ -81,15 +81,31 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	return ns, nil
 }
 
+// quotaOf reads the plan's per-environment envelope out of the desired doc.
+//
+// The control plane resolves it from the org's plan (billing.Table.Envelope) and
+// ships the VALUES; the agent never sees a plan name and holds no copy of the
+// plan table. An absent or partial envelope is refused by tenancy.Render rather
+// than defaulted — a missing ceiling is the failure this exists to prevent.
+func quotaOf(svc agent.DesiredService) tenancy.Quota {
+	q := asMap(svc.Desired["quota"])
+	return tenancy.Quota{
+		CPU:     asString(q["cpu"]),
+		Memory:  asString(q["memory"]),
+		Storage: asString(q["storage"]),
+	}
+}
+
 // tenancyManifests renders the environment's namespace.
 //
 // The namespace is passed through, never re-derived: it is the single value the
 // control plane resolved (ADR-0012, env-<environment_id>), and tenancy.Render
 // refuses anything that is not in that shape rather than trusting this caller.
-func (r *CNPGRenderer) tenancyManifests(namespace string) ([][]byte, error) {
+func (r *CNPGRenderer) tenancyManifests(namespace string, svc agent.DesiredService) ([][]byte, error) {
 	objs, err := tenancy.Render(tenancy.Spec{
 		Namespace: namespace,
 		Cell:      r.cell,
+		Quota:     quotaOf(svc),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)
@@ -146,7 +162,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	//
 	// Applied on every converge, not once: SSA is idempotent, and level-triggered
 	// means a namespace or policy deleted out from under us comes back.
-	tenancyObjs, err := r.tenancyManifests(namespace)
+	tenancyObjs, err := r.tenancyManifests(namespace, svc)
 	if err != nil {
 		return "", err
 	}

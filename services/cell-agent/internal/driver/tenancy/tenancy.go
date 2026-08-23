@@ -55,6 +55,12 @@ import (
 // customer. What it buys is that the malformed value never reaches a URL or a
 // YAML document. Surfacing a terminal `failed` writeback is a separate gap and
 // is not claimed here.
+// quantity is the closed grammar the control plane emits (billing.validQuantity
+// accepts whole cores and whole Mi/Gi/Ti). Re-checked HERE because this module
+// interpolates the value into a manifest: the two ends of the wire are separate
+// modules, and a value that got past one is not a value the other may assume.
+var quantity = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)?$`)
+
 var rfc1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // ValidateNamespace is the ONE owner of "is this a namespace we will act on".
@@ -93,7 +99,21 @@ func ValidateCell(cell string) error {
 type Spec struct {
 	Namespace string // env-<environment_id> (ADR-0012)
 	Cell      string
+	Quota     Quota // the plan's per-environment envelope, resolved by the control plane
 }
+
+// Quota is the per-environment resource envelope, as Kubernetes quantity
+// strings. The control plane resolves it from the org's plan and ships the
+// VALUES in the desired doc; this module never sees a plan name and holds no
+// copy of plans.json — the same boundary as pricing.
+type Quota struct {
+	CPU     string // cores, e.g. "8"
+	Memory  string // e.g. "16Gi"
+	Storage string // total PVC capacity, e.g. "100Gi"
+}
+
+// Set reports whether an envelope was supplied at all.
+func (q Quota) Set() bool { return q.CPU != "" || q.Memory != "" || q.Storage != "" }
 
 // Manifest is one rendered object.
 type Manifest struct {
@@ -116,6 +136,23 @@ func Render(s Spec) ([]Manifest, error) {
 		return nil, err
 	}
 
+	// THE ENVELOPE. Absent means the control plane did not resolve one, which is
+	// a bug there — rendering the namespace without a quota would silently give
+	// that environment no ceiling, so it is refused. Partially-set is refused for
+	// the same reason: a ResourceQuota missing a dimension bounds nothing on it.
+	if !s.Quota.Set() {
+		return nil, fmt.Errorf("tenancy: no quota envelope for %s — the control plane resolves "+
+			"it from the org's plan; rendering without one leaves the environment unbounded", s.Namespace)
+	}
+	for dim, v := range map[string]string{
+		"cpu": s.Quota.CPU, "memory": s.Quota.Memory, "storage": s.Quota.Storage,
+	} {
+		if !quantity.MatchString(v) {
+			return nil, fmt.Errorf("tenancy: %s quota %q for %s is not a Kubernetes quantity — "+
+				"the API server would reject the ResourceQuota at apply", dim, v, s.Namespace)
+		}
+	}
+
 	// NOTE ON LABELS — there is deliberately no steloit.dev/environment-id here.
 	// The agent does not receive the environment id; the desired doc carries the
 	// namespace only. US-3.3a labelled it strings.TrimPrefix(namespace, "env-"),
@@ -132,5 +169,57 @@ metadata:
     steloit.dev/cell: %s
     steloit.dev/tenant: "true"
 `, s.Namespace, s.Cell))},
+
+		// THE PER-ENVIRONMENT CEILING.
+		//
+		// Enforced by the API server's ResourceQuota ADMISSION CONTROLLER, which
+		// is in Kubernetes' default-enabled plugin list and needs no add-on. That
+		// distinction is the whole reason this ships while D7's NetworkPolicies do
+		// not: a NetworkPolicy needs a provider that this cell did not have, so
+		// the objects were stored and ignored. A ResourceQuota has no such switch.
+		//
+		// Scoped to REQUESTS, not limits. A quota on `limits.*` forces every pod
+		// to declare a limit, and the only way to supply one for a workload that
+		// declares none is a LimitRange `default` — which then becomes that pod's
+		// hard cap. The CNPG Cluster template declares no resources (US-3.3d owns
+		// deriving them from the sold shape), so a default limit would silently
+		// cap every managed Postgres, and one large enough not to would let a
+		// single pod consume the whole environment. Requests are also what
+		// actually allocate capacity: a pod requesting 1 CPU occupies 1 CPU of
+		// schedulable capacity whether or not it uses it, so bounding requests
+		// bounds the plan's real allocation.
+		{Kind: "ResourceQuota", Name: "env-quota", YAML: []byte(fmt.Sprintf(`apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: env-quota
+  namespace: %s
+spec:
+  hard:
+    requests.cpu: "%s"
+    requests.memory: %s
+    requests.storage: %s
+`, s.Namespace, s.Quota.CPU, s.Quota.Memory, s.Quota.Storage))},
+
+		// THE PAIR. A ResourceQuota constraining requests.cpu/memory REJECTS any
+		// pod that declares neither — that is what enforcement being real means
+		// here, and shipping the quota alone would make the namespace refuse
+		// ordinary pods. LimitRange supplies the missing requests.
+		//
+		// defaultRequest ONLY, deliberately no `default`: a default LIMIT becomes
+		// a hard cap on any container that declares nothing, which is how an
+		// earlier revision would have OOMKilled every managed Postgres at 512Mi.
+		// A container that declares its own requests is unaffected by these.
+		{Kind: "LimitRange", Name: "env-limits", YAML: []byte(fmt.Sprintf(`apiVersion: v1
+kind: LimitRange
+metadata:
+  name: env-limits
+  namespace: %s
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+`, s.Namespace))},
 	}, nil
 }
