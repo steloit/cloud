@@ -76,12 +76,16 @@ func runInfraStep(t *testing.T, script string, terraformExit int, files map[stri
 	// A REAL git repo: a copied worktree shares the original index, so `git
 	// ls-files` would report the source tree's files and every discovery
 	// mutation would be a false pass.
-	for _, args := range [][]string{
-		{"init", "-q"}, {"add", "-A"},
-		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base"},
-	} {
+	// No commit: `git ls-files` reads the INDEX and `git grep` searches tracked
+	// working-tree files, so `init` + `add` is sufficient — and a commit inherits
+	// the developer's global config, which fails outright under
+	// `commit.gpgsign = true` (measured: exit 128, "gpg failed to sign").
+	// GIT_CONFIG_* are pinned for the same reason.
+	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}} {
 		c := exec.Command("git", args...)
 		c.Dir = dir
+		c.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -138,13 +142,30 @@ func TestTheTerraformGateCatchesAnUncoveredCell(t *testing.T) {
 			delete(f, "infra/envs/dev/main.tf")
 			delete(f, "infra/envs/dev/tests/cell_enforces.tftest.hcl")
 		},
-		"the module block relabelled": func(f map[string]string) {
+		// TWO envs, one relabelled. With a single env, relabelling empties the
+		// discovered set and the `-z "$envs"` guard catches it — masking whether
+		// discovery itself is label-based. Measured: with only the one-env case,
+		// swapping the source regexp back to the label SURVIVED.
+		"one of two envs relabelled": func(f map[string]string) {
+			f["infra/envs/prod/main.tf"] = f["infra/envs/dev/main.tf"]
+			f["infra/envs/prod/tests/cell_enforces.tftest.hcl"] =
+				f["infra/envs/dev/tests/cell_enforces.tftest.hcl"]
 			f["infra/envs/dev/main.tf"] = strings.Replace(f["infra/envs/dev/main.tf"],
 				`module "gke_cell"`, `module "cell"`, 1)
 			delete(f, "infra/envs/dev/tests/cell_enforces.tftest.hcl")
 		},
 		"a cell outside infra/envs": func(f map[string]string) {
 			f["infra/cells/cell1/main.tf"] = f["infra/envs/dev/main.tf"]
+		},
+		// Same masking hazard as the relabel: with one env, moving the block to
+		// cell.tf and deleting the tests empties the set. Keep a covered sibling.
+		"one of two envs moved to cell.tf": func(f map[string]string) {
+			f["infra/envs/prod/main.tf"] = f["infra/envs/dev/main.tf"]
+			f["infra/envs/prod/tests/cell_enforces.tftest.hcl"] =
+				f["infra/envs/dev/tests/cell_enforces.tftest.hcl"]
+			f["infra/envs/dev/cell.tf"] = f["infra/envs/dev/main.tf"]
+			delete(f, "infra/envs/dev/main.tf")
+			delete(f, "infra/envs/dev/tests/cell_enforces.tftest.hcl")
 		},
 		"a new env with no tests": func(f map[string]string) {
 			f["infra/envs/stage/main.tf"] = f["infra/envs/dev/main.tf"]
@@ -218,7 +239,12 @@ func TestTheCellCACertificateOutputStillReadsMasterAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read the cell module's outputs: %v", err)
 	}
-	src := string(b)
+	// STRIP COMMENTS FIRST. A `strings.Contains` over the raw file cannot tell
+	// code from a corpse — wiring_test.go says exactly that, 175 lines up, about
+	// the sibling gate — and measured: parking the old expression in a `# was:`
+	// comment and setting `value = ""` passed this test, fmt, validate and all
+	// three terraform suites. The guard had the bypass it exists to prevent.
+	src := stripHCLComments(string(b))
 
 	const want = `one(google_container_cluster.cell.master_auth[*].cluster_ca_certificate)`
 	if !strings.Contains(src, want) {
@@ -234,4 +260,39 @@ func TestTheCellCACertificateOutputStillReadsMasterAuth(t *testing.T) {
 		t.Error("try() is back around the CA output; it swallows one()'s own error and hands " +
 			"a silent null to both envs' provider blocks")
 	}
+}
+
+// stripHCLComments removes `#` and `//` line comments and /* */ blocks, so a
+// text pin asserts what Terraform will EVALUATE rather than what the file
+// happens to contain. It does not try to respect strings containing a `#`:
+// outputs.tf has none, and a parser that is wrong in the permissive direction
+// would reintroduce the hole. If that changes, use hclparse.
+func stripHCLComments(src string) string {
+	var out strings.Builder
+	inBlock := false
+	for _, line := range strings.Split(src, "\n") {
+		if inBlock {
+			if i := strings.Index(line, "*/"); i >= 0 {
+				line, inBlock = line[i+2:], false
+			} else {
+				continue
+			}
+		}
+		if i := strings.Index(line, "/*"); i >= 0 {
+			if j := strings.Index(line[i:], "*/"); j >= 0 {
+				line = line[:i] + line[i+j+2:]
+			} else {
+				line, inBlock = line[:i], true
+			}
+		}
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		out.WriteString(line)
+		out.WriteString("\n")
+	}
+	return out.String()
 }

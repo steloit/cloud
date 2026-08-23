@@ -188,8 +188,21 @@ jobs:
           # remaining two, and hardcoding `dirs=infra/modules/gke-cell` passed the
           # Go pin as well — in both cases an env silently stopped being covered.
           # Every directory that instantiates the cell module must own a test.
+          # `xargs -r` (--no-run-if-empty) is here for CI's shell, not for tidiness,
+          # and it is NOT pinned by the harness — stated rather than left as an
+          # apparent oversight. GNU xargs runs the command once on EMPTY input, so
+          # `| xargs -0 -n1 dirname` exits 123 with "dirname: missing operand" and
+          # `-e` kills the script at the assignment (measured in ubuntu:24.04,
+          # rc=123 with no ::error:: annotation). BSD xargs on macOS does not run
+          # on empty input at all and accepts -r as a no-op, so the two behave
+          # identically here and no local test can tell them apart.
+          #
+          # Losing it therefore fails CLOSED — a red job with an opaque message,
+          # not a green one — which is why this is a diagnostics fix rather than
+          # a hole. The reason it matters is that rc=123 kills the script before
+          # the coverage loop can name the uncovered directory.
           set -o pipefail
-          dirs=$(git ls-files -z 'infra/**/*.tftest.hcl' 'infra/**/*.tftest.json' | xargs -0 -n1 dirname | sed 's#/tests$##' | sort -u)
+          dirs=$(git ls-files -z 'infra/**/*.tftest.hcl' 'infra/**/*.tftest.json' | xargs -0 -r -n1 dirname | sed 's#/tests$##' | sort -u)
           # DISCOVERY KEYS OFF THE MODULE SOURCE, not a label or a filename.
           # Measured: keying on `module "gke_cell"` in `*/main.tf` let three
           # semantics-preserving refactors drop an env out of the expected set
@@ -197,16 +210,17 @@ jobs:
           # loads every *.tf identically), the label renamed, or a cell placed
           # outside infra/envs/. The source path is the one string a cell
           # instantiation cannot omit.
-          envs=$(git grep -lE 'source[[:space:]]*=[[:space:]]*".*modules/gke-cell"' -- 'infra/**/*.tf' ':(exclude)infra/modules/**' | xargs -n1 dirname | sort -u || true)
+          envs=$(git grep -lE 'source[[:space:]]*=[[:space:]]*".*modules/gke-cell"' -- 'infra/**/*.tf' ':(exclude)infra/modules/**' | xargs -r -n1 dirname | sort -u || true)
           if [ -z "$envs" ]; then
             echo "::error::cell discovery found no environments — this gate did not run"
             exit 1
           fi
           expected=$(printf '%s\ninfra/modules/gke-cell\n' "$envs" | sort -u)
-          if [ -z "$dirs" ]; then
-            echo "::error::no terraform test files found — this gate did not run"
-            exit 1
-          fi
+          # There is deliberately no `-z "$dirs"` guard. It was here, and it is the
+          # third branch on this step that turned out to be subsumed by the
+          # per-directory loop below — which reports WHICH directory is uncovered
+          # instead of "something is missing". Dropping it changed no outcome,
+          # measured. Guards that nothing can distinguish are not guards.
           # ONE check per expected directory, not two. A set-difference against
           # $dirs was here and is gone: the loop below catches strictly more
           # (a directory with no tests AND one whose tests assert nothing), so
@@ -217,11 +231,11 @@ jobs:
           # blocks, and a directory with zero test files, BOTH exit 0 with
           # "Success! 0 passed, 0 failed".
           for d in $expected; do
-            if ! grep -rqE '^[[:space:]]*run[[:space:]]+"' "$d"/tests/*.tftest.hcl 2>/dev/null; then
+            if ! grep -rqE '^[[:space:]]*run[[:space:]]+"' "$d"/tests/*.tftest.hcl "$d"/tests/*.tftest.json 2>/dev/null; then
               echo "::error::$d instantiates the cell but owns no terraform test with a run block — it asserts nothing"
               exit 1
             fi
-            if ! grep -rq 'datapath_provider' "$d"/tests/*.tftest.hcl 2>/dev/null; then
+            if ! grep -rq 'datapath_provider' "$d"/tests/*.tftest.hcl "$d"/tests/*.tftest.json 2>/dev/null; then
               echo "::error::$d's terraform test never mentions datapath_provider"
               exit 1
             fi

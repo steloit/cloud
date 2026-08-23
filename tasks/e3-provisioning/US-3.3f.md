@@ -16,7 +16,8 @@ files:
   - infra/envs/cell0/tests/**
   - infra/k8s/policy/**
   - docs/adr/0015-cell-datapath-dataplane-v2.md
-  - services/api/internal/platform/testenv/wiring_test.go
+  - services/api/internal/platform/testenv/**
+  - docs/product/claudedocs/spec-change-proposals.md
   - .github/workflows/ci.yml
   - tasks/e3-provisioning/US-3.3f.md
 verify:
@@ -24,6 +25,7 @@ verify:
   - "cd \"$(git rev-parse --show-toplevel)/infra/envs/dev\" && terraform init -backend=false && terraform test"
   - "cd \"$(git rev-parse --show-toplevel)/infra/envs/cell0\" && terraform init -backend=false && terraform test"
   - "terraform fmt -check -recursive infra"
+  - "cd \"$(git rev-parse --show-toplevel)/services/api\" && go test -count=1 ./internal/platform/testenv/"
 owner: agent
 ---
 
@@ -137,3 +139,48 @@ Four mutations RED on a verified-GREEN baseline: the setting removed, set to
 removed. The first baseline probe reported NOT-GREEN and was itself the bug —
 `grep -cE '^Success!'` anchors at line start and terraform colours its output —
 so the four results were discarded and re-measured.
+
+**Rounds 3-5, which are most of the coverage.** The Outcome above describes the
+first two and would understate what merged by a wide margin.
+
+Round 3 added the CI gate (`terraform test` over every discovered directory) and
+the env-layer tests, because a module literal and an env's planned value are two
+different representations. Round 4 closed the env-layer half of the enforcement
+invariant (`network_policy` alongside ADVANCED_DATAPATH passed everything while
+GKE rejects it at apply), four measured node-config survivors, and the
+`core_min_nodes >= 1` validation.
+
+**Round 5 replaced the instrument.** Round 4 had pinned the gate's `exit $fail`
+with a contiguous substring needle; review defeated it by moving `fail=0` ONE
+LINE UP, inside the loop — all three suites failing, step exiting 0. A substring
+wall can always be stepped around when the property is control flow. So
+`infra_step_test.go` now EXTRACTS the step from `ci.yml` and EXECUTES it under
+`bash --noprofile --norc -eo pipefail` against a stub `terraform`. Five insertion
+variants died at once.
+
+That test passed for the wrong reason first: an exit-for-everything stub made
+`terraform init` fail, `-e` aborted before the loop, and "the step exits nonzero"
+was satisfied by an unrelated statement. Split the stub, and the mutation went
+red. Discovery also moved off the `module "gke_cell"` label onto the module
+SOURCE, after three semantics-preserving refactors were measured dropping an env
+out of coverage; and each discovered suite must now carry a `run` block that
+mentions `datapath_provider`, because a suite with none — and a directory with no
+test files — both exit 0 with "Success! 0 passed, 0 failed".
+
+Two branches were REMOVED rather than pinned (an unreachable arm, and a
+set-difference the per-directory loop subsumed): dropping either changed no
+outcome, which is what made them unpinnable. `xargs -r` is load-bearing — GNU
+xargs runs the command once on empty input, so without it the emptiness guard is
+unreachable on `ubuntu-latest` (rc=123, no annotation) while being reachable on
+macOS, meaning the harness would exercise a different control flow than CI.
+
+Also closed in round 5: the Calico ADDON path (a second way to trip the
+combination GKE rejects), `remove_default_node_pool = false` (which keeps a
+fourth pool on the default compute SA that every by-name pool assertion is blind
+to), module-layer `ip_allocation_policy`, three sibling capacity validations, and
+a text pin on `cluster_ca_certificate` — which no `terraform test` can cover,
+because under `mock_provider` `master_auth` is empty and the expression is never
+evaluated. That pin was itself broken on arrival: a bare `strings.Contains` over
+the file passed when the old expression was parked in a `# was:` comment and the
+output gutted, which is the exact hole `stripShellComments` exists to close in
+the sibling gate. It strips comments now.
