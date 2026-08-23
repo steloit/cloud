@@ -40,9 +40,13 @@ func (s *Service) mtdSpend(ctx context.Context, orgID string) (planFee, metered,
 		return 0, 0, 0, err
 	}
 	// Through SpendToDate, not `+=`: it saturates rather than wrapping (O19), and
-	// a negative month-to-date spend reads as "far below the cap", which disables
-	// the hard cap at the moment it is supposed to refuse. Summing the rows first
-	// with a raw += would have wrapped before this function ever saw them.
+	// summing the rows first with a raw `+=` would wrap before it could help.
+	//
+	// This is a DISPLAYED figure, not the cap. The cap is
+	// provisioning.enforceBudget, which never consults this number and has its
+	// own checked arithmetic — an earlier revision of this comment said
+	// otherwise, and contradicted the comment ten lines below that correctly
+	// says used_percent is measured against monthlyRunRate.
 	rows := make([]int64, 0, len(usage))
 	for _, u := range usage {
 		rows = append(rows, u.RateCents)

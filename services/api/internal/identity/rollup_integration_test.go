@@ -464,3 +464,62 @@ func TestAFailedRollupIsLoud(t *testing.T) {
 		}
 	}
 }
+
+// AND THE OTHER ARM — the one that can actually happen.
+//
+// Rollup logs from TWO places: the accumulation error and the narrowing error.
+// The test above drives the NARROWING arm, which needs a fleet whose accrual
+// exceeds int64. Measured: deleting only the accumulation arm's slog.Error
+// survives the full identity package, so observability was verified on the arm
+// that cannot occur and unverified on the arm that can — an unrepresentable or
+// negative `usage_events.rate_cents`, in a column that is a plain bigint with no
+// CHECK.
+func TestAnUnrepresentableRateIsAlsoLoud(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rate int64
+	}{
+		{"above the representable ceiling", money.MaxMonthly + 1},
+		{"negative", -2400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t, time.Hour)
+			ctx := context.Background()
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			_, ownerID := w.signupUser(t, strings.ReplaceAll(tc.name, " ", "-")+"@example.com")
+			org, err := w.svc.CreateOrgWithOwner(ctx, "loudrate", ownerID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			orgRow, _ := w.svc.GetOrg(ctx, org.ID)
+			prj, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t0 := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+			period := metering.Period(t0)
+			for _, e := range []struct {
+				edge string
+				at   time.Time
+			}{{"open", t0}, {"close", t0.Add(time.Hour)}} {
+				if _, err := w.pool.Exec(ctx,
+					`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+					 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, 'svc_bad', 'service_span', $4, 'postgres', $5, $6)`,
+					org.ID, prj.ID, env.ID, e.edge, tc.rate, e.at); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := metering.NewEmitter(store.New(w.pool)).Rollup(ctx, org.ID, period, t0.AddDate(0, 1, 0)); err == nil {
+				t.Fatal("the rollup accepted an unrepresentable rate")
+			}
+			logged := buf.String()
+			if !strings.Contains(logged, "ROLLUP OVERFLOW") || !strings.Contains(logged, org.ID) {
+				t.Errorf("the accumulation failure was SILENT — an operator is told nothing:\n%s", logged)
+			}
+		})
+	}
+}
