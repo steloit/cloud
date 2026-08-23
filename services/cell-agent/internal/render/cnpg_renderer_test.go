@@ -577,3 +577,50 @@ func TestTheRenderedQuotaComesFromTheDocNotTheRenderer(t *testing.T) {
 		})
 	}
 }
+
+// A DOC WITH NO ENVELOPE MUST BE REFUSED, and the refusal must be reachable
+// through quotaOf — the layer that FEEDS tenancy.Render.
+//
+// tenancy.Render's absence guard was verified one layer down, but nothing drove
+// a desired doc that simply lacks the key: making quotaOf return a default when
+// `desired["quota"]` is absent was a green mutation, and the renderer would then
+// invent a ceiling nobody granted. The sibling field is already covered exactly
+// this way (the namespace case deletes the key and asserts the refusal); this is
+// the same line for the quota.
+func TestAServiceWithNoEnvelopeInItsDocIsRefused(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	delete(s.Desired, "quota")
+
+	if _, err := newRenderer(a).Converge(context.Background(), s); err == nil {
+		t.Fatal("a desired doc with no envelope was accepted — the renderer invented a ceiling " +
+			"the control plane never granted")
+	} else if !strings.Contains(err.Error(), "no quota envelope") {
+		t.Fatalf("the refusal must name the missing envelope: %v", err)
+	}
+	if len(a.applied) != 0 {
+		t.Fatalf("objects were applied despite the refusal: %v", keysOf(a.applied))
+	}
+}
+
+// TEARDOWN MUST NOT DEPEND ON THE PLAN TABLE. Deleting a service is
+// `never_gated: self_deletion` in plans.json — plans gate capabilities, never
+// safety — and the deleting branch returns before any tenancy object is
+// rendered, so the envelope is never read on that path.
+func TestTeardownDoesNotNeedAnEnvelope(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	del := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+	delete(del.Desired, "quota")
+
+	status, err := r.Converge(context.Background(), del)
+	if err != nil {
+		t.Fatalf("teardown required an envelope it never reads: %v", err)
+	}
+	if status != "gone" {
+		t.Fatalf("teardown reported %q, want gone", status)
+	}
+}

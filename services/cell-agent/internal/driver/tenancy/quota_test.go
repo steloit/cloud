@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -221,8 +222,26 @@ func TestTheLimitRangeSuppliesRequestsWithoutCappingAnything(t *testing.T) {
 		t.Fatal("the LimitRange declares no limits")
 	}
 	for _, l := range lr.Spec.Limits {
-		if len(l.DefaultRequest) == 0 {
-			t.Errorf("%s supplies no defaultRequest — the quota then rejects undeclared pods", l.Type)
+		// TYPE MUST BE Container. Kubernetes FORBIDS default/defaultRequest on a
+		// Pod-type limit ("may not be specified when `type` is 'Pod'"), so this
+		// one word decides whether the object is accepted at all — and a rejected
+		// LimitRange aborts the Apply before the Cluster, stopping EVERY service
+		// in the environment from converging. It was unasserted and `Pod` was a
+		// green mutation.
+		if l.Type != "Container" {
+			t.Errorf("limit type is %q, want Container — the API server Forbids defaultRequest "+
+				"on a Pod-type limit, so every apply would 422 and nothing in the environment "+
+				"would converge", l.Type)
+		}
+		// BOTH dimensions. The quota constrains requests.cpu AND requests.memory,
+		// so a defaultRequest missing either still lets the quota reject every
+		// undeclared pod — which is the failure the pair exists to prevent.
+		// Dropping the cpu key was a green mutation.
+		for _, dim := range []string{"cpu", "memory"} {
+			if l.DefaultRequest[dim] == "" {
+				t.Errorf("%s supplies no defaultRequest for %s — the quota then rejects every "+
+					"pod that declares none", l.Type, dim)
+			}
 		}
 		if len(l.Default) != 0 {
 			t.Errorf("%s supplies a default LIMIT (%v). That becomes the hard cap on every "+
@@ -230,6 +249,80 @@ func TestTheLimitRangeSuppliesRequestsWithoutCappingAnything(t *testing.T) {
 				"resources until US-3.3d), and OOMKills it.", l.Type, l.Default)
 		}
 	}
+}
+
+// THE DEFAULTS MUST FIT INSIDE THE SMALLEST PLAN.
+//
+// A defaultRequest is what every undeclared pod reserves, so if it exceeds a
+// plan's whole envelope that plan admits NOTHING. Raising 100m/128Mi to 2/4Gi —
+// larger than free's entire 1 vCPU / 2 GiB ceiling — was a green mutation.
+//
+// Asserted as a PROPERTY against the smallest envelope in plans.json rather than
+// as literals, so retuning the defaults stays legal and "bigger than the whole
+// free plan" cannot ship.
+func TestTheLimitRangeDefaultsFitInsideTheSmallestPlanEnvelope(t *testing.T) {
+	free, ok := authoritativePlans(t)["free"]
+	if !ok {
+		t.Fatal("plans.json has no free plan")
+	}
+	var lr struct {
+		Spec struct {
+			Limits []struct {
+				DefaultRequest map[string]string `yaml:"defaultRequest"`
+			} `yaml:"limits"`
+		} `yaml:"spec"`
+	}
+	for _, m := range mustRender(t) {
+		if m.Kind == "LimitRange" {
+			if err := yaml.Unmarshal(m.YAML, &lr); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, l := range lr.Spec.Limits {
+		if got, ceiling := milli(t, l.DefaultRequest["cpu"]), milli(t, free.CPU); got >= ceiling {
+			t.Errorf("defaultRequest cpu %s is not smaller than free's whole envelope %s — a free "+
+				"environment would admit no pod that declares nothing", l.DefaultRequest["cpu"], free.CPU)
+		}
+		if got, ceiling := bytesOf(t, l.DefaultRequest["memory"]), bytesOf(t, free.Memory); got >= ceiling {
+			t.Errorf("defaultRequest memory %s is not smaller than free's whole envelope %s",
+				l.DefaultRequest["memory"], free.Memory)
+		}
+	}
+}
+
+// milli parses the two CPU spellings that appear here: whole cores ("1") and
+// millicores ("100m"). Deliberately tiny — this is a test helper, not a second
+// quantity parser for production to depend on.
+func milli(t *testing.T, v string) int64 {
+	t.Helper()
+	if strings.HasSuffix(v, "m") {
+		n, err := strconv.ParseInt(strings.TrimSuffix(v, "m"), 10, 64)
+		if err != nil {
+			t.Fatalf("cpu %q: %v", v, err)
+		}
+		return n
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		t.Fatalf("cpu %q: %v", v, err)
+	}
+	return n * 1000
+}
+
+func bytesOf(t *testing.T, v string) int64 {
+	t.Helper()
+	for suf, mult := range map[string]int64{"Mi": 1 << 20, "Gi": 1 << 30, "Ti": 1 << 40} {
+		if strings.HasSuffix(v, suf) {
+			n, err := strconv.ParseInt(strings.TrimSuffix(v, suf), 10, 64)
+			if err != nil {
+				t.Fatalf("memory %q: %v", v, err)
+			}
+			return n * mult
+		}
+	}
+	t.Fatalf("memory %q has no recognised unit", v)
+	return 0
 }
 
 // authoritativePlans reads the envelope out of plans.json — the ONE definition.

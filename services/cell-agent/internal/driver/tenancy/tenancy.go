@@ -14,28 +14,47 @@
 // under us is recreated on the next converge, where a create-once call at
 // environment creation would never notice.
 //
-// WHAT THIS PACKAGE DELIBERATELY DOES NOT RENDER — D7 (INF-001 §1) also calls
-// for "default-deny NetworkPolicies, ResourceQuota, LimitRange". US-3.3a shipped
-// all of them and the security review found each one either inert or harmful:
+// WHAT IT ALSO RENDERS, AND WHAT IS STILL WITHHELD — D7 (INF-001 §1) calls for
+// "default-deny NetworkPolicies, ResourceQuota, LimitRange". US-3.3a shipped all
+// three and the security review found each one inert or harmful; US-3.3e brings
+// back two of them, with the reasons they were withdrawn actually addressed:
 //
-//   - NetworkPolicies are NOT ENFORCED on the cells we build. infra/modules/
-//     gke-cell creates a GKE Standard cluster with no network_policy block and no
-//     ADVANCED_DATAPATH, so the API server stores every policy and no packet is
-//     ever dropped. Shipping them would put a green suite and a "D7 done" behind
-//     a boundary that does not exist.
-//   - Worse, the allow-set as written denies what CNPG requires — the metadata
-//     server (Workload Identity), GCS (WAL archiving) and the apiserver (the
-//     in-pod instance manager). Turning enforcement on would fence the first
-//     Postgres pod before it reached ready.
-//   - The LimitRange default (500m/512Mi) IS enforced, at admission, and the
-//     Cluster template declares no resources of its own — so it would silently
-//     become the hard cap on every managed Postgres, existing ones included.
-//   - The ResourceQuota envelope is a product decision with no owner in
-//     docs/founder-config.md and no dependence on plan.
+//   - ResourceQuota and LimitRange ARE rendered here now. The blocker was that
+//     the envelope was a product decision with no owner; it has one (founder,
+//     2026-08-23, docs/founder-config.md §5) and the control plane resolves the
+//     org's plan to concrete values and ships them in the desired doc. This
+//     package holds NO copy of the table and no default: a doc with no envelope
+//     is REFUSED, not rendered bare and not rendered at some fallback. A control
+//     plane that forgets to send one gets a loud, repeated failure instead of a
+//     ceiling nobody granted, silently applied to a paying customer.
 //
-// They are one change, not four: US-3.3c lands enforcement, the CNPG allow-set
-// and a founder-owned envelope together, because any one of them alone is either
-// a no-op or an outage.
+//     The cost of that choice is real and is paid deliberately: a service whose
+//     doc predates US-3.3e cannot converge AT ALL until it has an envelope, which
+//     is why the feature ships with a backfill migration
+//     (20260823140000_service_quota_backfill) rather than relying on each service
+//     being touched. Refusing is right because the alternative is unbounded, and
+//     an unbounded environment looks exactly like a working one.
+//
+//   - The LimitRange supplies defaultRequest ONLY, never default. That is the
+//     whole lesson of the withdrawal: a `default` becomes the hard cap on every
+//     container that declares nothing, and cluster.yaml.tmpl declares nothing, so
+//     the 512Mi default would have capped every managed Postgres. A quota on
+//     requests.* still needs SOME request on every pod or admission rejects it —
+//     hence defaultRequest, which fills the request and caps nothing.
+//
+//   - Because the CNPG Cluster declares no resources of its own, the cpu and
+//     memory ceilings currently bind as a POD-COUNT proxy rather than as compute.
+//     Storage is the only dimension that truly binds today. US-3.3d makes the
+//     Cluster declare its own requests; until it lands, do not read this package
+//     as enforcing the compute half of the envelope.
+//
+//   - NetworkPolicies are STILL withheld. They are not enforced on a GKE Standard
+//     cluster with no network_policy and no ADVANCED_DATAPATH — the API server
+//     stores every policy and no packet is dropped — and the allow-set as written
+//     denies what CNPG requires: the metadata server (Workload Identity), GCS
+//     (WAL archiving) and the apiserver (the in-pod instance manager). Enforcement
+//     is being turned on separately (task/US-3.3f); the allow-set lands with it,
+//     because either alone is a no-op or an outage.
 package tenancy
 
 import (
@@ -43,18 +62,6 @@ import (
 	"regexp"
 )
 
-// rfc1123Label is what the API server will accept as a namespace name, and it is
-// also the guard on a value that gets interpolated into a manifest and
-// fmt.Sprintf'd into a request path. A namespace carrying a newline injects
-// arbitrary YAML keys into the object; one carrying `../` walks out of the path
-// it was supposed to address.
-//
-// NOTE ON WHAT THIS DOES AND DOES NOT BUY: refusing locally is not better than
-// the API server refusing, in signalling terms — both produce a converge that
-// errors, logs and retries, with no writeback and no status change for the
-// customer. What it buys is that the malformed value never reaches a URL or a
-// YAML document. Surfacing a terminal `failed` writeback is a separate gap and
-// is not claimed here.
 // The closed grammar the control plane emits (billing.validQuantity). Re-checked
 // HERE because this module interpolates the value into a manifest: the two ends
 // of the wire are separate modules, and a value that got past one is not a value
@@ -69,6 +76,18 @@ var (
 	byteQuantity = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
 )
 
+// rfc1123Label is what the API server will accept as a namespace name, and it is
+// also the guard on a value that gets interpolated into a manifest and
+// fmt.Sprintf'd into a request path. A namespace carrying a newline injects
+// arbitrary YAML keys into the object; one carrying `../` walks out of the path
+// it was supposed to address.
+//
+// NOTE ON WHAT THIS DOES AND DOES NOT BUY: refusing locally is not better than
+// the API server refusing, in signalling terms — both produce a converge that
+// errors, logs and retries, with no writeback and no status change for the
+// customer. What it buys is that the malformed value never reaches a URL or a
+// YAML document. Surfacing a terminal `failed` writeback is a separate gap and
+// is not claimed here.
 var rfc1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // ValidateNamespace is the ONE owner of "is this a namespace we will act on".

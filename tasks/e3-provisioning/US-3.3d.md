@@ -55,6 +55,15 @@ driver rather than with an isolation task.
    hardcoded literal.
 3. Only then, a LimitRange whose defaults sit *underneath* the declared
    resources, with a test that no catalog shape is capped below what it sold.
+3a. **US-3.3e already shipped the LimitRange, with `defaultRequest` only and no
+   `default`** — so nothing is capped today, and this AC is now about what that
+   deliberately left undone. Until the Cluster declares its own requests, every
+   CNPG container is admitted at the environment's `defaultRequest`, which means
+   the plan's cpu and memory ceilings bind as a **pod-count proxy** rather than
+   as compute the customer paid for. Storage is the only dimension of the
+   founder's envelope that truly binds. Closing AC 1 is what makes the compute
+   half real; a `default` may only be added once AC 1 is green, and it must sit
+   above the largest shape the catalog sells, not at a round number.
 4. The golden fixtures in `internal/driver/cnpg/testdata/` are regenerated and
    the diff is read, not just accepted.
 
@@ -63,3 +72,7 @@ driver rather than with an isolation task.
 - `services/cell-agent/internal/driver/cnpg/templates/cluster.yaml.tmpl`
 - `services/api/internal/estimates/engine.go` (`memory_mb` resolution)
 - commit `7e94f26` — the withdrawn LimitRange, and why its defaults were wrong
+- `services/cell-agent/internal/driver/tenancy/tenancy.go` — the LimitRange as
+  US-3.3e reinstated it (`defaultRequest` only), and its package doc
+- `docs/founder-config.md` §5 — the ruled envelope, and the row recording that
+  the compute half does not yet bind

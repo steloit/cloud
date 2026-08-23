@@ -63,8 +63,12 @@ problems:
 - [x] The envelope is read from the founder-owned source, per plan — not retyped.
 - [x] All four plans render their own envelope; no two plans share one, so a
   wrong-plan render is detectable.
-- [x] CPU, memory and PVC/storage are each enforced, in the environment's own
-  namespace.
+- [x] CPU, memory and PVC/storage are each rendered and admission-enforced, in
+  the environment's own namespace. **But only storage BINDS today**:
+  `cluster.yaml.tmpl` declares no `resources:`, so every CNPG container is
+  admitted at the LimitRange's `defaultRequest` and the cpu/memory ceilings act
+  as a pod-count proxy rather than as compute the customer paid for. US-3.3d
+  closes it; disclosed rather than left implied by the word "enforced".
 - [x] Malformed, missing, zero, negative, unitless, fractional and
   YAML-injecting envelopes all fail closed, on both sides of the wire.
 - [x] An unknown plan is denied by default.
@@ -128,6 +132,26 @@ ruling rather than a derivation — `plans.json` is not self-authorising.
 
 Two API-baseline probes reported NOT-GREEN mid-sweep and were investigated rather
 than reported: the first copy lacked the repo root that `canon` reads.
+
+**Deferred citations.** US-3.3d and US-3.3g are on this branch. **US-3.11**
+(terminal-failure writeback, which the unchecked AC points at) is filed on
+`task/T3.4c`, and **US-3.3f** (enforcement) on its own branch — neither is an
+ancestor here, so those two references resolve only once those branches merge.
+Stated rather than left dangling.
+
+**Scope note:** the original AC said "CPU, memory, PVC count and Service count".
+The founder's table rules bytes, not counts, so `count/services` is deliberately
+absent — recorded rather than silently dropped.
+
+**The backfill was absorbed, not filed.** `tenancy.Render` refuses a doc with no
+envelope, so a service created before this branch does not run unbounded — it
+stops converging entirely, in a retry loop with no customer-visible status. That
+is a deploy-stop, so `20260823140000_service_quota_backfill` ships here. It
+repeats the four envelopes in SQL (SQL cannot read `plans.json`) and
+`TestTheBackfillMigrationMatchesThePlanTable` fails if the two ever differ, so
+the duplication is detectable rather than silent. A migration is immutable once
+applied: a later envelope change is US-3.3g's rewrite path, never an edit to
+that file.
 
 **Filed, not absorbed: US-3.3g.** The desired doc is rebuilt when a SERVICE
 changes, not when an org's PLAN changes, so an upgrade does not reach the cell

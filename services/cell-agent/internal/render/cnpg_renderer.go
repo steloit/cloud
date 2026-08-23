@@ -157,8 +157,17 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// on first apply.
 	//
 	// D7 also requires the namespace to CARRY default-deny NetworkPolicies, a
-	// ResourceQuota and a LimitRange. Those are NOT rendered here — see the
-	// tenancy package doc and US-3.3c. The boundary is a namespace today.
+	// ResourceQuota and a LimitRange. The quota and the LimitRange ARE rendered
+	// now (US-3.3e), from the envelope the control plane resolved and put in this
+	// service's desired doc. The NetworkPolicies are still withheld — see the
+	// tenancy package doc for the reason and task/US-3.3f for the enforcement.
+	//
+	// NOTE THE ASYMMETRY, because it is the reason US-3.3g exists: the namespace
+	// and its quota are ENVIRONMENT-scoped, but they are rendered from a SERVICE's
+	// doc, and every service in the environment renders them. Sibling docs written
+	// either side of a plan change disagree, and the namespace then carries
+	// whichever service converged last — the quota oscillates rather than merely
+	// going stale.
 	//
 	// Applied on every converge, not once: SSA is idempotent, and level-triggered
 	// means a namespace or policy deleted out from under us comes back.

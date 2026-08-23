@@ -169,11 +169,17 @@ func desiredDoc(product, intent, namespace string, quota billing.Quota, shape, s
 	// pricing: a plan table in two modules is a plan table that drifts. The
 	// control plane owns the mapping and the cell renders what it is given.
 	//
-	// KNOWN STALENESS, filed as US-3.3g: the doc is rebuilt when a SERVICE
-	// changes, not when an org's PLAN changes, so an upgrade does not reach the
-	// cell until each service in the environment is next touched. Recorded rather
-	// than hidden — the fix is a plan-change hook that rewrites the env's desired
-	// docs, which is a control-plane concern and not this task's.
+	// KNOWN GAP, filed as US-3.3g: the doc is rebuilt when a SERVICE changes, not
+	// when an org's PLAN changes. It is worse than staleness — the quota is
+	// ENVIRONMENT-scoped but rendered from each SERVICE's doc, so after a plan
+	// change the namespace carries whichever sibling converged last and the
+	// ceiling OSCILLATES between plans until every doc is rewritten. The fix is a
+	// plan-change hook that rewrites them in one transaction: a control-plane
+	// concern, and not this task's.
+	//
+	// Services that predate this field are handled once, by migration
+	// 20260823140000_service_quota_backfill, because tenancy.Render refuses a doc
+	// with no envelope — they would otherwise never converge again.
 	if quota != (billing.Quota{}) {
 		doc["quota"] = map[string]string{
 			"cpu": quota.CPU, "memory": quota.Memory, "storage": quota.Storage,
@@ -953,13 +959,12 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 	if err != nil {
 		return err
 	}
-	// The envelope is carried on the teardown doc too, so the tenancy objects the
-	// agent reconciles every converge stay complete right up to the last one.
-	delEnvelope, err := s.envelopeForService(ctx, svc.ID)
-	if err != nil {
-		return err
-	}
-	del := desiredDoc(svc.Product, svc.Intent.String, dns, delEnvelope, svc.Shape, svc.Scaling, svc.Override, true)
+	// NO ENVELOPE ON THE TEARDOWN DOC, deliberately. Converge's deleting branch
+	// returns before any tenancy object is rendered, so the value would never be
+	// read — and resolving it would give deletion a new way to fail (a missing
+	// org row, or a plan absent from the table) on a capability plans.json lists
+	// under `never_gated: self_deletion`. Plans gate capabilities, never safety.
+	del := desiredDoc(svc.Product, svc.Intent.String, dns, billing.Quota{}, svc.Shape, svc.Scaling, svc.Override, true)
 	if _, err := s.q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: svc.ID, Desired: del}); err != nil {
 		return err
 	}

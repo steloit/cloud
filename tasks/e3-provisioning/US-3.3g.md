@@ -36,6 +36,17 @@ The direction matters: an upgrade under-provisions (annoying, invisible), a
 **downgrade leaves the larger envelope in place** (we bill for the smaller plan
 and enforce the bigger one).
 
+**And it is worse than staleness — it OSCILLATES.** The ResourceQuota is
+environment-scoped but is rendered from a *service's* desired doc, and every
+service in the environment renders it (`render.CNPGRenderer.tenancyManifests`).
+After a plan change, sibling services carry different envelopes until all of them
+are rewritten, and the namespace ends up with whichever converged LAST. Since the
+agent is level-triggered and re-applies on every converge, the quota flips
+between the old and new plan for as long as the docs disagree. So this is not a
+window in which the customer sees an old value; it is a window in which the
+enforced ceiling is nondeterministic. That also rules out "just wait for natural
+touches" as a fix.
+
 ## Why it was not fixed in US-3.3e
 
 It is a control-plane concern — a plan-change hook that rewrites the desired docs
@@ -49,6 +60,10 @@ of the subscription path, not the rendering path. Recorded rather than hidden.
 2. The generation is bumped so the reconciler actually re-polls them.
 3. A test upgrades a plan and asserts the rendered ResourceQuota changes for a
    service that was NOT otherwise touched.
+3a. A test with **two** services in one environment asserts that after a plan
+   change no interleaving of their converges can leave the namespace on the old
+   envelope — the oscillation, not just the staleness. One service cannot
+   distinguish the two failures.
 4. A test downgrades and asserts the envelope shrinks — the direction that
    currently leaves us enforcing more than we bill.
 5. Mutation-verified on a GREEN-baseline harness.

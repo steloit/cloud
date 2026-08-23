@@ -100,6 +100,9 @@ anywhere is a bug.
 | Hard spend cap (per-org budget) | a product **feature** — an org sets its own bound (T11.6) | feature-specs §31 |
 | Founder org default budget | — | ❓ (if the founder's own org wants a cap) |
 | Money representation | integer cents end-to-end | ADR-025 |
+| **Per-environment resource envelope** — *ruled* | `free` **1 vCPU / 2 GiB / 10 GiB** · `pro` **8 / 16 GiB / 100 GiB** · `business` **12 / 24 GiB / 200 GiB** · `enterprise` **16 / 32 GiB / 250 GiB**. Per ENVIRONMENT, against the four authoritative plan ids (`orgs.plan`'s CHECK constraint — there is no `standard` tier). Machine-readable under each plan's `quota` in `plans.json`, which is the ONE definition; the cell-agent holds no copy and is shipped resolved values. | **founder 2026-08-23** · US-3.3e |
+| — *derived from it* | rendered as a **ResourceQuota on `requests.cpu`/`requests.memory`/`requests.storage`** paired with a LimitRange supplying `defaultRequest` only. Requests rather than limits because a `limits.*` quota forces every pod to declare a limit, and the only way to supply one for the CNPG Cluster (which declares no resources until **US-3.3d**) is a LimitRange `default` — which becomes its hard cap. Enforced by the API server's **ResourceQuota admission controller**, which is in Kubernetes' default-enabled plugin list and needs no add-on. | US-3.3e (derived, not ruled) |
+| — *what is NOT yet bounded* | `cluster.yaml.tmpl` declares no `resources:`, so every CNPG container is admitted at the LimitRange's `defaultRequest`. Until **US-3.3d** makes the Cluster declare its own, the cpu and memory ceilings bind as a **pod-count proxy** rather than as compute the customer paid for. **Storage is the only dimension that truly binds today.** | US-3.3e (disclosed) |
 
 ## 6 · Engineering governance (founder-ratified operating rules)
 
