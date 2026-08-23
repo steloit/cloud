@@ -33,8 +33,9 @@ func (d *Driver) Product() string { return "postgres" }
 
 // includedFloorGB is the storage each priced size includes, in GB. It MIRRORS
 // docs' catalog (`services/api/internal/estimates/pricing.json` → postgres.sizes
-// [*].included_gb) and must not drift from it: `TestEveryCatalogSizeRendersAt
-// LeastItsIncludedStorage` reads that file and fails if a size is missing here
+// [*].included_gb) and must not drift from it:
+// `TestEveryCatalogSizeRendersExactlyItsIncludedStorage` reads that file and
+// fails if a size is missing here
 // or floored below what its base price includes. The cell-agent is a separate
 // module and must not import the API's pricing table, so the binding is a test
 // rather than a shared constant.
