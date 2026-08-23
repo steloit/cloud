@@ -52,6 +52,11 @@ variable "core_min_nodes" {
 
 variable "core_max_nodes" {
   type = number
+
+  validation {
+    condition     = var.core_max_nodes >= var.core_min_nodes
+    error_message = "core_max_nodes must be >= core_min_nodes; GKE rejects min > max at apply, and a mocked plan has no backstop for it."
+  }
 }
 
 variable "storage_machine_type" {
@@ -70,6 +75,11 @@ variable "storage_driver" {
 
 variable "storage_node_count" {
   type = number
+
+  validation {
+    condition     = var.storage_node_count >= 1
+    error_message = "storage_node_count must be at least 1: the db-storage pool is where CNPG runs, and zero nodes is a silently broken cell rather than an apply error."
+  }
 }
 
 variable "storage_local_ssd_count" {
@@ -84,4 +94,9 @@ variable "workload_machine_type" {
 
 variable "workload_max_nodes" {
   type = number
+
+  validation {
+    condition     = var.workload_max_nodes >= 1
+    error_message = "workload_max_nodes must be at least 1: an autoscaled workload pool capped at zero accepts no customer workloads."
+  }
 }

@@ -135,6 +135,38 @@ run "the_cell_enforces_network_policy" {
     error_message = "the workload pool is not COS_CONTAINERD, which gVisor sandboxing requires."
   }
 
+  # THE OTHER WAY TO ENABLE LEGACY NETWORK POLICY. `network_policy {}` is asserted
+  # elsewhere in this file, but the Calico ADDON is a different attribute path
+  # entirely and was measured green: addons_config.network_policy_config with
+  # disabled = false. GKE does not support it alongside Dataplane V2, so the
+  # guard's own premise was covered for one of the two ways to trip it.
+  assert {
+    condition = alltrue([
+      for a in google_container_cluster.cell.addons_config :
+      length(a.network_policy_config) == 0 || one(a.network_policy_config).disabled
+    ])
+    error_message = "the Calico NetworkPolicy addon is enabled alongside ADVANCED_DATAPATH — a second, separate way to trip the combination GKE rejects."
+  }
+
+  # A FOURTH NODE POOL THE SECURITY ASSERTIONS CANNOT SEE. Flipping
+  # remove_default_node_pool to false was green everywhere: the cluster keeps a
+  # default pool running the DEFAULT COMPUTE SERVICE ACCOUNT, with no taint, no
+  # image_type, no sandbox_config and no GKE_METADATA. Every assertion in this
+  # file iterates the three pools by name, so it is structurally blind to a
+  # fourth — and the default-compute-SA outcome is exactly what the node identity
+  # assertion above exists to prevent.
+  assert {
+    condition     = google_container_cluster.cell.remove_default_node_pool
+    error_message = "the default node pool is kept; it runs the default compute service account (project-Editor-adjacent) and none of this module's pool assertions can see it."
+  }
+
+  # VPC-native is asserted at BOTH layers, like the datapath. It was env-only, and
+  # the env layer is the one a rename can drop out of CI.
+  assert {
+    condition     = length(google_container_cluster.cell.ip_allocation_policy) == 1
+    error_message = "the cell does not request VPC-native networking; network mode is create-time only and cannot be converted afterwards."
+  }
+
   # Least privilege is asserted through the SCOPES as well as the identity: the
   # node service account assertion above is green with oauth_scopes = [] on the
   # core and db-storage pools, so it pins who the node is and not what it may do.

@@ -110,11 +110,25 @@ var ciGates = []ciGate{
 	},
 	{
 		task: "US-3.3f", job: "infra",
-		runContains: "these directories instantiate the cell but own no terraform test",
-		why: "emptiness alone is not coverage: deleting ONE env's tests/ directory left the " +
-			"gate green over the remaining dirs, and hardcoding discovery to the module " +
-			"passed too. Discovery is compared against the set of dirs that instantiate " +
-			"the cell, so an env cannot silently stop being covered.",
+		runContains: "instantiates the cell but owns no terraform test with a run block",
+		why: "emptiness alone is not coverage: deleting ONE env's tests/ left the gate green " +
+			"over the remaining dirs, hardcoding discovery to the module passed too, and a " +
+			"suite gutted to zero run blocks exits 0 with \"Success! 0 passed\". The " +
+			"behaviour is pinned by TestTheTerraformGate* (which EXECUTES this step); this " +
+			"needle only keeps the step itself from being deleted wholesale.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['log'] is True",
+		why: "the k8s step's only other gate is a content-BLIND glob parse; these assertions " +
+			"are the sole check on network-logging.yaml, and deleting the whole heredoc was " +
+			"measured green everywhere",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['delegate'] is False",
+		why: "delegate=false is what makes \"every denied connection is logged\" hold for " +
+			"namespaces created later; flipping it was measured green",
 	},
 	{
 		task: "US-3.3f", job: "infra",
