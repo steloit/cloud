@@ -75,21 +75,46 @@ func TestArchiveTimeoutIsMeasuredRPO(t *testing.T) {
 // The cell-agent is a separate Go module and must not IMPORT the API's pricing
 // table; the test reads the file from the repo root, the precedent parity_test.go
 // already sets.
-func TestEveryCatalogSizeRendersAtLeastItsIncludedStorage(t *testing.T) {
-	for size, includedGB := range catalogSizes(t) {
+func TestEveryCatalogSizeRendersExactlyItsIncludedStorage(t *testing.T) {
+	catalog := catalogSizes(t)
+
+	// EQUALITY, not `>=`. An inequality binds only one direction, and two
+	// mutations survived it: lowering `performance.included_gb` in the catalog
+	// (green in BOTH modules, re-pricing every performance customer by 50c/GB),
+	// and raising the driver's floor to 500 (green everywhere — an 11200c service
+	// silently getting a 500Gi PVC). The same number lives in two files; the test
+	// has to pin them together, not merely order them.
+	for size, includedGB := range catalog {
 		spec := devSpec()
 		spec.Shape = map[string]any{"size": size}
 		m, err := New().Render(spec)
 		if err != nil {
 			t.Fatalf("size %q is in the catalog and the driver refuses it: %v", size, err)
 		}
-		got := renderedStorageGB(t, m[0].YAML)
-		if got < includedGB {
-			t.Errorf("size %q includes %d GB but renders a %dGi PVC — the customer is billed "+
-				"for storage the volume does not have", size, includedGB, got)
+		want := includedGB
+		if want < minVolumeGB {
+			want = minVolumeGB // dev includes 0 GB, and a 0Gi PVC is not a volume
 		}
-		if got <= 0 {
-			t.Errorf("size %q renders a %dGi PVC, which is not a volume", size, got)
+		if got := renderedStorageGB(t, m[0].YAML); got != want {
+			t.Errorf("size %q includes %d GB and renders a %dGi PVC, want exactly %dGi. "+
+				"Under-rendering bills for storage the volume does not have; over-rendering "+
+				"provisions storage nobody sold.", size, includedGB, got, want)
+		}
+	}
+
+	// The two maps must name the SAME sizes. A catalog size missing from the
+	// driver is refused at converge; a driver size missing from the catalog is a
+	// floor for something nobody can buy, and neither is visible from the loop
+	// above.
+	for size := range catalog {
+		if _, ok := includedFloorGB[size]; !ok {
+			t.Errorf("the catalog sells %q and includedFloorGB has no entry — every converge "+
+				"for that size fails", size)
+		}
+	}
+	for size := range includedFloorGB {
+		if _, ok := catalog[size]; !ok {
+			t.Errorf("includedFloorGB has %q, which the catalog does not sell", size)
 		}
 	}
 }

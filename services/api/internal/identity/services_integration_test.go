@@ -2532,3 +2532,116 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 		t.Fatalf("a corrupt blob was reported as an unrepresentable amount: %s", b8)
 	}
 }
+
+// A SIZE CHANGE MUST PRICE THE SAME WHENEVER THE ROW WAS CREATED.
+//
+// T3.4c made an unset postgres storage_gb resolve to the size's included_gb, so
+// a `standard` created after it persists 50. On a later downgrade to `dev` the
+// merge carries that 50, and dev includes 0, so the row prices
+// 1900 + 50GB*50c = 4400. A row created BEFORE T3.4c stores 0 and the identical
+// PATCH priced 1900 — two customers, one resulting configuration, two prices,
+// decided by signup date.
+//
+// 4400 is the right answer, and it is the catalog's own arithmetic rather than a
+// new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
+// expansion only, and a request below .status.capacity is rejected), so the
+// customer keeps the 50Gi volume and pays for the 50 GB beyond dev's zero
+// included. Billing 1900 would be giving away storage the cluster is still
+// carrying — the same declared-vs-provisioned split T3.4c exists to close.
+//
+// The legacy rows are reconciled by migration 20260823120000, which is
+// price-neutral at rest (raising a stored 0 to included_gb adds exactly zero,
+// since Price charges only the positive part of storage_gb - included_gb).
+// This test drives BOTH provenances through the real HTTP surface and requires
+// one answer.
+func TestASizeDowngradePricesTheSameWhicheverProvenanceTheRowHas(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "ratchet@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newStandard := func(name string) string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"`+name+`","shape":{"size":"standard"}}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"`+name+`","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard"}}`, ownerCk)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create: %d %s", resp.StatusCode, body)
+		}
+		var svc struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &svc)
+		return svc.Id
+	}
+
+	// (a) A row created today. The gate resolves the included storage explicitly.
+	fresh := newStandard("fresh")
+	var freshShape map[string]any
+	if err := w.pool.QueryRow(ctx, `SELECT shape FROM services WHERE id = $1`, fresh).Scan(&freshShape); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshShape["storage_gb"]; got != float64(50) {
+		t.Fatalf("a standard created today stored storage_gb=%v, want the included 50", got)
+	}
+
+	// (b) A row with the PRE-T3.4c shape, written straight to the column — the
+	// state the migration exists to reconcile.
+	legacy := newStandard("legacy")
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET shape = jsonb_set(shape, '{storage_gb}', '0', true) WHERE id = $1`, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	// Apply the ratchet the migration applies. (The migration itself runs at
+	// startup; this reproduces its statement against the row seeded above, so the
+	// test proves the STATEMENT reconciles the two provenances, not merely that
+	// migrations ran.)
+	if _, err := w.pool.Exec(ctx, `
+		UPDATE services SET shape = jsonb_set(shape, '{storage_gb}',
+			to_jsonb(GREATEST(COALESCE((shape ->> 'storage_gb')::int, 0), 50)), true)
+		WHERE product = 'postgres' AND shape ->> 'size' = 'standard'
+		  AND COALESCE((shape ->> 'storage_gb')::int, 0) < 50`); err != nil {
+		t.Fatal(err)
+	}
+
+	priceAfterDowngrade := func(id string) int64 {
+		t.Helper()
+		row, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, id), org.Id, ownerID,
+			map[string]any{"size": "dev"}, nil, nil)
+		if err != nil {
+			t.Fatalf("downgrade %s: %v", id, err)
+		}
+		return row.MonthlyEstimateCents
+	}
+
+	gotFresh, gotLegacy := priceAfterDowngrade(fresh), priceAfterDowngrade(legacy)
+	if gotFresh != gotLegacy {
+		t.Fatalf("the same downgrade prices %d for a row created today and %d for a pre-T3.4c row — "+
+			"two customers with one resulting configuration, billed differently by signup date",
+			gotFresh, gotLegacy)
+	}
+	// 1900 (dev base) + 50 GB beyond dev's 0 included, at 50c/GB.
+	const want = 1900 + 50*50
+	if gotFresh != want {
+		t.Fatalf("a dev keeping its 50Gi volume priced %d, want %d — the volume cannot shrink, "+
+			"so billing dev's base alone gives away storage the cluster still carries", gotFresh, want)
+	}
+}
