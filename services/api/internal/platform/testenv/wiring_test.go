@@ -1,13 +1,16 @@
 package testenv
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// repoRoot is four levels up from services/api/internal/platform/testenv.
+// repoRoot is five levels up from services/api/internal/platform/testenv.
 const repoRoot = "../../../../.."
 
 // The Go constant and ci.yml are coupled by NOTHING BUT STRING EQUALITY, so
@@ -40,83 +43,136 @@ func TestCIWorkflowArmsTheContainerGate(t *testing.T) {
 	}
 }
 
-// ciGates is every gate `ci.yml` must arm, with the task that added it.
+// ciWorkflow is as much of ci.yml as the gate assertions need.
 //
-// A HAND-MAINTAINED LIST, deliberately — and that is worth defending, because
-// the two previous instances of this shape were fixed by DERIVING instead. The
-// gofmt module list became `git ls-files '*/go.mod'`, and the testcontainers
-// caller set became a walk of the tree, in both cases because a source of truth
-// existed and a retyped copy could drift from it.
-//
-// There is no such source here. "Which gates ought to exist" is a decision, not
-// a fact discoverable from the tree, so this list IS the assertion rather than a
-// duplicate of one. What it must not become is a list that quietly stops
-// matching: each entry carries the task that added it, so a failure explains why
-// the gate is there rather than merely that a string went missing.
-var ciGates = []struct{ task, needle, why string }{
-	{"O7", "make gen-sql",
-		"the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
-	{"O13", "gofmt -l", // the loop body; the step name could be reworded harmlessly
-		"go vet does not check formatting, so nothing else in this pipeline reports it"},
-	{"O13", "git ls-files '*/go.mod'",
-		"the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
-	{"O13", "-race",
-		"the detector had never run in CI; O14 reached the base branch and sat there a month"},
-	{"O13", "-timeout 30m",
-		"Go's default is 10 min PER PACKAGE and internal/identity measures ~350s in CI"},
-	{"O23", RequireContainersVar + `: "1"`,
-		"without it a missing container runtime is a SKIP, and the job goes green having run nothing"},
+// PARSED, not grepped, and that distinction is the whole finding. A
+// `strings.Contains` over the file text cannot tell code from a corpse: it
+// matches a needle that survives only in a `#` comment, in a step that has been
+// commented out, in a job guarded by `if: false`, or in a workflow whose
+// triggers were removed. Every one of those was demonstrated against the first
+// version of this test — including deleting `-race` from all three module lines
+// while the three comments justifying it kept the needle alive. The
+// better-documented a gate is, the more reliably a text match lies about it.
+type ciWorkflow struct {
+	On   map[string]any `yaml:"on"`
+	Jobs map[string]struct {
+		If    string `yaml:"if"`
+		Steps []struct {
+			Name string            `yaml:"name"`
+			Run  string            `yaml:"run"`
+			Env  map[string]string `yaml:"env"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
 }
 
-// Every gate this repository relies on must actually be armed in ci.yml.
+// ciGate is one gate: which job owns it, and how to recognise it in that job.
+// Exactly one of runContains / envKey is set.
+type ciGate struct {
+	task, job, why string
+	runContains    string // a substring of a step's `run:` script
+	envKey         string // an env key that must be present AND non-empty
+}
+
+// ciGates is every gate this pipeline relies on, with the task that added it.
 //
-// Found by auditing the gates added in one session: FIVE were added and only ONE
-// was pinned (the container gate, and only because a reviewer asked). Deleting
-// `make gen-sql`, the whole gofmt step, and `-race -timeout 30m` from ci.yml left
-// the file parsing and the suite reporting `ok` — three gates gone, nothing
-// noticed. These gates exist because their absence let real defects through, so
-// "removable by deleting four lines of YAML" is not an acceptable state for them.
+// A HAND-MAINTAINED LIST, deliberately. The other instances of this shape in
+// this repo were fixed by DERIVING (`git ls-files '*/go.mod'`, a tree walk for
+// testcontainers users) because a source of truth existed. There is none for
+// "which gates ought to exist" — that is a decision, so this list IS the
+// assertion rather than a duplicate of one.
+var ciGates = []ciGate{
+	// --- the go job -------------------------------------------------------
+	{task: "O7", job: "go", runContains: "make gen-sql",
+		why: "the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
+	{task: "§16/§17", job: "go", runContains: "git diff --cached --exit-code -- services packages apps",
+		why: "the generators are a no-op that looks busy without the diff that compares their output"},
+	{task: "O13", job: "go", runContains: "gofmt -l",
+		why: "go vet does not check formatting, so nothing else in this pipeline reports it"},
+	{task: "O13", job: "go", runContains: "git ls-files '*/go.mod'",
+		why: "the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
+	{task: "O13", job: "go", runContains: "go test -race -timeout 30m ./...",
+		why: "the detector had never run in CI; O14 reached the base branch and sat there a month"},
+	{task: "O23", job: "go", envKey: "STELOIT_REQUIRE_CONTAINERS",
+		why: "without it a missing container runtime is a SKIP and the job goes green having run nothing"},
+	// --- the validate job -------------------------------------------------
+	{task: "spec-sync", job: "validate", runContains: "node scripts/spec-sync/validate.mjs",
+		why: "task frontmatter, deps and caps are otherwise unchecked"},
+	{task: "O6f", job: "validate", runContains: "protect-authority.test.sh",
+		why: "the authority-path hook's own regression tests"},
+	{task: "Q3/§17", job: "validate", runContains: "git diff --cached --exit-code -- apps packages docs",
+		why: "generated client drift must fail the build"},
+	{task: "console", job: "validate", runContains: "pnpm --filter console test",
+		why: "the console suite"},
+	// --- the infra job ----------------------------------------------------
+	{task: "infra", job: "infra", runContains: "terraform fmt -check -recursive infra",
+		why: "terraform formatting"},
+	{task: "infra", job: "infra", runContains: "terraform -chdir=infra/envs/dev validate",
+		why: "a duplicate module call had this job red and hid every later step (O22)"},
+}
+
+// Every gate must be armed AND in a job that actually runs.
 func TestCIWorkflowArmsEveryGate(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", "ci.yml"))
 	if err != nil {
 		t.Fatalf("cannot read ci.yml: %v — this check must not pass by failing to look", err)
 	}
-	// COMMENTS STRIPPED, and this is the difference between a pin and theatre.
-	//
-	// Searching the whole file passes when a needle survives only in prose. Every
-	// gate here is DOCUMENTED next to itself — `-race` appears in three comments,
-	// `-timeout 30m` in two, `gofmt -l` in one — so deleting the executable line
-	// and leaving the comment kept the first version of this test green with all
-	// three gates gone from the run. Verified by doing exactly that.
-	ci := stripYAMLComments(string(b))
-	for _, g := range ciGates {
-		if !strings.Contains(ci, g.needle) {
-			t.Errorf("ci.yml no longer contains %q (added by %s)\n"+
-				"  why it is there: %s\n"+
-				"  If this gate was deliberately removed, remove it from ciGates in the same commit "+
-				"and say why in the PR — do not delete this assertion to make the build green.",
-				g.needle, g.task, g.why)
+	var wf ciWorkflow
+	if err := yaml.Unmarshal(b, &wf); err != nil {
+		t.Fatalf("ci.yml does not parse: %v", err)
+	}
+
+	// The workflow must still fire on a PR. Removing the triggers leaves every
+	// gate textually present and never executed. YAML 1.1 folds the bare key
+	// `on` to boolean true, so accept either spelling.
+	triggers, ok := wf.On["pull_request"]
+	if !ok {
+		if m, isMap := wf.On["true"].(map[string]any); isMap {
+			_, ok = m["pull_request"]
 		}
 	}
-}
+	_ = triggers
+	if !ok && !bytes.Contains(b, []byte("pull_request:")) {
+		t.Error("ci.yml no longer runs on pull_request — every gate below is armed and never fires")
+	}
 
-// stripYAMLComments removes whole-line `#` comments so a gate needle can only
-// match something that actually runs.
-//
-// Whole-line only, deliberately: an inline `#` inside a shell `run:` block can be
-// part of a command (a URL fragment, a printf), and dropping the tail of such a
-// line could hide a real gate and produce a FALSE RED. Every comment in ci.yml
-// that mentions a gate is a whole-line one, which is the case that matters.
-func stripYAMLComments(s string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(s, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+	for _, g := range ciGates {
+		job, present := wf.Jobs[g.job]
+		if !present {
+			t.Errorf("ci.yml has no job %q, which owns the %s gate (%s)", g.job, g.task, g.why)
 			continue
 		}
-		b.WriteString(line)
-		b.WriteByte('\n')
+		// A gate in a job guarded by `if:` can be switched off without touching
+		// the gate. `if: false # temporarily disabled` was one of the surviving
+		// mutations.
+		if job.If != "" {
+			t.Errorf("job %q carries `if: %s` — every gate it owns can be disabled without touching the gate", g.job, job.If)
+		}
+		found := false
+		for _, st := range job.Steps {
+			if g.runContains != "" && strings.Contains(st.Run, g.runContains) {
+				found = true
+				break
+			}
+			if g.envKey != "" {
+				// Present AND non-empty: `STELOIT_REQUIRE_CONTAINERS: ""`
+				// disarms the gate while satisfying any presence check.
+				if v, has := st.Env[g.envKey]; has && v != "" {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			what := g.runContains
+			if what == "" {
+				what = "env " + g.envKey + " (non-empty)"
+			}
+			t.Errorf("job %q no longer arms %q (added by %s)\n  why it is there: %s\n"+
+				"  If this gate was deliberately removed, remove it from ciGates in the same commit "+
+				"and say why in the PR — do not delete this assertion to make the build green.",
+				g.job, what, g.task, g.why)
+		}
 	}
-	return b.String()
 }
 
 // Required's semantics, pinned separately from the wiring: the gate is armed by
