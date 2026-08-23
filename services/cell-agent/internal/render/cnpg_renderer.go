@@ -257,7 +257,14 @@ var phaseStatus = map[string]string{
 	"Switchover in progress":                       "provisioning",
 	"Failing over":                                 "provisioning",
 	"Upgrading cluster":                            "provisioning",
-	"Waiting for user action":                      "degraded",
+	// `failed`, NOT `degraded`. The control plane's status machine allows
+	// provisioning → {ready, failed, deleting} only; degraded is reachable from
+	// `ready`. An agent that answers a still-provisioning cluster with `degraded`
+	// has its writeback REJECTED every tick, so observed_generation never
+	// advances and the row is retried forever — the exact invisible-retry failure
+	// statusFromPhase argues against thirty lines below, arrived at from the
+	// other side.
+	"Waiting for user action": "failed",
 	// terminal-bad (manual intervention or a definition error)
 	"Cluster is unrecoverable and needs manual intervention":                                  "failed",
 	"Invalid cluster definition":                                                              "failed",

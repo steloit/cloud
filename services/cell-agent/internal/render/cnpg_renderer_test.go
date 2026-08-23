@@ -105,7 +105,7 @@ func svc(id, status string) agent.DesiredService {
 		ID: id, CellID: "cell-0", Product: "postgres", Status: status, Generation: 1,
 		Desired: map[string]any{
 			"product": "postgres", "shape": map[string]any{"size": "dev"},
-			"namespace": "env-9f3c1a2b",
+			"namespace": "env-0123456789abcdef0123456789abcdef",
 		},
 	}
 }
@@ -116,14 +116,14 @@ func newRenderer(applier *fakeApplier) *CNPGRenderer {
 
 func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
-	status, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
+	status, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status != "ready" {
 		t.Fatalf("healthy cluster → want ready, got %q", status)
 	}
-	objs := a.applied["env-9f3c1a2b"]
+	objs := a.applied["env-0123456789abcdef0123456789abcdef"]
 	// Asserted by KIND, not by count or position: a count breaks whenever either
 	// renderer legitimately grows an object, and then gets "fixed" by bumping the
 	// number, which asserts nothing.
@@ -170,7 +170,7 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 		t.Fatal("no Cluster in the applied set")
 	}
 	// Compared as a VALUE, not as a substring. `strings.Contains(…, "namespace:
-	// env-9f3c1a2b")` is satisfied by "env-9f3c1a2b-shadow", so mutating the
+	// env-0123456789abcdef0123456789abcdef")` is satisfied by "env-0123456789abcdef0123456789abcdef-shadow", so mutating the
 	// namespace to namespace+"-shadow" survived this assertion in isolation and
 	// was caught only by TestApplyIsIdempotent's byte comparison, under an
 	// unrelated name. Round 2's own lesson, one level down.
@@ -182,9 +182,9 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 	if err := yaml.Unmarshal(objs[clusterAt], &got); err != nil {
 		t.Fatalf("the applied Cluster does not parse: %v", err)
 	}
-	if got.Metadata.Namespace != "env-9f3c1a2b" {
+	if got.Metadata.Namespace != "env-0123456789abcdef0123456789abcdef" {
 		t.Fatalf("the CNPG Cluster was placed in %q, want the resolved namespace "+
-			"env-9f3c1a2b", got.Metadata.Namespace)
+			"env-0123456789abcdef0123456789abcdef", got.Metadata.Namespace)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestConvergeObservesClusterStatus(t *testing.T) {
 	terminalCases := map[string]string{"Cluster in healthy state": "ready"}
 	for phase, want := range terminalCases {
 		a := newFakeApplier(phase)
-		got, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
+		got, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +205,7 @@ func TestConvergeObservesClusterStatus(t *testing.T) {
 	}
 	for _, phase := range []string{"", "Setting up primary", "Waiting for the instances to become active"} {
 		a := newFakeApplier(phase)
-		if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); !errors.Is(err, agent.ErrNotConverged) {
+		if _, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); !errors.Is(err, agent.ErrNotConverged) {
 			t.Fatalf("transient phase %q must signal ErrNotConverged, got %v", phase, err)
 		}
 	}
@@ -217,7 +217,7 @@ func TestConvergeObservesClusterStatus(t *testing.T) {
 // would never be re-polled to reach ready (the blocker this test now pins).
 func TestNotYetReadyDoesNotReportTransientStatus(t *testing.T) {
 	a := newFakeApplier("Setting up primary")
-	_, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning"))
+	_, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if !errors.Is(err, agent.ErrNotConverged) {
 		t.Fatalf("a still-converging cluster must signal ErrNotConverged, got %v", err)
 	}
@@ -228,7 +228,7 @@ func TestNotYetReadyDoesNotReportTransientStatus(t *testing.T) {
 
 func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
-	got, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "deleting"))
+	got, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,11 +242,11 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 		t.Fatal("teardown deleted nothing")
 	}
 	for _, d := range a.deleted {
-		if strings.Contains(d, "svc_db01") {
-			t.Fatalf("teardown addressed the RAW service id %q — the driver named it svc-db01", d)
+		if strings.Contains(d, "svc_0123456789abcdef0123456789abcdef") {
+			t.Fatalf("teardown addressed the RAW service id %q — the driver named it svc-0123456789abcdef0123456789abcdef", d)
 		}
 	}
-	if a.deleted[0] != "env-9f3c1a2b/Cluster/svc-db01" {
+	if a.deleted[0] != "env-0123456789abcdef0123456789abcdef/Cluster/svc-0123456789abcdef0123456789abcdef" {
 		t.Fatalf("teardown must delete the cluster by its driver name: %v", a.deleted)
 	}
 	if a.applies != 0 {
@@ -256,7 +256,7 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 
 func TestNamespaceDerivedFromDesired(t *testing.T) {
 	// No placement → error, never a guessed namespace.
-	s := svc("svc_db01", "provisioning")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
 	delete(s.Desired, "namespace")
 	if _, err := newRenderer(newFakeApplier("")).Converge(context.Background(), s); err == nil {
 		t.Fatal("a service with no resolved namespace must error, not guess")
@@ -267,7 +267,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
 	r := newRenderer(a)
 	for range 3 {
-		if _, err := r.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+		if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -276,7 +276,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 	if a.applies != 3 {
 		t.Fatalf("expected 3 idempotent applies, got %d", a.applies)
 	}
-	if !bytesEqual(a.applied["env-9f3c1a2b"], mustRender(t)) {
+	if !bytesEqual(a.applied["env-0123456789abcdef0123456789abcdef"], mustRender(t)) {
 		t.Fatal("repeated converge produced different manifests — not idempotent")
 	}
 }
@@ -288,7 +288,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 func mustRender(t *testing.T) [][]byte {
 	t.Helper()
 	tm, err := tenancy.Render(tenancy.Spec{
-		Namespace: "env-9f3c1a2b", Cell: "cell-0",
+		Namespace: "env-0123456789abcdef0123456789abcdef", Cell: "cell-0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func mustRender(t *testing.T) [][]byte {
 		out = append(out, o.YAML)
 	}
 	m, err := cnpg.New().Render(driver.Spec{
-		Name: "svc_db01", Namespace: "env-9f3c1a2b", Product: "postgres",
+		Name: "svc_0123456789abcdef0123456789abcdef", Namespace: "env-0123456789abcdef0123456789abcdef", Product: "postgres",
 		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
 		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
 	})
@@ -326,7 +326,7 @@ func bytesEqual(a, b [][]byte) bool {
 func TestApplyErrorSurfaces(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
 	a.applyErr = context.DeadlineExceeded
-	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err == nil {
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err == nil {
 		t.Fatal("an apply failure must surface (the reconciler leaves the row outstanding)")
 	}
 }
@@ -338,9 +338,9 @@ func TestApplyErrorSurfaces(t *testing.T) {
 // rather than at apply time on a live cluster.
 func TestNamespaceSurvivesTheWire(t *testing.T) {
 	// exactly what the api's desiredDoc produces (US-3.3 Step 1)
-	apiDesired := []byte(`{"product":"postgres","namespace":"env-9f3c1a2b","shape":{"size":"dev"}}`)
+	apiDesired := []byte(`{"product":"postgres","namespace":"env-0123456789abcdef0123456789abcdef","shape":{"size":"dev"}}`)
 	// exactly how the poll ships a row and the agent decodes it
-	wire := []byte(`{"id":"svc_db01","cell_id":"cell-0","product":"postgres","status":"provisioning","generation":1,"desired":` + string(apiDesired) + `}`)
+	wire := []byte(`{"id":"svc_0123456789abcdef0123456789abcdef","cell_id":"cell-0","product":"postgres","status":"provisioning","generation":1,"desired":` + string(apiDesired) + `}`)
 	var decoded agent.DesiredService
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestNamespaceSurvivesTheWire(t *testing.T) {
 	if _, err := newRenderer(a).Converge(context.Background(), decoded); err != nil {
 		t.Fatalf("the renderer could not use the api-produced desired doc: %v", err)
 	}
-	if _, ok := a.applied["env-9f3c1a2b"]; !ok {
+	if _, ok := a.applied["env-0123456789abcdef0123456789abcdef"]; !ok {
 		t.Fatalf("namespace did not survive api → wire → agent → renderer; applied into %v", keysOf(a.applied))
 	}
 }
@@ -378,13 +378,13 @@ func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
 			a := newFakeApplier("Cluster in healthy state")
 			r := newRenderer(a)
 			ctx := context.Background()
-			if _, err := r.Converge(ctx, svc("svc_db01", "provisioning")); err != nil {
+			if _, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 				t.Fatal(err)
 			}
 			a.deleteErr, a.deleteErrAt = errors.New("403 forbidden"), at
 			a.deleted = nil
 
-			status, err := r.Converge(ctx, svc("svc_db01", "deleting"))
+			status, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
 			if err == nil {
 				t.Fatalf("a refused Delete at %d reported success", at)
 			}
@@ -398,11 +398,11 @@ func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
 	// Observe failing must not read as "not created yet" either.
 	a := newFakeApplier("Cluster in healthy state")
 	r := newRenderer(a)
-	if _, err := r.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	a.observeErr = errors.New("403 forbidden")
-	_, err := r.Converge(context.Background(), svc("svc_db01", "provisioning"))
+	_, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err == nil {
 		t.Fatal("a refused Observe was swallowed — the service sits in provisioning forever")
 	}
@@ -423,7 +423,7 @@ func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
 	// The driver refuses a non-postgres product, which is the reachable form of
 	// "this binary cannot work out what this service owns".
 	c := newFakeApplier("Cluster in healthy state")
-	bad := svc("svc_db01", "deleting")
+	bad := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
 	bad.Product = "valkey"
 	if status, err := newRenderer(c).Converge(context.Background(), bad); err == nil || status == "gone" {
 		t.Fatalf("teardown reported %q/%v for a service whose objects it cannot enumerate — "+
@@ -433,10 +433,10 @@ func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
 	// Positive control: with nothing failing, teardown still reports gone.
 	b := newFakeApplier("Cluster in healthy state")
 	r2 := newRenderer(b)
-	if _, err := r2.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r2.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
-	if status, err := r2.Converge(context.Background(), svc("svc_db01", "deleting")); err != nil || status != "gone" {
+	if status, err := r2.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting")); err != nil || status != "gone" {
 		t.Fatalf("a clean teardown must report gone: %q %v", status, err)
 	}
 }
@@ -448,11 +448,11 @@ func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
 // driver, never retyped.
 func TestConvergeObservesTheClusterObject(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
-	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	ms, err := cnpg.New().Render(driver.Spec{
-		Name: "svc_db01", Namespace: "env-9f3c1a2b", Product: "postgres",
+		Name: "svc_0123456789abcdef0123456789abcdef", Namespace: "env-0123456789abcdef0123456789abcdef", Product: "postgres",
 		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
 		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
 	})
@@ -471,5 +471,40 @@ func TestConvergeObservesTheClusterObject(t *testing.T) {
 	if a.observedName != want {
 		t.Fatalf("Converge observed %q, want the Cluster %q — observing any other object "+
 			"404s, so the service never reaches ready and is never metered", a.observedName, want)
+	}
+}
+
+// EVERY STATUS THIS AGENT CAN EMIT MUST BE A LEGAL EDGE FROM `provisioning`.
+//
+// The control plane allows provisioning → {ready, failed, deleting}. A writeback
+// of anything else is rejected every tick: observed_generation never advances,
+// the row stays outstanding, and the service is retried forever with nothing
+// visible — the failure statusFromPhase explicitly chose `failed` over
+// `degraded` to avoid, which `"Waiting for user action": "degraded"` then
+// reintroduced from the other side.
+//
+// The two modules have separate go.mod files and no go.work, so this set is
+// duplicated rather than imported. TestTheAgentsLegalEdgesMatchTheStatusMachine
+// on the API side pins the other copy; changing one alone fails there.
+func TestEveryTerminalStatusIsALegalEdgeFromProvisioning(t *testing.T) {
+	legalFromProvisioning := map[string]bool{"ready": true, "failed": true, "deleting": true}
+
+	seen := 0
+	for phase, status := range phaseStatus {
+		if !terminal(status) {
+			continue
+		}
+		seen++
+		if !legalFromProvisioning[status] {
+			t.Errorf("phase %q maps to terminal status %q, which provisioning cannot "+
+				"transition to — the writeback is rejected every tick and the service is "+
+				"retried forever with no signal", phase, status)
+		}
+	}
+	if got := statusFromPhase("a phase CNPG has not shipped yet"); !legalFromProvisioning[got] {
+		t.Errorf("an unknown phase maps to %q, which provisioning cannot transition to", got)
+	}
+	if seen == 0 {
+		t.Fatal("phaseStatus yielded no terminal status — this test would prove nothing")
 	}
 }

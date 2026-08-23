@@ -25,7 +25,7 @@ import (
 const clusterYAML = `apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: svc-db01
+  name: svc-0123456789abcdef0123456789abcdef
   namespace: acme--prod
 spec:
   instances: 1
@@ -34,7 +34,7 @@ spec:
 const backupYAML = `apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
-  name: svc-db01-nightly
+  name: svc-0123456789abcdef0123456789abcdef-nightly
   namespace: acme--prod
 spec:
   immediate: true
@@ -84,7 +84,7 @@ func TestApplyUsesServerSideApplyContract(t *testing.T) {
 		t.Fatalf("SSA content-type wrong: %q", c0.contentType)
 	}
 	// CNPG is a CRD → /apis/<group>/<version>/namespaces/<ns>/clusters/<name>
-	if c0.path != "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/clusters/svc-db01" {
+	if c0.path != "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/clusters/svc-0123456789abcdef0123456789abcdef" {
 		t.Fatalf("cluster apply path wrong: %s", c0.path)
 	}
 	if !strings.Contains(c0.query, "fieldManager=steloit-cell-agent") || !strings.Contains(c0.query, "force=true") {
@@ -98,7 +98,7 @@ func TestApplyUsesServerSideApplyContract(t *testing.T) {
 	if c0.body != clusterYAML {
 		t.Fatalf("apply body was modified in flight:\n%s", c0.body)
 	}
-	if got[1].path != "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/scheduledbackups/svc-db01-nightly" {
+	if got[1].path != "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/scheduledbackups/svc-0123456789abcdef0123456789abcdef-nightly" {
 		t.Fatalf("scheduledbackup path wrong: %s", got[1].path)
 	}
 }
@@ -108,14 +108,14 @@ func TestObserveReadsClusterPhase(t *testing.T) {
 	srv := serverCapturing(t, 200, `{"status":{"phase":"Cluster in healthy state"}}`, &got)
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
 
-	phase, err := c.Observe(context.Background(), "acme--prod", "svc-db01")
+	phase, err := c.Observe(context.Background(), "acme--prod", "svc-0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if phase != "Cluster in healthy state" {
 		t.Fatalf("phase wrong: %q", phase)
 	}
-	if got[0].method != http.MethodGet || !strings.HasSuffix(got[0].path, "/clusters/svc-db01") {
+	if got[0].method != http.MethodGet || !strings.HasSuffix(got[0].path, "/clusters/svc-0123456789abcdef0123456789abcdef") {
 		t.Fatalf("observe request wrong: %s %s", got[0].method, got[0].path)
 	}
 }
@@ -127,7 +127,7 @@ func TestObserveNotFoundIsEmptyNotError(t *testing.T) {
 	srv := serverCapturing(t, 404, `{"kind":"Status","code":404}`, &got)
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
 
-	phase, err := c.Observe(context.Background(), "acme--prod", "svc-db01")
+	phase, err := c.Observe(context.Background(), "acme--prod", "svc-0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatalf("a 404 must not be an error (the cluster is simply not created yet): %v", err)
 	}
@@ -140,7 +140,7 @@ func TestDeleteIsIdempotent(t *testing.T) {
 	var got []capture
 	srv := serverCapturing(t, 404, `{"code":404}`, &got)
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
-	if err := c.Delete(context.Background(), "acme--prod", "Cluster", "svc-db01"); err != nil {
+	if err := c.Delete(context.Background(), "acme--prod", "Cluster", "svc-0123456789abcdef0123456789abcdef"); err != nil {
 		t.Fatalf("deleting an already-absent cluster must succeed (idempotent teardown): %v", err)
 	}
 	if got[0].method != http.MethodDelete {
@@ -195,10 +195,10 @@ func TestDeleteRoutesByKind(t *testing.T) {
 	var got []capture
 	srv := serverCapturing(t, 200, `{}`, &got)
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
-	if err := c.Delete(context.Background(), "acme--prod", "ScheduledBackup", "svc-db01-nightly"); err != nil {
+	if err := c.Delete(context.Background(), "acme--prod", "ScheduledBackup", "svc-0123456789abcdef0123456789abcdef-nightly"); err != nil {
 		t.Fatal(err)
 	}
-	want := "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/scheduledbackups/svc-db01-nightly"
+	want := "/apis/postgresql.cnpg.io/v1/namespaces/acme--prod/scheduledbackups/svc-0123456789abcdef0123456789abcdef-nightly"
 	if got[0].path != want {
 		t.Fatalf("ScheduledBackup delete routed to %q, want %q (a /clusters/ path 404s and orphans it)", got[0].path, want)
 	}
@@ -210,20 +210,20 @@ func TestDeleteRoutesByKind(t *testing.T) {
 // US-3.3a needs this because the agent creates the env namespace itself, and a
 // namespace has no namespace.
 func TestClusterScopedKindsGetAClusterScopedPath(t *testing.T) {
-	got, err := resourcePath("v1", "Namespace", "", "env-9f3c1a2b")
+	got, err := resourcePath("v1", "Namespace", "", "env-0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatalf("a Namespace with no namespace must be routable: %v", err)
 	}
-	if want := "/api/v1/namespaces/env-9f3c1a2b"; got != want {
+	if want := "/api/v1/namespaces/env-0123456789abcdef0123456789abcdef"; got != want {
 		t.Fatalf("Namespace path = %q, want %q", got, want)
 	}
 	// Even when a namespace IS supplied (the applier passes the env namespace for
 	// the whole batch), a cluster-scoped kind must ignore it rather than nest.
-	got, err = resourcePath("v1", "Namespace", "env-9f3c1a2b", "env-9f3c1a2b")
+	got, err = resourcePath("v1", "Namespace", "env-0123456789abcdef0123456789abcdef", "env-0123456789abcdef0123456789abcdef")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "/api/v1/namespaces/env-9f3c1a2b"; got != want {
+	if want := "/api/v1/namespaces/env-0123456789abcdef0123456789abcdef"; got != want {
 		t.Fatalf("Namespace path with a namespace arg = %q, want %q — it must not nest", got, want)
 	}
 }
@@ -590,7 +590,20 @@ func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
 	}
 }
 
-const testNS = "env-9f3c1a2b"
+// PRODUCTION-SHAPED IDENTIFIERS. ids.New mints a 32-hex suffix, so a real
+// namespace is `env-<32 hex>` (36 chars) and a real service id `svc_<32 hex>`.
+// These fixtures were `env-9f3c1a2b` (12) and `svc_db01` (8) — three times
+// shorter than anything the platform can produce — so every rule keyed on
+// identifier LENGTH was unpinned. Four such mutations survived, two of which
+// switched off this task's headline behaviours for every real environment: a
+// Delete that no-ops above 12 chars, and a teardown that deletes nothing and
+// still reports gone.
+//
+// Provenance worth recording: ADR-0012 writes the shape as `env_9f3c… →
+// env-9f3c…` with a typographic ELLIPSIS, and the fixture read that elision as
+// a literal. An elided example became the test data (AGENTS.md: examples are
+// normative).
+const testNS = "env-0123456789abcdef0123456789abcdef"
 
 // productionManifests is what CNPGRenderer.Converge actually applies: the
 // environment's Namespace, then the service's Cluster and ScheduledBackup.
@@ -607,7 +620,7 @@ func productionManifests(t *testing.T) [][]byte {
 		out = append(out, m.YAML)
 	}
 	sm, err := cnpg.New().Render(driver.Spec{
-		Name: "svc_db01", Namespace: testNS, Product: "postgres",
+		Name: "svc_0123456789abcdef0123456789abcdef", Namespace: testNS, Product: "postgres",
 		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
 		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
 	})
