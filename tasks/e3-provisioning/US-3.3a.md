@@ -188,7 +188,7 @@ literally what US-3.3c will do, was still green.
 `yaml.Unmarshal` returns only document 1, so the Kind-based absence guard and
 `Apply`'s cross-namespace check each described the first object while all the
 bytes were sent. Then the repairs were pinned for one element, then indices 0–1,
-then 0–3 — and then, with the length swept to 16, a skip keyed on **the Namespace
+then 0–3 — and then, with the length swept, a skip keyed on **the Namespace
 at index 0** still survived, which is *every* production batch
 (`[Namespace, Cluster, ScheduledBackup]`). Length, index and composition are all
 swept now; index ≥ 12 remains an accepted survivor (see below — an earlier round
