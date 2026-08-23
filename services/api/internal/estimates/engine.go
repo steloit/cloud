@@ -152,7 +152,11 @@ type fieldSpec struct {
 // creating `{version: "17"}` are different contracts and must not match.
 var shapeSchema = map[string]map[string]fieldSpec{
 	"postgres": {
-		"size":       {"string", "dev"},
+		"size": {"string", "dev"},
+		// The 0 here is a floor, not the effective default: resolve() replaces an
+		// UNSET storage_gb with the size's included_gb (founder 2026-08-23). It
+		// still applies to a size the catalog does not know, which Price then
+		// rejects by name.
 		"storage_gb": {"int", 0},
 		"ha":         {"bool", false},
 		// Unpriced but contracted. OPAQUE because these carry structure, not
@@ -255,6 +259,29 @@ func resolve(in ShapeInput) (map[string]any, string, error) {
 			return nil, "", fmt.Errorf("estimates: shape field %q of %s declares unknown kind %q", k, in.Product, spec.kind)
 		}
 	}
+	// STORAGE INCLUDED IN THE SIZE (founder, 2026-08-23: "the customer-facing
+	// pricing definition takes precedence"). An unset postgres storage_gb means
+	// the size's included_gb, NOT zero.
+	//
+	// Resolved HERE rather than at the driver, because included_gb is a pricing
+	// concept and the cell-agent is a separate module that must not carry a copy
+	// of the catalog. Doing it here makes the contract explicit at the gate: the
+	// resolved shape a customer is priced on, and the one persisted and shipped
+	// to the cell, says 50 rather than implying it.
+	//
+	// The price is unchanged: Price charges `storage_gb - included_gb` only when
+	// positive, so 50 - 50 = 0 extra. A test pins that.
+	if in.Product == "postgres" {
+		if _, present := in.Shape["storage_gb"]; !present || in.Shape["storage_gb"] == nil {
+			size, _ := out["size"].(string)
+			if sz, known := table.Postgres.Sizes[size]; known {
+				out["storage_gb"] = sz.IncludedGB
+			}
+			// An unknown size keeps the schema default; Price rejects the size
+			// by name a moment later, which is the better error.
+		}
+	}
+
 	intent := in.Intent
 	if intent == "" {
 		intent = defaultIntent(in.Product)
