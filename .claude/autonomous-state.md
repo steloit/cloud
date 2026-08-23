@@ -3,7 +3,7 @@
 Handoff between autonomous Claude Code sessions. **Not authoritative** — the repo,
 git, CI and `tasks/` are. Verify before trusting; correct this file when it is wrong.
 
-**Last updated:** 2026-08-23 · `main` @ `42ae67a` · CI **green**
+**Last updated:** 2026-08-23 (session 2, mid-flight) · `main` @ `80334f9` · CI **green**
 
 ---
 
@@ -15,12 +15,21 @@ that; the queue is the plan.
 
 ## Current phase
 
-**Idle at a clean stop.** The verification-infrastructure phase is finished and merged.
-Next phase is the MVP feature path.
+**Session 2: gate-hardening + the two investigations.** Four PRs in flight, none
+merged on my own assessment — each waits for its review.
 
 ---
 
 ## Next concrete action
+
+**Land the four open PRs** (below), then start `US-3.3a`.
+
+| PR | task | state |
+|---|---|---|
+| #317 | O29 — pin every CI gate | CI running; QA returned BLOCKING, **all findings applied**, re-review not yet requested |
+| #318 | O2 — 4-representation comparison + currency fix | **CI green**, arch review still running |
+| #319 | O20 — tested detection queries | CI running, 26/26 local `-race` |
+| — | T3.4c | ✅ merged (#315): ambiguity recorded, task stays `ready`, no code |
 
 **Start `US-3.3a`** (`tasks/e3-provisioning/US-3.3a.md`, `high`) — nothing creates an
 environment's Kubernetes namespace, nor its D7 default-deny NetworkPolicy /
@@ -46,7 +55,25 @@ Do **not** pick `T3.4c` — see "Blocked on a human" below.
 
 ---
 
-## Completed this phase — do NOT redo
+## Session 2 additions — do NOT redo
+
+- **Audited all five CI gates against a real run log**, not `ci.yml`. All five
+  EXECUTE. The container gate is proven by behaviour (identity 350.8s, reconcile
+  146.5s, db 31.1s, 0 SKIP) because its env var is masked in logs.
+- **O29** — four of five gates could be deleted from `ci.yml` with a green suite.
+  Now parsed with `yaml.v3` and asserted on `steps[].run`/`.env` + no `if:` on the
+  job + `pull_request` trigger. **Twelve mutation classes red.** Two earlier
+  versions were theatre (whole-file text match; then whole-line-comment strip,
+  defeated by an *inline* comment plus an emptied env value).
+- **O20** — `docs/dev/money-range-audit.md` + a test that EXTRACTS the SQL from the
+  doc and proves it finds seeded poison in all five money locations. My first
+  query used `services.org_id`, which does not exist (chain is
+  services→environments→projects).
+- **O2** — the module is **INERT** (`billing_account` defaults `""`, no tfvars sets
+  it), so there is no drift, just a dormant module and a hand-made budget.
+  `currency_code` un-hardcoded from USD → `var.budget_currency`.
+
+## Completed in session 1 — do NOT redo
 
 12 PRs merged (#305–#314, #316). Tasks 101 → 116 done; stale `in-progress` 3 → 0.
 
