@@ -453,8 +453,28 @@ func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
 	// close, and is recorded as a gap.
 	const maxLen = 16
 
-	filler := func(i int) []byte {
-		return []byte(fmt.Sprintf("apiVersion: v1\nkind: Secret\nmetadata:\n  name: ok%d\n  namespace: env-mine\n", i))
+	// HETEROGENEOUS, and shaped like production. Sixteen byte-identical Secrets
+	// sweep length and index and leave COMPOSITION fixed, so a guard that keys off
+	// content — or off state accumulated earlier in the loop — is unpinned. The
+	// variant that survived was "skip every manifest after a Namespace", and
+	// CNPGRenderer.Converge applies [Namespace, Cluster, ScheduledBackup]: element
+	// 0 is ALWAYS a Namespace, so that skip disabled both guards for 100% of the
+	// driver's manifests with the whole suite green.
+	//
+	// Index 0 is cluster-scoped when the batch has more than one element, matching
+	// Converge; the rest cycle through the kinds it actually emits.
+	filler := func(i, n int) []byte {
+		if i == 0 && n > 1 {
+			return []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: env-mine\n")
+		}
+		switch i % 3 {
+		case 0:
+			return []byte(fmt.Sprintf("apiVersion: v1\nkind: Secret\nmetadata:\n  name: ok%d\n  namespace: env-mine\n", i))
+		case 1:
+			return []byte(fmt.Sprintf("apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata:\n  name: db%d\n  namespace: env-mine\n", i))
+		default:
+			return []byte(fmt.Sprintf("apiVersion: postgresql.cnpg.io/v1\nkind: ScheduledBackup\nmetadata:\n  name: sb%d\n  namespace: env-mine\n", i))
+		}
 	}
 	offenders := map[string]struct {
 		yaml  []byte
@@ -484,6 +504,20 @@ metadata:
   name: env-mine
   namespace: env-somewhere
 `), "cluster-scoped"},
+		// A ScheduledBackup is emitted on every converge and was never driven
+		// through either guard, so skipping the guards for that kind was green.
+		"a ScheduledBackup in another namespace": {[]byte(`apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: nightly
+  namespace: env-victim
+`), "env-victim"},
+		"a Cluster in another namespace": {[]byte(`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db
+  namespace: env-victim
+`), "env-victim"},
 	}
 
 	for label, off := range offenders {
@@ -492,7 +526,7 @@ metadata:
 				t.Run(fmt.Sprintf("%s/len%d/at%d", label, n, idx), func(t *testing.T) {
 					manifests := make([][]byte, n)
 					for i := range manifests {
-						manifests[i] = filler(i)
+						manifests[i] = filler(i, n)
 					}
 					manifests[idx] = off.yaml
 
@@ -534,7 +568,7 @@ metadata:
 		c := NewClientForTest(srv.URL, "tok", srv.Client())
 		clean := make([][]byte, n)
 		for i := range clean {
-			clean[i] = filler(i)
+			clean[i] = filler(i, n)
 		}
 		if err := c.Apply(context.Background(), "env-mine", clean); err != nil {
 			t.Fatalf("a legitimate %d-manifest apply was refused: %v", n, err)

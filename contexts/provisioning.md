@@ -139,11 +139,12 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   kind absent from the consumer must be REFUSED, and the two key sets asserted EQUAL: the first fix's
   own test could not fail from changing the new map, because every kind it tried was missing from both,
   so the refusal came from the path builder, not the guard it named.
-- **Guard every document, every element, and every path — not the first of each.** Four green
-  survivors in one branch, and the index fix needed two attempts of its own. `yaml.Unmarshal` returns only document 1, so a kind-based absence guard and a
+- **Guard every document, element and path — not the first of each.** Four green survivors in one
+  branch; the index fix alone needed three attempts. `yaml.Unmarshal` returns only document 1, so a kind-based absence guard and a
   cross-namespace check both passed while a second document carried an arbitrary object elsewhere. Both
-  were then pinned only for a one-element slice, then indices 0–1, then 0–3 — a hardcoded ceiling in a
-  test is a constant a mutation can match, so SWEEP the length instead of choosing one. And `Converge`'s
+  were then pinned for one element, then indices 0–1, then 0–3 — a hardcoded ceiling is a constant a
+  mutation can match, so sweep it; and the sweep to 16 was STILL green against a skip keyed on the
+  Namespace at index 0, i.e. every production batch, so vary COMPOSITION too. And `Converge`'s
   deleting branch returns before the renderer, so a guard in `Render` covered create only:
   `"../../../api/v1/namespaces/kube-system"` was refused on create and accepted on teardown — the path
   that `fmt.Sprintf`s it into a DELETE URL. One owner, called from the accessor both paths use.

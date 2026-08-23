@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -110,6 +112,13 @@ func TestRunRefusesToStartOnABadBootConfig(t *testing.T) {
 // run(), so that annotation was false. Two of the four are pinned here; the
 // in-cluster branch needs a cluster and is recorded in the Outcome instead.
 func TestRunTakesTheAckBranchAndHonoursThePollInterval(t *testing.T) {
+	// Hermetic: kube.NewInCluster reads these directly, so on a pod-based runner
+	// run() would take the in-cluster branch and fail on GSA/WAL instead of
+	// reaching ACK. Safe polarity either way (a false failure, never a false
+	// pass), but a CI move to self-hosted pods should not break this.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -189,4 +198,87 @@ func TestMainExitsNonZeroWhenRunFails(t *testing.T) {
 	if !strings.Contains(string(out), "RECONCILER_CELL") {
 		t.Fatalf("the failure must name the variable an operator has to fix: %s", out)
 	}
+}
+
+// SIGTERM must become a GRACEFUL stop, and nothing pinned that in either
+// direction. Four mutations were green: deleting signal.NotifyContext and passing
+// the parent straight to a.Run, swapping NotifyContext for context.WithCancel,
+// dropping `defer stop()`, and hoisting the whole thing into main(). A pod that
+// no longer converts SIGTERM into a graceful stop is killed mid-converge, and CI
+// would not have noticed.
+//
+// The hoist matters specifically: with the signal context created before boot, a
+// SIGTERM arriving during boot is absorbed, boot completes, a.Run returns at once
+// and the process exits 0 — which an orchestrator reads as "completed" rather
+// than "terminated".
+func TestMainStopsGracefullyOnSIGTERM(t *testing.T) {
+	if os.Getenv("CELL_AGENT_SIGTERM_UNDER_TEST") == "1" {
+		main()
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestMainStopsGracefullyOnSIGTERM")
+	cmd.WaitDelay = 5 * time.Second
+	cmd.Env = append(os.Environ(),
+		"CELL_AGENT_SIGTERM_UNDER_TEST=1",
+		"RECONCILER_CELL=cell-0",
+		"CONTROL_PLANE_URL=http://127.0.0.1:1", // refused fast; the agent logs and keeps polling
+		"RECONCILER_SECRET=s3cret",
+		"POLL_INTERVAL_SECONDS=1",
+	)
+	// A LOCKED buffer. exec writes the child's output from its own goroutine while
+	// this test polls it for "cell-agent starting", so a plain bytes.Buffer is a
+	// data race — caught by -race under -count=2, which is why that gate exists.
+	out := &syncBuffer{}
+	cmd.Stdout, cmd.Stderr = out, out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait until the agent is past boot and actually in the loop, so the signal
+	// exercises a.Run's context rather than the boot path.
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(out.String(), "cell-agent starting") {
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatalf("agent never reached the loop: %s", out.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	err := cmd.Wait()
+
+	if ctx.Err() != nil {
+		t.Fatalf("SIGTERM did not stop the agent within the deadline — the signal is not "+
+			"wired to a.Run's context. output=%s", out.String())
+	}
+	if err != nil {
+		t.Fatalf("SIGTERM must be a graceful stop (exit 0), got %v. output=%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "cell-agent stopped") {
+		t.Fatalf("the agent exited without logging a clean stop: %s", out.String())
+	}
+}
+
+// syncBuffer is a bytes.Buffer that may be read while a child process writes to
+// it. Only what this file needs: Write and String.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

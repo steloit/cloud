@@ -137,208 +137,182 @@ Corrected to `env-9f3c1a2b` (`sanitize(env_id)`, ADR-0012 §36). The review
 independently diffed all eleven and confirmed none asserted anything *about* the
 `proj--env` shape, so no coverage was destroyed.
 
-## What four review rounds found — all blocking, all mine
+## What six review rounds found — all blocking, all mine
 
-Recorded in full because the pattern is the finding: **each round I verified the
+Recorded because the pattern is the finding: **each round I verified the
 representation I had just edited and not the one that decides.**
 
-**A wrong label.** `steloit.dev/environment-id` was set to
-`TrimPrefix(namespace, "env-")` = `9f3c1a2b`, while the id is `env_9f3c1a2b` —
-naming a value the control plane never holds, and US-3.3b planned to delete *by
-it*. Removed: the namespace NAME already identifies the environment, and the
-agent is not given the id (the desired doc carries the namespace only). A test
-pins the absence and says what to do instead.
+**I WEAKENED A TEST AND CLAIMED THE OPPOSITE.**
+`TestCNPGRendererAppliesRenderedManifests`'s D8 assertion — "the namespace came
+from placement, not a guess" — went from `objs[0]`, the CNPG Cluster
+specifically, to a substring search over the **concatenated** applied set. Every
+tenancy manifest also contains `namespace: env-9f3c1a2b`, so it was answered by a
+different object than the one it names: rendering one tenant's database into
+another tenant's namespace (`driver.Spec.Namespace` → `env-victim`) left it
+**GREEN**, and the branch described the change as making it stronger. Widening an
+assertion from one object to a set reads as generalisation and is a weakening. It
+now parses the `kind: Cluster` object and compares `metadata.namespace` as a
+value — the first repair was still `strings.Contains`, so `…-shadow` survived.
+
+**One test genuinely was made stronger.**
+`TestDeletingAFailedServiceLeavesNothingBehind` began failing because env objects
+survive a *service* teardown — correct: the namespace belongs to the environment.
+It now pins **both** directions, with the env set DERIVED from `tenancy.Render`
+rather than retyped.
+
+**A wrong label.** `steloit.dev/environment-id` was `TrimPrefix(namespace, "env-")`
+= `9f3c1a2b` while the id is `env_9f3c1a2b` — naming a value the control plane
+never holds, and US-3.3b planned to delete *by it*. Removed; the namespace NAME
+already identifies the environment.
 
 **`Apply` routed by the caller's namespace and never read `metadata.namespace`,**
 so a manifest declaring another namespace went into the caller's — fail-closed
-only because the API server answers 400, i.e. a tenant boundary enforced a network
-hop away, on a path nothing pinned. Refused locally now, both directions, before
-the request is built.
+only because the API server answers 400, a tenant boundary enforced a network hop
+away on a path nothing pinned. Refused locally now, before the request is built.
 
-**Widening `plurals` was not inert — it was a regression.** `Delete` hardcoded
+**Widening `plurals` was a regression.** `Delete` hardcoded
 `apiVersion = "postgresql.cnpg.io/v1"`, so the four added kinds built plausible
-paths under the wrong API group, 404'd, and `Delete` maps 404 → `nil` =
-"already gone":
-
-| | `origin/main` | this branch, before the fix |
-|---|---|---|
-| `Delete(…,"Namespace","obj")` | errors by name | `/apis/postgresql.cnpg.io/v1/namespaces/obj` → `nil` |
-
-US-3.3b is the task that will call `Delete(ns, "Namespace", ns)`; it would have
-reported success while the namespace and its contents survived. Now an explicit
-`apiVersions` map that REFUSES a kind it cannot address — which also closes a
-**pre-existing** instance: `Secret` (v1) and `StatefulSet` (apps/v1) were already
-in `plurals` on `main` and already routed under the CNPG group. Neither is
-reachable today (no driver renders a Secret; valkey is not wired to a renderer).
-And the two maps' key sets are now asserted EQUAL, because the first fix's own
-test could not fail from changing `apiVersions`: every kind it tried was missing
-from `plurals` too, so the refusal came from the path builder, not the guard the
-test named. Widening `plurals` *alone* — literally what US-3.3c will do — was
-still a green change.
+paths under the wrong group, 404'd, and 404 maps to `nil` = "already gone":
+`Delete(…,"Namespace","obj")` errored by name on `origin/main` and returned `nil`
+here. **US-3.3b is the task that calls `Delete(ns,"Namespace",ns)`** — it would
+have reported success while the namespace and its contents survived. Now an
+explicit `apiVersions` map that REFUSES an unaddressable kind, which also closes
+a **pre-existing** instance: `Secret` (v1) and `StatefulSet` (apps/v1) were
+already in `plurals` on `main` and already routed under the CNPG group. The two
+key sets are asserted EQUAL, because the first fix's own test could not fail from
+changing `apiVersions` — every kind it tried was missing from `plurals` too, so
+the refusal came from the path builder. Widening `plurals` *alone*, which is
+literally what US-3.3c will do, was still green.
 
 **Two multi-document bypasses, green against the whole suite.**
 `yaml.Unmarshal` returns only document 1, so the Kind-based absence guard and
 `Apply`'s cross-namespace check each described the first object while all the
-bytes were sent: `---\nkind: NetworkPolicy` re-added a withdrawn policy, and a
-second document declaring `namespace: env-victim` was PATCHed wholesale. Then the
-repairs were pinned only for a one-element slice, and then only for indices 0–1,
-while `Converge` applies **three** and elements 1..n are the driver's — the only
-ones carrying a namespace. The offender's index is parameterised now.
+bytes were sent. Then the repairs were pinned for one element, then indices 0–1,
+then 0–3 — and then, with the length swept to 16, a skip keyed on **the Namespace
+at index 0** still survived, which is *every* production batch
+(`[Namespace, Cluster, ScheduledBackup]`). Length, index and composition are all
+swept now; index ≥ 16 remains an accepted survivor.
 
 **The teardown path never validated the namespace.** `Converge`'s deleting branch
 returns before `Render`, and teardown is what `fmt.Sprintf`s the value into a
 DELETE URL. `"../../../api/v1/namespaces/kube-system"` was refused on create and
-**accepted on teardown**. One owner (`ValidateNamespace`), called from
-`namespaceOf`, which both paths use.
+**accepted on teardown**. One owner (`ValidateNamespace`) via `namespaceOf`.
 
-**I WEAKENED A TEST AND CLAIMED THE OPPOSITE.**
-`TestCNPGRendererAppliesRenderedManifests`'s D8 assertion — "the namespace came
-from placement, not a guess" — was changed from `objs[0]`, the CNPG Cluster
-specifically, to a substring search over the **concatenated** applied set. Every
-tenancy manifest also contains `namespace: env-9f3c1a2b`, so the assertion was
-answered by a different object than the one it names: mutating
-`driver.Spec.Namespace` to `env-victim`, rendering one tenant's database into
-another tenant's namespace, left the test **GREEN**. The branch described this
-change as making the test stronger. Widening an assertion from one object to a
-set of objects reads as generalisation and is a weakening. It now parses the
-object containing `kind: Cluster` and compares `metadata.namespace` as a value —
-the first repair was still `strings.Contains`, so `env-9f3c1a2b-shadow` survived
-it in isolation.
-
-**One test genuinely was made stronger.**
-`TestDeletingAFailedServiceLeavesNothingBehind` began failing because the env
-objects survive a service teardown — which is correct: the namespace belongs to
-the environment and other services live in it. Rather than exempt them, it now
-pins **both** directions — no *service* object may remain, and the *environment*
-objects **must** — with the env set DERIVED from `tenancy.Render` rather than
-retyped, so an object added there is covered without anyone remembering.
-
-**Three more assertions did not assert what they named,** and two annotations were
-false. The `steloit.dev/cell` label was never pinned to `Spec.Cell` (the test's
-own constant equalled the hardcoded value); the repaired D8 check was still
-`strings.Contains`, so `-shadow` survived;
+**Three more assertions did not assert what they named,** and two annotations
+were false: `steloit.dev/cell` was never pinned to `Spec.Cell` (the test's own
+constant equalled the hardcoded value);
 `TestRenderAcceptsEveryShapeTheControlPlaneCanMint` omitted the only shape
 production mints (`env-<32 hex>`, 36 chars) while annotating one entry
-`// canon fixtures` — `9f3c1a2b` appears nowhere in `fixtures.json` — and calling
-another "the truncation ceiling" when `namespaceForEnv`'s truncation branch is
-unreachable (36 < 63 always).
+`// canon fixtures` — `9f3c1a2b` is not in `fixtures.json` — and calling another
+"the truncation ceiling" when that branch is unreachable (36 < 63 always).
 
-**Boot-time validation, in three representations.** `RECONCILER_CELL` was
-unvalidated, so a typo (`cell_0`, `Cell-0`) booted cleanly and then failed every
-converge on the cell — the agent loop logs and continues, so nothing is written
-back and the control plane sees every service sit in provisioning forever.
-Validating it was not enough: the *call* was unpinned because `cmd/cell-agent`
-had no test files, and then `main` **honouring** the result was unpinned too
-(`if err := run(...); false` was green, and the agent would exit 0 — a
-crash-looping pod an orchestrator reads as "completed"). All three are pinned
-now, the last by re-executing the test binary as a subprocess.
+**Boot validation, in three representations.** `RECONCILER_CELL` was unvalidated,
+so a typo booted cleanly then failed every converge with no writeback. Validating
+it was not enough: the *call* was unpinned (`cmd/` had no tests), and then `main`
+**honouring** the result was unpinned too — `if err := run(...); false` was green
+and the agent would exit **0**, which an orchestrator reads as "completed". A
+test that hoisted `signal.NotifyContext` into `main()` also changed behaviour I
+described as unchanged: a SIGTERM during boot would be absorbed and exit 0.
+Reverted, ordering verified byte-identical to `origin/main`, and SIGTERM is now
+pinned by a subprocess test that kills two further green mutations.
 
-## Negative evidence — thirty-five mutations, and a correction to the last table
+## Negative evidence — forty-five mutations, and a correction to an earlier table
 
-**Round 3's first mutation table was invalid and is withdrawn.** It was produced
+**An earlier mutation table was invalid and is withdrawn.** Round 3's was produced
 with `cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
-module-only copy has a **RED baseline** — `TestClusterMatchesGroundTruthManifest`,
-`TestBranchMatchesSpikeGroundTruth`, `TestPITRMatchesSpikeGroundTruth` fail with
-`repo root not found (AGENTS.md)` before any mutation — so every row reported RED
-whether or not the mutation was caught. That is the mistake bank entry *directly
-above the one this branch added*, violated in the same round.
+module-only copy has a **RED baseline** — three `parity_test.go` cases need the
+repo root — so every row reported RED whether the mutation was caught or not. That
+is the mistake bank entry *directly above the one this branch added*, violated in
+the same round. Of its 25 rows, 24 were genuinely RED and one was GREEN ("Delete
+falls back to a guessed API group").
 
-**Every row has been re-measured on ONE harness**: a scaffolded repo root
-(`AGENTS.md` + `infra/k8s` + `infra/spike` + `services/cell-agent`) with a verified
-GREEN baseline (0 FAILs on a clean copy, asserted before and after the sweep). Of
-the 25 withdrawn rows, **24 are RED and one was GREEN** — "Delete falls back to a
-guessed API group". Every kind in `TestDeleteRefusesAKindItCannotAddress` is
-missing from `plurals` too, so the refusal was answered by `resourcePath`, not the
-guard the test names; widening `plurals` alone was green as well. Both closed by
-`TestPluralsAndAPIVersionsNameTheSameKinds` plus a case driven through a kind that
-is addressable but has no apiVersion.
+A RED baseline can only manufacture false REDs, never false GREENs, so every
+*survivor* found in rounds 1–3 stands; what was unreliable was the evidence that
+the fixes worked — the half load-bearing for merging.
 
-Worth stating because it bounds the damage: **a RED baseline can only manufacture
-false REDs, never false GREENs.** Every *survivor* found in rounds 1–3 stands. What
-was unreliable was the evidence that the fixes worked — the half load-bearing for
-merging. (Rounds 1–2 used targeted `-run` selectors that never load
-`internal/driver/cnpg`, which is sound but was never committed; moot now.)
-
-The table below is the full re-run: 35 mutations, each with an
-assert-the-mutation-applied guard (a mutation that does not apply reads as a green
-hole) and an assert-the-baseline-is-green guard (a harness that cannot produce a
-GREEN is not measuring anything). Three failed to apply on the first attempt
-through shell quoting and were re-run from files.
-
-**The sweep also found a defect in one of the new tests.** Mutation 33 (deleting
-the `ValidateCell` call) did not fail `TestRunRefusesToStartOnABadBootConfig` — it
-**hung** it, because `run()` then got past validation and blocked in `a.Run` until
-Go's 10-minute default test timeout. The suite went from 5 seconds to 10 minutes,
-at 0% CPU. It was caught, but the most expensive way available, and it would have
-eaten a large share of CI's 30m budget. `run` now takes a `ctx` so a test can hand
-it an already-cancelled one; the suite is back to 2.7s.
+Everything below was re-measured on ONE harness: a scaffolded repo root
+(`AGENTS.md` + `infra/k8s` + `infra/spike` + `services/cell-agent`) with a GREEN
+no-mutation baseline asserted before and after every row, each mutation carrying
+an assert-it-applied guard. The sweep also found a defect in one of the new tests:
+mutation 33 did not FAIL `TestRunRefusesToStartOnABadBootConfig`, it **hung** it
+for 10 minutes at 0% CPU, because `run()` got past validation and blocked in
+`a.Run`. `run` takes a `ctx` now; the suite is 8.6s under `-race -count=2`.
 
 | mutation | |
 |---|---|
-| render the namespace but never APPLY it | RED |
-| apply the namespace LAST (ordering broken) | RED |
-| route Namespace as namespaced (404 on a live cluster) | RED |
-| `clusterScoped["Cluster"]`/`["ScheduledBackup"]` = true | RED |
-| remove the cluster-scoped branch entirely | RED |
-| a namespaced kind with no namespace is accepted | RED |
 | the CNPG Cluster rendered into `env-victim` | RED *(was GREEN — the weakened D8 assertion)* |
-| `steloit.dev/environment-id` returns with the truncated value | RED |
-| a NetworkPolicy is re-added to `tenancy.Render` | RED |
-| namespace validation relaxed back to a prefix check | RED |
-| the cell label value left unvalidated (YAML injection) | RED |
-| `Render` refuses everything (negatives alone would pass) | RED |
-| the Apply mismatch guard, each arm separately + refuse-everything + runs-too-late | RED |
 | **a D7 policy re-added as a second YAML document** *(was GREEN)* | RED |
 | **a second document smuggling a Secret into `env-victim`** (was GREEN) | RED |
-| `Delete` falls back to a guessed API group | RED |
-| `Namespace` routed under the CNPG group | RED |
-| `StatefulSet` routed under the CNPG group (the pre-existing trap) | RED |
-| teardown skips namespace validation (traversal reaches DELETE) | RED |
-| the cell label hardcoded instead of read from `Spec.Cell` | RED |
 | the Cluster namespace gains a `-shadow` suffix | RED *(was GREEN — the first D8 repair was a substring)* |
-| an extra label added to the Namespace | RED |
-| `ValidateCell` accepts anything (a bad `RECONCILER_CELL` boots) | RED |
-| `exactlyOneDocument` refuses everything (control) | RED |
-| `ValidateNamespace` refuses everything (control) | RED |
 | `exactlyOneDocument` applied only to `manifests[0]` | RED *(was GREEN)* |
 | the cross-namespace guard applied only to `manifests[0]` | RED *(was GREEN)* |
 | `plurals` widened alone, as US-3.3c will do | RED *(was GREEN)* |
-| a kind addressable via `plurals` with no `apiVersions` entry | RED |
 | the Namespace rendered with a `metadata.namespace` | RED *(was GREEN)* |
 | the `ValidateCell` **call** deleted from boot | RED *(was GREEN — `cmd/` had no tests)* |
 | `main` IGNORES `run`'s error | RED *(was GREEN)* |
-| `main` exits 0 instead of 1 on a boot failure | RED |
-| an `apiVersions` entry removed for a routable kind | RED |
 | `Apply`'s guards restricted to indices 0–1 (`Converge` passes three) | RED *(was GREEN)* |
 | `Apply`'s guards restricted to indices 0–3 | RED *(was GREEN — the length sweep now runs to 16)* |
-| `Apply`'s guards bypassed for batches longer than 4 | RED |
-| `Apply`'s guards restricted to indices 0–14 | RED |
-| `Apply` continues past a refused manifest instead of aborting | RED |
-| `run` ignores `POLL_INTERVAL_SECONDS` / never announces the ACK fallback | RED |
+| `Apply`'s guards skipped for everything after a Namespace | RED *(was GREEN — production's exact batch)* |
+| `Apply`'s guards skipped for `kind: ScheduledBackup` | RED *(was GREEN)* |
+| signal handling deleted (`parent` passed straight to `a.Run`) | RED *(was GREEN)* |
+| `signal.NotifyContext` → `context.WithCancel` | RED *(was GREEN)* |
 
-## NOT done — AC 2 and AC 4
+The remaining **28 rows** — ordering, cluster-scoped routing, every arm of the
+`Apply` mismatch and `Delete` apiVersion guards, label and namespace validation,
+the teardown path, and four refuse-everything controls — are all RED and listed
+in full in the PR. Only the rows above are recorded here, because a mutation that
+was once GREEN is the only kind that says something a green suite did not.
 
-**AC 2 (D7 policies)** → **three** tasks, not one. My first framing ("the four
-are one change") was right for the policies and wrong for the rest, and the
-architecture review said so: the LimitRange and the quota were withdrawn because
-they are *wrong*, not because they are coupled to Dataplane V2. Bundling them
-would gate a one-number founder decision behind a cluster migration.
+## Accepted survivors — measured green, deliberately not closed
 
-- **US-3.3c** (`ready`, critical) — NetworkPolicy enforcement on the cell, the
-  correct CNPG allow-set, and the agent RBAC the namespace write now needs. These
-  genuinely land together: you cannot write a correct egress set without a cell
-  that enforces it.
-- **US-3.3d** (`ready`, high) — the Cluster declares resources from the sold
-  shape, and only then a LimitRange. CNPG-driver scope; needs no CNI.
-- **US-3.3e** (`blocked`) — the per-plan environment envelope. Blocked on a
-  founder number rather than sitting `critical`/`ready` where nobody can take it.
+Named here because an unrecorded survivor is indistinguishable from one nobody
+looked for.
 
-**AC 3 (live proof)** → needs a cell; the statement is in `verify:` marked NOT
-YET RUN, and US-3.3c AC 7 owns the runbook.
+| survivor | why it stands |
+|---|---|
+| `Apply` guards skipped for index ≥ 16 | Any hand-written sweep has a ceiling. 16 is twice the largest batch this branch ever applied (8, at `7e94f26`). The real close is a property test over random `n` and random composition, filed with US-3.3c. |
+| `defer stop()` dropped in `run` | `stop()` only releases the signal handler, and the process exits immediately after `run` returns. Leaking it until exit is a no-op; contriving a test would pin an artefact, not a behaviour. |
+| the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard | Reaching it requires `kube.NewInCluster()` to succeed, i.e. a real cluster. There is none (see AC 3). US-3.3c owns it alongside the RBAC grant. |
+| the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
 
-**AC 4 (env deletion)** → **US-3.3b**. There is no environment-deletion path in
-the agent to hook: teardown today is per-service (`svc.Status == "deleting"`), and
-env deletion needs the control plane to express it in desired state first.
+## Outcome
 
-**As merged, D7 is a namespace and nothing else.** An environment is a name and a
-quota-free, policy-free namespace; deleting an environment leaks it.
+Shipped: the environment's Kubernetes namespace, created agent-side on every
+converge (level-triggered), with `resourcePath` taught cluster-scoped routing and
+`Apply`/`Delete` taught to refuse what they cannot address. **D7's policy objects
+are NOT here** — implemented, then withdrawn to US-3.3c/d/e once the security
+review showed the cell enforces no NetworkPolicy, the allow-set would fence CNPG
+off Workload Identity, GCS and the apiserver, and the LimitRange would cap every
+managed Postgres at 512Mi.
+
+Six review rounds, every one blocking, and the pattern is the finding: **each
+round I verified the representation I had just edited and not the one that
+decides.** Manifests vs. what enforces them; the struct field vs. the bytes; the
+create path vs. teardown; the validator vs. its call site vs. `main` honouring
+it; `manifests[0]` vs. `_mi<2` vs. `_mi<4` vs. the batch's *composition*; and,
+worst, 25 mutation results vs. the harness that produced them — a module-only
+`cp -R` whose baseline was already RED, published as evidence.
+
+45 mutations RED on one harness with a green baseline asserted before and after;
+four accepted survivors named above. Five lessons in `contexts/provisioning.md`.
+
+**As merged, an environment is a namespace and nothing else, and deleting one
+leaks it (US-3.3b).**
+
+## NOT done — AC 2, AC 3, AC 4
+
+**AC 2 (D7 policies)** → **three** tasks, not one. "The four are one change" was
+right for the policies and wrong for the rest: the LimitRange and the quota were
+withdrawn because they are *wrong*, not because they are coupled to Dataplane V2,
+and bundling them would gate a one-number founder decision behind a cluster
+migration. **US-3.3c** (`ready`, critical) — enforcement, the CNPG allow-set, and
+the agent RBAC this namespace write now needs; they land together because you
+cannot write a correct egress set without a cell that enforces it. **US-3.3d**
+(`ready`, high) — the Cluster declares resources from the sold shape, then a
+LimitRange; CNPG-driver scope, needs no CNI. **US-3.3e** (`blocked`) — the
+per-plan envelope, blocked on a founder number rather than sitting
+`critical`/`ready` where nobody can take it.
+
+**AC 3 (live proof)** → needs a cell; in `verify:` marked NOT YET RUN, runbook
+owned by US-3.3c AC 7. **AC 4 (env deletion)** → **US-3.3b**: teardown today is
+per-service, and env deletion needs a control-plane contract that does not exist.
