@@ -154,24 +154,25 @@ jobs:
         run: |
           # -count=1 DISABLES THE TEST CACHE, and it is load-bearing, not hygiene.
           #
-          # MEASURED (US-3.3a, 2026-08-23), stated without a mechanism because the
-          # mechanism did not reproduce: a change to ONLY a repo-root JSON fixture
-          # that two Go modules assert against came back `ok (cached)` in BOTH
-          # modules on a warm cache, and RED in both with -count=1. Since
-          # actions/setup-go restores GOCACHE across commits keyed on go.sum, a PR
-          # touching just that fixture could have reported green while broken —
-          # failing OPEN, which is the direction that matters.
+          # THE BOUNDARY IS THE MODULE ROOT. Measured three ways (scratch module
+          # and this repo):
+          #   fixture in the test's own package testdata/   -> edit is caught
+          #   fixture elsewhere in the SAME module          -> edit is caught
+          #   fixture OUTSIDE the module root               -> `ok (cached)`,
+          #                                                    edit is INVISIBLE
+          # Live, with this repo's own wiring_test.go (which reads ci.yml five
+          # directories up, outside services/api): disarming a gate is
+          # `ok (cached)` without the flag and FAIL with it.
           #
-          # A synthetic reproduction did NOT confirm the obvious explanation. In a
-          # scratch module, a test reading a fixture outside its own package
-          # directory is simply UNCACHEABLE (it re-runs every time, in-module and
-          # out), so "the fixture is an untracked input" is not what happened, and
-          # neither "package directory" nor "module root" is asserted here. What
-          # is asserted is the observation and the fix. If you are tempted to
-          # remove the flag, reproduce the cached-green first.
+          # actions/setup-go restores GOCACHE across commits keyed on go.sum, so a
+          # PR touching only such a file could report green while broken. It fails
+          # OPEN, which is the direction that matters. services/cell-agent's
+          # parity_test.go reads repo-root infra/k8s/ and is in the same class.
           #
-          # It is also free: the CI `go` job measured 514s with the flag against
-          # 586s without.
+          # (An earlier revision of this comment said such a test is simply
+          # UNCACHEABLE in and out of the module. That was wrong in both halves —
+          # from a probe that read two fixtures in one test and never achieved a
+          # cached run at all.)
           cd services/api && go build ./... && go vet ./... && go test -count=1 -race -timeout 30m ./...
           cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
           cd ../../packages/contracts/go && go build ./...

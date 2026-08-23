@@ -570,3 +570,36 @@ func TestEveryCNPGPhaseKeepsItsClassification(t *testing.T) {
 		t.Fatalf("table has %d phases, expectations have %d", len(phaseStatus), len(want))
 	}
 }
+
+// THE TEARDOWN TRIGGER HAS TWO REPRESENTATIONS AND ONLY ONE WAS DRIVEN.
+//
+// `svc.Status == "deleting" || asBool(svc.Desired["deleting"])` — every existing
+// teardown test uses the STATUS arm (the svc() helper sets it), so deleting the
+// desired-flag arm was a green mutation.
+//
+// That arm is not redundant: DeleteService writes the deleting desired doc and
+// bumps the generation BEFORE the status transition, so there is a window where
+// the agent is handed a service whose DESIRED says deleting and whose STATUS does
+// not. Without this arm the agent re-APPLIES that service's manifests in that
+// window and reports it ready — recreating what the control plane is tearing down.
+func TestATeardownFlagInDesiredIsHonouredWithoutTheStatus(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	s.Desired["deleting"] = true
+
+	status, err := newRenderer(a).Converge(context.Background(), s)
+	if err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if status != "gone" {
+		t.Errorf("a service flagged deleting in its desired doc converged to %q, not gone — "+
+			"DeleteService bumps the generation before the status edge, so this is the window "+
+			"where the agent would re-apply what is being torn down", status)
+	}
+	if len(a.applied) != 0 {
+		t.Errorf("manifests were APPLIED for a service being torn down: %v", keysOf(a.applied))
+	}
+	if len(a.deleted) == 0 {
+		t.Error("nothing was deleted for a service flagged deleting in its desired doc")
+	}
+}

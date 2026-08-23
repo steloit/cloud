@@ -235,7 +235,8 @@ worst, 25 mutation results vs. the harness that produced them — a module-only
 `cp -R` whose baseline was already RED, published as evidence.
 
 **61 DISTINCT rows RED** on one harness with a green baseline asserted before and
-after; 34 of them once GREEN; two accepted survivors recorded below. Derivation,
+after; 34 of them once GREEN; THREE accepted survivors recorded below (a fourth
+is struck through as closed) — counted, not remembered. Derivation,
 because two earlier published counts (59, and 61-before-dedup) were restated
 rather than re-derived: 34 once-GREEN rows + 29 in the PR = 63 entries, minus the 2
 that appear verbatim in both (the `ValidateCell` call; `main` ignoring `run`'s
@@ -256,7 +257,7 @@ looked for.
 | `Apply` guards skipped for index ≥ **12** | Any hand-written sweep has a ceiling; this one is 12, against a largest-ever batch of 8 (`7e94f26`). **This was published as "≥ 16" for one round while the sweep already ran to 12** — the ceiling was lowered in the same commit that widened the fixtures, and four claims were not updated. Corrected here and measured: ≥ 12 GREEN, ≥ 13 GREEN, ≥ 16 vacuous. The real close is a property test over random `n` and random composition, filed with US-3.3c. |
 | `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
 | ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
-| the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
+| the `signal.NotifyContext` hoist into `main()` | Narrower than it reads: the PARENT-DERIVATION half IS pinned (deriving the context from `context.Background()` inside `run` is caught), so only the hoist-into-`main` representation is open. Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
 
 ## Outcome
 
@@ -293,17 +294,18 @@ D9/A2.5). **O31** owns the five-representation status vocabulary.
 
 Round 13 also keeps two pre-existing closures: every CNPG phase pinned by
 CLASSIFICATION (reclassifying a terminal-bad phase as transient was green in both
-modules), and `-count=1` on all three Go modules in CI. That one is stated as an
-observation, not a mechanism: an edit to ONLY a repo-root fixture two modules
-assert against came back `ok (cached)` in both and RED in both with the flag, and
-setup-go restores GOCACHE across commits — so it failed OPEN. A synthetic
-reproduction did **not** confirm the obvious explanation (in a scratch module such
-a test is simply uncacheable), so no claim about package-vs-module roots is made.
-Measured: the CI `go` job is 514s with the flag against 586s without, so it is
-free either way.
+modules), and `-count=1` on all three Go modules in CI. **The boundary is the MODULE
+root** — measured three ways after two earlier attempts got it wrong in opposite
+directions: a fixture in the test's own `testdata/` is caught on edit, a fixture
+elsewhere in the SAME module is caught, and a fixture OUTSIDE the module root
+comes back `ok (cached)` with the edit invisible. Live, with this repo's own
+`wiring_test.go` (which reads `ci.yml` five directories up): disarming a gate is
+cached-green without the flag and FAIL with it. setup-go restores GOCACHE across
+commits, so it failed OPEN. `cell-agent`'s `parity_test.go`, which reads
+repo-root `infra/k8s/`, is in the same class.
 
 **61 DISTINCT rows RED** across the branch (34 once-GREEN, enumerated in the PR
-with the other 27), two accepted survivors below. Five lessons in
+with the other 27), three accepted survivors below. Five lessons in
 `contexts/provisioning.md`.
 
 **As merged, an environment is a namespace and nothing else, and deleting one
