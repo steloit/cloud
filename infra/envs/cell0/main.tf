@@ -76,6 +76,7 @@ module "cost_guardrails" {
   cell_id            = var.cell_id
   billing_account    = var.billing_account
   monthly_budget_usd = 700
+  budget_currency    = var.budget_currency
   alert_emails       = var.alert_emails
 }
 

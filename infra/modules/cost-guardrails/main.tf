@@ -26,7 +26,8 @@ resource "google_billing_budget" "cell" {
 
   amount {
     specified_amount {
-      currency_code = "USD"
+      # Must match the billing account's currency; the API rejects anything else.
+      currency_code = var.budget_currency
       units         = tostring(floor(var.monthly_budget_usd))
     }
   }

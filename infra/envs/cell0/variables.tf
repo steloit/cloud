@@ -34,3 +34,9 @@ variable "alert_emails" {
   type    = list(string)
   default = []
 }
+
+variable "budget_currency" {
+  type        = string
+  description = "Must equal the billing account's currency (see the cost-guardrails module). Supplied with billing_account at P1."
+  default     = ""
+}
