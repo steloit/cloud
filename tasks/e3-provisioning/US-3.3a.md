@@ -206,38 +206,10 @@ to `degraded`, but the control plane allows `provisioning → {ready, failed,
 deleting}` only. The writeback is rejected every tick, `observed_generation`
 never advances, and the service is retried forever with nothing visible — the
 exact failure `statusFromPhase` argues against thirty lines below, arrived at
-from the other side. Now `failed` — and that is ALL that shipped of it, because round 12 tried to go
-further and made it worse.
-
-**Round 12 is reverted, and the revert is the lesson.** It added a
-`statusFor(from, want)` and a copy of the transition table to the AGENT, with a
-repo-root JSON artifact to keep the copies honest. Three measured problems:
-
-- **It collapsed the transient guard.** `statusFor("ready","provisioning")`
-  finds no legal edge and returns `from`; `ready` IS terminal, so Converge's
-  `!terminal(status)` BLOCKER never fired. A READY service observed in
-  `Upgrading cluster` reported `"ready", nil` instead of `ErrNotConverged` —
-  the agent declaring a generation converged mid-apply, `observed_generation`
-  advancing, the row leaving the outstanding set. Strictly worse than the 409
-  loop it replaced, and reachable through the exact flow the fix cited.
-- **The premise for the artifact was false.** "Separate go.mod files, so neither
-  module can import the other" — `apps/cli/go.mod` already imports
-  `packages/contracts/go` across that boundary with a `replace`, and
-  `docs/architecture.md` says the cell-agent does too. I asserted an
-  architectural constraint without checking the repo that contradicts it.
-- **It deleted the test that caught its own headline incident.** The replacement
-  cross-product skips any answer where `got == from`, and the
-  `"Waiting for user action": "degraded"` mutation — cited three times as the
-  motivating live consequence — became a SURVIVOR. A sweep that treats "no
-  change" as always-legal cannot see the case where no change is the wrong
-  answer.
-
-The real fix belongs in `reconcile.Writeback`, which is the only place holding
-both `from` and the machine, and where a data-plane copy of a control-plane
-state machine is not a plane leak (ADR-0001 D9/A2.5). Filed as **US-3.3h** with
-the design and the five ACs, including the two survivors QA found in the
-reverted version (`suspended` silently auto-resuming, and an unknown `from`
-being echoed back outside the vocabulary).
+from the other side. Now `failed` — and that is ALL that shipped of it. Round 12 tried to go further,
+with a FROM-aware `statusFor` in the AGENT and a repo-root artifact pinning two
+copies of the transition table; **round 13 reverted all of it** as a regression.
+The three measured reasons, and where the real fix lives, are in the Outcome.
 
 **What round 13 keeps:** every CNPG phase pinned by CLASSIFICATION, not just by
 count — reclassifying `"Cluster has incomplete or invalid image catalog"` from
@@ -263,12 +235,75 @@ worst, 25 mutation results vs. the harness that produced them — a module-only
 `cp -R` whose baseline was already RED, published as evidence.
 
 **61 DISTINCT rows RED** on one harness with a green baseline asserted before and
-after; 34 of them once GREEN; two accepted survivors named above. Derivation,
+after; 34 of them once GREEN; two accepted survivors recorded below. Derivation,
 because two earlier published counts (59, and 61-before-dedup) were restated
-rather than re-derived: 34 rows here + 29 in the PR = 63 entries, minus the 2
+rather than re-derived: 34 once-GREEN rows + 29 in the PR = 63 entries, minus the 2
 that appear verbatim in both (the `ValidateCell` call; `main` ignoring `run`'s
 error) = **61**. Rows, not mutations — PR row 29 bundles two refuse-everything
 controls, so 61 rows cover **62 mutations**. Five lessons in
+`contexts/provisioning.md`.
+
+**As merged, an environment is a namespace and nothing else, and deleting one
+leaks it (US-3.3b).**
+
+## Accepted survivors — measured green, deliberately not closed
+
+Named here because an unrecorded survivor is indistinguishable from one nobody
+looked for.
+
+| survivor | why it stands |
+|---|---|
+| `Apply` guards skipped for index ≥ **12** | Any hand-written sweep has a ceiling; this one is 12, against a largest-ever batch of 8 (`7e94f26`). **This was published as "≥ 16" for one round while the sweep already ran to 12** — the ceiling was lowered in the same commit that widened the fixtures, and four claims were not updated. Corrected here and measured: ≥ 12 GREEN, ≥ 13 GREEN, ≥ 16 vacuous. The real close is a property test over random `n` and random composition, filed with US-3.3c. |
+| `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
+| ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
+| the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
+
+## Outcome
+
+Shipped: the environment's Kubernetes namespace, created **agent-side** on every
+converge (level-triggered, so a namespace deleted out from under us comes back),
+with `resourcePath` taught cluster-scoped routing, `Apply` restructured so the
+"correct for index 0 only" class is unrepresentable, and the transport pinned.
+D7's policy objects are deliberately NOT here — see the withdrawal section above.
+
+**The status work is a single line: `"Waiting for user action"` maps to `failed`,
+not `degraded`.** Round 12 tried to go further — a FROM-aware `statusFor` and a
+transition table in the agent, pinned by a repo-root JSON artifact — and **round
+13 reverted all of it**, because both reviewers measured it as a regression:
+
+- It **collapsed the transient guard.** `statusFor("ready","provisioning")` finds
+  no legal edge and returns `from`; `ready` IS terminal, so Converge's
+  `!terminal(status)` BLOCKER never fired. A READY service observed mid-upgrade
+  reported `"ready", nil` instead of `ErrNotConverged` — the agent declaring a
+  generation converged during an apply, `observed_generation` advancing, the row
+  leaving the outstanding set. Strictly worse than the 409 loop it replaced.
+- **Its premise was false.** "Separate go.mod files, so neither module can import
+  the other" — `apps/cli/go.mod` already `require`s and `replace`s
+  `packages/contracts/go` across exactly that boundary, and
+  `docs/architecture.md` names the cell-agent as an importer too. An
+  architectural constraint I asserted without checking the repo.
+- **It deleted the test that caught its own headline incident.** The replacement
+  cross-product skips any answer where `got == from`, so the
+  `"Waiting for user action": "degraded"` mutation — cited three times as the
+  motivating live consequence — became a survivor.
+
+The real fix is **US-3.3h**, in `reconcile.Writeback`: the only place holding
+both `from` and the machine, and where this is not a plane leak (ADR-0001
+D9/A2.5). **O31** owns the five-representation status vocabulary.
+
+Round 13 also keeps two pre-existing closures: every CNPG phase pinned by
+CLASSIFICATION (reclassifying a terminal-bad phase as transient was green in both
+modules), and `-count=1` on all three Go modules in CI. That one is stated as an
+observation, not a mechanism: an edit to ONLY a repo-root fixture two modules
+assert against came back `ok (cached)` in both and RED in both with the flag, and
+setup-go restores GOCACHE across commits — so it failed OPEN. A synthetic
+reproduction did **not** confirm the obvious explanation (in a scratch module such
+a test is simply uncacheable), so no claim about package-vs-module roots is made.
+Measured: the CI `go` job is 514s with the flag against 586s without, so it is
+free either way.
+
+**61 DISTINCT rows RED** across the branch (34 once-GREEN, enumerated in the PR
+with the other 27), two accepted survivors below. Five lessons in
 `contexts/provisioning.md`.
 
 **As merged, an environment is a namespace and nothing else, and deleting one

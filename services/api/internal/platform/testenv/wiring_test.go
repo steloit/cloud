@@ -94,11 +94,12 @@ var ciGates = []ciGate{
 		why: "the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
 	{task: "O13", job: "go", runContains: "go test -count=1 -race -timeout 30m ./...",
 		why: "the detector had never run in CI; O14 reached the base branch and sat there a month. " +
-			"The -count=1 is part of the needle deliberately (US-3.3a): cmd/go only tracks fixtures " +
-			"under a test's OWN package directory, so an edit to a repo-root or cross-module fixture " +
-			"comes back `ok (cached)` — measured green in both modules for a change that is RED with " +
-			"-count=1, and setup-go restores GOCACHE across commits. Dropping the flag fails OPEN. " +
-			"Note this must be pinned through EXECUTABLE text: runContains matches against " +
+			"The -count=1 is part of the needle deliberately (US-3.3a): an edit to ONLY a " +
+			"repo-root fixture that two modules assert against came back `ok (cached)` in both, " +
+			"and RED in both with the flag — and setup-go restores GOCACHE across commits, so a " +
+			"PR could report green while broken. The mechanism is deliberately not claimed (a " +
+			"synthetic repro says such a test is uncacheable, not mis-cached); the observation " +
+			"is. Note it must be pinned through EXECUTABLE text: runContains matches against " +
 			"stripShellComments, so a gate can never be armed by a comment"},
 	{task: "O13", job: "go", runContains: `out="$(gofmt -l "$m" 2>&1)"`,
 		why: "the exit-status/stderr capture: gofmt reports CLEAN on stdout for a file that does not parse"},

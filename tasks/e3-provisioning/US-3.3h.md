@@ -68,11 +68,22 @@ legal edge, because it is the only place that has both `from` and the machine.
 Next to `transitions` in `provisioning`:
 
 ```go
-// ObservedStatus maps a cell's observation onto a status legal from `from`.
-// settled=false means: take this edge, but the row is NOT converged — the
-// machine needs another hop, so observed_generation must NOT advance.
-func ObservedStatus(from, observed string) (to string, settled bool)
+// Observation is what the machine decided to do with a cell's report. It is a
+// TYPE, not a (string, bool) pair, because ADR-0014 binds here: `to, _ :=
+// ObservedStatus(...)` compiles, and dropping that bool silently re-introduces
+// the advance-observed-while-unsettled bug round 12 was reverted for. Writeback
+// must be unable to advance observation without having consulted it.
+type Observation struct{ /* unexported */ }
+
+func ObservedStatus(from, observed string) Observation
+
+func (o Observation) Edge() (to string, ok bool) // ok=false: no transition
+func (o Observation) Converged() bool            // false: do NOT advance observed_generation
 ```
+
+The unsafe form must not compile — that is ADR-0014's rule, ratified by the
+founder 2026-08-23, and it is the whole reason this task exists rather than a
+patch to the reverted design.
 
 | from | observed | → | why |
 |---|---|---|---|
@@ -82,9 +93,17 @@ func ObservedStatus(from, observed string) (to string, settled bool)
 | `failed` | `ready` | `provisioning`, **unsettled** | the documented retry path; the next tick lands `ready` |
 | `suspended` | `ready` | `suspended`, settled | **never auto-resume** — see below |
 | anything else | — | `from`, settled | no legal edge: report no change |
+| any | `""` | no edge, settled | **a live input at this layer**: `reconcile/http.go` normalizes the wire's `gone` to `""`. Today `Writeback`'s existing `rep.Status != ""` guard keeps the mapping off the teardown path, but AC 2's cross product is over phases and pins nothing here. |
 
 Reached through `reconcile.Transitioner` (extended by one method) so `reconcile`
 still does not import `provisioning`.
+
+Traced before proposing: on the unsettled `failed`+healthy hop, `Transition`
+(failed → provisioning) is legal, `MarkObserved` is skipped, so
+`observed_generation < generation` holds, `ListDesiredForCell` still returns the
+row and the next tick lands `ready`. The row is not stranded, and returning an
+error is the same shape as the existing failed-`Transition` path the code already
+documents.
 
 ## Acceptance criteria
 
@@ -104,8 +123,11 @@ still does not import `provisioning`.
    which is why this is an AC and not an incident.
 6. `statusFor`-style logic does NOT reappear in the cell-agent, and no copy of
    `transitions` exists outside `services/api`.
-7. Mutation-verified on a GREEN-baseline harness, including: the mapping ignored
-   at the call site, each table row individually, and the transient collapse.
+7. `observed == ""` is handled explicitly, not by accident of a caller's guard.
+8. Mutation-verified on a GREEN-baseline harness, including: each table row
+   individually, the transient collapse, and — since ADR-0014 says the unsafe
+   form must not compile — a check that ignoring the convergence signal is a
+   COMPILE error rather than a surviving mutation.
 
 ## Read first
 
