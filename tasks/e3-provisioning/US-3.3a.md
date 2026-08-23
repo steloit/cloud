@@ -218,10 +218,31 @@ Also fixed: `RECONCILER_CELL` was unvalidated, so a plausible typo
 service on the cell, logging and continuing with no writeback — the control plane
 would see every service sit in provisioning forever. Validated at boot now.
 
-## Negative evidence — twenty-five mutations, each RED
+## Negative evidence — and a correction to it
 
-Applied in `cp -R` copies (AGENTS.md), each with an assert-the-mutation-applied
-guard, because a mutation that does not apply reads as a green hole.
+**Round 3's first mutation table was invalid and is withdrawn.** It was produced
+with `cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed". A
+module-only copy has a **RED baseline** — `TestClusterMatchesGroundTruthManifest`,
+`TestBranchMatchesSpikeGroundTruth` and `TestPITRMatchesSpikeGroundTruth` fail
+with `repo root not found (AGENTS.md)` before any mutation is applied — so every
+row reported RED whether or not the mutation was caught. That is the mistake bank
+entry *directly above the one this branch added*, violated in the same round.
+
+Re-run on a scaffolded repo root with a **verified GREEN no-mutation baseline**
+(0 FAILs on a clean copy). Result: 11 of the 12 round-3 rows were genuinely RED
+and one was **GREEN** —
+
+| withdrawn row | actual |
+|---|---|
+| "Delete falls back to a guessed API group" | **GREEN.** Replacing the refusal with a CNPG-group fallback is not caught: every kind in `TestDeleteRefusesAKindItCannotAddress` is missing from `plurals` too, so the refusal was answered by `resourcePath`, not by the guard the test names. Widening `plurals` alone — literally what US-3.3c will do — was also green. Fixed with `TestPluralsAndAPIVersionsNameTheSameKinds` and a case driven through a kind that is addressable but has no apiVersion. |
+
+Rounds 1 and 2 are unaffected: they used targeted `-run` selectors against
+`internal/{kube,render,driver/tenancy}` and never loaded `internal/driver/cnpg`.
+
+The table below is the re-run. Every entry was measured on the scaffolded harness,
+each with an assert-the-mutation-applied guard, because a mutation that does not
+apply reads as a green hole — and now also with an assert-the-baseline-is-green
+guard, because a harness that cannot produce a GREEN is not measuring anything.
 
 | mutation | |
 |---|---|
@@ -238,7 +259,7 @@ guard, because a mutation that does not apply reads as a green hole.
 | the cell label value left unvalidated (YAML injection) | RED |
 | `Render` refuses everything (negatives alone would pass) | RED |
 | the Apply mismatch guard, each arm separately + refuse-everything + runs-too-late | RED |
-| **a D7 policy re-added as a second YAML document** (was GREEN) | RED |
+| **a D7 policy re-added as a second YAML document** *(was GREEN)* | RED |
 | **a second document smuggling a Secret into `env-victim`** (was GREEN) | RED |
 | `Delete` falls back to a guessed API group | RED |
 | `Namespace` routed under the CNPG group | RED |
@@ -250,6 +271,12 @@ guard, because a mutation that does not apply reads as a green hole.
 | `ValidateCell` accepts anything (a bad `RECONCILER_CELL` boots) | RED |
 | `exactlyOneDocument` refuses everything (control) | RED |
 | `ValidateNamespace` refuses everything (control) | RED |
+| `exactlyOneDocument` applied only to `manifests[0]` | RED *(was GREEN)* |
+| the cross-namespace guard applied only to `manifests[0]` | RED *(was GREEN)* |
+| `plurals` widened alone, as US-3.3c will do | RED *(was GREEN)* |
+| a kind addressable via `plurals` with no `apiVersions` entry | RED |
+| the Namespace rendered with a `metadata.namespace` | RED *(was GREEN)* |
+| the `ValidateCell` **call** deleted from boot | RED *(was GREEN — `cmd/` had no tests)* |
 
 ## One test was made stronger. One was weakened, and the review caught it
 

@@ -161,11 +161,19 @@ func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
 	// omitted the only shape that ever occurs, which is a cross-plane contract
 	// test that does not test the contract.
 	for _, produced := range []string{
-		"env-" + strings.Repeat("a1b2c3d4", 4), // env_<32 hex> → 36 chars, the real one
-		"env-9f3c1a2b",                         // canon fixtures
-		"env-w",                                // reconcile wiring test seed, at the len<5 boundary
+		// The ONLY shape production mints: ids.New("env") emits env_<32 hex>, and
+		// k8sNamespace maps "_"→"-", so the namespace is env-<32 hex>, 36 chars.
+		"env-" + strings.Repeat("a1b2c3d4", 4),
+		// Seeded by reconcile/wiring_integration_test.go:48,335 — 5 chars, exactly
+		// at this function's len<5 boundary.
+		"env-w",
+		// Boundary cases. NOT currently mintable: 36 < 63 always, so
+		// namespaceForEnv's `if len(ns) > 63` truncation branch is unreachable for
+		// any id ids.New can produce. Kept so the boundary stays pinned if the id
+		// scheme ever changes; an earlier version of this list called the 63-char
+		// case "the truncation ceiling", which claimed a path that cannot be taken.
 		"env-0",
-		"env-" + strings.Repeat("f", 59), // exactly 63, the truncation ceiling
+		"env-" + strings.Repeat("f", 59),
 	} {
 		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell}); err != nil {
 			t.Fatalf("the control plane can mint %q and Render refuses it: %v", produced, err)
@@ -221,9 +229,11 @@ func TestEachManifestIsExactlyOneDocumentAndItsKindIsTrue(t *testing.T) {
 			}
 			docs++
 			var head struct {
-				Kind     string `yaml:"kind"`
-				Metadata struct {
-					Name string `yaml:"name"`
+				APIVersion string `yaml:"apiVersion"`
+				Kind       string `yaml:"kind"`
+				Metadata   struct {
+					Name      string `yaml:"name"`
+					Namespace string `yaml:"namespace"`
 				} `yaml:"metadata"`
 			}
 			if err := node.Decode(&head); err != nil {
@@ -235,6 +245,19 @@ func TestEachManifestIsExactlyOneDocumentAndItsKindIsTrue(t *testing.T) {
 			}
 			if head.Metadata.Name != m.Name {
 				t.Fatalf("Manifest.Name is %q but the document says %q", m.Name, head.Metadata.Name)
+			}
+			// SCOPE. A Namespace is cluster-scoped and must not declare a
+			// metadata.namespace: kube.Apply refuses that outright, so a rendered
+			// one fails EVERY converge for EVERY service on the cell with no
+			// writeback. Nothing asserted it — adding `namespace: kube-system`
+			// under metadata left the whole suite green.
+			if head.APIVersion == "" {
+				t.Fatalf("%s/%s declares no apiVersion", m.Kind, m.Name)
+			}
+			if m.Kind == "Namespace" && head.Metadata.Namespace != "" {
+				t.Fatalf("the Namespace declares metadata.namespace %q — it is cluster-scoped, "+
+					"and kube.Apply refuses a cluster-scoped object that names a namespace",
+					head.Metadata.Namespace)
 			}
 		}
 		if docs != 1 {

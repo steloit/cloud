@@ -428,3 +428,114 @@ metadata:
 		t.Fatalf("expected 1 apply, got %d", len(got))
 	}
 }
+
+// EVERY manifest, not just the first.
+//
+// Both of Apply's guards were pinned only for a single-element slice, and the
+// covered element is the worst possible one: Converge passes
+// [tenancy Namespace, Cluster, ScheduledBackup], so element 0 is the manifest
+// the agent writes itself and elements 1..n are the driver's — the only ones
+// that carry a metadata.namespace at all. Restricting either guard to
+// manifests[0] left the whole suite green.
+func TestApplyGuardsEveryManifestNotJustTheFirst(t *testing.T) {
+	nsManifest := []byte(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: env-mine
+`)
+	cases := map[string]struct {
+		second []byte
+		names  string
+	}{
+		"a later manifest declaring another namespace": {[]byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: stolen
+  namespace: env-victim
+`), "env-victim"},
+		"a later manifest carrying two documents": {[]byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: ok
+  namespace: env-mine
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smuggled
+  namespace: env-victim
+`), "2 YAML documents"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var got []capture
+			srv := serverCapturing(t, 200, `{}`, &got)
+			c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+			err := c.Apply(context.Background(), "env-mine", [][]byte{nsManifest, tc.second})
+			if err == nil {
+				t.Fatal("Apply accepted it — the guard only covers manifests[0]")
+			}
+			if !strings.Contains(err.Error(), tc.names) {
+				t.Fatalf("the error must name what was wrong with the SECOND manifest: %v", err)
+			}
+			// The first manifest is legitimate and may already have been sent;
+			// what must not happen is the offending one reaching the server.
+			for _, g := range got {
+				if strings.Contains(g.body, "env-victim") || strings.Contains(g.body, "smuggled") {
+					t.Fatalf("the offending manifest was sent: %s", g.body)
+				}
+			}
+		})
+	}
+}
+
+// `plurals` says which kinds are addressable; `apiVersions` says under which
+// group. They must name the SAME set, or the two drift and Delete either refuses
+// something Apply can write or routes something under a guessed group.
+//
+// TestDeleteRefusesAKindItCannotAddress could not catch this: every kind it
+// tries is missing from BOTH maps, so the refusal it observes comes from
+// resourcePath, not from the apiVersions guard it is named for. Adding
+// "NetworkPolicy" to `plurals` alone — literally what US-3.3c will do — stayed
+// green. That is the round-3 lesson recurring inside the round-3 fix.
+func TestPluralsAndAPIVersionsNameTheSameKinds(t *testing.T) {
+	for kind := range plurals {
+		if _, ok := apiVersions[kind]; !ok {
+			t.Errorf("%q is in plurals but not apiVersions — Delete would refuse a kind "+
+				"Apply can write, or (if the refusal is ever softened) route it under a guess", kind)
+		}
+	}
+	for kind := range apiVersions {
+		if _, ok := plurals[kind]; !ok {
+			t.Errorf("%q is in apiVersions but not plurals — resourcePath cannot address it", kind)
+		}
+	}
+}
+
+// The apiVersions guard must fire on its own, not be answered by resourcePath.
+// Driven with a kind present in `plurals` and absent from `apiVersions`, which is
+// the only state in which the guard is the thing that speaks.
+func TestDeleteRefusesAKindThatIsAddressableButHasNoAPIVersion(t *testing.T) {
+	plurals["Widget"] = "widgets"
+	defer delete(plurals, "Widget")
+
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	err := c.Delete(context.Background(), "env-x", "Widget", "obj")
+	if err == nil {
+		t.Fatal("Delete routed a kind with no apiVersion — a 404 from a guessed group reads as 'already gone'")
+	}
+	if !strings.Contains(err.Error(), "apiVersion") {
+		t.Fatalf("the error must name the missing apiVersion: %v", err)
+	}
+	if called {
+		t.Fatal("a request was sent")
+	}
+}
