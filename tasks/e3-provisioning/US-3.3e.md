@@ -146,11 +146,12 @@ ruling rather than a derivation — `plans.json` is not self-authorising.
 Two API-baseline probes reported NOT-GREEN mid-sweep and were investigated rather
 than reported: the first copy lacked the repo root that `canon` reads.
 
-**Deferred citations.** US-3.3d and US-3.3g are on this branch. **US-3.11**
-(terminal-failure writeback, which the unchecked AC points at) is filed on
-`task/T3.4c`, and **US-3.3f** (enforcement) on its own branch — neither is an
-ancestor here, so those two references resolve only once those branches merge.
-Stated rather than left dangling.
+**Deferred citations.** US-3.3d, US-3.3g and US-3.3i are on this branch, and
+**US-3.3f** merged to `main` while this one was open, so its citation now
+resolves. The one that does NOT is **US-3.11** (terminal-failure writeback,
+which the unchecked AC above points at): it is filed on `task/T3.4c` (#322),
+not an ancestor here, so that reference resolves only once #322 merges. Stated
+rather than left dangling.
 
 **Scope note:** the original AC said "CPU, memory, PVC count and Service count".
 The founder's table rules bytes, not counts, so `count/services` is deliberately
