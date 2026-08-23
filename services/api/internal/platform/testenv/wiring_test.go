@@ -88,6 +88,55 @@ var ciGates = []ciGate{
 		why: "the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
 	{task: "§16/§17", job: "go", runContains: "git diff --cached --exit-code -- services packages apps",
 		why: "the generators are a no-op that looks busy without the diff that compares their output"},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: `terraform -chdir="$d" test || fail=1`,
+		why: "terraform validate cannot check a VALUE. This is the only gate asserting that " +
+			"each cell enables NetworkPolicy enforcement — without it the API server stores " +
+			"D7's policies and drops nothing, which is the defect US-3.3a withdrew for.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		// CONTIGUOUS, deliberately. A bare "exit $fail" needle is satisfied while the
+		// gate is neutered: review measured that inserting `fail=0` on the line before
+		// it leaves every registered needle intact — `|| fail=1`, `exit $fail`, the
+		// "did not run" message — and the step exits 0 with all three terraform suites
+		// failing. Matching the loop's tail THROUGH the exit means any statement
+		// slipped in between breaks the match. This is the same lesson the O6f entry
+		// below records for authority-paths, applied to the step that repeated it.
+		runContains: "  echo \"::endgroup::\"\ndone\nexit $fail",
+		why: "the loop reports per-module failures ONLY through this; `exit 0` — or a " +
+			"`fail=0` inserted between the loop and the exit — fails the gate OPEN",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "instantiates the cell but owns no terraform test with a run block",
+		why: "emptiness alone is not coverage: deleting ONE env's tests/ left the gate green " +
+			"over the remaining dirs, hardcoding discovery to the module passed too, and a " +
+			"suite gutted to zero run blocks exits 0 with \"Success! 0 passed\". The " +
+			"behaviour is pinned by TestTheTerraformGate* (which EXECUTES this step); this " +
+			"needle only keeps the step itself from being deleted wholesale.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['log'] is True",
+		why: "the k8s step's only other gate is a content-BLIND glob parse; these assertions " +
+			"are the sole check on network-logging.yaml, and deleting the whole heredoc was " +
+			"measured green everywhere",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['delegate'] is False",
+		why: "delegate=false is what makes \"every denied connection is logged\" hold for " +
+			"namespaces created later; flipping it was measured green",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "this gate did not run",
+		why: "GitHub's default shell has no pipefail and -e does not fire on a failing command " +
+			"substitution in a for header, so empty discovery would skip every test and exit 0. " +
+			"The emptiness guard is the only thing that makes that loud.",
+	},
 	{task: "O13", job: "go", runContains: "gofmt -l",
 		why: "go vet does not check formatting, so nothing else in this pipeline reports it"},
 	{task: "O13", job: "go", runContains: "git ls-files '*/go.mod'",
