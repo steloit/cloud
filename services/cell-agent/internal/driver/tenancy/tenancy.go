@@ -6,8 +6,9 @@
 // (D6, frozen by ADR-0001) is that the control plane writes desired state and
 // the cell-agent converges it. Creating the namespace control-plane-side would
 // mean giving the control plane cluster credentials and a kube client — an
-// architecture delta, not an implementation choice, and ADR-0040 says a delta
-// needs evidence from implementation or a customer, which this does not have.
+// architecture delta, not an implementation choice, and ADR-040 says a delta
+// needs "implementation, performance, customer, or security evidence" — none of
+// which this has.
 //
 // Agent-side is also level-triggered for free: a namespace deleted out from
 // under us is recreated on the next converge, where a create-once call at
@@ -43,11 +44,50 @@ import (
 )
 
 // rfc1123Label is what the API server will accept as a namespace name, and it is
-// also the guard on a value this package interpolates into a manifest. A
-// namespace carrying a newline injects arbitrary YAML keys into the object; one
-// carrying an uppercase letter or a space is accepted here and rejected by the
-// API server, which converges forever with no control-plane signal.
+// also the guard on a value that gets interpolated into a manifest and
+// fmt.Sprintf'd into a request path. A namespace carrying a newline injects
+// arbitrary YAML keys into the object; one carrying `../` walks out of the path
+// it was supposed to address.
+//
+// NOTE ON WHAT THIS DOES AND DOES NOT BUY: refusing locally is not better than
+// the API server refusing, in signalling terms — both produce a converge that
+// errors, logs and retries, with no writeback and no status change for the
+// customer. What it buys is that the malformed value never reaches a URL or a
+// YAML document. Surfacing a terminal `failed` writeback is a separate gap and
+// is not claimed here.
 var rfc1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// ValidateNamespace is the ONE owner of "is this a namespace we will act on".
+//
+// It is exported because the teardown path needs the same answer: Converge's
+// deleting branch returns before Render is ever called, so a namespace validated
+// only inside Render is validated on the create path alone — and teardown is the
+// path that fmt.Sprintf's the value into a DELETE URL.
+func ValidateNamespace(ns string) error {
+	if ns == "" {
+		return fmt.Errorf("tenancy: namespace is required")
+	}
+	if len(ns) > 63 || !rfc1123Label.MatchString(ns) {
+		return fmt.Errorf("tenancy: namespace %q is not an RFC1123 label", ns)
+	}
+	if len(ns) < 5 || ns[:4] != "env-" {
+		return fmt.Errorf("tenancy: namespace %q is not env-<environment_id> (ADR-0012)", ns)
+	}
+	return nil
+}
+
+// ValidateCell is the ONE owner of "is this cell id usable". It is exported so
+// the agent can refuse a bad RECONCILER_CELL at boot rather than failing every
+// converge on the cell with no control-plane signal.
+func ValidateCell(cell string) error {
+	if cell == "" {
+		return fmt.Errorf("tenancy: cell is required — every row carries cell_id (D7)")
+	}
+	if len(cell) > 63 || !rfc1123Label.MatchString(cell) {
+		return fmt.Errorf("tenancy: cell %q is not an RFC1123 label", cell)
+	}
+	return nil
+}
 
 // Spec is what an environment needs in order to become a tenant boundary.
 type Spec struct {
@@ -67,28 +107,13 @@ type Manifest struct {
 // anything namespaced, because applying into a namespace that does not exist yet
 // is a 404. Callers must apply in slice order.
 func Render(s Spec) ([]Manifest, error) {
-	if s.Namespace == "" {
-		return nil, fmt.Errorf("tenancy: namespace is required")
-	}
-	if s.Cell == "" {
-		return nil, fmt.Errorf("tenancy: cell is required — every row carries cell_id (D7)")
-	}
-	// The namespace name is the control plane's to choose (ADR-0012,
-	// env-<environment_id>). Refuse anything else rather than deriving a second
-	// opinion here — two derivations is how they drift.
-	//
-	// Checked as a whole label, not as a prefix: "env- x" and "env-UP" and a
-	// namespace with an embedded newline all carry the prefix.
-	if len(s.Namespace) > 63 || !rfc1123Label.MatchString(s.Namespace) {
-		return nil, fmt.Errorf("tenancy: namespace %q is not an RFC1123 label", s.Namespace)
-	}
-	if len(s.Namespace) < 5 || s.Namespace[:4] != "env-" {
-		return nil, fmt.Errorf("tenancy: namespace %q is not env-<environment_id> (ADR-0012)", s.Namespace)
+	if err := ValidateNamespace(s.Namespace); err != nil {
+		return nil, err
 	}
 	// The cell is interpolated as a label VALUE and is subject to the same
 	// injection: a newline in it adds a key to the object.
-	if len(s.Cell) > 63 || !rfc1123Label.MatchString(s.Cell) {
-		return nil, fmt.Errorf("tenancy: cell %q is not an RFC1123 label", s.Cell)
+	if err := ValidateCell(s.Cell); err != nil {
+		return nil, err
 	}
 
 	// NOTE ON LABELS — there is deliberately no steloit.dev/environment-id here.

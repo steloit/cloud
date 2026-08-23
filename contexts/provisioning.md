@@ -63,43 +63,31 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Metering only "when billing ships" — metering is day-one (D10).
 - Scale-to-zero designs that require an always-awake poller (A1.2 — internal jobs; the customer queue is now pgmq-in-DB drained by a scale-to-zero worker, A5.2).
 - Building storage/AI/queue as a *managed service* — they are Bindings or a Postgres capability (A5); a new managed product needs an ADR.
-- Classifying by implementation instead of state semantics (ADR-038's State Test: state location/ownership decides Service vs Capability vs Binding — lifecycle, backup, branching, billing all follow state).
-- Surfacing a capability's dependency as a prerequisite or error instead of composing it (the catalog sells intents; the composer proposes the shaped service + estimate — "Jobs without Postgres" is a proposal, never homework).
+- Classifying by implementation instead of state semantics (ADR-038's State Test decides Service vs Capability vs Binding).
+- Surfacing a capability's dependency as homework instead of composing it (the catalog sells intents; the composer proposes the shaped service + estimate).
 - Backend-swapping a capability into different semantics ("Jobs on Kafka") — a semantic divergence is a NEW named service via the gate, never a swap (ADR-038 scope clause).
 - An external Binding that proxies bytes/traffic, routes across providers, or enforces a hard in-line cap — that is the commodity we don't build (A5.3/A5.4).
-- Letting an execution model change silently under a Product, or migrating one without a visible, priced,
-  consented estimate (ADR-040: the Composer proposes; the accepted estimate is the contract).
+- Letting an execution model change silently under a Product, or migrating one without a visible, priced, consented estimate (ADR-040).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair and never bill.
-- **Moving a guard without asking what else it was doing.** US-3.8 shipped five blockers across three
-  review rounds and every one was the same: a guard that existed and worked, until a boundary moved
-  under it. Making `desired` track the override column turned "any PATCH un-pins" into a real path but
-  left the price restore only in the shape branch, so un-pinning released the capacity and kept charging
-  for it — permanently, since the row was then unsweepable. Splitting the sweep's one UPDATE into
-  SELECT+UPDATE moved the expiry predicate off the write path, so a concurrent customer edit was
-  silently reverted and billed at the pre-edit rate. Unifying the pricing path deleted the `estimates.Price`
-  call that was also the merged shape's first validator and owned the `ShapeError → 422` conversion, so a
-  client typo started answering 500 "contact support" on one endpoint while the same input still
-  answered 422 on another. **The diagnostic question after any restructure is not "does the new code
-  work" — it is "what did the moved or deleted code guarantee, and who guarantees it now?"** Each of the
-  three had a second job nobody had written down, and a green suite found none of them.
+- **Moving a guard without asking what else it was doing.** US-3.8 shipped five blockers over three
+  review rounds, all one cause: a guard that worked until a boundary moved under it. Making `desired`
+  track the override column left the price restore in the shape branch, so un-pinning released capacity
+  and kept charging — permanently, the row now unsweepable. Splitting the sweep's UPDATE into
+  SELECT+UPDATE moved the expiry predicate off the write path, silently reverting and mis-billing a
+  concurrent edit. Unifying the pricing path deleted the `estimates.Price` call that was also the merged
+  shape's first validator and owned `ShapeError → 422`.
 - **A test that re-implements the guard it is named for asserts nothing about that guard.** US-3.8's
-  `TestTheDesiredDocNeverCarriesADeadPin` called `overrideInstances` on its own input, nilled the pin,
-  and then asserted `desiredDoc` produced no pin — which is the production line, copied into the test
-  body. Deleting the real one from `services.go` left the test GREEN; a mutation sweep found it. The
-  same shape hid in the sweep predicate: `… AND pg_input_is_valid(x) AND x::timestamptz <= now()`
-  looked like it guarded the cast, and deleting BOTH guards changed nothing — because an *earlier* OR
-  arm was already `OR pg_input_is_valid(x) = false`. The same guard, written twice. OR short-circuits
-  left to right, so the duplicate shielded the cast and the inner copy could never fire; delete the
-  earlier arm too and the statement aborts. Both were caught by the same question: **if I delete the
-  line this test is named after, does the test fail?** If the answer needs a copy of that line
-  somewhere else to be yes, the class is open. The fix for the first is to drive the real entry point
-  and read the real column; for the second, one flat `CASE` — a `CASE` nested inside the `OR` merely
-  moved the problem, silently absorbing the `IS NULL` arm through its `ELSE`.
-  *Corrected 2026-07-27 after review:* this entry first blamed query-plan reordering. It was not that —
-  the shield was deterministic duplication. Postgres genuinely does not promise WHERE-clause evaluation
-  order (which is why `CASE` is still right, forward-looking), but that was not the mechanism here, and
-  "a plan might reorder this" and "I wrote this guard twice" have different fixes. **A mistake bank
-  entry that names the wrong cause teaches the wrong reflex** — the same failure O11 was corrected for.
+  `TestTheDesiredDocNeverCarriesADeadPin` called `overrideInstances` itself — the production line,
+  copied into the test body — so deleting the real one left it GREEN. Same shape in the sweep
+  predicate: an inner `AND pg_input_is_valid(x) AND x::timestamptz <= now()` could never fire because
+  an *earlier* OR arm was already `OR pg_input_is_valid(x) = false`; OR short-circuits left to right,
+  so the duplicate shielded the cast and deleting both changed nothing. Ask: **if I delete the line
+  this test is named after, does the test fail?** If it needs a copy of that line elsewhere to be yes,
+  the class is open. Fix: drive the real entry point and read the real column; for the predicate, one
+  flat `CASE` (nesting it inside the `OR` merely absorbed the `IS NULL` arm through its `ELSE`).
+  *Corrected 2026-07-27:* this first blamed query-plan reordering. It was deterministic duplication.
+  Postgres does not promise WHERE evaluation order (so `CASE` is still right), but that was not the
+  mechanism — **an entry that names the wrong cause teaches the wrong reflex** (as O11 was corrected for).
 - **A module-only `cp -R` gives a red baseline for tests that reach outside the module.** The
   fault-injection rule says copy the module, mutate the copy — but `TestCKM3EstimateGatedProvisioningEndToEnd`
   and `TestEveryAssistantHandlerGatesOnPolicy` read `../../../../docs/…` and `apps/cli`, so under
@@ -111,17 +99,11 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   applied per-site instead of made unrepresentable. An overflow bound went into one arm of a
   three-arm pricing switch (the siblings kept wrapping, and a wrapped price disabled the org's spend
   cap permanently); a 404-for-no-standing conversion went into one transport of a two-transport
-  endpoint (one request header reopened the oracle). Both fixes were correct and both were partial,
-  and no amount of care at the next site would have changed the rate. `int64` cents compiles `a * b`,
-  so every priced dimension is an opportunity to forget; `money.Cents` is a struct, so it does not
-  compile at all. **The question after writing any guard is not "is this one right" — it is "how many
-  places must be right, and what stops the next one being missed?"** If the answer is "a reviewer",
-  the design is wrong.
-  *What ships today:* the whole class, via O16. `money.Cents` is live and every priced dimension
-  goes through it, so the sibling arms this entry describes as still wrapping no longer can. The
-  deferral this note previously recorded (US-3.8 keeping only the one-arm bound, founder 2026-07-27)
-  is closed — kept in the history here because the deferral was ratified and its closure is the
-  evidence the entry is about.
+  endpoint. Both fixes were correct, both partial, and more care at the next site would not have
+  changed the rate. `int64` cents compiles `a * b`; `money.Cents` is a struct, so it does not compile
+  at all. **Ask not "is this guard right" but "how many places must be right, and what stops the next
+  one being missed?"** If the answer is "a reviewer", the design is wrong. *Closed by O16:* `money.Cents`
+  is live across every priced dimension, so the sibling arms described here can no longer wrap.
 - **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape` had a
   pre-existing stale-read race that was merely a desired-doc divergence — until US-3.8 wrote the price
   column on every PATCH, at which point it could put three facts in disagreement at once: the column
@@ -137,7 +119,31 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   (the ADR-0003→A4 precedent) — never claim "no delta because the semantic contract is unchanged";
   the catalog-plane "execution models are replaceable" language does not apply to founder-ratified
   infrastructure decisions (T1.0 review C1).
-- **Spike kits need a committed idempotent teardown with evidence.** In-cluster cleanup + "I deleted
-  it in the console/session" is not teardown: commit a script that is safe to re-run (waits for PVC
-  reclaim before cluster delete, removes bucket-IAM tombstones of deleted SAs, ends with an orphan
-  sweep) and commit its output as the $0-state proof (T1.0 QA review).
+- **Spike kits need a committed idempotent teardown with evidence.** "I deleted it in the console" is
+  not teardown: commit a re-runnable script (waits for PVC reclaim before cluster delete, removes
+  bucket-IAM tombstones of deleted SAs, ends with an orphan sweep) and commit its output as the
+  $0-state proof (T1.0 QA review).
+- **Shipping a constraint without finding what enforces it.** US-3.3a rendered D7's default-deny
+  NetworkPolicies and proved every manifest correct, but `infra/modules/gke-cell` is GKE Standard with
+  no `network_policy`/`ADVANCED_DATAPATH`: the API server stores them and nothing drops a packet.
+  Rendered, stored and enforced are three representations; the suite covered two. Inert-but-wrong is no
+  no-op either — the allow-set fenced CNPG off Workload Identity, GCS and the apiserver, which would
+  surface as "no Postgres reaches ready" after an unrelated `terraform apply` in another task.
+- **Widening a routing table without widening its consumer turns a loud error into a silent success.**
+  Four kinds added to `kube`'s `plurals` were not inert: `Delete` hardcoded the CNPG apiVersion, so they
+  built plausible paths under the wrong group, 404'd, and `Delete` maps 404 → "already gone".
+  `Delete(ns,"Namespace",ns)` — US-3.3b's exact call — would report success while the namespace lived.
+  A kind absent from the consumer must be REFUSED, never routed under a default.
+- **An assertion answered by something other than what it names is not an assertion.** A D8 check
+  widened from `objs[0]` (the Cluster) to the concatenated applied set, which the tenancy manifests
+  satisfy alone — rendering the Cluster into another tenant's namespace stayed GREEN; its repair was
+  still `strings.Contains`, so `…-shadow` survived. Widening one object to a set reads as
+  generalisation and IS a weakening. Compare values, and drive every field from a variable a mutation
+  can move — a label test whose only cell value equals the hardcoded string proves nothing.
+- **A guard that parses only document 1 does not guard the bytes.** `yaml.Unmarshal` silently returns
+  the first document of a stream, so a kind-based absence guard and a cross-namespace check both passed
+  while a second document carried an arbitrary object elsewhere. Assert exactly one document first.
+- **Validate on every path the value reaches, not the one you were editing.** `Converge`'s deleting
+  branch returns before the renderer, so a namespace guard in `Render` covered create only — and
+  teardown is what `fmt.Sprintf`s it into a DELETE URL. `"../../../api/v1/namespaces/kube-system"` was
+  refused on create, accepted on teardown. One owner, called from the accessor both paths use.

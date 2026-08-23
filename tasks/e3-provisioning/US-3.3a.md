@@ -11,11 +11,14 @@ labels: [Platform, Security]
 module: M4 Provisioning
 contexts: [provisioning]
 files:
+  - services/api/internal/provisioning/**
   - services/cell-agent/internal/**
-  - tasks/e3-provisioning/US-3.3a.md
-  - tasks/e3-provisioning/US-3.3b.md   # the half this could not reach
-  - tasks/e3-provisioning/US-3.3c.md   # the half the security review withdrew
+  - services/cell-agent/cmd/**
+  - infra/**
+  - contexts/provisioning.md            # the living file (AGENTS.md §8)
+  - tasks/e3-provisioning/US-3.3*.md
 verify:
+  - "a service in a brand-new environment converges without a hand-created namespace (LIVE — needs a cell; NOT YET RUN, see AC 3)"
   - "cd \"$(git rev-parse --show-toplevel)/services/cell-agent\" && go build ./... && go vet ./... && go test -race ./..."
   - "cd \"$(git rev-parse --show-toplevel)/services/cell-agent\" && test -z \"$(gofmt -l .)\""
 owner: agent
@@ -47,8 +50,9 @@ or *policing*, so isolation is nominal until this lands.
 - [ ] The namespace carries default-deny NetworkPolicy, ResourceQuota, LimitRange
   (D7). **Withdrawn to US-3.3c** — implemented, then removed before merge because
   the security review showed each object is inert or harmful. See below.
-- [x] A service in a brand-new environment converges with no hand-created
-  namespace; proven without the runbook's preflight.
+- [ ] A service in a brand-new environment converges with no hand-created
+  namespace; **proven without the runbook's preflight**. NOT PROVEN — see
+  "AC 3 is not checked, and why" below.
 - [ ] Deleting an environment removes the namespace (and nothing else's).
   **Filed as US-3.3b** — no env-teardown path exists to hook.
 
@@ -80,6 +84,29 @@ creation would never notice.
 
 So the task's claim held exactly. The live e2e worked because a runbook ran
 `kubectl create ns` in preflight.
+
+## AC 3 is not checked, and why
+
+The AC says **"proven without the runbook's preflight"**. That was ticked on the
+first version of this branch and it should not have been:
+
+- `infra/spike/us33-e2e.sh` **still runs the preflight** (`kubectl get ns || kubectl
+  create ns`). The runbook's NOTE has been corrected, but the preflight itself is
+  left in place deliberately — removing it would make the runbook unrunnable
+  until a cell exists to prove the replacement works.
+- **There is no cell to prove it on.** `gcloud container clusters list
+  --project=steloit-dev --format=json` returns `[]` with exit 0 (a control call,
+  `projects describe` → `steloit-dev ACTIVE`, rules out a silent auth failure).
+  `infra/modules/gke-cell` has never been applied. The US-3.3 live drill ran
+  against a cell that no longer exists.
+- So the evidence for "the namespace is created before anything is applied into
+  it" is a Go test against a fake applier, not a live converge. That is real
+  evidence for the ordering invariant and no evidence at all for the AC as
+  worded.
+
+The live statement is back in `verify:`, marked NOT YET RUN. **US-3.3c** owns
+building a cell with enforcement, and its AC 7 owns turning the runbook into
+something that asserts the boundary rather than creating it.
 
 ## D7 was implemented and then WITHDRAWN — this is the substance of the task
 
@@ -137,7 +164,61 @@ boundary enforced a network hop away on a path nothing pinned. It is refused
 before the request is built, in both directions (a namespaced object declaring a
 foreign namespace; a cluster-scoped object declaring any).
 
-## Negative evidence — thirteen mutations, each RED
+## Round 3 — what the second pair of reviews found
+
+Both reviewers came back BLOCKING on round 2. Four things, three of them mine:
+
+**1. Widening `plurals` converted a loud error into a silent success.** Adding
+`Namespace`/`NetworkPolicy`/`ResourceQuota`/`LimitRange` to the plural map was not
+inert: `Delete` hardcoded `apiVersion = "postgresql.cnpg.io/v1"`, so those kinds
+began building plausible paths under the wrong API group, receiving a 404, and
+`Delete` maps 404 → `nil` = "already gone". Measured:
+
+| | `origin/main` | round 2 |
+|---|---|---|
+| `Delete(…,"Namespace","obj")` | errors by name | `/apis/postgresql.cnpg.io/v1/namespaces/obj` → `nil` |
+
+US-3.3b is the task that will call `Delete(ns, "Namespace", ns)`. It would have
+reported success while the namespace and everything in it survived. Fixed with an
+explicit `apiVersions` map that refuses a kind it cannot address — which also
+closes a **pre-existing** instance of the same trap: `Secret` (v1) and
+`StatefulSet` (apps/v1) were already in `plurals` on `main` and already routed
+under the CNPG group. Neither is reachable today (no driver renders a Secret; the
+valkey driver is not wired to a renderer), but the mechanism was live.
+
+**2. Two multi-document bypasses, both green against the whole suite.** The
+absence guard for the withdrawn policies switches on `Manifest.Kind` and never
+parses the bytes, and `Apply`'s cross-namespace guard reads document 1 only,
+because `yaml.Unmarshal` silently returns just the first document of a stream.
+Appending `---\nkind: NetworkPolicy…` re-added a policy, and a second document
+declaring `namespace: env-victim` was PATCHed wholesale — both with everything
+passing. One representation of the guarded data (the struct field, document 1)
+was covered and the other (the bytes, documents 2..n) was not. `Apply` now
+refuses a multi-document manifest, and `Render` asserts one document per manifest
+whose `kind` matches the field.
+
+**3. The teardown path never validated the namespace.** `Converge`'s deleting
+branch returns before `tenancy.Render` is reached, so the RFC1123 guard covered
+the create path alone — and teardown is the path that `fmt.Sprintf`s the value
+into a DELETE URL. Probed: `"../../../api/v1/namespaces/kube-system"` was refused
+on create and **accepted on teardown**, reporting gone after issuing deletes
+against paths that walk out of the namespace. The check now lives in
+`namespaceOf`, which both paths go through.
+
+**4. Three assertions did not assert what they named.** The `steloit.dev/cell`
+label was never pinned to `Spec.Cell` (the test's own constant is `"cell0"`, so
+hardcoding the label passed); the repaired D8 assertion was still a
+`strings.Contains`, so `namespace + "-shadow"` survived it in isolation; and
+`TestRenderAcceptsEveryShapeTheControlPlaneCanMint` listed three strings the
+control plane never mints while omitting the only shape it always does
+(`env-<32 hex>`, 36 chars).
+
+Also fixed: `RECONCILER_CELL` was unvalidated, so a plausible typo
+(`cell_0`, `Cell-0`) booted cleanly and then failed every converge for every
+service on the cell, logging and continuing with no writeback — the control plane
+would see every service sit in provisioning forever. Validated at boot now.
+
+## Negative evidence — twenty-five mutations, each RED
 
 Applied in `cp -R` copies (AGENTS.md), each with an assert-the-mutation-applied
 guard, because a mutation that does not apply reads as a green hole.
@@ -157,6 +238,18 @@ guard, because a mutation that does not apply reads as a green hole.
 | the cell label value left unvalidated (YAML injection) | RED |
 | `Render` refuses everything (negatives alone would pass) | RED |
 | the Apply mismatch guard, each arm separately + refuse-everything + runs-too-late | RED |
+| **a D7 policy re-added as a second YAML document** (was GREEN) | RED |
+| **a second document smuggling a Secret into `env-victim`** (was GREEN) | RED |
+| `Delete` falls back to a guessed API group | RED |
+| `Namespace` routed under the CNPG group | RED |
+| `StatefulSet` routed under the CNPG group (the pre-existing trap) | RED |
+| teardown skips namespace validation (traversal reaches DELETE) | RED |
+| the cell label hardcoded instead of read from `Spec.Cell` | RED |
+| the Cluster namespace gains a `-shadow` suffix | RED |
+| an extra label added to the Namespace | RED |
+| `ValidateCell` accepts anything (a bad `RECONCILER_CELL` boots) | RED |
+| `exactlyOneDocument` refuses everything (control) | RED |
+| `ValidateNamespace` refuses everything (control) | RED |
 
 ## One test was made stronger. One was weakened, and the review caught it
 
@@ -177,9 +270,23 @@ containing `kind: Cluster` and asserts against that one.
 
 ## NOT done — AC 2 and AC 4
 
-**AC 2 (D7 policies)** → **US-3.3c**, priority `critical`. Enforcement, the CNPG
-allow-set, shape-derived resources and a founder-owned quota envelope are one
-change; any one alone is a no-op or an outage.
+**AC 2 (D7 policies)** → **three** tasks, not one. My first framing ("the four
+are one change") was right for the policies and wrong for the rest, and the
+architecture review said so: the LimitRange and the quota were withdrawn because
+they are *wrong*, not because they are coupled to Dataplane V2. Bundling them
+would gate a one-number founder decision behind a cluster migration.
+
+- **US-3.3c** (`ready`, critical) — NetworkPolicy enforcement on the cell, the
+  correct CNPG allow-set, and the agent RBAC the namespace write now needs. These
+  genuinely land together: you cannot write a correct egress set without a cell
+  that enforces it.
+- **US-3.3d** (`ready`, high) — the Cluster declares resources from the sold
+  shape, and only then a LimitRange. CNPG-driver scope; needs no CNI.
+- **US-3.3e** (`blocked`) — the per-plan environment envelope. Blocked on a
+  founder number rather than sitting `critical`/`ready` where nobody can take it.
+
+**AC 3 (live proof)** → needs a cell; the statement is in `verify:` marked NOT
+YET RUN, and US-3.3c AC 7 owns the runbook.
 
 **AC 4 (env deletion)** → **US-3.3b**. There is no environment-deletion path in
 the agent to hook: teardown today is per-service (`svc.Status == "deleting"`), and

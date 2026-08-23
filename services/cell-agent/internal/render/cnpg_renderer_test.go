@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
 	"strings"
@@ -160,8 +161,22 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 	if clusterAt < 0 {
 		t.Fatal("no Cluster in the applied set")
 	}
-	if !strings.Contains(string(objs[clusterAt]), "namespace: env-9f3c1a2b") {
-		t.Fatalf("the CNPG Cluster was not placed in the resolved namespace:\n%s", objs[clusterAt])
+	// Compared as a VALUE, not as a substring. `strings.Contains(…, "namespace:
+	// env-9f3c1a2b")` is satisfied by "env-9f3c1a2b-shadow", so mutating the
+	// namespace to namespace+"-shadow" survived this assertion in isolation and
+	// was caught only by TestApplyIsIdempotent's byte comparison, under an
+	// unrelated name. Round 2's own lesson, one level down.
+	var got struct {
+		Metadata struct {
+			Namespace string `yaml:"namespace"`
+		} `yaml:"metadata"`
+	}
+	if err := yaml.Unmarshal(objs[clusterAt], &got); err != nil {
+		t.Fatalf("the applied Cluster does not parse: %v", err)
+	}
+	if got.Metadata.Namespace != "env-9f3c1a2b" {
+		t.Fatalf("the CNPG Cluster was placed in %q, want the resolved namespace "+
+			"env-9f3c1a2b", got.Metadata.Namespace)
 	}
 }
 

@@ -104,6 +104,14 @@ type objMeta struct {
 // kubectl edit is corrected on the next converge — level-triggered, §2).
 func (c *Client) Apply(ctx context.Context, namespace string, manifests [][]byte) error {
 	for _, m := range manifests {
+		// EXACTLY ONE DOCUMENT. yaml.Unmarshal silently returns only the first
+		// document of a multi-document stream, so every check below — the kind we
+		// route on, the name we address, the namespace we compare — would describe
+		// document 1 while the whole body is PATCHed. A second document could carry
+		// any kind into any namespace with all of it green.
+		if err := exactlyOneDocument(m); err != nil {
+			return err
+		}
 		var meta objMeta
 		if err := yaml.Unmarshal(m, &meta); err != nil {
 			return fmt.Errorf("kube: parse manifest: %w", err)
@@ -190,9 +198,10 @@ func (c *Client) Observe(ctx context.Context, namespace, name string) (string, e
 // Delete removes the CNPG Cluster (teardown). A 404 is success — idempotent, so
 // a repeated teardown converges to the same absence.
 func (c *Client) Delete(ctx context.Context, namespace, kind, name string) error {
-	apiVersion := "postgresql.cnpg.io/v1"
-	if kind == "VolumeSnapshot" {
-		apiVersion = "snapshot.storage.k8s.io/v1"
+	apiVersion, ok := apiVersions[kind]
+	if !ok {
+		return fmt.Errorf("kube: cannot delete %s/%s — no apiVersion for kind %q; "+
+			"add it to apiVersions rather than letting it route under a guessed group", kind, name, kind)
 	}
 	path, err := resourcePath(apiVersion, kind, namespace, name)
 	if err != nil {
@@ -278,9 +287,67 @@ var plurals = map[string]string{
 	"Backup":          "backups",
 	"Secret":          "secrets",
 	"StatefulSet":     "statefulsets",
-	// US-3.3a — the env namespace and its D7 isolation boundary.
-	"Namespace":     "namespaces",
-	"NetworkPolicy": "networkpolicies",
-	"ResourceQuota": "resourcequotas",
-	"LimitRange":    "limitranges",
+	// US-3.3a — the env namespace. The D7 policy kinds are deliberately NOT here:
+	// nothing renders them (they were withdrawn to US-3.3c), and an entry in this
+	// map is not inert — it is what lets Delete build a path for a kind, so an
+	// unrendered kind here converts Delete's loud refusal into a silent 404.
+	"Namespace": "namespaces",
+}
+
+// apiVersions is the group/version each kind lives in. Delete needs it because,
+// unlike Apply, it has no manifest to read apiVersion from.
+//
+// It replaces a hardcoded "postgresql.cnpg.io/v1" with one special case for
+// VolumeSnapshot. That default was already wrong for two kinds in `plurals`:
+// Secret is v1 and StatefulSet is apps/v1, so Delete built a path under the CNPG
+// group, got a 404, and mapped it to "already gone" — the exact silent-success
+// class TestDeleteRoutesByKind exists to prevent. Neither is reachable today (no
+// driver renders a Secret and the valkey driver is not wired to a renderer), but
+// the mechanism was a trap and US-3.3a widened it by four kinds.
+var apiVersions = map[string]string{
+	"Cluster":         "postgresql.cnpg.io/v1",
+	"ScheduledBackup": "postgresql.cnpg.io/v1",
+	"Backup":          "postgresql.cnpg.io/v1",
+	"VolumeSnapshot":  "snapshot.storage.k8s.io/v1",
+	"Secret":          "v1",
+	"StatefulSet":     "apps/v1",
+	"Namespace":       "v1",
+}
+
+// exactlyOneDocument refuses a multi-document YAML stream. Callers pass one
+// object per []byte; anything else means the routing metadata we parsed does not
+// describe all of the bytes we are about to send.
+func exactlyOneDocument(m []byte) error {
+	dec := yaml.NewDecoder(bytes.NewReader(m))
+	docs := 0
+	for {
+		var node yaml.Node
+		err := dec.Decode(&node)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("kube: parse manifest: %w", err)
+		}
+		// An empty document — a leading or trailing `---` with nothing after it —
+		// is ordinary YAML and carries no object. yaml.v3 surfaces it either as a
+		// zero node or as a null scalar depending on position, so both are skipped.
+		if node.Kind == 0 || (node.Kind == yaml.DocumentNode && len(node.Content) == 0) {
+			continue
+		}
+		if node.Kind == yaml.DocumentNode && len(node.Content) == 1 &&
+			node.Content[0].Tag == "!!null" {
+			continue
+		}
+		docs++
+	}
+	switch docs {
+	case 1:
+		return nil
+	case 0:
+		return fmt.Errorf("kube: manifest contains no YAML document")
+	default:
+		return fmt.Errorf("kube: manifest contains %d YAML documents, want exactly 1 — "+
+			"only the first would be routed, while all of it would be sent", docs)
+	}
 }

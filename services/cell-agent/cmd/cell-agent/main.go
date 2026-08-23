@@ -13,6 +13,7 @@ import (
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver/cnpg"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 	"github.com/steloit/cloud/services/cell-agent/internal/render"
 )
@@ -21,6 +22,16 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	cell := env("RECONCILER_CELL", "cell-0")
+	// Validated AT BOOT, not at converge. The cell id becomes a label value on
+	// every environment namespace, and tenancy.Render refuses one that is not an
+	// RFC1123 label. Without this check a plausible typo — RECONCILER_CELL=cell_0
+	// or Cell-0 — starts cleanly and then fails EVERY converge for EVERY service
+	// on the cell; the agent loop logs and continues, so nothing is written back
+	// and the control plane sees every service sit in provisioning forever.
+	if err := tenancy.ValidateCell(cell); err != nil {
+		log.Error("boot failed: RECONCILER_CELL is not usable as a label value", "cell", cell, "err", err)
+		os.Exit(1)
+	}
 	base := os.Getenv("CONTROL_PLANE_URL")
 	token := os.Getenv("RECONCILER_SECRET")
 	if base == "" || token == "" {

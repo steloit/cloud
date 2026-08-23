@@ -228,26 +228,6 @@ func TestNamespacedKindsStillRequireANamespace(t *testing.T) {
 }
 
 // The four D7 kinds must all be routable; an unknown kind is a 404 at apply time.
-func TestD7KindsAreRoutable(t *testing.T) {
-	for kind, want := range map[string]string{
-		"NetworkPolicy": "/apis/networking.k8s.io/v1/namespaces/env-x/networkpolicies/p",
-		"ResourceQuota": "/api/v1/namespaces/env-x/resourcequotas/p",
-		"LimitRange":    "/api/v1/namespaces/env-x/limitranges/p",
-	} {
-		api := "v1"
-		if kind == "NetworkPolicy" {
-			api = "networking.k8s.io/v1"
-		}
-		got, err := resourcePath(api, kind, "env-x", "p")
-		if err != nil {
-			t.Errorf("%s is not routable: %v", kind, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("%s path = %q, want %q", kind, got, want)
-		}
-	}
-}
 
 // Apply routes by the CALLER's namespace argument. A manifest declaring a
 // DIFFERENT namespace was therefore written into the caller's, and the only
@@ -331,5 +311,120 @@ metadata:
 	}
 	if len(got) != 0 {
 		t.Fatalf("it was sent anyway: %+v", got)
+	}
+}
+
+// Widening `plurals` without widening its consumer converts a LOUD error into a
+// SILENT success. Delete hardcoded apiVersion "postgresql.cnpg.io/v1"; adding a
+// kind to `plurals` was therefore enough to make Delete build a plausible path
+// under the wrong API group, receive a 404, and map it to "already gone".
+//
+// Measured on this branch before the fix:
+//
+//	Delete(…, "Namespace", "obj") -> /apis/postgresql.cnpg.io/v1/namespaces/obj, err=<nil>
+//
+// while origin/main refused it by name. US-3.3b is the task that will call
+// Delete(ns, "Namespace", ns); it would have reported success while the
+// namespace and everything in it survived.
+func TestDeleteRoutesEveryKindToItsOwnAPIGroup(t *testing.T) {
+	for kind, want := range map[string]string{
+		"Cluster":         "/apis/postgresql.cnpg.io/v1/namespaces/env-x/clusters/obj",
+		"ScheduledBackup": "/apis/postgresql.cnpg.io/v1/namespaces/env-x/scheduledbackups/obj",
+		"VolumeSnapshot":  "/apis/snapshot.storage.k8s.io/v1/namespaces/env-x/volumesnapshots/obj",
+		"Secret":          "/api/v1/namespaces/env-x/secrets/obj",
+		"StatefulSet":     "/apis/apps/v1/namespaces/env-x/statefulsets/obj",
+		"Namespace":       "/api/v1/namespaces/obj",
+	} {
+		var seen string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen = r.URL.Path
+			w.WriteHeader(200)
+		}))
+		c := NewClientForTest(srv.URL, "tok", srv.Client())
+		if err := c.Delete(context.Background(), "env-x", kind, "obj"); err != nil {
+			t.Errorf("Delete %s: %v", kind, err)
+		} else if seen != want {
+			t.Errorf("Delete %s routed to %q, want %q", kind, seen, want)
+		}
+		srv.Close()
+	}
+}
+
+// The other direction: a kind Delete has no apiVersion for must be REFUSED, not
+// routed under a guess. Without this, adding a kind to `plurals` silently
+// re-opens the hole above.
+func TestDeleteRefusesAKindItCannotAddress(t *testing.T) {
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	for _, kind := range []string{"NetworkPolicy", "ResourceQuota", "LimitRange", "Ingress"} {
+		err := c.Delete(context.Background(), "env-x", kind, "obj")
+		if err == nil {
+			t.Errorf("Delete accepted %s — a 404 from a wrong path reads as 'already gone'", kind)
+		}
+	}
+	if called {
+		t.Fatal("a request was sent for a kind Delete cannot address")
+	}
+}
+
+// A manifest is one object. yaml.Unmarshal returns only document 1 of a
+// multi-document stream, so the kind we route on, the name we address and the
+// namespace we compare all describe the first object while the WHOLE body is
+// PATCHed — a second document could carry any kind into any namespace with the
+// suite green.
+func TestApplyRefusesAMultiDocumentManifest(t *testing.T) {
+	multi := []byte(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: env-mine
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stolen
+  namespace: env-victim
+`)
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	err := c.Apply(context.Background(), "env-mine", [][]byte{multi})
+	if err == nil {
+		t.Fatal("Apply accepted a 2-document manifest; the cross-namespace guard read document 1 only")
+	}
+	if !strings.Contains(err.Error(), "2 YAML documents") {
+		t.Fatalf("unhelpful error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("it was sent anyway: %+v", got)
+	}
+}
+
+// Trailing separators and an empty trailing document are ordinary YAML and must
+// still apply, or the guard above would be satisfied by an Apply that refuses
+// anything with a "---" in it.
+func TestApplyStillAcceptsOneDocumentWithSeparators(t *testing.T) {
+	withSep := []byte(`---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: env-mine
+---
+`)
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	if err := c.Apply(context.Background(), "env-mine", [][]byte{withSep}); err != nil {
+		t.Fatalf("a single document with separators was refused: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 apply, got %d", len(got))
 	}
 }

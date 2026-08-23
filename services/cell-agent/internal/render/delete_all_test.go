@@ -177,3 +177,45 @@ func TestDeletingAFailedServiceLeavesNothingBehind(t *testing.T) {
 		}
 	}
 }
+
+// The TEARDOWN path must validate the namespace too.
+//
+// Converge's deleting branch returns before tenancy.Render is ever reached, so a
+// check living inside Render guards the create path alone — and teardown is the
+// path that fmt.Sprintf's the value straight into a DELETE URL. Probed before
+// the fix: a namespace of "../../../api/v1/namespaces/kube-system" was refused on
+// create and accepted on teardown, reporting gone after issuing deletes against
+// paths that walk out of the namespace entirely.
+func TestTeardownRefusesANamespaceItWouldNotHaveCreated(t *testing.T) {
+	for _, bad := range []string{
+		"../../../api/v1/namespaces/kube-system",
+		"env-x/../kube-system",
+		"kube-system",
+		"env-UPPER",
+		"env-x\nmetadata: injected",
+	} {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_db01", "deleting")
+		s.Desired["namespace"] = bad
+
+		if _, err := newRenderer(a).Converge(context.Background(), s); err == nil {
+			t.Errorf("teardown accepted namespace %q", bad)
+		}
+		if len(a.deleted) != 0 {
+			t.Errorf("teardown issued deletes for %q: %v", bad, a.deleted)
+		}
+	}
+
+	// And the legitimate teardown still works, or the above would be satisfied by
+	// a Converge that refuses every deletion.
+	a := newFakeApplier("Cluster in healthy state")
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	s := svc("svc_db01", "deleting")
+	if status, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+		t.Fatalf("a legitimate teardown was refused: %v", err)
+	} else if status != "gone" {
+		t.Fatalf("teardown reported %q, want gone", status)
+	}
+}

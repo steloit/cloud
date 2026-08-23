@@ -79,6 +79,9 @@ func TestTheNamespaceParsesAndCarriesWhatItClaims(t *testing.T) {
 			t.Fatalf("label %s = %q, want %q", k, obj.Metadata.Labels[k], v)
 		}
 	}
+	if len(obj.Metadata.Labels) != len(want) {
+		t.Fatalf("labels = %v, want exactly %v", obj.Metadata.Labels, want)
+	}
 	// US-3.3a shipped steloit.dev/environment-id set to TrimPrefix(ns, "env-").
 	// The real id is env_9f3c1a2b, so the label read "9f3c1a2b" — a value that
 	// names nothing the control plane knows. Absent is better than wrong; the
@@ -149,16 +152,94 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 // ever parts company, the agent hard-errors on EVERY converge for that
 // environment and the control plane sees no signal at all.
 func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
-	// namespaceForEnv is services/api-side: k8sNamespace lowercases, replaces
-	// each run of invalid characters with "-", trims dashes, truncates to 63.
-	// These are the outputs it produces for ids of the shape env_<hex>.
+	// namespaceForEnv is services/api-side: k8sNamespace lowercases, replaces each
+	// run of invalid characters with "-", trims dashes, truncates to 63.
+	//
+	// The FIRST entry is the shape it actually mints in production —
+	// ids.New("env") emits env_<32 hex>, so the namespace is env-<32 hex>, 36
+	// characters. An earlier version of this test listed three short strings and
+	// omitted the only shape that ever occurs, which is a cross-plane contract
+	// test that does not test the contract.
 	for _, produced := range []string{
-		"env-9f3c1a2b",
+		"env-" + strings.Repeat("a1b2c3d4", 4), // env_<32 hex> → 36 chars, the real one
+		"env-9f3c1a2b",                         // canon fixtures
+		"env-w",                                // reconcile wiring test seed, at the len<5 boundary
 		"env-0",
-		"env-" + strings.Repeat("f", 59), // exactly 63
+		"env-" + strings.Repeat("f", 59), // exactly 63, the truncation ceiling
 	} {
 		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell}); err != nil {
 			t.Fatalf("the control plane can mint %q and Render refuses it: %v", produced, err)
+		}
+	}
+}
+
+// The cell label must come FROM Spec.Cell. Asserting it against a single
+// constant cannot tell that apart from a hardcoded string: the package's own
+// `cell` const is "cell0", so hardcoding `steloit.dev/cell: cell0` in the
+// template satisfied a one-value test with the whole suite green.
+func TestTheCellLabelIsTheSpecCellAndNotAConstant(t *testing.T) {
+	for _, c := range []string{"cell-0", "cell-7"} {
+		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var obj struct {
+			Metadata struct {
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"metadata"`
+		}
+		if err := yaml.Unmarshal(objs[0].YAML, &obj); err != nil {
+			t.Fatal(err)
+		}
+		if got := obj.Metadata.Labels["steloit.dev/cell"]; got != c {
+			t.Fatalf("Spec.Cell = %q but the label says %q", c, got)
+		}
+	}
+}
+
+// Every Manifest must be EXACTLY ONE YAML document, and its Kind field must
+// describe that document.
+//
+// The absence guard for the withdrawn D7 objects switches on Manifest.Kind and
+// never parses the bytes. Appending "---\nkind: NetworkPolicy…" to the Namespace
+// manifest re-added a policy with the ENTIRE SUITE GREEN — one representation of
+// "what is rendered" (the struct field) was covered and the other (the bytes)
+// was not. yaml.Unmarshal reads only document 1, so every check downstream
+// describes the first object while all of the bytes get applied.
+func TestEachManifestIsExactlyOneDocumentAndItsKindIsTrue(t *testing.T) {
+	for _, m := range mustRender(t) {
+		dec := yaml.NewDecoder(strings.NewReader(string(m.YAML)))
+		docs := 0
+		for {
+			var node yaml.Node
+			err := dec.Decode(&node)
+			if err != nil {
+				break
+			}
+			if node.Kind == 0 {
+				continue
+			}
+			docs++
+			var head struct {
+				Kind     string `yaml:"kind"`
+				Metadata struct {
+					Name string `yaml:"name"`
+				} `yaml:"metadata"`
+			}
+			if err := node.Decode(&head); err != nil {
+				t.Fatalf("document %d of %s does not decode: %v", docs, m.Kind, err)
+			}
+			if head.Kind != m.Kind {
+				t.Fatalf("Manifest.Kind is %q but document %d says %q — the struct field "+
+					"and the bytes disagree, and every guard reads the field", m.Kind, docs, head.Kind)
+			}
+			if head.Metadata.Name != m.Name {
+				t.Fatalf("Manifest.Name is %q but the document says %q", m.Name, head.Metadata.Name)
+			}
+		}
+		if docs != 1 {
+			t.Fatalf("%s/%s rendered %d YAML documents, want exactly 1 — a second document "+
+				"is invisible to every Kind-based guard in this package", m.Kind, m.Name, docs)
 		}
 	}
 }

@@ -41,13 +41,25 @@ been a new control-plane↔agent contract smuggled into a namespace-creation tas
 
 ## What is actually leaked today
 
-A deleted environment leaves behind: the namespace, three NetworkPolicies, a
-ResourceQuota and a LimitRange. Not customer data — the CNPG cluster and its PVCs
-are torn down by the per-service path — but the namespace is not free:
+A deleted environment leaves behind **its namespace**. Not customer data — the
+CNPG cluster and its PVCs are torn down by the per-service path — but the
+namespace is not free:
 
-- it holds a `ResourceQuota` that counts against nothing, and
 - it is a live tenant boundary for an environment that no longer exists, which is
   a confusing thing to find in a cluster during an incident.
+
+As merged, US-3.3a renders the namespace and nothing else: the D7
+NetworkPolicies, ResourceQuota and LimitRange were withdrawn to US-3.3c/d/e, so
+the leak is **one object per environment, not six**. US-3.3c will widen it again
+— write the teardown against `tenancy.Render`'s output rather than a typed-out
+list, exactly as `envObjectKeys` in `delete_all_test.go` already does.
+
+**`Delete` could not address a Namespace at all** until round 3: `plurals` had the
+kind but `Delete` hardcoded the CNPG apiVersion, so `Delete(ns,"Namespace",ns)`
+built `/apis/postgresql.cnpg.io/v1/namespaces/<name>`, got a 404, and returned
+`nil` — reporting success while the namespace survived. There is now an
+`apiVersions` map and `TestDeleteRoutesEveryKindToItsOwnAPIGroup` pinning
+`Namespace` → `/api/v1/namespaces/<name>`.
 
 ## Design constraint inherited from US-3.3a
 

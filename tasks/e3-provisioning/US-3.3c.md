@@ -14,7 +14,6 @@ files:
   - infra/modules/gke-cell/**
   - infra/envs/**
   - services/cell-agent/internal/**
-  - docs/founder-config.md
   - tasks/e3-provisioning/US-3.3c.md
 verify:
   - "the gke-cell module enables NetworkPolicy enforcement (network_policy or ADVANCED_DATAPATH), asserted by a test, not by reading the plan"
@@ -67,7 +66,7 @@ pod/namespace selectors never matches a non-pod IP, so all of these are denied:
 Ordering makes it worse: the policies apply *before* the Cluster in the same
 converge, so the pod comes up already fenced.
 
-### 3. The LimitRange default silently caps every managed Postgres
+### 3. (moved to US-3.3d) The LimitRange default silently caps every managed Postgres
 
 `internal/driver/cnpg/templates/cluster.yaml.tmpl` declares **no `resources:`**.
 A LimitRange `default: {cpu: 500m, memory: 512Mi}` therefore becomes the hard
@@ -81,7 +80,7 @@ The real fix is that the Cluster should declare resources derived from the sold
 shape — `estimates` already resolves `memory_mb` — and only then can a LimitRange
 default sit underneath it harmlessly.
 
-### 4. The quota envelope is a product decision with no owner
+### 4. (moved to US-3.3e) The quota envelope is a product decision with no owner
 
 `requests.cpu: 8 / limits.cpu: 16 / 16Gi / 32Gi / 16 PVCs / 32 services` are
 unsourced constants. `docs/founder-config.md` §5 owns quota knobs and has no
@@ -91,13 +90,21 @@ in `plans.json`. A 3-instance CNPG cluster consumes 3 PVCs and 3 Services, so
 `persistentvolumeclaims: 16` caps an environment at ~5 HA clusters with no error
 surface when it hits.
 
-**NEEDS FOUNDER INPUT** — the per-plan environment envelope. Read it from the
-same source `plans.json` owns; do not retype constants into a driver.
+Both of these were originally bundled here. The architecture review was right
+that the bundling is a rationalisation: they were withdrawn because they are
+**wrong**, not because they are coupled to Dataplane V2. A LimitRange needs no
+CNI, and the quota needs one founder number — gating either behind a cluster
+migration is worse than splitting them out. They are **US-3.3d** and **US-3.3e**.
 
 ## Acceptance criteria
 
 1. The gke-cell module enables NetworkPolicy enforcement, asserted by a test
-   against the module rather than by reading a plan by hand.
+   against the module rather than by reading a plan by hand. **There are zero GKE
+   clusters in `steloit-dev` today** (`gcloud container clusters list
+   --format=json` → `[]`, exit 0, with `projects describe` proving the credential
+   works), so `infra/modules/gke-cell` has never been applied — this is the
+   cheapest possible moment to fix it, and the only one that avoids recreating a
+   cluster's node pools.
 2. The default-deny + allow set is restored to `internal/driver/tenancy` **with**
    the four CNPG egress/ingress allowances above, each a separate assertion.
 3. The allow policies are asserted **structurally**, not by substring: every
@@ -108,11 +115,18 @@ same source `plans.json` owns; do not retype constants into a driver.
    proved the policies EXISTED and that default-deny denied; three mutations that
    widen the allows into a hole (`podSelector:{}`→`namespaceSelector:{}`,
    `egress: [- {}]`, DNS widened to all of kube-system) all survived green.
-4. The Cluster declares resources from the sold shape, and only then does a
-   LimitRange default go back — with a test that a managed postgres of each
-   catalog shape is not capped below its shape.
-5. The quota envelope comes from the founder-owned source, per plan.
-6. Two GKE configurations that break the DNS rule silently are pinned or ruled
+4. **The agent has RBAC for the cluster-scoped namespace write.** This branch
+   made the agent PATCH `/api/v1/namespaces/<name>` on every converge — a
+   privilege it never had. There is no ServiceAccount, ClusterRole or Deployment
+   artifact anywhere in the repo (`grep -rn "kind: ClusterRole\|kind: ServiceAccount\|serviceAccountName"`
+   over `*.yaml|*.tf|*.sh` returns nothing), and `NewInCluster` is the documented
+   in-cluster path. `Apply` returns on the first error and the Namespace is first
+   in the batch, so **a 403 halts convergence for every service on the cell** —
+   including services in namespaces that already exist and were converging fine.
+   Grant cluster-scoped `create`/`patch` on `namespaces`, and consider tolerating
+   a 403 on the tenancy object specifically so a permissions gap degrades to
+   "this environment is not created" rather than "this cell provisions nothing".
+5. Two GKE configurations that break the DNS rule silently are pinned or ruled
    out: **Cloud DNS for GKE** (no kube-dns pods; resolution goes to
    169.254.169.254) and **NodeLocal DNSCache** (`k8s-app: node-local-dns`,
    hostNetwork, link-local VIP — a podSelector cannot match it). Neither is
@@ -128,4 +142,6 @@ same source `plans.json` owns; do not retype constants into a driver.
   records why each object was withheld.
 - `infra/modules/gke-cell/main.tf`
 - `services/cell-agent/internal/driver/cnpg/templates/cluster.yaml.tmpl`
-- `docs/founder-config.md` §5
+- **commit `7e94f26`** — the withdrawn NetworkPolicy manifests and their tests
+  live there and nowhere else. Start from them; they are wrong in the ways above,
+  and rewriting from scratch re-earns the same review findings.

@@ -54,6 +54,13 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	if ns == "" {
 		return "", fmt.Errorf("render: service %s has no resolved namespace in desired", svc.ID)
 	}
+	// Validated HERE, not inside tenancy.Render, because Converge's deleting
+	// branch returns before Render is reached — so a check living in Render
+	// guards the create path only, and teardown is the path that interpolates
+	// this value into a DELETE URL. One owner, both paths.
+	if err := tenancy.ValidateNamespace(ns); err != nil {
+		return "", fmt.Errorf("render: service %s: %w", svc.ID, err)
+	}
 	return ns, nil
 }
 
