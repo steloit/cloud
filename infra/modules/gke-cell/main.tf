@@ -48,6 +48,34 @@ resource "google_container_cluster" "cell" {
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
+
+  # NETWORKPOLICY ENFORCEMENT. Without this the API server ACCEPTS AND STORES
+  # every NetworkPolicy and nothing drops a packet: D7's tenant boundary would be
+  # a set of objects that look like isolation and are not. US-3.3a rendered that
+  # boundary, measured every manifest correct, and withdrew it on discovering
+  # there was nothing to enforce it.
+  #
+  # ADVANCED_DATAPATH is GKE Dataplane V2 (eBPF/Cilium). It "comes with
+  # Kubernetes network policy enforcement built-in", so `network_policy` must NOT
+  # also be set — the API rejects that combination outright:
+  #   "Enabling NetworkPolicy for clusters with DatapathProvider=ADVANCED_DATAPATH
+  #    is not allowed."
+  # (cloud.google.com/kubernetes-engine/docs/how-to/dataplane-v2). The legacy
+  # alternative is Calico via `network_policy`, which we do not use.
+  #
+  # THIS IS A CREATE-TIME DECISION. Google documents no migration path for an
+  # existing Standard cluster; changing it later means rebuilding the cluster and
+  # its node pools. There are currently ZERO clusters in this project
+  # (`gcloud container clusters list --format=json` → `[]`), so it costs nothing
+  # now and a full rebuild at any later point. That asymmetry is the reason this
+  # lands before the policies it enables.
+  #
+  # Known Dataplane V2 caveats we are accepting, from Google's own list: NetworkPolicy
+  # `endPort` (port RANGES) is silently not enforced on affected versions — read a
+  # policy back and check the field survived before relying on a range; hairpin
+  # connections can drop; hostPort conflicts with the NodePort range. None of these
+  # affect the D7 policy set, which uses single ports and no hostPort.
+  datapath_provider = "ADVANCED_DATAPATH"
 }
 
 # Core pool: api + operators + observability. Floor 1 (A1.6) — never zero.

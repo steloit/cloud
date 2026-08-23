@@ -1,0 +1,39 @@
+# NETWORK POLICY LOGGING — Dataplane V2 only.
+#
+# Enforcement you cannot see is not operable. A denied connection is otherwise
+# indistinguishable from an application bug: the customer reports "my service
+# can't reach X", and nothing in our logs says a policy dropped it.
+#
+# GKE creates a NetworkLogging object named `default` on every Dataplane V2
+# cluster, with both directions OFF. This turns DENIED connections on and leaves
+# ALLOWED off:
+#
+#   - denied is the signal. It is the one that tells us the boundary is doing
+#     something, and the one an operator needs during an incident. It is also
+#     bounded: on a healthy cell it should be near zero, so a rising rate is
+#     itself an alert.
+#   - allowed is every packet between every pod in every environment. On a cell
+#     with real traffic that is a logging bill and a haystack, not a signal.
+#
+# This is also the closest thing to a continuous proof that enforcement is ON:
+# if the policies were being stored and ignored, there would be no denials at
+# all — including the ones a default-deny namespace must produce.
+#
+# Verify after apply:
+#   kubectl get networklogging default -o yaml
+#   gcloud logging read 'jsonPayload.connection.dest.pod_namespace="env-..."' \
+#     --project <project> --limit 20
+#
+# Docs: cloud.google.com/kubernetes-engine/docs/how-to/network-policy-logging
+apiVersion: networking.gke.io/v1alpha1
+kind: NetworkLogging
+metadata:
+  name: default
+spec:
+  cluster:
+    allow:
+      log: false
+      delegate: false
+    deny:
+      log: true
+      delegate: false

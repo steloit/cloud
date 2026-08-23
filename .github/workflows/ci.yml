@@ -170,6 +170,21 @@ jobs:
           terraform -chdir=infra/envs/dev validate
           terraform -chdir=infra/envs/cell0 init -backend=false -input=false
           terraform -chdir=infra/envs/cell0 validate
+      - name: Terraform module tests (credential-free, mocked providers)
+        run: |
+          # `terraform validate` checks syntax and types; it cannot check a VALUE.
+          # These assert against the planned resource — e.g. that the cell enables
+          # NetworkPolicy enforcement at all, which US-3.3a found nothing did while
+          # every manifest and every test looked correct.
+          fail=0
+          for d in $(git ls-files 'infra/**/*.tftest.hcl' | xargs -n1 dirname | sed 's#/tests$##' | sort -u); do
+            echo "::group::terraform test $d"
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" test || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
       - name: k8s manifests parse (always)
         run: |
           python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/k8s/**/*.yaml', recursive=True)]"
