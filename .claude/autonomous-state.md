@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-23 (night) · `main` @ `f9f0ad5` · **5 open PRs**
+**Updated:** 2026-08-24 (early) · `main` @ `ac844dc` · **5 open PRs, all CI-green**
 
 ---
 
@@ -18,23 +18,25 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 | PR | task | state |
 |---|---|---|
-| **#320** | US-3.3a | **round 13 = a REVERT of round 12.** Both reviewers measured that r12's agent-side `statusFor` collapsed the transient guard (a READY service mid-upgrade reported `ready, nil` instead of ErrNotConverged). Reverted; real fix filed as **US-3.3h**. CI green. Needs re-review. |
-| **#322** | T3.4c | round 3 (`aac654e`), CI green. Reviews were never posted to the PR — needs a confirming re-review before merge. |
-| **#323** | US-3.3f | **round 4** (`fc83d96`): two CI fail-opens closed, the env-layer `network_policy` half asserted, 5 measured survivors killed, US-3.3c filed. CI green. Needs re-review. |
-| **#324** | US-3.3e | opened, based on `task/US-3.3a`. All 7 blockers closed. CI green. |
-| **#325** | O19 | `money.Accrual` (128-bit). reviewer+qa RUNNING. |
+| **#320** | US-3.3a | **round 15.** r12 was reverted as a regression; r14 restored task sections a bad span-replace deleted; r15 closed Observe's addressing (exact path, not suffix) + the teardown desired-flag arm. Both reviewers passed the earlier state ("safe to merge"); a focused check of r14-r15 is RUNNING. |
+| **#322** | T3.4c | **round 4.** Three migration blockers fixed and verified on real postgres: no generation bump, an unguarded cast that ABORTS the migration, and a WHERE that skipped its own `"78"` example. Plus a teardown that deleted postgres objects for a `valkey` service. |
+| **#323** | US-3.3f | **round 6.** CI gate pinned by EXECUTING it; discovery keys off the module source; the CA text pin had the bypass it existed to prevent. |
+| **#324** | US-3.3e | green, stacked on #320. Unreviewed since its blockers were closed. |
+| **#325** | O19 | **round 3.** `money.Accrual` (128-bit); the hard cap's own `SpendToDate` wrapped NEGATIVE (disabling the cap) and now saturates. |
 
 **Stacking:** US-3.3e branches from US-3.3a. Merge order must be
 US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
 
 ## Next action
 
-Re-review #320 (r13), #323 (r4), #322. Merge order: **#320 → #324** (stacked);
-#322, #323, #325 independent. Then the ready queue: **O9**, **T1.4a**, **US-10.7**.
+Merge order: **#320 → #324** (stacked); #322, #323, #325 independent. #324 needs a
+review pass on its final state before merging. Then the ready queue: **O9**,
+**T1.4a**, **US-10.7**, and the tasks this session filed (**US-3.3h**, **O30**,
+**O31**, **O32**, **US-3.3c**).
 
-**Merge-time conflict to expect:** #320 r13 and #323 r4 BOTH edit
-`services/api/internal/platform/testenv/wiring_test.go` (`ciGates`) and
-`.github/workflows/ci.yml`. Different hunks, but resolve deliberately.
+**Merge-time conflicts to expect:** #320, #323 and #325 all touch
+`services/api/internal/platform/testenv/wiring_test.go` and/or `.github/workflows/ci.yml`.
+Different hunks; resolve deliberately.
 
 ## Blocked on a human
 
@@ -110,6 +112,18 @@ These are in `contexts/provisioning.md` in full. The short form:
    (`-count=1` is now in CI for all three modules, pinned through executable text).
 10. **A legality sweep cannot see "no change".** Skipping answers equal to `from`
    hides the case where no change is the WRONG answer. Assert the DESTINATION.
+11. **A substring needle cannot pin control flow.** Pinning a CI step's `exit $fail`
+   by text was defeated twice by moving `fail=0` one line. EXECUTE the step in a
+   test instead — and split the stub, or the script dies at `init` under `-e` and
+   the assertion passes for an unrelated reason.
+12. **A guard nothing can distinguish is not a guard.** Three separate branches on
+   one CI step turned out to be subsumed by the loop below them; removing each
+   changed no outcome. Remove them rather than inventing a test.
+13. **Run the SHIPPED artifact, not a paraphrase.** Two migrations this session had
+   defects invisible because a test hand-copied a simplified statement, or ran the
+   real one only against an empty database where a no-op UPDATE looks correct.
+14. **`strings.Contains` over a file cannot tell code from a comment.** A text pin
+   passed with the expression parked in a `# was:` line and the value gutted.
 
 ## Conventions
 
