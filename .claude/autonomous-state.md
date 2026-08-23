@@ -3,7 +3,7 @@
 Handoff between autonomous Claude Code sessions. **Not authoritative** — the repo,
 git, CI and `tasks/` are. Verify before trusting; correct this file when it is wrong.
 
-**Last updated:** 2026-08-23 (session 2) · `main` @ `695b4c4` · CI **green**
+**Last updated:** 2026-08-23 (end of session 2) · `main` @ `f105f25` · CI **green** · **0 open PRs**
 
 ---
 
@@ -15,21 +15,14 @@ that; the queue is the plan.
 
 ## Current phase
 
-**Session 2: gate-hardening + the two investigations.** Four PRs in flight, none
-merged on my own assessment — each waits for its review.
+**Idle at a clean stop.** Session 2 closed: gate-hardening and both investigations
+merged, nothing in flight, no worktrees.
 
 ---
 
 ## Next concrete action
 
-**Land the four open PRs** (below), then start `US-3.3a`.
-
-| PR | task | state |
-|---|---|---|
-| #317 | O29 — 23 CI gates pinned | CI running. **Two review rounds, both BLOCKING, all applied.** Every mutation class individually RED |
-| #318 | O2 — comparison + `currency_code` deleted | CI running. **Two review rounds, both applied.** `plan` now refuses without the amount |
-| — | O20 | ✅ merged (#319): tested detection queries, docs+test only |
-| — | T3.4c | ✅ merged (#315): ambiguity recorded, task stays `ready`, no code |
+**Start `US-3.3a`** — session 2's four PRs (#315, #317, #318, #319) are all merged.
 
 **Start `US-3.3a`** (`tasks/e3-provisioning/US-3.3a.md`, `high`) — nothing creates an
 environment's Kubernetes namespace, nor its D7 default-deny NetworkPolicy /
