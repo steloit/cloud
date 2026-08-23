@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -2530,5 +2531,329 @@ func TestAPoisonedStoredPriceMakesTheSpendCapFailClosed(t *testing.T) {
 	}
 	if strings.Contains(b8, "representable") {
 		t.Fatalf("a corrupt blob was reported as an unrepresentable amount: %s", b8)
+	}
+}
+
+// THE ORG'S OWN PLAN, END TO END — the control-plane half of the envelope.
+//
+// The cell-agent side is well covered: it proves the renderer emits what it is
+// handed. billing proves the numbers are the founder's. NOTHING proved the JOIN
+// — that THIS org's plan becomes THIS service's envelope. Measured: rewriting
+// `envelopeFor` to ignore `org.Plan` and always return pro's envelope survived
+// the entire container-backed suite, and so did `CreateService` shipping an
+// empty Quota. That is the exact defect the task exists to remove ("a Free org
+// and a Business org get the identical envelope"), and it is the sibling
+// representation of the mutation already killed on the renderer.
+//
+// Two plans, because one plan cannot distinguish a lookup from a constant.
+func TestTheDesiredDocCarriesTheOrgsOwnPlanEnvelope(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+
+	want := map[string]map[string]any{
+		"free":     {"cpu": "1", "memory": "2Gi", "storage": "10Gi"},
+		"business": {"cpu": "12", "memory": "24Gi", "storage": "200Gi"},
+	}
+
+	for plan, envelope := range want {
+		t.Run(plan, func(t *testing.T) {
+			ck, uid := w.signupUser(t, plan+"-envelope@example.com")
+			resp, body := w.post(t, "/v1/orgs", `{"name":"`+plan+`co"}`, ck)
+			if resp.StatusCode != 201 {
+				t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+			}
+			var org struct{ Id string }
+			_ = json.Unmarshal([]byte(body), &org)
+			if _, err := w.pool.Exec(ctx, `UPDATE orgs SET plan = $2 WHERE id = $1`, org.Id, plan); err != nil {
+				t.Fatal(err)
+			}
+			orgRow, err := w.svc.GetOrg(ctx, org.Id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, body = w.post(t, "/v1/estimates",
+				`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev"}}]}`, ck)
+			if resp.StatusCode != 200 {
+				t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+			}
+			var est struct{ Id string }
+			_ = json.Unmarshal([]byte(body), &est)
+			resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+				`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev"}}`, ck)
+			if resp.StatusCode != 201 {
+				t.Fatalf("create: %d %s", resp.StatusCode, body)
+			}
+			var svc struct{ Id string }
+			_ = json.Unmarshal([]byte(body), &svc)
+
+			var desired map[string]any
+			if err := w.pool.QueryRow(ctx, `SELECT desired FROM services WHERE id = $1`, svc.Id).Scan(&desired); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := desired["quota"].(map[string]any)
+			if !ok {
+				t.Fatalf("a %s org's service shipped NO envelope — the agent refuses to render, "+
+					"so the service never converges and the environment has no ceiling: %v", plan, desired)
+			}
+			for dim, wantVal := range envelope {
+				if got[dim] != wantVal {
+					t.Errorf("a %s org's service carries %s=%v, want %v — the control plane is not "+
+						"resolving THIS org's plan", plan, dim, got[dim], wantVal)
+				}
+			}
+		})
+	}
+}
+
+// EVERY PATH THAT WRITES `desired` MUST SHIP AN ENVELOPE.
+//
+// desiredDoc gained a parameter and four call sites changed; three of them
+// (UpdateService, the override-expiry sweep, delete) had no test inspecting the
+// resulting document, and dropping the envelope from all three was green.
+// Table-driven so a new writer of `desired` has to be added here.
+func TestEveryDesiredDocWritingPathShipsAnEnvelope(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ck, uid := w.signupUser(t, "paths@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"pathsco"}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	if _, err := w.pool.Exec(ctx, `UPDATE orgs SET plan = 'business' WHERE id = $1`, org.Id); err != nil {
+		t.Fatal(err)
+	}
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev"}}]}`, ck)
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev"}}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	envelopeOf := func(t *testing.T, label string) {
+		t.Helper()
+		var desired map[string]any
+		if err := w.pool.QueryRow(ctx, `SELECT desired FROM services WHERE id = $1`, svc.Id).Scan(&desired); err != nil {
+			t.Fatal(err)
+		}
+		q, ok := desired["quota"].(map[string]any)
+		if !ok || q["cpu"] != "12" {
+			t.Fatalf("after %s the desired doc carries %v, want business's 12/24Gi/200Gi — "+
+				"a doc with no envelope makes the agent refuse to render, forever, with no "+
+				"writeback", label, desired["quota"])
+		}
+	}
+	envelopeOf(t, "create")
+
+	if _, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svc.Id), org.Id, uid,
+		map[string]any{"ha": true}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	envelopeOf(t, "a shape PATCH")
+
+	// The override-expiry SWEEP is the third writer of `desired`. Seeded directly
+	// rather than through the handler, because the handler's own validation is
+	// not what this test is about — the sweep rewriting a doc WITHOUT an envelope
+	// is.
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET override = $2::jsonb WHERE id = $1`, svc.Id,
+		`{"instances":3,"reason":"load test","expires_at":"`+past+`"}`); err != nil {
+		t.Fatal(err)
+	}
+	sweepCtx, stop := context.WithCancel(ctx)
+	go w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var ov []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id = $1`, svc.Id).Scan(&ov); err != nil {
+			t.Fatal(err)
+		}
+		if len(ov) == 0 || string(ov) == "null" {
+			break
+		}
+		if time.Now().After(deadline) {
+			stop()
+			t.Fatal("the override-expiry sweep never cleared the expired pin")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stop()
+	envelopeOf(t, "the override-expiry sweep")
+}
+
+// THE BACKFILL, RUN AS THE SHIPPED FILE, AGAINST ROWS THAT ACTUALLY EXIST.
+//
+// Every container-backed test already applies this migration — against an EMPTY
+// database, where an UPDATE that matches nothing is indistinguishable from one
+// that is correct. This seeds the rows the migration exists for and then
+// executes the .sql file itself (not a paraphrase of it, which would test this
+// test's SQL and ship the file's).
+//
+// What makes it a deploy-stop rather than a nicety: tenancy.Render REFUSES a
+// spec with no envelope, and the renderer calls it on every converge, so a
+// service whose doc predates US-3.3e does not run unbounded — it fails to
+// converge forever, in a retry loop with no customer-visible status.
+func TestTheBackfillGivesEveryExistingServiceItsOrgsEnvelope(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+
+	sql, err := os.ReadFile("../platform/db/migrations/20260823140000_service_quota_backfill.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two plans, because one cannot tell a per-org lookup from a constant, plus a
+	// row that must NOT be touched.
+	type seeded struct{ id, plan string }
+	var rows []seeded
+	var untouched string
+	for i, plan := range []string{"free", "enterprise"} {
+		ck, uid := w.signupUser(t, fmt.Sprintf("backfill-%d@example.com", i))
+		resp, body := w.post(t, "/v1/orgs", fmt.Sprintf(`{"name":"backfill%d"}`, i), ck)
+		if resp.StatusCode != 201 {
+			t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+		}
+		var org struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &org)
+		if _, err := w.pool.Exec(ctx, `UPDATE orgs SET plan = $2 WHERE id = $1`, org.Id, plan); err != nil {
+			t.Fatal(err)
+		}
+		orgRow, err := w.svc.GetOrg(ctx, org.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, body = w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"dev"}}]}`, ck)
+		if resp.StatusCode != 200 {
+			t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev"}}`, ck)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create: %d %s", resp.StatusCode, body)
+		}
+		var svc struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &svc)
+		rows = append(rows, seeded{svc.Id, plan})
+
+		// Age the row back to what a pre-US-3.3e doc looks like.
+		if _, err := w.pool.Exec(ctx,
+			`UPDATE services SET desired = desired - 'quota' WHERE id = $1`, svc.Id); err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			// A second service in the SAME org whose doc is '{}' — it predates the
+			// reconciler columns and has no doc to extend. desiredDoc writes it
+			// whole on the next touch; the migration must leave it alone rather
+			// than manufacture a doc whose only key is a quota.
+			resp, body = w.post(t, "/v1/estimates",
+				`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"old","shape":{"size":"dev"}}]}`, ck)
+			if resp.StatusCode != 200 {
+				t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+			}
+			_ = json.Unmarshal([]byte(body), &est)
+			resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+				`{"name":"old","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"dev"}}`, ck)
+			if resp.StatusCode != 201 {
+				t.Fatalf("create: %d %s", resp.StatusCode, body)
+			}
+			var old struct{ Id string }
+			_ = json.Unmarshal([]byte(body), &old)
+			untouched = old.Id
+			if _, err := w.pool.Exec(ctx,
+				`UPDATE services SET desired = '{}'::jsonb WHERE id = $1`, old.Id); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	gen := func(id string) int64 {
+		var g int64
+		if err := w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id = $1`, id).Scan(&g); err != nil {
+			t.Fatal(err)
+		}
+		return g
+	}
+	before := map[string]int64{}
+	for _, r := range rows {
+		before[r.id] = gen(r.id)
+	}
+	beforeUntouched := gen(untouched)
+
+	if _, err := w.pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("the shipped backfill did not execute: %v", err)
+	}
+
+	want := map[string]map[string]any{
+		"free":       {"cpu": "1", "memory": "2Gi", "storage": "10Gi"},
+		"enterprise": {"cpu": "16", "memory": "32Gi", "storage": "250Gi"},
+	}
+	for _, r := range rows {
+		var desired map[string]any
+		if err := w.pool.QueryRow(ctx, `SELECT desired FROM services WHERE id = $1`, r.id).Scan(&desired); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := desired["quota"].(map[string]any)
+		if !reflect.DeepEqual(got, want[r.plan]) {
+			t.Errorf("%s service: backfilled %v, want %v", r.plan, got, want[r.plan])
+		}
+		// The doc it extended must survive — `desired = jsonb_build_object(...)`
+		// would pass the assertion above while erasing product and namespace.
+		if desired["product"] != "postgres" || desired["namespace"] == nil {
+			t.Errorf("%s service: the backfill replaced the doc instead of extending it: %v", r.plan, desired)
+		}
+		if g := gen(r.id); g != before[r.id]+1 {
+			t.Errorf("%s service: generation %d, want %d — the agent polls "+
+				"observed_generation < generation, so without the bump the corrected doc is never fetched",
+				r.plan, g, before[r.id]+1)
+		}
+	}
+
+	var emptyDoc map[string]any
+	if err := w.pool.QueryRow(ctx, `SELECT desired FROM services WHERE id = $1`, untouched).Scan(&emptyDoc); err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyDoc) != 0 {
+		t.Errorf("a '{}' doc was given a quota and nothing else: %v", emptyDoc)
+	}
+	if g := gen(untouched); g != beforeUntouched {
+		t.Errorf("a skipped row's generation was bumped (%d → %d), which schedules a converge "+
+			"of a doc that still cannot render", beforeUntouched, g)
+	}
+
+	// Idempotent: migrations get re-run in recovery, and `NOT (desired ? 'quota')`
+	// is what stops a second pass from bumping every generation again.
+	if _, err := w.pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if g := gen(r.id); g != before[r.id]+1 {
+			t.Errorf("%s service: a second run bumped generation to %d", r.plan, g)
+		}
 	}
 }

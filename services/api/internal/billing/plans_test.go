@@ -92,20 +92,60 @@ func TestBillingReconcilesWithCanon(t *testing.T) {
 // The loader fails loudly on bad data — a typo must never silently ship a $0
 // meter, an unlimited allowance, or a missing plan.
 func TestLoadRejectsBadData(t *testing.T) {
-	good := `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3},
-		"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},
-		"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},
-		"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},
+	good := `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}},
+		"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5,"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"}},
+		"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20,"quota":{"cpu":"12","memory":"24Gi","storage":"200Gi"}},
+		"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000,"quota":{"cpu":"16","memory":"32Gi","storage":"250Gi"}}},
 		"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`
 	if _, err := parse([]byte(good)); err != nil {
 		t.Fatalf("valid table rejected: %v", err)
 	}
 	bad := map[string]string{
-		"missing plan":   `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
-		"zero overage":   `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":0,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
-		"negative limit": `{"plans":{"free":{"fee_cents":0,"project_limit":-5,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
-		"negative fee":   `{"plans":{"free":{"fee_cents":-1,"project_limit":1,"included_seats":3},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"missing plan":   `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"zero overage":   `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5,"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"}},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20,"quota":{"cpu":"12","memory":"24Gi","storage":"200Gi"}},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000,"quota":{"cpu":"16","memory":"32Gi","storage":"250Gi"}}},"overage":{"egress_cents_per_gb":9,"seat_cents":0,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"negative limit": `{"plans":{"free":{"fee_cents":0,"project_limit":-5,"included_seats":3,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5,"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"}},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20,"quota":{"cpu":"12","memory":"24Gi","storage":"200Gi"}},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000,"quota":{"cpu":"16","memory":"32Gi","storage":"250Gi"}}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
+		"negative fee":   `{"plans":{"free":{"fee_cents":-1,"project_limit":1,"included_seats":3,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}},"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5,"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"}},"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20,"quota":{"cpu":"12","memory":"24Gi","storage":"200Gi"}},"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000,"quota":{"cpu":"16","memory":"32Gi","storage":"250Gi"}}},"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`,
 	}
+	// The envelope is required and must be a whole, positive quantity in the
+	// closed grammar. Each of these would otherwise render a ResourceQuota the
+	// API server rejects at apply — a config typo discovered on a cell rather
+	// than at boot — or, for a missing block, an environment with no ceiling.
+	withFree := func(q string) string {
+		return `{"plans":{"free":{"fee_cents":0,"project_limit":1,"included_seats":3` + q + `},
+		"pro":{"fee_cents":2900,"project_limit":3,"included_seats":5,"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"}},
+		"business":{"fee_cents":9900,"project_limit":-1,"included_seats":20,"quota":{"cpu":"12","memory":"24Gi","storage":"200Gi"}},
+		"enterprise":{"fee_cents":null,"project_limit":-1,"included_seats":1000,"quota":{"cpu":"16","memory":"32Gi","storage":"250Gi"}}},
+		"overage":{"egress_cents_per_gb":9,"seat_cents":700,"build_cents_per_min":1,"event_cents_per_million":120,"ai_cents_per_1k":200}}`
+	}
+	for name, q := range map[string]string{
+		"no quota block at all": ``,
+		"missing cpu":           `,"quota":{"memory":"2Gi","storage":"10Gi"}`,
+		"missing memory":        `,"quota":{"cpu":"1","storage":"10Gi"}`,
+		"missing storage":       `,"quota":{"cpu":"1","memory":"2Gi"}`,
+		"zero cpu":              `,"quota":{"cpu":"0","memory":"2Gi","storage":"10Gi"}`,
+		"fractional cpu":        `,"quota":{"cpu":"0.5","memory":"2Gi","storage":"10Gi"}`,
+		"millicores":            `,"quota":{"cpu":"500m","memory":"2Gi","storage":"10Gi"}`,
+		"negative cpu":          `,"quota":{"cpu":"-1","memory":"2Gi","storage":"10Gi"}`,
+		"unitless memory":       `,"quota":{"cpu":"1","memory":"2","storage":"10Gi"}`,
+		"decimal-unit memory":   `,"quota":{"cpu":"1","memory":"2GB","storage":"10Gi"}`,
+		"zero storage":          `,"quota":{"cpu":"1","memory":"2Gi","storage":"0Gi"}`,
+		"nonsense storage":      `,"quota":{"cpu":"1","memory":"2Gi","storage":"lots"}`,
+	} {
+		if _, err := parse([]byte(withFree(q))); err == nil {
+			t.Errorf("a plan envelope with %s was accepted", name)
+		}
+	}
+	// Positive control for the grammar: the forms we DO accept must parse, or
+	// every case above is satisfied by a parser that rejects everything.
+	for _, q := range []string{
+		`,"quota":{"cpu":"1","memory":"2Gi","storage":"10Gi"}`,
+		`,"quota":{"cpu":"16","memory":"512Mi","storage":"2Ti"}`,
+	} {
+		if _, err := parse([]byte(withFree(q))); err != nil {
+			t.Errorf("a legitimate envelope was rejected: %v", err)
+		}
+	}
+
 	for name, js := range bad {
 		if _, err := parse([]byte(js)); err == nil {
 			t.Errorf("%s: bad table accepted", name)

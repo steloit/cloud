@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -160,8 +161,30 @@ func CanTransition(from, to string) bool {
 // lifecycle flags). Substrate names never appear here (D8); this is grammar
 // only. `deleting` marks a teardown so the cell converges the service to gone.
 // `namespace` is the env-derived cell namespace (ADR-0012).
-func desiredDoc(product, intent, namespace string, shape, scaling, override []byte, deleting bool) []byte {
+func desiredDoc(product, intent, namespace string, quota billing.Quota, shape, scaling, override []byte, deleting bool) []byte {
 	doc := map[string]any{"product": product}
+	// THE PLAN'S PER-ENVIRONMENT ENVELOPE, resolved here and shipped as values.
+	//
+	// The cell-agent must not carry a copy of plans.json — same boundary as
+	// pricing: a plan table in two modules is a plan table that drifts. The
+	// control plane owns the mapping and the cell renders what it is given.
+	//
+	// KNOWN GAP, filed as US-3.3g: the doc is rebuilt when a SERVICE changes, not
+	// when an org's PLAN changes. It is worse than staleness — the quota is
+	// ENVIRONMENT-scoped but rendered from each SERVICE's doc, so after a plan
+	// change the namespace carries whichever sibling converged last and the
+	// ceiling OSCILLATES between plans until every doc is rewritten. The fix is a
+	// plan-change hook that rewrites them in one transaction: a control-plane
+	// concern, and not this task's.
+	//
+	// Services that predate this field are handled once, by migration
+	// 20260823140000_service_quota_backfill, because tenancy.Render refuses a doc
+	// with no envelope — they would otherwise never converge again.
+	if quota != (billing.Quota{}) {
+		doc["quota"] = map[string]string{
+			"cpu": quota.CPU, "memory": quota.Memory, "storage": quota.Storage,
+		}
+	}
 	if namespace != "" {
 		doc["namespace"] = namespace // the cell renders here (env-derived, ADR-0012)
 	}
@@ -186,6 +209,30 @@ func desiredDoc(product, intent, namespace string, shape, scaling, override []by
 	}
 	b, _ := json.Marshal(doc)
 	return b
+}
+
+// envelopeFor resolves an org's per-environment resource quota.
+//
+// Deny-by-default all the way down: an org whose plan is not in the table is a
+// programming error (orgs.plan has a CHECK constraint listing exactly the four),
+// and returning a zero Quota would render a ResourceQuota of "" that the API
+// server rejects at apply — a config problem discovered on a cell.
+func (s *Service) envelopeFor(ctx context.Context, orgID string) (billing.Quota, error) {
+	org, err := s.q.GetOrg(ctx, orgID)
+	if err != nil {
+		return billing.Quota{}, fmt.Errorf("provisioning: org for quota envelope: %w", err)
+	}
+	return s.plans.Envelope(org.Plan)
+}
+
+// envelopeForService is the same, for the paths that hold a service rather than
+// an org id.
+func (s *Service) envelopeForService(ctx context.Context, serviceID string) (billing.Quota, error) {
+	orgID, err := s.q.OrgForService(ctx, serviceID)
+	if err != nil {
+		return billing.Quota{}, fmt.Errorf("provisioning: org for service %s: %w", serviceID, err)
+	}
+	return s.envelopeFor(ctx, orgID)
 }
 
 // resolveNamespace derives the cell namespace for an environment.
@@ -399,6 +446,12 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	if err != nil {
 		return store.Service{}, err
 	}
+	// Resolved BEFORE the insert: an org whose plan has no envelope must fail the
+	// create, not produce a service the cell can never give a quota.
+	envelope, err := s.envelopeFor(ctx, orgID)
+	if err != nil {
+		return store.Service{}, err
+	}
 	shapeJSON, err := json.Marshal(resolvedShape)
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
@@ -413,7 +466,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		EstimateID:           pgtype.Text{String: in.EstimateID, Valid: true},
 		// US-1.3a/US-3.3: desired populated at creation with the resolved cell
 		// namespace; the row is outstanding so the cell picks it up next poll.
-		Desired: desiredDoc(in.Product, line.Intent, namespace, shapeJSON, nil, nil, false),
+		Desired: desiredDoc(in.Product, line.Intent, namespace, envelope, shapeJSON, nil, nil, false),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -557,11 +610,15 @@ func (s *Service) expireOverride(ctx context.Context, row store.Service) error {
 	if err != nil {
 		return fmt.Errorf("org lookup: %w", err)
 	}
+	sweepEnvelope, err := s.envelopeFor(ctx, orgID)
+	if err != nil {
+		return err
+	}
 	prior := row.MonthlyEstimateCents
 	updated, err := s.q.ClearExpiredOverride(ctx, store.ClearExpiredOverrideParams{
 		ID:                   row.ID,
 		MonthlyEstimateCents: base.MonthlyCents.Int64(),
-		Desired:              desiredDoc(row.Product, row.Intent.String, ns, row.Shape, row.Scaling, nil, false),
+		Desired:              desiredDoc(row.Product, row.Intent.String, ns, sweepEnvelope, row.Shape, row.Scaling, nil, false),
 		Generation:           row.Generation,
 	})
 	if err != nil {
@@ -813,7 +870,11 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 	if err != nil {
 		return store.Service{}, err
 	}
-	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, effShape, effScaling, effOverride, false)
+	updEnvelope, err := s.envelopeForService(ctx, svc.ID)
+	if err != nil {
+		return store.Service{}, err
+	}
+	params.Desired = desiredDoc(svc.Product, svc.Intent.String, ns, updEnvelope, effShape, effScaling, effOverride, false)
 	priorCents := svc.MonthlyEstimateCents
 	params.Generation = svc.Generation
 	row, err := s.q.UpdateServiceShape(ctx, params)
@@ -898,7 +959,12 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 	if err != nil {
 		return err
 	}
-	del := desiredDoc(svc.Product, svc.Intent.String, dns, svc.Shape, svc.Scaling, svc.Override, true)
+	// NO ENVELOPE ON THE TEARDOWN DOC, deliberately. Converge's deleting branch
+	// returns before any tenancy object is rendered, so the value would never be
+	// read — and resolving it would give deletion a new way to fail (a missing
+	// org row, or a plan absent from the table) on a capability plans.json lists
+	// under `never_gated: self_deletion`. Plans gate capabilities, never safety.
+	del := desiredDoc(svc.Product, svc.Intent.String, dns, billing.Quota{}, svc.Shape, svc.Scaling, svc.Override, true)
 	if _, err := s.q.BumpServiceGeneration(ctx, store.BumpServiceGenerationParams{ID: svc.ID, Desired: del}); err != nil {
 		return err
 	}

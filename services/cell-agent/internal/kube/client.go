@@ -326,6 +326,12 @@ var plurals = map[string]string{
 	// map is not inert — it is what lets Delete build a path for a kind, so an
 	// unrendered kind here converts Delete's loud refusal into a silent 404.
 	"Namespace": "namespaces",
+	// US-3.3e — the per-environment ceiling. Removed in US-3.3a when the D7
+	// objects were withdrawn and nothing rendered them; back now that tenancy
+	// does. TestPluralsAndAPIVersionsNameTheSameKinds keeps the two maps moving
+	// together, and it is what caught this the moment the renderer changed.
+	"ResourceQuota": "resourcequotas",
+	"LimitRange":    "limitranges",
 }
 
 // apiVersions is the group/version each kind lives in. Delete needs it because,
@@ -346,6 +352,8 @@ var apiVersions = map[string]string{
 	"Secret":          "v1",
 	"StatefulSet":     "apps/v1",
 	"Namespace":       "v1",
+	"ResourceQuota":   "v1",
+	"LimitRange":      "v1",
 }
 
 // exactlyOneDocument refuses a multi-document YAML stream. Callers pass one

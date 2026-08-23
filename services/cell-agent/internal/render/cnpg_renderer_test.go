@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -106,6 +107,9 @@ func svc(id, status string) agent.DesiredService {
 		Desired: map[string]any{
 			"product": "postgres", "shape": map[string]any{"size": "dev"},
 			"namespace": "env-0123456789abcdef0123456789abcdef",
+			// The plan's per-environment envelope, as the control plane ships it:
+			// resolved VALUES, never a plan name. `pro` here.
+			"quota": map[string]any{"cpu": "8", "memory": "16Gi", "storage": "100Gi"},
 		},
 	}
 }
@@ -289,6 +293,7 @@ func mustRender(t *testing.T) [][]byte {
 	t.Helper()
 	tm, err := tenancy.Render(tenancy.Spec{
 		Namespace: "env-0123456789abcdef0123456789abcdef", Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +343,12 @@ func TestApplyErrorSurfaces(t *testing.T) {
 // rather than at apply time on a live cluster.
 func TestNamespaceSurvivesTheWire(t *testing.T) {
 	// exactly what the api's desiredDoc produces (US-3.3 Step 1)
-	apiDesired := []byte(`{"product":"postgres","namespace":"env-0123456789abcdef0123456789abcdef","shape":{"size":"dev"}}`)
+	// The QUOTA crosses the same two boundaries and is the newer half: the api
+	// resolves the org's plan to values, and the agent must read them back as
+	// strings out of a decoded map[string]any. A json tag or type change on
+	// either side breaks here rather than at apply time on a live cluster.
+	apiDesired := []byte(`{"product":"postgres","namespace":"env-0123456789abcdef0123456789abcdef",` +
+		`"quota":{"cpu":"8","memory":"16Gi","storage":"100Gi"},"shape":{"size":"dev"}}`)
 	// exactly how the poll ships a row and the agent decodes it
 	wire := []byte(`{"id":"svc_0123456789abcdef0123456789abcdef","cell_id":"cell-0","product":"postgres","status":"provisioning","generation":1,"desired":` + string(apiDesired) + `}`)
 	var decoded agent.DesiredService
@@ -351,6 +361,23 @@ func TestNamespaceSurvivesTheWire(t *testing.T) {
 	}
 	if _, ok := a.applied["env-0123456789abcdef0123456789abcdef"]; !ok {
 		t.Fatalf("namespace did not survive api → wire → agent → renderer; applied into %v", keysOf(a.applied))
+	}
+	// And the envelope arrived intact, in the rendered ResourceQuota.
+	var quota []byte
+	for _, o := range a.applied["env-0123456789abcdef0123456789abcdef"] {
+		if bytes.Contains(o, []byte("kind: ResourceQuota")) {
+			quota = o
+		}
+	}
+	if quota == nil {
+		t.Fatal("no ResourceQuota was applied — the environment has no ceiling")
+	}
+	// The envelope's two RENDERED dimensions. storage is carried in the doc and
+	// deliberately not rendered (US-3.3e / US-3.3i), so it cannot be asserted here.
+	for _, want := range []string{`requests.cpu: "8"`, "requests.memory: 16Gi"} {
+		if !bytes.Contains(quota, []byte(want)) {
+			t.Fatalf("the envelope did not survive the wire: %q missing from\n%s", want, quota)
+		}
 	}
 }
 
@@ -506,6 +533,105 @@ func TestEveryTerminalStatusIsALegalEdgeFromProvisioning(t *testing.T) {
 	}
 	if seen == 0 {
 		t.Fatal("phaseStatus yielded no terminal status — this test would prove nothing")
+	}
+}
+
+// THE RENDERER READS THE ENVELOPE FROM THE DOC, it does not carry one.
+//
+// Every other fixture ships `pro`, so hardcoding pro's envelope in the renderer
+// was a GREEN mutation — indistinguishable from reading it. This drives the
+// free and enterprise rows instead, which is the only way that distinction
+// shows up.
+func TestTheRenderedQuotaComesFromTheDocNotTheRenderer(t *testing.T) {
+	for _, tc := range []struct{ plan, cpu, mem, sto string }{
+		{"free", "1", "2Gi", "10Gi"},
+		{"enterprise", "16", "32Gi", "250Gi"},
+	} {
+		t.Run(tc.plan, func(t *testing.T) {
+			a := newFakeApplier("Cluster in healthy state")
+			s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+			s.Desired["quota"] = map[string]any{"cpu": tc.cpu, "memory": tc.mem, "storage": tc.sto}
+			if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+				t.Fatal(err)
+			}
+			var quota []byte
+			for _, o := range a.applied["env-0123456789abcdef0123456789abcdef"] {
+				if bytes.Contains(o, []byte("kind: ResourceQuota")) {
+					quota = o
+				}
+			}
+			if quota == nil {
+				t.Fatal("no ResourceQuota applied")
+			}
+			// storage is deliberately NOT among these: US-3.3e withholds
+			// requests.storage because the API cannot predict the PVC the cell
+			// will create, so it cannot refuse an order that will not fit
+			// (US-3.3i). The doc still CARRIES it — the value below is the
+			// founder's — which is why the fixture sets it and the assertion
+			// list does not.
+			for _, want := range []string{
+				`requests.cpu: "` + tc.cpu + `"`,
+				"requests.memory: " + tc.mem,
+			} {
+				if !bytes.Contains(quota, []byte(want)) {
+					t.Errorf("%s: %q missing — the renderer is not reading the doc:\n%s", tc.plan, want, quota)
+				}
+			}
+			if bytes.Contains(quota, []byte("requests.storage")) {
+				t.Errorf("%s: requests.storage is rendered again — see US-3.3i:\n%s", tc.plan, quota)
+			}
+			// And emphatically NOT pro's, which every other fixture uses.
+			if bytes.Contains(quota, []byte(`requests.cpu: "8"`)) && tc.cpu != "8" {
+				t.Errorf("%s rendered pro's CPU ceiling", tc.plan)
+			}
+		})
+	}
+}
+
+// A DOC WITH NO ENVELOPE MUST BE REFUSED, and the refusal must be reachable
+// through quotaOf — the layer that FEEDS tenancy.Render.
+//
+// tenancy.Render's absence guard was verified one layer down, but nothing drove
+// a desired doc that simply lacks the key: making quotaOf return a default when
+// `desired["quota"]` is absent was a green mutation, and the renderer would then
+// invent a ceiling nobody granted. The sibling field is already covered exactly
+// this way (the namespace case deletes the key and asserts the refusal); this is
+// the same line for the quota.
+func TestAServiceWithNoEnvelopeInItsDocIsRefused(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	delete(s.Desired, "quota")
+
+	if _, err := newRenderer(a).Converge(context.Background(), s); err == nil {
+		t.Fatal("a desired doc with no envelope was accepted — the renderer invented a ceiling " +
+			"the control plane never granted")
+	} else if !strings.Contains(err.Error(), "no quota envelope") {
+		t.Fatalf("the refusal must name the missing envelope: %v", err)
+	}
+	if len(a.applied) != 0 {
+		t.Fatalf("objects were applied despite the refusal: %v", keysOf(a.applied))
+	}
+}
+
+// TEARDOWN MUST NOT DEPEND ON THE PLAN TABLE. Deleting a service is
+// `never_gated: self_deletion` in plans.json — plans gate capabilities, never
+// safety — and the deleting branch returns before any tenancy object is
+// rendered, so the envelope is never read on that path.
+func TestTeardownDoesNotNeedAnEnvelope(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	del := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+	delete(del.Desired, "quota")
+
+	status, err := r.Converge(context.Background(), del)
+	if err != nil {
+		t.Fatalf("teardown required an envelope it never reads: %v", err)
+	}
+	if status != "gone" {
+		t.Fatalf("teardown reported %q, want gone", status)
 	}
 }
 

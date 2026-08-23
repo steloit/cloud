@@ -81,15 +81,31 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	return ns, nil
 }
 
+// quotaOf reads the plan's per-environment envelope out of the desired doc.
+//
+// The control plane resolves it from the org's plan (billing.Table.Envelope) and
+// ships the VALUES; the agent never sees a plan name and holds no copy of the
+// plan table. An absent or partial envelope is refused by tenancy.Render rather
+// than defaulted — a missing ceiling is the failure this exists to prevent.
+func quotaOf(svc agent.DesiredService) tenancy.Quota {
+	q := asMap(svc.Desired["quota"])
+	return tenancy.Quota{
+		CPU:     asString(q["cpu"]),
+		Memory:  asString(q["memory"]),
+		Storage: asString(q["storage"]),
+	}
+}
+
 // tenancyManifests renders the environment's namespace.
 //
 // The namespace is passed through, never re-derived: it is the single value the
 // control plane resolved (ADR-0012, env-<environment_id>), and tenancy.Render
 // refuses anything that is not in that shape rather than trusting this caller.
-func (r *CNPGRenderer) tenancyManifests(namespace string) ([][]byte, error) {
+func (r *CNPGRenderer) tenancyManifests(namespace string, svc agent.DesiredService) ([][]byte, error) {
 	objs, err := tenancy.Render(tenancy.Spec{
 		Namespace: namespace,
 		Cell:      r.cell,
+		Quota:     quotaOf(svc),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)
@@ -141,12 +157,21 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// on first apply.
 	//
 	// D7 also requires the namespace to CARRY default-deny NetworkPolicies, a
-	// ResourceQuota and a LimitRange. Those are NOT rendered here — see the
-	// tenancy package doc and US-3.3c. The boundary is a namespace today.
+	// ResourceQuota and a LimitRange. The quota and the LimitRange ARE rendered
+	// now (US-3.3e), from the envelope the control plane resolved and put in this
+	// service's desired doc. The NetworkPolicies are still withheld — see the
+	// tenancy package doc for the reason and task/US-3.3f for the enforcement.
+	//
+	// NOTE THE ASYMMETRY, because it is the reason US-3.3g exists: the namespace
+	// and its quota are ENVIRONMENT-scoped, but they are rendered from a SERVICE's
+	// doc, and every service in the environment renders them. Sibling docs written
+	// either side of a plan change disagree, and the namespace then carries
+	// whichever service converged last — the quota oscillates rather than merely
+	// going stale.
 	//
 	// Applied on every converge, not once: SSA is idempotent, and level-triggered
 	// means a namespace or policy deleted out from under us comes back.
-	tenancyObjs, err := r.tenancyManifests(namespace)
+	tenancyObjs, err := r.tenancyManifests(namespace, svc)
 	if err != nil {
 		return "", err
 	}
