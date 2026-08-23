@@ -3,7 +3,7 @@
 Handoff between autonomous Claude Code sessions. **Not authoritative** — the repo,
 git, CI and `tasks/` are. Verify before trusting; correct this file when it is wrong.
 
-**Last updated:** 2026-08-23 (session 2, mid-flight) · `main` @ `80334f9` · CI **green**
+**Last updated:** 2026-08-23 (session 2) · `main` @ `695b4c4` · CI **green**
 
 ---
 
@@ -26,9 +26,9 @@ merged on my own assessment — each waits for its review.
 
 | PR | task | state |
 |---|---|---|
-| #317 | O29 — pin every CI gate | CI running; QA returned BLOCKING, **all findings applied**, re-review not yet requested |
-| #318 | O2 — 4-representation comparison + currency fix | **CI green**, arch review still running |
-| #319 | O20 — tested detection queries | CI running, 26/26 local `-race` |
+| #317 | O29 — 23 CI gates pinned | CI running. **Two review rounds, both BLOCKING, all applied.** Every mutation class individually RED |
+| #318 | O2 — comparison + `currency_code` deleted | CI running. **Two review rounds, both applied.** `plan` now refuses without the amount |
+| — | O20 | ✅ merged (#319): tested detection queries, docs+test only |
 | — | T3.4c | ✅ merged (#315): ambiguity recorded, task stays `ready`, no code |
 
 **Start `US-3.3a`** (`tasks/e3-provisioning/US-3.3a.md`, `high`) — nothing creates an
@@ -70,8 +70,15 @@ Do **not** pick `T3.4c` — see "Blocked on a human" below.
   query used `services.org_id`, which does not exist (chain is
   services→environments→projects).
 - **O2** — the module is **INERT** (`billing_account` defaults `""`, no tfvars sets
-  it), so there is no drift, just a dormant module and a hand-made budget.
-  `currency_code` un-hardcoded from USD → `var.budget_currency`.
+  it), so there is no drift: a dormant module and a hand-made budget that never met.
+  `currency_code` is **DELETED** (the server supplies the account currency — the
+  discovery doc says "provided on output"; setting it is the only way to fail). My
+  first fix made it a variable, which REMOVED a guard: `INR` + `units=300` = ₹300/mo
+  ≈ $3.60. The amount is now a required env variable with no default, so `plan`
+  refuses until it is chosen alongside `billing_account`.
+- **O2 has SIX founder decisions now, not four** — the amount/currency pairing and
+  `alert_emails` were missed. With currency server-supplied the direction of the
+  amount divergence FLIPS: live's ₹1000 is ~3.3× larger than terraform's ₹300.
 
 ## Completed in session 1 — do NOT redo
 
