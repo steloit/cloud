@@ -50,9 +50,13 @@ const secondsInLongestMonth = int64(31 * 24 * 60 * 60)
 // WHOLE money path without wrapping — not merely the largest one multiply
 // survives.
 //
-// It is DERIVED, not chosen. `metering.Rollup` computes `weighted += secs *
-// rate`, so an amount the estimate accepts is multiplied by a month of seconds
-// on the billing side. An earlier bound guaranteed only that the estimate's own
+// It is DERIVED, not chosen. An amount the estimate accepts is multiplied by a
+// month of seconds on the billing side, and the product must survive: that is
+// now enforced at `Accrual.Int64()`, the single narrowing point, rather than by
+// the accumulator itself (which carries 128 bits and cannot wrap). Before O19
+// the accumulation WAS the constraint — `metering.Rollup` computed
+// `weighted += secs * rate` in an int64 — which is why the ceiling makes exactly
+// one service-month fit, and why that was not enough. An earlier bound guaranteed only that the estimate's own
 // arithmetic fit in an int64; amounts just under it then wrapped in the rollup —
 // the same defect one layer later, on the invoice instead of the quote.
 //
@@ -341,8 +345,15 @@ func (a Accrual) String() string {
 	if a.hi == 0 {
 		return strconv.FormatUint(a.lo, 10)
 	}
-	// Long division by 1e19 (the largest power of ten below 2^64) — two limbs is
-	// at most three chunks, and this avoids math/big for a stdlib-only package.
+	// Long division by 1e19 (the largest power of ten below 2^64); two limbs is at
+	// most three chunks.
+	//
+	// NOT because math/big is unavailable — math/big IS stdlib, and ADR-0001's
+	// "stdlib only" is a no-third-party-deps rule, not a no-math/big one. (An
+	// earlier version of this comment said otherwise and was simply wrong.) The
+	// reason is that it keeps the type allocation-free, which matters for a value
+	// accumulated once per span in a rollup even though String() itself is an
+	// error path.
 	const chunk = uint64(1e19)
 	hi, lo := a.hi, a.lo
 	var parts []string

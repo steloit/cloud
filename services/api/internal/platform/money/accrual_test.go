@@ -169,3 +169,34 @@ func TestAccrualRejectsNegativeSeconds(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNegative — a negative span would REDUCE a bill", err)
 	}
 }
+
+// THE TOP-LIMB ARM OF String() IS ONLY REACHED ABOVE 1e19 × 2^64.
+//
+// Every accrual the differential test builds comes from a rate <= MaxMonthly,
+// whose high word never reaches 1e19 — so the `qh = hi / chunk` branch was
+// unexercised: replacing it with `qh = 0`, which silently truncates the MOST
+// SIGNIFICANT limb of the very number an overflow message exists to print, left
+// the whole money suite green.
+//
+// These values cannot be reached by accumulating real rates, so they are
+// constructed directly. That is the point: String() is an error path, and the
+// error path is where a value nobody can produce in a test is printed.
+func TestTheAccrualRendersValuesAboveTheTopLimbBoundary(t *testing.T) {
+	const chunk = uint64(1e19)
+	for _, a := range []Accrual{
+		{hi: math.MaxUint64, lo: math.MaxUint64}, // 2^128 - 1
+		{hi: math.MaxUint64, lo: 0},
+		{hi: chunk, lo: 0},
+		{hi: chunk, lo: math.MaxUint64},
+		{hi: chunk - 1, lo: math.MaxUint64}, // just below the top-limb arm
+		{hi: 1, lo: 0},                      // 2^64 exactly
+		{hi: 0, lo: math.MaxUint64},
+		{hi: 0, lo: 0},
+	} {
+		want := new(big.Int).Lsh(new(big.Int).SetUint64(a.hi), 64)
+		want.Or(want, new(big.Int).SetUint64(a.lo))
+		if got := a.String(); got != want.String() {
+			t.Errorf("Accrual{hi:%d, lo:%d} rendered %q, want %q", a.hi, a.lo, got, want)
+		}
+	}
+}

@@ -148,9 +148,10 @@ derivation.
 
 **Not decided here, and not decidable in implementation: what `quota_usage.
 rate_cents` MEANS.** `Rollup` writes Σ(seconds × monthly rate) — cent-seconds —
-and its column comment says so, while `invoice.Close`, `mtdSpend`,
-`billing_export` and `usage_http` all read the same column as cents. Measured
-end to end: one service at $24.00/month running for one hour produces an invoice
-of **$86,400.00**. Which side is authoritative, and the proration convention if
+and its column comment says so — as does `usage_http`, which DIVIDES by a
+seconds-per-month constant — while `invoice.Close`, `mtdSpend` and
+`billing_export` read the same column as cents. Measured end to end on one row:
+the invoice says **$86,400.00** and `GET /usage` says **3 cents**, for one
+service at $24.00/month running for one hour. Which side is authoritative, and the proration convention if
 the writer is the one that moves, are pricing decisions — filed as **O30** with a
 `NEEDS FOUNDER INPUT` row rather than settled here.

@@ -122,7 +122,14 @@ func (e *Emitter) Rollup(ctx context.Context, orgID, period string, now time.Tim
 		// LOUD, and it does not write. A rollup that cannot be represented must
 		// not upsert a partial or wrapped figure over the previous value: the
 		// row stays as it was, the period is visibly not recomputed, and the
-		// error propagates to the caller (the scheduler logs and retries).
+		// error propagates to the caller. THAT CALLER IS NOT A SCHEDULER — there
+		// is none yet (see this file's header): the only production caller is
+		// GetUsage's recompute-on-read, so an unrepresentable accrual makes
+		// `GET /orgs/{org}/usage` a 500 for that org and period until the data
+		// changes, and usage_events is append-only so there is no operator
+		// correction path. That is still better than writing a wrapped figure
+		// the invoice and the hard cap would both believe, but the blast radius
+		// is real and is recorded in O30 rather than left implied.
 		// Silently storing zero would read as "this org used nothing".
 		slog.Error("ROLLUP OVERFLOW — quota_usage NOT written, billing figure would be wrong (D10)",
 			"org", orgID, "period", period, "seconds", totalSeconds, "err", accErr)

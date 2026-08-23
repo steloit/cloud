@@ -99,6 +99,7 @@ anywhere is a bug.
 | Never plan-gated (safety) | TLS · backups · MFA · policies · alerts · dunning · self-deletion | plans.json / F9 |
 | Hard spend cap (per-org budget) | a product **feature** — an org sets its own bound (T11.6) | feature-specs §31 |
 | Founder org default budget | — | ❓ (if the founder's own org wants a cap) |
+| **Span proration: what a running service accrues** | — | ❓ **NEEDS FOUNDER INPUT** — see `tasks/eops/O30.md`. `quota_usage.rate_cents` is WRITTEN as cent-seconds and READ as cents by three surfaces and as cent-seconds by a fourth. Measured on one row: `invoice.Close` says **$86,400.00**, `GET /usage` says **3 cents**, for a $24.00/mo service that ran one hour. Two decisions are needed: (a) which side is authoritative — recommended: the stored value is money, since the column is named `rate_cents` and the invoice, the MTD spend and the hard cap all read it that way; (b) the divisor — the ACTUAL period's seconds (a full period bills exactly the sticker rate; the only option consistent with "one arithmetic everywhere"), a fixed 730-hour month (AWS/GCP), or the fixed **30-day** month `usage_http.go:29` already hardcodes today. Implementation must not pick this (founder, 2026-07-27). |
 | Money representation | integer cents end-to-end | ADR-025 |
 
 ## 6 · Engineering governance (founder-ratified operating rules)
