@@ -11,6 +11,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -76,6 +78,20 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 		lines = append(lines, Line{Description: plan + " plan", Cents: int64(fee), UsageRef: "plan:" + period})
 		total += int64(fee)
 	}
+	// The metered rows are summed with a CHECKED addition below, not `+=` and NOT
+	// billing.SpendToDate.
+	//
+	// SpendToDate saturates to MaxInt64, which is right for a figure that must be
+	// RENDERED (the billing overview) and catastrophic for one that is FROZEN. An
+	// invoice total is a charge, and there is no safe direction in which a charge
+	// can be MaxInt64. Measured: one `quota_usage` row at -500 (the column is
+	// `bigint NOT NULL` with no CHECK) froze TotalCents at 9223372036854775807
+	// against Σlines of 30200 — and UpsertInvoiceForPeriod is ON CONFLICT DO
+	// NOTHING, so that $92-quadrillion invoice is permanent. An earlier revision
+	// of this branch introduced exactly that while trying to fix a wrap.
+	//
+	// So: refuse to close. The invariant an invoice owes is Σ(lines) == total, and
+	// an invoice that cannot honour it must not exist.
 	// one line per metered accrual (the rollup already priced it into rate_cents).
 	for _, u := range usage {
 		if u.RateCents == 0 {
@@ -85,6 +101,11 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 			Description: u.Meter, Cents: u.RateCents,
 			UsageRef: "meter:" + u.Meter + ":" + period,
 		})
+		if u.RateCents < 0 || total > math.MaxInt64-u.RateCents {
+			return store.Invoice{}, fmt.Errorf(
+				"invoice: %s/%s cannot be totalled: meter %q contributes %d to a running total of %d",
+				orgID, period, u.Meter, u.RateCents, total)
+		}
 		total += u.RateCents
 	}
 

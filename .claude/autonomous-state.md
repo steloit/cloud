@@ -129,7 +129,9 @@ These are in `contexts/provisioning.md` in full. The short form:
 
 - Worktree per task; `git status` in it **before** removing it.
 - After pushing: `git rev-list --left-right --count origin/<branch>...HEAD` → `0 0`.
-- Reviewers by name: `subagent_type: "reviewer"` and `"qa"`. Worth the wall clock.
+- Reviewers by name: `subagent_type: "reviewer"` and `"qa"` — **ONCE per PR, on
+  the final diff, code only** (ADR-0016, founder 2026-08-24). Not after every
+  round; task-file narrative/counts/citations are the implementer's own pass.
 - `node scripts/spec-sync/validate.mjs` after any `tasks/` edit.
 - Context packs: documented cap 150 lines, validator enforces >160 (O12 owns the
   discrepancy). Compress an existing entry to fund a new one.
