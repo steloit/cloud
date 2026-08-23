@@ -1,15 +1,16 @@
 # ADR-0014 — Platform invariants live in types, not at call sites
 
-**Status:** Proposed (agent, 2026-07-27) — needs founder ratification
+**Status:** Accepted (founder-ratified 2026-08-23) · proposed by agent 2026-07-27
 
-**If the founder declines:** the code stands regardless. `money.Cents` and
-`problem.FromDenial` each close specific, reproduced defects (a spend cap
-permanently bypassable by one authenticated request; a 403/404 divergence
-between two transports of one operation), and those fixes are not contingent on
-the general rule. What would lapse is only the RULE — "where a platform
-invariant can be encoded in a type, it must be" — which would stop binding
-future work. A "no" here is not a request to revert; it is a decision about
-precedent.
+The rule now BINDS: where a platform invariant can be encoded in a type, it must
+be. Reviews may cite this as standing authority.
+
+*Pre-ratification framing, kept because it scopes what was decided:* the code was
+never contingent on the ruling. `money.Cents` and `problem.FromDenial` each close
+specific, reproduced defects (a spend cap permanently bypassable by one
+authenticated request; a 403/404 divergence between two transports of one
+operation). What was open was only the PRECEDENT — whether the general rule binds
+future work. It does.
 
 **Deciders:** Founder
 **Relates to:** ADR-025 (money is integer cents), ADR-0008 (review pipeline),
