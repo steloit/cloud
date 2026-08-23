@@ -22,12 +22,17 @@ resource "google_billing_budget" "cell" {
 
   budget_filter {
     projects = ["projects/${var.project_id}"]
-    # EXPLICIT. The discovery doc marks calendarPeriod "Optional" and documents no
-    # default, while the provider documents "Exactly one of calendar_period,
-    # custom_period must be provided" — and the module set neither. MONTH is not a
-    # new choice: it is what the live budget already uses and what a "monthly
-    # budget" means in both other representations. An earlier version of the O2
-    # writeup asserted MONTH was the API default; that was unsupported.
+    # DOCUMENTATION, and a provider no-op. resource_billing_budget.go:213 carries
+    # DiffSuppressFunc: checkValAndDefaultStringSuppress("MONTH", ...) — the
+    # provider encodes MONTH as the default and suppresses it, so this renders as
+    # `calendar_period: null` in the plan and the request to Google is unchanged.
+    # There is also no ExactlyOneOf; the enforced constraint is AtLeastOneOf across
+    # budget_filter, already satisfied by `projects`.
+    #
+    # Kept because it states the instrument in the file rather than by absence.
+    # MONTH is what terraform and live already are — the TASK asks for a
+    # trial-credit instrument, which is open decision #1 in O2 and would be a
+    # custom_period, not a field flip.
     calendar_period = "MONTH"
   }
 

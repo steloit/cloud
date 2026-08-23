@@ -35,3 +35,18 @@ variable "alert_emails" {
   default = []
 }
 
+
+variable "monthly_budget_units" {
+  type        = number
+  description = <<-EOT
+    Budget amount, in the BILLING ACCOUNT'S OWN CURRENCY (currency_code is unset;
+    the server supplies it). NO DEFAULT, deliberately — same idiom as project_id:
+    supplied when P1 lands, never hardcoded.
+
+    This is the guard, not the docstring. A literal here meant an operator could
+    supply billing_account alone and silently get a 300-unit budget — which on an
+    INR account is about US$3.60, alerting permanently. With no default,
+    `terraform plan` refuses until the amount is chosen in the same breath as the
+    account, which is when its currency becomes knowable. See O2 decision #5.
+  EOT
+}
