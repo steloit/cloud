@@ -39,10 +39,20 @@ func (s *Service) mtdSpend(ctx context.Context, orgID string) (planFee, metered,
 	if err != nil {
 		return 0, 0, 0, err
 	}
+	// Through SpendToDate, not `+=`: it saturates rather than wrapping (O19), and
+	// summing the rows first with a raw `+=` would wrap before it could help.
+	//
+	// This is a DISPLAYED figure, not the cap. The cap is
+	// provisioning.enforceBudget, which never consults this number and has its
+	// own checked arithmetic — an earlier revision of this comment said
+	// otherwise, and contradicted the comment ten lines below that correctly
+	// says used_percent is measured against monthlyRunRate.
+	rows := make([]int64, 0, len(usage))
 	for _, u := range usage {
-		metered += u.RateCents
+		rows = append(rows, u.RateCents)
 	}
-	return planFee, metered, billing.SpendToDate(planFee, metered), nil
+	metered = billing.SpendToDate(0, rows...)
+	return planFee, metered, billing.SpendToDate(planFee, rows...), nil
 }
 
 // monthlyRunRate is the org's committed monthly forecast: plan fee + Σ active

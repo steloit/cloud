@@ -7,6 +7,7 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -133,5 +134,82 @@ func TestInvoiceGenerator(t *testing.T) {
 	resp, body := w.get(t, "/v1/orgs/"+org.ID+"/billing/invoices", ck)
 	if resp.StatusCode != 200 || !strings.Contains(body, inv.ID) || !strings.Contains(body, "usage_ref") {
 		t.Fatalf("listInvoices: %d %s", resp.StatusCode, body)
+	}
+}
+
+// AN INVOICE NEVER FREEZES A TOTAL ITS LINES DO NOT SUM TO.
+//
+// `quota_usage.rate_cents` is `bigint NOT NULL` with no CHECK, so a degenerate
+// row is storable — and `Rollup` is not the only writer of that table, it only
+// ever writes `service_span_seconds`. Measured on an earlier revision of this
+// branch, which summed the rows through the SATURATING SpendToDate: one row at
+// -500 froze TotalCents at 9223372036854775807 against Σlines of 30200. Because
+// UpsertInvoiceForPeriod is ON CONFLICT DO NOTHING, that $92-quadrillion invoice
+// was permanent and re-closing returned it unchanged.
+//
+// Saturation is right for a figure that must be RENDERED and catastrophic for one
+// that is FROZEN. Close refuses instead.
+func TestAnInvoiceNeverFreezesATotalItsLinesDoNotSumTo(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rows map[string]int64
+	}{
+		{"a negative meter row", map[string]int64{"service_span_seconds": 20800, "egress_bytes": -500}},
+		{"a row at the int64 ceiling", map[string]int64{"service_span_seconds": 20800, "egress_bytes": math.MaxInt64}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t, time.Hour)
+			ctx := context.Background()
+			q := store.New(w.pool)
+			plans, err := billing.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, ownerID := w.signupUser(t, strings.ReplaceAll(tc.name, " ", "-")+"@example.com")
+			org, err := w.svc.CreateOrgWithOwner(ctx, "invsum", ownerID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const period = "2026-07"
+			for meter, rate := range tc.rows {
+				if _, err := w.pool.Exec(ctx,
+					`insert into quota_usage (org_id, meter, period, used, rate_cents) values ($1,$2,$3,100,$4)`,
+					org.ID, meter, period, rate); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			inv, err := invoice.NewService(q, plans).Close(ctx, org.ID, period)
+			if err != nil {
+				// Refusing is the correct outcome; nothing must have been frozen.
+				var n int
+				if err := w.pool.QueryRow(ctx,
+					`select count(*) from invoices where org_id=$1 and period=$2`, org.ID, period).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				if n != 0 {
+					t.Errorf("Close refused but %d invoice row(s) were written anyway", n)
+				}
+				return
+			}
+			// If it DID close, the invariant must hold exactly.
+			if inv.TotalCents == math.MaxInt64 {
+				t.Fatalf("the frozen invoice total is MaxInt64 — a charge nobody can act on, and "+
+					"ON CONFLICT DO NOTHING makes it permanent (lines: %s)", inv.Lines)
+			}
+			var lines []struct {
+				Cents int64 `json:"cents"`
+			}
+			if err := json.Unmarshal(inv.Lines, &lines); err != nil {
+				t.Fatal(err)
+			}
+			var sum int64
+			for _, l := range lines {
+				sum += l.Cents
+			}
+			if sum != inv.TotalCents {
+				t.Errorf("Σ lines %d != total %d — the invoice's own invariant", sum, inv.TotalCents)
+			}
+		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 )
 
 //go:embed plans.json
@@ -126,9 +127,39 @@ func (t *Table) PlanFeeCents(plan string) (int, bool) {
 // is exactly the number the overview and invoice show — one arithmetic
 // everywhere (F9). meteredRateCents are the per-meter accrued cents for the
 // current period.
+//
+// IT SATURATES RATHER THAN WRAPPING (O19), and it is a DISPLAY figure.
+//
+// The wrap was real — SpendToDate(2900, MaxInt64/2, MaxInt64/2) returned
+// -9223372036854772910 — but an earlier revision of this comment justified the
+// fix by saying "this is the number the hard cap enforces against". That is
+// FALSE and was corrected on review: the cap is provisioning.enforceBudget,
+// which never calls this function, does its own arithmetic through
+// money.FromInt/Cents.Add, and already fails closed on an unrepresentable
+// stored row. The only production callers here are the billing OVERVIEW
+// (identity.mtdSpend), which renders a month-to-date number to a human.
+//
+// Saturating is right for that caller and only that caller: it has to show
+// something, and a negative month-to-date spend is worse than an obviously
+// pegged one. It is emphatically NOT right for a figure that gets FROZEN —
+// invoice.Close sums with a checked addition and REFUSES instead, because an
+// invoice total is a charge and there is no safe direction in which a charge
+// can be MaxInt64.
 func SpendToDate(planFeeCents int64, meteredRateCents ...int64) int64 {
 	total := planFeeCents
+	if total < 0 {
+		return math.MaxInt64
+	}
 	for _, c := range meteredRateCents {
+		// `c < 0` is PROVABLY REDUNDANT, and is kept for legibility rather than
+		// as a guard — recorded because it cannot be mutation-killed and should
+		// not be mistaken for an untested branch. Proof: the arm above
+		// guarantees total >= 0, and for c < 0 the expression MaxInt64-c
+		// overflows to a negative, so `total > MaxInt64-c` is already true.
+		// Deleting it changes no outcome for any input.
+		if c < 0 || total > math.MaxInt64-c {
+			return math.MaxInt64
+		}
 		total += c
 	}
 	return total
