@@ -40,6 +40,59 @@ func TestCIWorkflowArmsTheContainerGate(t *testing.T) {
 	}
 }
 
+// ciGates is every gate `ci.yml` must arm, with the task that added it.
+//
+// A HAND-MAINTAINED LIST, deliberately — and that is worth defending, because
+// the two previous instances of this shape were fixed by DERIVING instead. The
+// gofmt module list became `git ls-files '*/go.mod'`, and the testcontainers
+// caller set became a walk of the tree, in both cases because a source of truth
+// existed and a retyped copy could drift from it.
+//
+// There is no such source here. "Which gates ought to exist" is a decision, not
+// a fact discoverable from the tree, so this list IS the assertion rather than a
+// duplicate of one. What it must not become is a list that quietly stops
+// matching: each entry carries the task that added it, so a failure explains why
+// the gate is there rather than merely that a string went missing.
+var ciGates = []struct{ task, needle, why string }{
+	{"O7", "make gen-sql",
+		"the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
+	{"O13", "gofmt -l", // the loop body; the step name could be reworded harmlessly
+		"go vet does not check formatting, so nothing else in this pipeline reports it"},
+	{"O13", "git ls-files '*/go.mod'",
+		"the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
+	{"O13", "-race",
+		"the detector had never run in CI; O14 reached the base branch and sat there a month"},
+	{"O13", "-timeout 30m",
+		"Go's default is 10 min PER PACKAGE and internal/identity measures ~350s in CI"},
+	{"O23", RequireContainersVar + `: "1"`,
+		"without it a missing container runtime is a SKIP, and the job goes green having run nothing"},
+}
+
+// Every gate this repository relies on must actually be armed in ci.yml.
+//
+// Found by auditing the gates added in one session: FIVE were added and only ONE
+// was pinned (the container gate, and only because a reviewer asked). Deleting
+// `make gen-sql`, the whole gofmt step, and `-race -timeout 30m` from ci.yml left
+// the file parsing and the suite reporting `ok` — three gates gone, nothing
+// noticed. These gates exist because their absence let real defects through, so
+// "removable by deleting four lines of YAML" is not an acceptable state for them.
+func TestCIWorkflowArmsEveryGate(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("cannot read ci.yml: %v — this check must not pass by failing to look", err)
+	}
+	ci := string(b)
+	for _, g := range ciGates {
+		if !strings.Contains(ci, g.needle) {
+			t.Errorf("ci.yml no longer contains %q (added by %s)\n"+
+				"  why it is there: %s\n"+
+				"  If this gate was deliberately removed, remove it from ciGates in the same commit "+
+				"and say why in the PR — do not delete this assertion to make the build green.",
+				g.needle, g.task, g.why)
+		}
+	}
+}
+
 // Required's semantics, pinned separately from the wiring: the gate is armed by
 // PRESENCE, not by value.
 func TestRequiredReadsTheVar(t *testing.T) {
