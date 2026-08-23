@@ -76,6 +76,34 @@ func main() {
 // orchestrator reads that as "completed", where the default disposition would
 // have killed it. Deriving from `parent` keeps production behaviour identical
 // and still lets a cancelled parent short-circuit the loop.
+// selectRenderer is extracted so the choice can be ASSERTED, not merely
+// announced. A test that reads the log line cannot tell these apart, and all
+// four were green: constructing the CNPG renderer and then handing the agent an
+// Ack one (a silent fallback that logs "real apply" — verbatim the failure this
+// branch exists to prevent); swapping the GSA and bucket arguments, which yields
+// `destinationPath: gs://sa@…` and no workload identity, so no WAL archiving and
+// NO PITR (ADR-0007 F3); hardcoding the cell; and passing a nil applier.
+//
+// Returning the renderer lets a test assert its concrete type and the values it
+// was built with.
+func selectRenderer(getenv func(string) string, cell string, log *slog.Logger) (agent.Renderer, error) {
+	// US-3.3: in a cell, converge for real via the Kubernetes API; outside one,
+	// fall back to the Ack renderer and SAY SO — a silent fallback would look
+	// like a working agent that provisions nothing.
+	kc, kerr := kube.NewInCluster()
+	if kerr != nil {
+		log.Warn("renderer: ACK (no cluster — desired state is acknowledged, NOTHING is provisioned)", "reason", kerr)
+		return agent.NewAckRenderer(log), nil
+	}
+	gsa, wal := getenv("CELL_GSA_EMAIL"), getenv("CELL_WAL_BUCKET")
+	if gsa == "" || wal == "" {
+		return nil, fmt.Errorf("CELL_GSA_EMAIL and CELL_WAL_BUCKET are required in-cluster " +
+			"(customer DB pods need workload identity + a WAL bucket)")
+	}
+	log.Info("renderer: CNPG (in-cluster, real apply)", "cell", cell, "wal_bucket", wal, "gsa", gsa)
+	return render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, log), nil
+}
+
 func run(parent context.Context, getenv func(string) string, log *slog.Logger) error {
 	cell, base, token, err := bootConfig(getenv)
 	if err != nil {
@@ -90,21 +118,9 @@ func run(parent context.Context, getenv func(string) string, log *slog.Logger) e
 
 	cp := agent.NewHTTPControlPlane(base, token)
 
-	// Renderer selection (US-3.3): in a cell, converge for real via the
-	// Kubernetes API; outside one, fall back to the Ack renderer and SAY SO —
-	// a silent fallback would look like a working agent that provisions nothing.
-	var renderer agent.Renderer
-	if kc, kerr := kube.NewInCluster(); kerr == nil {
-		gsa, wal := getenv("CELL_GSA_EMAIL"), getenv("CELL_WAL_BUCKET")
-		if gsa == "" || wal == "" {
-			return fmt.Errorf("CELL_GSA_EMAIL and CELL_WAL_BUCKET are required in-cluster " +
-				"(customer DB pods need workload identity + a WAL bucket)")
-		}
-		renderer = render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, log)
-		log.Info("renderer: CNPG (in-cluster, real apply)", "cell", cell, "wal_bucket", wal)
-	} else {
-		renderer = agent.NewAckRenderer(log)
-		log.Warn("renderer: ACK (no cluster — desired state is acknowledged, NOTHING is provisioned)", "reason", kerr)
+	renderer, err := selectRenderer(getenv, cell, log)
+	if err != nil {
+		return err
 	}
 	a := agent.New(cell, cp, renderer, log)
 

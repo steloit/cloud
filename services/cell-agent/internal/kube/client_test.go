@@ -503,6 +503,21 @@ func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
 		}{smuggled, "2 YAML documents"}
 		_ = idx
 	}
+	// A kind that is in plurals/apiVersions but that NOTHING renders. Every
+	// offender above is derived from the renderers, so the sweep could only ever
+	// pin the guards for kinds that exist today — and restricting the namespace
+	// fence to the CNPG API group, or to Cluster/ScheduledBackup, was green.
+	// US-3.3b and US-3.3c both widen those maps.
+	offenders["an unrendered but addressable kind in another namespace"] = struct {
+		yaml  []byte
+		names string
+	}{[]byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: creds\n  namespace: env-victim\n"), "env-victim"}
+	offenders["an unrendered but addressable kind carrying two documents"] = struct {
+		yaml  []byte
+		names string
+	}{[]byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: creds\n  namespace: " + testNS +
+		"\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: smuggled\n  namespace: env-victim\n"), "2 YAML documents"}
+
 	// A cluster-scoped object that names a namespace — the third guard arm.
 	offenders["a cluster-scoped object declaring a namespace"] = struct {
 		yaml  []byte
@@ -540,11 +555,12 @@ func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
 					if len(got) != idx {
 						t.Fatalf("Apply sent %d manifests, want %d — it did not abort at the offender", len(got), idx)
 					}
-					for _, g := range got {
+					for k, g := range got {
 						if strings.Contains(g.body, "env-victim") || strings.Contains(g.body, "smuggled") ||
 							strings.Contains(g.body, "env-somewhere") {
 							t.Fatalf("the offending manifest at index %d was sent: %s", idx, g.body)
 						}
+						assertSSAContract(t, g, manifests[k], k)
 					}
 				})
 			}
@@ -566,6 +582,9 @@ func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
 		}
 		if len(got) != n {
 			t.Fatalf("length %d: expected %d applies, got %d", n, n, len(got))
+		}
+		for k, g := range got {
+			assertSSAContract(t, g, clean[k], k)
 		}
 		srv.Close()
 	}
@@ -642,9 +661,12 @@ func TestPluralsAndAPIVersionsNameTheSameKinds(t *testing.T) {
 // Driven with a kind present in `plurals` and absent from `apiVersions`, which is
 // the only state in which the guard is the thing that speaks.
 func TestDeleteRefusesAKindThatIsAddressableButHasNoAPIVersion(t *testing.T) {
-	plurals["Widget"] = "widgets"
-	defer delete(plurals, "Widget")
-
+	// NO package-state mutation. An earlier version wrote plurals["Widget"] and
+	// deleted it with defer, which was safe only while nothing in this package
+	// called t.Parallel() — and -race would not have warned first. It is also
+	// unnecessary: Delete looks up apiVersions BEFORE resourcePath, so a kind
+	// absent from both maps is answered by the guard this test names, not by the
+	// path builder. TestPluralsAndAPIVersionsNameTheSameKinds covers the drift.
 	var called bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -708,5 +730,49 @@ func TestAuthRereadsTheRotatedServiceAccountToken(t *testing.T) {
 	if seen[1] != "Bearer rotated-token" {
 		t.Fatalf("the rotated token was not picked up: second request sent %q — every apply "+
 			"401s once the projected token expires, and never recovers without a restart", seen[1])
+	}
+}
+
+// assertSSAContract pins the request shape for EVERY manifest in a batch.
+//
+// TestApplyUsesServerSideApplyContract asserts it on got[0] and one path on
+// got[1]. Converge applies [Namespace, Cluster, ScheduledBackup], so the only
+// object whose contract was pinned is the one the agent writes itself — the
+// customer's database was unpinned, and six restrictions to `_mi == 0` were
+// green:
+//
+//   - re-marshalling the body for _mi > 0 (what CNPG receives changes while the
+//     driver's goldens still pass, because the driver still renders correctly)
+//   - dropping force=true for _mi > 0 — the SILENT one: the Cluster and
+//     ScheduledBackup stop being force-owned, so a manual `kubectl edit` is never
+//     corrected on the next converge and nothing errors. Level-triggered
+//     convergence survives for the Namespace only.
+//   - dropping fieldManager, reverting to merge-patch, skipping auth, and
+//     honouring resourcePath's error only at index 0 (fail-loud, but still holes)
+func assertSSAContract(t *testing.T, g capture, sent []byte, idx int) {
+	t.Helper()
+	if g.method != http.MethodPatch {
+		t.Errorf("manifest %d: method %s, want PATCH", idx, g.method)
+	}
+	if g.contentType != "application/apply-patch+yaml" {
+		t.Errorf("manifest %d: content-type %q — that is not a server-side apply", idx, g.contentType)
+	}
+	if g.auth != "Bearer tok" {
+		t.Errorf("manifest %d: authorization %q", idx, g.auth)
+	}
+	if !strings.Contains(g.query, "fieldManager=steloit-cell-agent") {
+		t.Errorf("manifest %d: no fieldManager in %q — SSA needs an owner", idx, g.query)
+	}
+	if !strings.Contains(g.query, "force=true") {
+		t.Errorf("manifest %d: force=true missing from %q. Without it this object is not "+
+			"force-owned, so a manual kubectl edit is never corrected on the next converge — "+
+			"level-triggered convergence, silently lost for this object only", idx, g.query)
+	}
+	if g.path == "" || !strings.HasPrefix(g.path, "/api") {
+		t.Errorf("manifest %d: path %q — resourcePath's error was not honoured", idx, g.path)
+	}
+	if g.body != string(sent) {
+		t.Errorf("manifest %d: the body is not the driver's bytes verbatim.\n got: %s\nwant: %s",
+			idx, g.body, sent)
 	}
 }

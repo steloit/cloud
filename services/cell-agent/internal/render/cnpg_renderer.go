@@ -40,7 +40,24 @@ type cnpgDriver interface {
 // (it runs IN the cell with those credentials); only the per-service namespace
 // comes from the control plane via the desired doc.
 func NewCNPGRenderer(pg cnpgDriver, applier kube.Applier, cell, gsaEmail, walBucket string, log *slog.Logger) *CNPGRenderer {
+	// A nil applier is a wiring bug that would otherwise surface as a nil deref
+	// on the first converge, on a cell, at 3am. Building one is a programming
+	// error, so panic here rather than return an error nobody would check.
+	if applier == nil {
+		panic("render: CNPGRenderer built with a nil applier")
+	}
 	return &CNPGRenderer{pg: pg, applier: applier, log: log, cell: cell, gsaEmail: gsaEmail, walBucket: walBucket}
+}
+
+// Placement reports the per-cell values this renderer was built with.
+//
+// Exported so a CALLER's wiring can be asserted rather than inferred from a log
+// line: swapping the gsaEmail and walBucket arguments at the construction site
+// renders `destinationPath: gs://sa@…` and an empty workload-identity
+// annotation — no WAL archiving and no PITR (ADR-0007 F3) — while every log line
+// still reads correctly.
+func (r *CNPGRenderer) Placement() (cell, gsaEmail, walBucket string) {
+	return r.cell, r.gsaEmail, r.walBucket
 }
 
 // placement is the control-plane-resolved location for a service, carried in the

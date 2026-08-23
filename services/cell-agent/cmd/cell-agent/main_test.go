@@ -3,10 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"github.com/steloit/cloud/services/cell-agent/internal/kube"
+	"github.com/steloit/cloud/services/cell-agent/internal/render"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -314,10 +321,10 @@ func TestRunTakesTheInClusterBranchAndRequiresGSAandWAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A syntactically valid CA, or the client refuses for the wrong reason.
-	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), []byte(testCAPEM), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), testCA(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	kube.SetSADirForTest(t, dir)
+	t.Cleanup(kube.SetSADirForTest(dir))
 	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 
@@ -378,24 +385,92 @@ func TestRunTakesTheInClusterBranchAndRequiresGSAandWAL(t *testing.T) {
 	}
 }
 
-// testCAPEM is a throwaway self-signed cert: NewInCluster requires the CA to
-// parse, and a bogus string would make the test pass for the wrong reason.
-const testCAPEM = `-----BEGIN CERTIFICATE-----
-MIIDBTCCAe2gAwIBAgIUGQIaQJw8jwr4dUf7XqH7oz7l3AwwDQYJKoZIhvcNAQEL
-BQAwEjEQMA4GA1UEAwwHdGVzdC1jYTAeFw0yNjA4MjMwODMxMjBaFw0yNjA4MjQw
-ODMxMjBaMBIxEDAOBgNVBAMMB3Rlc3QtY2EwggEiMA0GCSqGSIb3DQEBAQUAA4IB
-DwAwggEKAoIBAQC/V4JAZNm9d9QTTjFVBBhZ8I9ahQulJmp7w0GXJXIkSdIeYaIg
-y2LvIt9gVkp6gyLC6pYiMAONsecKNIwxN9j3OvZ9eAM3kxpwXly3gnmqmbcpSVLm
-H4UNpMmKry7ET1SqlWFh8tCaXNb//3xaUj+iqaLL+kiMUuM8XVqjPkzFSGRQR7nk
-UKWZ49Jss6OKh9bc+z4X+6JNQ9dHbByXfzP1UEArxT4uhZT4AHKhvzY9vH7D7Cea
-aWmpvOHc6ufIUYBTAKCbAiv0RT+Aurm0tYSLijpL2eXBuWToAd2TAwnzWicxdo2e
-e97pfar8qzFC1JQMDCYN94kLLmxUT6hzsL9DAgMBAAGjUzBRMB0GA1UdDgQWBBRm
-gVBI+9FPNpemgPOK9n0p6tn7kDAfBgNVHSMEGDAWgBRmgVBI+9FPNpemgPOK9n0p
-6tn7kDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBGyXvVGiCX
-9GCzL9iWcXjUP2hNSAjo3+bBphXQkVN7d2PCfKrXPdnu4SxM/GB1v2dSRlktGm1/
-LH1eeJgciBM0VvIQ5mQJWNBH2LAbSeGptjooDsktnHif3dDyf8SuvFwIDJIy1fv4
-5/dPukUyGnNWQhpkSfRWdchbd5EeeHfb2+UHPsZpJ0pBGeMZ9VlxMERcArxM9W96
-q4tjhJdddSDnOcNdKwQ1l3wrus6WFKr5kXch5FpPSesQajAofb0RzGGjpsfvxkow
-JZgRQCMK5Xlk4KwYZES83QCB8vrRjXZrLVsGFyiniP8RUVpPp0nti5urky6HzVsb
-mwuNuMvAyUvC
------END CERTIFICATE-----`
+// THE WIRING, not the announcement. Four mutations were green against a test
+// that only read the log line: constructing the CNPG renderer and then handing
+// the agent an Ack one (a silent fallback that logs "real apply" — verbatim the
+// failure this branch exists to prevent), swapping the GSA and bucket arguments,
+// hardcoding the cell, and passing a nil applier.
+//
+// The swap is the worst: it renders `destinationPath: gs://sa@p.iam…` and an
+// empty workload-identity annotation, so no WAL archiving and NO PITR
+// (ADR-0007 F3), while every log line still reads correctly. The GSA/WAL guard
+// fires on EMPTY; nothing checked the values land in the right slots.
+func TestTheInClusterRendererIsWiredNotJustAnnounced(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "token"), []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), testCA(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(kube.SetSADirForTest(dir))
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	const gsa, wal, cell = "sa@p.iam.gserviceaccount.com", "steloit-dev-wal-customer", "cell-7"
+	env := map[string]string{"CELL_GSA_EMAIL": gsa, "CELL_WAL_BUCKET": wal}
+	r, err := selectRenderer(func(k string) string { return env[k] }, cell,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cnpgR, ok := r.(*render.CNPGRenderer)
+	if !ok {
+		t.Fatalf("in-cluster selected a %T — an Ack renderer here is an agent that logs "+
+			"'real apply' and provisions nothing", r)
+	}
+	gotCell, gotGSA, gotWAL := cnpgR.Placement()
+	if gotCell != cell {
+		t.Errorf("cell wired as %q, want %q — every env namespace would carry the wrong "+
+			"steloit.dev/cell label", gotCell, cell)
+	}
+	if gotGSA != gsa {
+		t.Errorf("GSA wired as %q, want %q", gotGSA, gsa)
+	}
+	if gotWAL != wal {
+		t.Errorf("WAL bucket wired as %q, want %q — swapped with the GSA this renders "+
+			"destinationPath: gs://<an email>/ and no workload identity: no WAL archiving, "+
+			"no PITR (ADR-0007 F3), with the log line still correct", gotWAL, wal)
+	}
+
+	// Out of cluster the choice must flip, or the assertions above would be
+	// satisfied by a selectRenderer that always builds a CNPG renderer.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	r2, err := selectRenderer(func(k string) string { return env[k] }, cell,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, isCNPG := r2.(*render.CNPGRenderer); isCNPG {
+		t.Fatal("a CNPG renderer was built with no cluster")
+	}
+}
+
+// testCA generates a self-signed CA at test time. It replaces a pasted PEM whose
+// notAfter was one day out: AppendCertsFromPEM does not check expiry, so that
+// cert would have kept passing after it expired — a landmine for whoever later
+// verifies the pool or does a real handshake, sitting under a comment insisting
+// the CA must be valid.
+func testCA(t *testing.T) []byte {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "steloit-test-ca"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(100 * 365 * 24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}

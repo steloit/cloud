@@ -191,7 +191,8 @@ bytes were sent. Then the repairs were pinned for one element, then indices 0–
 then 0–3 — and then, with the length swept to 16, a skip keyed on **the Namespace
 at index 0** still survived, which is *every* production batch
 (`[Namespace, Cluster, ScheduledBackup]`). Length, index and composition are all
-swept now; index ≥ 16 remains an accepted survivor.
+swept now; index ≥ 12 remains an accepted survivor (see below — an earlier round
+published this as 16 while the harness ran to 12).
 
 **The teardown path never validated the namespace.** `Converge`'s deleting branch
 returns before `Render`, and teardown is what `fmt.Sprintf`s the value into a
@@ -216,7 +217,7 @@ described as unchanged: a SIGTERM during boot would be absorbed and exit 0.
 Reverted, ordering verified byte-identical to `origin/main`, and SIGTERM is now
 pinned by a subprocess test that kills two further green mutations.
 
-## Negative evidence — fifty-one mutations, and a correction to an earlier table
+## Negative evidence — sixty-one mutations, and corrections to two earlier tables
 
 **An earlier mutation table was invalid and is withdrawn.** Round 3's was produced
 with `cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
@@ -251,7 +252,7 @@ for 10 minutes at 0% CPU, because `run()` got past validation and blocked in
 | the `ValidateCell` **call** deleted from boot | RED *(was GREEN — `cmd/` had no tests)* |
 | `main` IGNORES `run`'s error | RED *(was GREEN)* |
 | `Apply`'s guards restricted to indices 0–1 (`Converge` passes three) | RED *(was GREEN)* |
-| `Apply`'s guards restricted to indices 0–3 | RED *(was GREEN — the length sweep now runs to 16)* |
+| `Apply`'s guards restricted to indices 0–3 | RED *(was GREEN — the length is swept)* |
 | `Apply`'s guards skipped for everything after a Namespace | RED *(was GREEN — production's exact batch)* |
 | `Apply`'s guards skipped for `kind: ScheduledBackup` | RED *(was GREEN)* |
 | signal handling deleted (`parent` passed straight to `a.Run`) | RED *(was GREEN)* |
@@ -261,6 +262,16 @@ for 10 minutes at 0% CPU, because `run()` got past validation and blocked in
 | `panic()` substituted for the in-cluster CNPG renderer | RED *(was GREEN — the only arm that runs on a cell)* |
 | the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` requirement removed | RED *(was GREEN — silent loss of PITR)* |
 | the per-request ServiceAccount token re-read deleted | RED *(was GREEN, and unreported)* |
+| `force=true` dropped for manifests after the first | RED *(was GREEN — the SILENT one: those objects stop being force-owned, so a manual `kubectl edit` is never corrected)* |
+| content-type reverts to merge-patch after the first | RED *(was GREEN)* |
+| auth applied only to the first manifest | RED *(was GREEN)* |
+| the namespace fence restricted to the CNPG API group | RED *(was GREEN — every offender was CNPG-group)* |
+| `exactlyOneDocument` skipped when document 1 is a `Secret` | RED *(was GREEN)* |
+| the CNPG renderer built, discarded, and an Ack renderer handed to the agent | RED *(was GREEN — logs "real apply", provisions nothing)* |
+| the GSA and WAL bucket arguments swapped | RED *(was GREEN — `gs://<an email>/`, no PITR, log line correct)* |
+| the cell hardcoded to `cell-0` in the in-cluster renderer | RED *(was GREEN)* |
+| `NewInCluster` caches the token instead of wiring the file | RED *(was GREEN — the production constructor, which B4's test could not see)* |
+| the cluster CA read and its PEM validation removed | RED *(was GREEN — empty pool, every converge fails TLS behind "real apply")* |
 | `signal.NotifyContext` → `context.WithCancel` | RED *(was GREEN)* |
 
 The remaining **29 rows** — ordering, cluster-scoped routing, every arm of the
@@ -269,6 +280,10 @@ the teardown path, and four refuse-everything controls — are all RED and liste
 in full in the PR. Only the rows above are recorded here, because a mutation that
 was once GREEN is the only kind that says something a green suite did not.
 
+*(Round 9 note: an earlier version of this line claimed the 29 were "listed in
+full in the PR" when the PR named six categories in a sentence and enumerated
+none. They are enumerated there now.)*
+
 ## Accepted survivors — measured green, deliberately not closed
 
 Named here because an unrecorded survivor is indistinguishable from one nobody
@@ -276,7 +291,7 @@ looked for.
 
 | survivor | why it stands |
 |---|---|
-| `Apply` guards skipped for index ≥ 16 | Any hand-written sweep has a ceiling. 16 is twice the largest batch this branch ever applied (8, at `7e94f26`). The real close is a property test over random `n` and random composition, filed with US-3.3c. |
+| `Apply` guards skipped for index ≥ **12** | Any hand-written sweep has a ceiling; this one is 12, against a largest-ever batch of 8 (`7e94f26`). **This was published as "≥ 16" for one round while the sweep already ran to 12** — the ceiling was lowered in the same commit that widened the fixtures, and four claims were not updated. Corrected here and measured: ≥ 12 GREEN, ≥ 13 GREEN, ≥ 16 vacuous. The real close is a property test over random `n` and random composition, filed with US-3.3c. |
 | `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
 | ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
 | the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
@@ -299,8 +314,8 @@ it; `manifests[0]` vs. `_mi<2` vs. `_mi<4` vs. the batch's *composition*; and,
 worst, 25 mutation results vs. the harness that produced them — a module-only
 `cp -R` whose baseline was already RED, published as evidence.
 
-51 mutations RED on one harness with a green baseline asserted before and after
-(22 of them once GREEN); two accepted survivors named above. Five lessons in `contexts/provisioning.md`.
+61 mutations RED on one harness with a green baseline asserted before and after
+(32 of them once GREEN); two accepted survivors named above. Five lessons in `contexts/provisioning.md`.
 
 **As merged, an environment is a namespace and nothing else, and deleting one
 leaks it (US-3.3b).**
