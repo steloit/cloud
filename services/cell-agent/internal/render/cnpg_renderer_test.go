@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
@@ -22,14 +23,17 @@ func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)
 // fakeApplier records what was applied and returns a scripted cluster phase, so
 // the whole render→apply→observe path is provable without a cluster.
 type fakeApplier struct {
-	mu         sync.Mutex
-	applied    map[string][][]byte // namespace/name → objects
-	deleted    []string
-	live       map[string]bool // ns/name → exists, like an API server
-	phase      string
-	applyErr   error
-	observeErr error
-	applies    int
+	mu           sync.Mutex
+	applied      map[string][][]byte // namespace/name → objects
+	deleted      []string
+	live         map[string]bool // ns/name → exists, like an API server
+	phase        string
+	applyErr     error
+	observeErr   error
+	deleteErr    error // fault seam: a Delete that the API server refuses
+	deleteErrAt  int   // fail on the Nth Delete (0 = the first)
+	applies      int
+	observedName string
 }
 
 func newFakeApplier(phase string) *fakeApplier {
@@ -74,6 +78,7 @@ func (f *fakeApplier) Observe(_ context.Context, ns, name string) (string, error
 	if f.observeErr != nil {
 		return "", f.observeErr
 	}
+	f.observedName = name
 	// A name that was never applied does not exist — "" like a real 404.
 	if !f.live[ns+"/"+name] {
 		return "", nil
@@ -87,6 +92,9 @@ func (f *fakeApplier) Observe(_ context.Context, ns, name string) (string, error
 func (f *fakeApplier) Delete(_ context.Context, ns, kind, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deleteErr != nil && len(f.deleted) == f.deleteErrAt {
+		return f.deleteErr
+	}
 	f.deleted = append(f.deleted, ns+"/"+kind+"/"+name)
 	delete(f.live, ns+"/"+name)
 	return nil
@@ -352,4 +360,116 @@ func keysOf(m map[string][][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// GONE MUST MEAN GONE. The renderer already refuses to report `gone` when a
+// Delete fails or when its objects cannot be enumerated — and both were green
+// mutations, because `fakeApplier` had no way to fail a Delete at all
+// (`observeErr` existed and was never set; there was no `deleteErr`).
+//
+// What the guard protects: `gone` makes the control plane mark the service
+// deleted and STOP METERING, while the CNPG cluster keeps running and keeps
+// costing us. A 403 or a 409 must not read as success.
+func TestTeardownNeverReportsGoneWhenSomethingFailed(t *testing.T) {
+	// Fail the first Delete, then the second — an error at any position must
+	// prevent `gone`, not just at position zero.
+	for at := 0; at < 2; at++ {
+		t.Run(fmt.Sprintf("deleteFailsAt%d", at), func(t *testing.T) {
+			a := newFakeApplier("Cluster in healthy state")
+			r := newRenderer(a)
+			ctx := context.Background()
+			if _, err := r.Converge(ctx, svc("svc_db01", "provisioning")); err != nil {
+				t.Fatal(err)
+			}
+			a.deleteErr, a.deleteErrAt = errors.New("403 forbidden"), at
+			a.deleted = nil
+
+			status, err := r.Converge(ctx, svc("svc_db01", "deleting"))
+			if err == nil {
+				t.Fatalf("a refused Delete at %d reported success", at)
+			}
+			if status == "gone" {
+				t.Fatalf("reported gone though a Delete was refused — the control plane marks " +
+					"the service deleted and stops metering while its cluster keeps running")
+			}
+		})
+	}
+
+	// Observe failing must not read as "not created yet" either.
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	if _, err := r.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	a.observeErr = errors.New("403 forbidden")
+	_, err := r.Converge(context.Background(), svc("svc_db01", "provisioning"))
+	if err == nil {
+		t.Fatal("a refused Observe was swallowed — the service sits in provisioning forever")
+	}
+	// It must be THE OBSERVE FAILURE, not ErrNotConverged. Swallowing the error
+	// leaves phase == "", which maps to ErrNotConverged — also an error, so an
+	// `err != nil` assertion passes either way and the mutation survives. A 403
+	// is permanent and must be visible as itself; ErrNotConverged says "ask
+	// again in 10s", which is how a broken cell looks exactly like a slow one.
+	if errors.Is(err, agent.ErrNotConverged) {
+		t.Fatalf("a refused Observe surfaced as ErrNotConverged — a permanent failure "+
+			"disguised as a transient one, retried forever with no signal: %v", err)
+	}
+	if !strings.Contains(err.Error(), "403 forbidden") {
+		t.Fatalf("the error does not carry the Observe failure: %v", err)
+	}
+
+	// A teardown that cannot ENUMERATE its objects must not report gone either.
+	// The driver refuses a non-postgres product, which is the reachable form of
+	// "this binary cannot work out what this service owns".
+	c := newFakeApplier("Cluster in healthy state")
+	bad := svc("svc_db01", "deleting")
+	bad.Product = "valkey"
+	if status, err := newRenderer(c).Converge(context.Background(), bad); err == nil || status == "gone" {
+		t.Fatalf("teardown reported %q/%v for a service whose objects it cannot enumerate — "+
+			"the row is marked deleted while whatever it owns keeps running", status, err)
+	}
+
+	// Positive control: with nothing failing, teardown still reports gone.
+	b := newFakeApplier("Cluster in healthy state")
+	r2 := newRenderer(b)
+	if _, err := r2.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := r2.Converge(context.Background(), svc("svc_db01", "deleting")); err != nil || status != "gone" {
+		t.Fatalf("a clean teardown must report gone: %q %v", status, err)
+	}
+}
+
+// Converge observes the CLUSTER, not whichever manifest happens to be first or
+// last. Observing manifests[len-1] instead of the Cluster was green: in
+// production that GETs /clusters/<name>-nightly, 404s, and the service never
+// reaches ready and is never metered. The expected name is DERIVED from the
+// driver, never retyped.
+func TestConvergeObservesTheClusterObject(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := cnpg.New().Render(driver.Spec{
+		Name: "svc_db01", Namespace: "env-9f3c1a2b", Product: "postgres",
+		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
+		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want string
+	for _, m := range ms {
+		if m.Kind == "Cluster" {
+			want = m.Name
+		}
+	}
+	if want == "" {
+		t.Fatal("the driver rendered no Cluster")
+	}
+	if a.observedName != want {
+		t.Fatalf("Converge observed %q, want the Cluster %q — observing any other object "+
+			"404s, so the service never reaches ready and is never metered", a.observedName, want)
+	}
 }

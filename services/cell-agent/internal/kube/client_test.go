@@ -776,3 +776,159 @@ func assertSSAContract(t *testing.T, g capture, sent []byte, idx int) {
 			idx, g.body, sent)
 	}
 }
+
+// APPLYONE HAS NO INDEX, so these run once per manifest KIND and hold for every
+// position in every batch by construction. This is what replaced eight rounds of
+// index sweeping: the rules moved out of the loop, so "correct for the first one"
+// stopped being a representable state.
+func TestApplyOneSendsTheFullContractForEveryProductionManifest(t *testing.T) {
+	for _, m := range productionManifests(t) {
+		kind := yamlKind(t, m)
+		t.Run(kind, func(t *testing.T) {
+			var got []capture
+			srv := serverCapturing(t, 200, `{}`, &got)
+			defer srv.Close()
+			c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+			if err := c.applyOne(context.Background(), testNS, m); err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("expected 1 request, got %d", len(got))
+			}
+			g := got[0]
+			assertSSAContract(t, g, m, 0)
+
+			// THE EXACT PATH, not a prefix. `strings.HasPrefix(path, "/api")` let
+			// three mutations through: swapping the caller's namespace out of the
+			// path (a customer's Cluster written into another namespace, with the
+			// metadata.namespace fence unable to see it because it compares the
+			// DECLARATION, not the URL), routing everything to the first
+			// manifest's path, and a wrong plural — the exact failure the explicit
+			// `plurals` map exists to prevent.
+			var meta objMeta
+			if err := yaml.Unmarshal(m, &meta); err != nil {
+				t.Fatal(err)
+			}
+			want, err := resourcePath(meta.APIVersion, meta.Kind, testNS, meta.Metadata.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if g.path != want {
+				t.Fatalf("%s routed to %q, want %q", kind, g.path, want)
+			}
+			if !clusterScoped[kind] && !strings.Contains(g.path, "/namespaces/"+testNS+"/") {
+				t.Fatalf("%s was not routed into the caller's namespace: %q", kind, g.path)
+			}
+		})
+	}
+}
+
+// A REJECTION MUST SURFACE, for every kind. Restricting the status check to the
+// first manifest was green: a 422 on the Cluster or ScheduledBackup was
+// swallowed, Apply returned nil, and Converge went on to observe a healthy
+// cluster and report READY with no ScheduledBackup — silent loss of
+// restorability, the same severity as the GSA/WAL swap.
+func TestApplyOneSurfacesEveryRejection(t *testing.T) {
+	for _, m := range productionManifests(t) {
+		kind := yamlKind(t, m)
+		for _, status := range []int{400, 401, 403, 409, 422, 500, 503} {
+			t.Run(fmt.Sprintf("%s/%d", kind, status), func(t *testing.T) {
+				var got []capture
+				srv := serverCapturing(t, status, `{"message":"nope"}`, &got)
+				defer srv.Close()
+				c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+				err := c.applyOne(context.Background(), testNS, m)
+				if err == nil {
+					t.Fatalf("%s: a %d was swallowed — the object was not applied and the "+
+						"agent would report success", kind, status)
+				}
+				if !strings.Contains(err.Error(), fmt.Sprint(status)) {
+					t.Errorf("the error must carry the status: %v", err)
+				}
+				// It must name the object that failed, or a 3am operator has to
+				// guess which of the batch it was.
+				var meta objMeta
+				_ = yaml.Unmarshal(m, &meta)
+				if !strings.Contains(err.Error(), meta.Metadata.Name) {
+					t.Errorf("the error does not name %s/%s: %v", kind, meta.Metadata.Name, err)
+				}
+			})
+		}
+	}
+}
+
+// The batch-level property that remains once applyOne owns the rest: Apply stops
+// at the first failure and sends exactly the manifests before it.
+func TestApplyAbortsAtTheFailingManifestAndSendsNoMore(t *testing.T) {
+	real := productionManifests(t)
+	for failAt := 0; failAt < len(real); failAt++ {
+		t.Run(fmt.Sprintf("failAt%d", failAt), func(t *testing.T) {
+			var got []capture
+			n := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				got = append(got, capture{method: r.Method, path: r.URL.Path, body: string(body)})
+				if n == failAt {
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message":"rejected"}`))
+				} else {
+					w.WriteHeader(200)
+					_, _ = w.Write([]byte(`{}`))
+				}
+				n++
+			}))
+			defer srv.Close()
+			c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+			if err := c.Apply(context.Background(), testNS, real); err == nil {
+				t.Fatal("Apply reported success though the server rejected a manifest")
+			}
+			if len(got) != failAt+1 {
+				t.Fatalf("the server saw %d requests, want %d — Apply did not stop at the "+
+					"failure, and everything after a refused Namespace would be applied into "+
+					"a namespace that may not exist", len(got), failAt+1)
+			}
+		})
+	}
+}
+
+// ONLY 404 IS GONE, for Delete and Observe alike. Widening either to any 4xx/5xx
+// was green. For Delete that means a 403 or 409 reads as "already gone", Converge
+// reports `gone`, and the control plane marks the service deleted and stops
+// metering while the CNPG cluster keeps running. For Observe it means a 403
+// becomes "" → provisioning → retried forever with no signal.
+func TestOnly404IsBenignForDeleteAndObserve(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 409, 500, 503} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+			if err := c.Delete(context.Background(), testNS, "Cluster", "db"); err == nil {
+				t.Errorf("Delete treated %d as gone — the service is marked deleted and "+
+					"stops being metered while its cluster keeps running", status)
+			}
+			if _, err := c.Observe(context.Background(), testNS, "db"); err == nil {
+				t.Errorf("Observe treated %d as 'not created yet' — the service sits in "+
+					"provisioning forever with no signal", status)
+			}
+		})
+	}
+	// 404 must still be benign in both, or the above is satisfied by refusing everything.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+	if err := c.Delete(context.Background(), testNS, "Cluster", "db"); err != nil {
+		t.Errorf("Delete on a 404 must be gone: %v", err)
+	}
+	phase, err := c.Observe(context.Background(), testNS, "db")
+	if err != nil || phase != "" {
+		t.Errorf("Observe on a 404 must be (\"\", nil): %q %v", phase, err)
+	}
+}

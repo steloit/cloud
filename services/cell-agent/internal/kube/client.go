@@ -108,57 +108,82 @@ type objMeta struct {
 // the agent the authoritative field manager for the fields it owns (so a manual
 // kubectl edit is corrected on the next converge — level-triggered, §2).
 func (c *Client) Apply(ctx context.Context, namespace string, manifests [][]byte) error {
+	// The loop does ONE thing: order and abort. Every per-manifest rule lives in
+	// applyOne, which has no index and therefore cannot be made correct "for the
+	// first one only".
+	//
+	// That structure is the fix for a class this file relocated eight times.
+	// With the rules inline here, every one of them was expressible as
+	// `… && i == 0`, and each round's test closed one more component — the
+	// guards, then the kinds, then the body shape, then five of the six request
+	// fields, then the path, then the response — while the next component stayed
+	// green. A per-index rule is not something to test harder; it is something to
+	// make unrepresentable.
+	//
+	// Aborting rather than continuing is load-bearing: the Namespace is applied
+	// first and everything after it is namespaced, so proceeding past a failure
+	// would apply a service into a namespace that may not exist.
 	for _, m := range manifests {
-		// EXACTLY ONE DOCUMENT. yaml.Unmarshal silently returns only the first
-		// document of a multi-document stream, so every check below — the kind we
-		// route on, the name we address, the namespace we compare — would describe
-		// document 1 while the whole body is PATCHed. A second document could carry
-		// any kind into any namespace with all of it green.
-		if err := exactlyOneDocument(m); err != nil {
+		if err := c.applyOne(ctx, namespace, m); err != nil {
 			return err
 		}
-		var meta objMeta
-		if err := yaml.Unmarshal(m, &meta); err != nil {
-			return fmt.Errorf("kube: parse manifest: %w", err)
+	}
+	return nil
+}
+
+// applyOne validates, routes and server-side-applies a single manifest.
+//
+// It takes no index and no slice, so "correct for the first manifest" is not a
+// state this function can be in.
+func (c *Client) applyOne(ctx context.Context, namespace string, m []byte) error {
+	// EXACTLY ONE DOCUMENT. yaml.Unmarshal silently returns only the first
+	// document of a multi-document stream, so every check below — the kind we
+	// route on, the name we address, the namespace we compare — would describe
+	// document 1 while the whole body is PATCHed. A second document could carry
+	// any kind into any namespace with all of it green.
+	if err := exactlyOneDocument(m); err != nil {
+		return err
+	}
+	var meta objMeta
+	if err := yaml.Unmarshal(m, &meta); err != nil {
+		return fmt.Errorf("kube: parse manifest: %w", err)
+	}
+	// A manifest is routed by the CALLER's namespace, not by its own
+	// metadata.namespace — so a manifest declaring a different namespace would be
+	// written into the caller's. The API server rejects that with a 400, which
+	// makes it fail-closed but leaves the tenant boundary being enforced a network
+	// hop away, and only for namespaced kinds. Refuse locally instead.
+	if got := meta.Metadata.Namespace; got != "" {
+		if clusterScoped[meta.Kind] {
+			return fmt.Errorf("kube: %s/%s is cluster-scoped but declares namespace %q",
+				meta.Kind, meta.Metadata.Name, got)
 		}
-		// A manifest is routed by the CALLER's namespace, not by its own
-		// metadata.namespace — so a manifest declaring a different namespace
-		// would be written into the caller's. The API server rejects that with a
-		// 400, which makes it fail-closed but leaves the tenant boundary being
-		// enforced a network hop away, and only for namespaced kinds. Refuse
-		// locally instead: a cross-namespace write is a bug in the renderer, and
-		// the agent should not need a round trip to say so.
-		if got := meta.Metadata.Namespace; got != "" {
-			if clusterScoped[meta.Kind] {
-				return fmt.Errorf("kube: %s/%s is cluster-scoped but declares namespace %q",
-					meta.Kind, meta.Metadata.Name, got)
-			}
-			if got != namespace {
-				return fmt.Errorf("kube: %s/%s declares namespace %q but is being applied to %q",
-					meta.Kind, meta.Metadata.Name, got, namespace)
-			}
+		if got != namespace {
+			return fmt.Errorf("kube: %s/%s declares namespace %q but is being applied to %q",
+				meta.Kind, meta.Metadata.Name, got, namespace)
 		}
-		path, err := resourcePath(meta.APIVersion, meta.Kind, namespace, meta.Metadata.Name)
-		if err != nil {
-			return err
-		}
-		url := c.base + path + "?fieldManager=" + c.fieldOwner + "&force=true"
-		req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(m))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/apply-patch+yaml")
-		req.Header.Set("Accept", "application/json")
-		c.auth(req)
-		resp, err := c.hc.Do(req)
-		if err != nil {
-			return fmt.Errorf("kube: apply %s/%s: %w", meta.Kind, meta.Metadata.Name, err)
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return fmt.Errorf("kube: apply %s/%s: %d: %s", meta.Kind, meta.Metadata.Name, resp.StatusCode, bytes.TrimSpace(body))
-		}
+	}
+	path, err := resourcePath(meta.APIVersion, meta.Kind, namespace, meta.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	url := c.base + path + "?fieldManager=" + c.fieldOwner + "&force=true"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(m))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/apply-patch+yaml")
+	req.Header.Set("Accept", "application/json")
+	c.auth(req)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("kube: apply %s/%s: %w", meta.Kind, meta.Metadata.Name, err)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("kube: apply %s/%s: %d: %s",
+			meta.Kind, meta.Metadata.Name, resp.StatusCode, bytes.TrimSpace(body))
 	}
 	return nil
 }
@@ -222,6 +247,10 @@ func (c *Client) Delete(ctx context.Context, namespace, kind, name string) error
 		return fmt.Errorf("kube: delete %s: %w", name, err)
 	}
 	defer resp.Body.Close()
+	// ONLY 404 means gone. Widening this to any 4xx/5xx was a green change, and
+	// what it costs is severe: a 403 or 409 would become "already gone", Converge
+	// would report `gone`, and the control plane would mark the service deleted
+	// and stop metering while the CNPG cluster kept running and billing us.
 	if resp.StatusCode == http.StatusNotFound {
 		return nil // already gone
 	}

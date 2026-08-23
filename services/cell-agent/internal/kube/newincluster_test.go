@@ -1,14 +1,19 @@
 package kube
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -109,6 +114,109 @@ func TestNewInClusterRefusesAnUnusableClusterCA(t *testing.T) {
 		t.Setenv("KUBERNETES_SERVICE_HOST", "")
 		if _, err := NewInCluster(); err == nil {
 			t.Fatal("NewInCluster built a client with no KUBERNETES_SERVICE_HOST")
+		}
+	})
+}
+
+// THE TRANSPORT, END TO END, against a real TLS server.
+//
+// Round 9 pinned that a missing or unparseable ca.crt is refused. Read,
+// validated and INSTALLED are three representations, and only two were covered:
+// dropping `RootCAs: pool` from the tls.Config was green, adding
+// `InsecureSkipVerify: true` was green, and downgrading the base URL to `http://`
+// — the projected ServiceAccount token in cleartext — was green. So was an empty
+// `fieldOwner` in the production constructor, which NewClientForTest hides by
+// hardcoding its own.
+//
+// A real handshake pins all of them at once: the client must trust the server
+// because of the CA it read, and must not trust one it did not.
+func TestNewInClusterActuallyTalksTLSAndCarriesItsIdentity(t *testing.T) {
+	var got struct{ auth, query, path string }
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.auth, got.query, got.path = r.Header.Get("Authorization"), r.URL.RawQuery, r.URL.Path
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	host, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("trusts the CA it read", func(t *testing.T) {
+		saDirWith(t, "projected-token", caPEM)
+		t.Setenv("KUBERNETES_SERVICE_HOST", host)
+		t.Setenv("KUBERNETES_SERVICE_PORT", port)
+
+		c, err := NewInCluster()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ns := []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: env-9f3c1a2b\n")
+		if err := c.Apply(context.Background(), "env-9f3c1a2b", [][]byte{ns}); err != nil {
+			t.Fatalf("apply over TLS failed — the CA it read is not installed as the trust "+
+				"root, or the base URL is not https: %v", err)
+		}
+		if got.auth != "Bearer projected-token" {
+			t.Errorf("authorization %q — the in-cluster client must send its ServiceAccount token", got.auth)
+		}
+		if !strings.Contains(got.query, "fieldManager=steloit-cell-agent") {
+			t.Errorf("query %q — the PRODUCTION constructor must set a field manager; "+
+				"NewClientForTest hardcodes its own and hides an empty one here", got.query)
+		}
+		if !strings.Contains(got.query, "force=true") {
+			t.Errorf("query %q — without force the agent is not the authoritative owner", got.query)
+		}
+	})
+
+	t.Run("refuses a server it has no CA for", func(t *testing.T) {
+		// A DIFFERENT, valid CA. This is the arm that kills InsecureSkipVerify and
+		// a dropped RootCAs: with either, the handshake below would succeed.
+		saDirWith(t, "projected-token", testCAPEM(t))
+		t.Setenv("KUBERNETES_SERVICE_HOST", host)
+		t.Setenv("KUBERNETES_SERVICE_PORT", port)
+
+		c, err := NewInCluster()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ns := []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: env-9f3c1a2b\n")
+		err = c.Apply(context.Background(), "env-9f3c1a2b", [][]byte{ns})
+		if err == nil {
+			t.Fatal("the client trusted a server whose CA it was never given — either " +
+				"InsecureSkipVerify is set or RootCAs is not installed, and the agent's " +
+				"token goes to anything presenting any certificate")
+		}
+		if !strings.Contains(err.Error(), "certificate") && !strings.Contains(err.Error(), "x509") {
+			t.Fatalf("expected a certificate failure, got: %v", err)
+		}
+	})
+
+	t.Run("Observe and Delete carry the token too", func(t *testing.T) {
+		saDirWith(t, "projected-token", caPEM)
+		t.Setenv("KUBERNETES_SERVICE_HOST", host)
+		t.Setenv("KUBERNETES_SERVICE_PORT", port)
+		c, err := NewInCluster()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Apply's bearer is pinned above; Observe's and Delete's were not, so
+		// deleting c.auth(req) from either was a green change.
+		got.auth = ""
+		if _, err := c.Observe(context.Background(), "env-9f3c1a2b", "db"); err != nil {
+			t.Fatal(err)
+		}
+		if got.auth != "Bearer projected-token" {
+			t.Errorf("Observe sent authorization %q", got.auth)
+		}
+		got.auth = ""
+		if err := c.Delete(context.Background(), "env-9f3c1a2b", "Cluster", "db"); err != nil {
+			t.Fatal(err)
+		}
+		if got.auth != "Bearer projected-token" {
+			t.Errorf("Delete sent authorization %q", got.auth)
 		}
 	})
 }
