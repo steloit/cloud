@@ -249,3 +249,122 @@ func (c *Cents) UnmarshalJSON(b []byte) error {
 	*c = v
 	return nil
 }
+
+// Accrual is Σ(rate × seconds) — a metered accumulation, NOT an amount.
+//
+// WHY THIS IS NOT A Cents. A Cents is bounded by MaxMonthly, which is derived so
+// that ONE monthly rate survives ONE month of seconds. An accrual is the product
+// itself: a single service at the maximum rate for the longest month is ~9.2e18,
+// which consumes the entire int64 budget on its own. Two such services are a
+// legitimate business fact and an impossible int64. Bounding an accrual by
+// MaxMonthly would therefore refuse arithmetic that is simply correct, and
+// bounding it by MaxInt64 is the wrap this type exists to remove.
+//
+// So it carries 128 bits and CANNOT overflow in practice rather than being
+// checked for overflow: to exceed 2^128 you would need ~3.7e19 service-months at
+// the maximum representable rate. The bug class is unrepresentable instead of
+// tested-against — which is the point ADR-0014 makes about invariants living in
+// types.
+//
+// `metering.Rollup` accumulated this as a raw `weighted += secs * rate` across
+// every span of every service in the org. MaxMonthly makes one service-month
+// exactly fit; the SECOND service wraps `quota_usage.rate_cents`, the number
+// billing derives charges from. Nothing detected it — a wrapped value is just a
+// number.
+type Accrual struct{ hi, lo uint64 }
+
+// NoAccrual is the empty accumulation, provided so callers never need a literal.
+var NoAccrual = Accrual{}
+
+// AddMul accumulates rate × seconds. Seconds is a duration, not a count of
+// money, so it is an ordinary int64 — but it must not be negative: a negative
+// span is a clock or ordering bug upstream, and silently crediting it would
+// REDUCE a bill.
+func (a Accrual) AddMul(rate Cents, seconds int64) (Accrual, error) {
+	if seconds < 0 {
+		return NoAccrual, fmt.Errorf("%w: %d seconds", ErrNegative, seconds)
+	}
+	hi, lo := bits.Mul64(uint64(rate.v), uint64(seconds))
+	sum, carry := bits.Add64(a.lo, lo, 0)
+	high, carry := bits.Add64(a.hi, hi, carry)
+	if carry != 0 {
+		// Unreachable with any real fleet; returned rather than ignored because
+		// "cannot happen" is how the int64 version was written too.
+		return NoAccrual, fmt.Errorf("%w: accrual exceeds 128 bits", ErrOverflow)
+	}
+	return Accrual{hi: high, lo: sum}, nil
+}
+
+// Int64 narrows the accrual to an int64 for storage, or ErrOverflow.
+//
+// This is the ONLY place the 128-bit value can be lost, so it is the only place
+// that has to fail — and it fails LOUDLY instead of wrapping. A caller that gets
+// an error here has an org whose accrual genuinely cannot be represented in the
+// column, which is a billing incident, not a rounding question.
+func (a Accrual) Int64() (int64, error) {
+	if a.hi != 0 || a.lo > uint64(math.MaxInt64) {
+		return 0, fmt.Errorf("%w: accrual %s does not fit an int64", ErrOverflow, a)
+	}
+	return int64(a.lo), nil
+}
+
+// DivSeconds returns the accrual spread over n seconds, as an amount — the
+// arithmetic that turns Σ(monthly-rate × seconds) back into money.
+//
+// Provided here rather than at the call site because the 128-by-64 division has
+// a trap: bits.Div64 PANICS when the high word is at least the divisor. That is
+// exactly the case where the quotient would not fit 64 bits, so the guard below
+// is not defensive padding — without it, an org large enough to need this method
+// crashes the process instead of returning an error.
+func (a Accrual) DivSeconds(n int64) (Cents, error) {
+	if n <= 0 {
+		return Zero, fmt.Errorf("money: cannot spread an accrual over %d seconds", n)
+	}
+	d := uint64(n)
+	if a.hi >= d {
+		return Zero, fmt.Errorf("%w: %s spread over %d seconds exceeds 64 bits", ErrOverflow, a, n)
+	}
+	q, _ := bits.Div64(a.hi, a.lo, d)
+	if q > uint64(MaxMonthly) {
+		return Zero, fmt.Errorf("%w: %s spread over %d seconds is %d, above the maximum representable monthly amount %d",
+			ErrOverflow, a, n, q, MaxMonthly)
+	}
+	return Cents{v: int64(q)}, nil
+}
+
+// IsZero reports whether nothing has accrued.
+func (a Accrual) IsZero() bool { return a.hi == 0 && a.lo == 0 }
+
+// String renders the full 128-bit value in decimal, so an overflow message names
+// the actual number rather than a truncated one.
+func (a Accrual) String() string {
+	if a.hi == 0 {
+		return strconv.FormatUint(a.lo, 10)
+	}
+	// Long division by 1e19 (the largest power of ten below 2^64) — two limbs is
+	// at most three chunks, and this avoids math/big for a stdlib-only package.
+	const chunk = uint64(1e19)
+	hi, lo := a.hi, a.lo
+	var parts []string
+	for hi != 0 || lo != 0 {
+		var rem uint64
+		var qh uint64
+		if hi >= chunk {
+			qh = hi / chunk
+			hi = hi % chunk
+		}
+		q, r := bits.Div64(hi, lo, chunk)
+		rem = r
+		hi, lo = qh, q
+		if hi == 0 && lo == 0 {
+			parts = append(parts, strconv.FormatUint(rem, 10))
+		} else {
+			parts = append(parts, fmt.Sprintf("%019d", rem))
+		}
+	}
+	out := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		out += parts[i]
+	}
+	return out
+}
