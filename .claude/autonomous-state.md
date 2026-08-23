@@ -3,7 +3,7 @@
 Handoff between autonomous Claude Code sessions. **Not authoritative** — the repo,
 git, CI and `tasks/` are. Verify before trusting; correct this file when it is wrong.
 
-**Last updated:** 2026-08-23 (end of session 2) · `main` @ `f105f25` · CI **green** · **0 open PRs**
+**Last updated:** 2026-08-23 (session 2, cont.) · `main` @ `f105f25` · CI **green** · **1 open PR (#320)**
 
 ---
 
@@ -15,24 +15,32 @@ that; the queue is the plan.
 
 ## Current phase
 
-**Idle at a clean stop.** Session 2 closed: gate-hardening and both investigations
-merged, nothing in flight, no worktrees.
+**US-3.3a implemented** (PR #320) — env namespace + D7 isolation. Security review
+running; do not merge before it reports.
 
 ---
 
 ## Next concrete action
 
-**Start `US-3.3a`** — session 2's four PRs (#315, #317, #318, #319) are all merged.
+**Land #320 (US-3.3a)** once its security review reports, then pick the next `high`
+from the ready queue.
 
-**Start `US-3.3a`** (`tasks/e3-provisioning/US-3.3a.md`, `high`) — nothing creates an
-environment's Kubernetes namespace, nor its D7 default-deny NetworkPolicy /
-ResourceQuota / LimitRange. Tenant isolation is nominal until it lands.
+**US-3.3a is DONE and must not be redone.** The decision was settled on evidence:
+`services/api/go.mod` has **no `k8s.io/*` at all**, so control-plane-side namespace
+creation would be an architecture delta (D6/ADR-0001). Agent-side, in
+`services/cell-agent/internal/driver/tenancy`, applied before the service manifests
+in one ordered `Apply`. Six manifests; Namespace first because everything after it
+is namespaced.
 
-Two things to settle first, both stated in the task:
-1. **Namespace creation goes control-plane-side at env creation, or agent-side during
-   converge — the task says decide and record why.** That is an engineering decision,
-   not a founder one.
-2. Its `verify:` block is prose, not commands. Replace with executable checks.
+Two things it uncovered, both fixed on that branch:
+- `resourcePath` could not express a **cluster-scoped** resource (a Namespace has
+  no namespace). `clusterScoped` is now explicit alongside `plurals`.
+- Eleven `internal/render` fixtures still used `acme--prod`, the pre-ADR-0012
+  `proj--env` shape. `internal/kube`'s eleven uses are legitimately arbitrary.
+
+**AC 4 (env deletion removes the namespace) is filed as US-3.3b**, not done: there
+is no environment-teardown path in the agent — teardown is per-service — so it
+needs a control-plane contract that does not exist.
 
 Do **not** pick `T3.4c` — see "Blocked on a human" below.
 
