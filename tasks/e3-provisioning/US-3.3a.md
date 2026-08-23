@@ -2,7 +2,7 @@
 id: US-3.3a
 title: "Nothing creates the env namespace (nor its D7 default-deny policies)"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
