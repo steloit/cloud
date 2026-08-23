@@ -1,10 +1,18 @@
 package kube
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/cnpg"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
+	"gopkg.in/yaml.v3"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,10 +48,11 @@ type capture struct {
 func serverCapturing(t *testing.T, status int, respBody string, got *[]capture) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buf := make([]byte, r.ContentLength)
-		if r.ContentLength > 0 {
-			_, _ = r.Body.Read(buf)
-		}
+		// io.ReadAll, not one Read: a single Read is not guaranteed to fill the
+		// buffer, and TestApplyUsesServerSideApplyContract compares the captured
+		// body for exact equality. The sweep now reads this field hundreds of
+		// times per run.
+		buf, _ := io.ReadAll(r.Body)
 		*got = append(*got, capture{
 			method: r.Method, path: r.URL.Path, contentType: r.Header.Get("Content-Type"),
 			auth: r.Header.Get("Authorization"), query: r.URL.RawQuery, body: string(buf),
@@ -430,94 +439,78 @@ metadata:
 	}
 }
 
-// EVERY manifest at EVERY index, at ANY batch length.
+// EVERY manifest, at EVERY index, at ANY batch length, with PRODUCTION BYTES.
 //
-// The history of this test is the finding. First it drove one element, so
-// restricting either guard to `manifests[0]` was green. Then it drove two, so
-// `_mi < 2` was green. Then it drove up to four, so **`_mi < 4` was green** — a
-// hardcoded ceiling in a test is a constant a mutation can simply match. And the
-// batch is known to be growing: commit 7e94f26 on this branch had tenancy.Render
-// returning six manifests, so Converge applied eight, and US-3.3c restores at
-// least three NetworkPolicies.
+// The history of this test is the finding, and it is one class relocated five
+// times: restricting the guards to `manifests[0]` was green, so the test drove
+// two; `_mi < 2` was green, so it drove four; `_mi < 4` was green, so it swept to
+// 16; and a skip keyed on the Namespace at index 0 — every production batch — was
+// green, so the kinds were varied. Then a skip keyed on `len(m) > 200`, or on the
+// manifest containing "\nspec:", was STILL green, because every fixture was a
+// hand-written four-line metadata-only stub: no labels, no spec, 55–140 bytes.
+// Five hand-written approximations of a batch this repo can render for real.
 //
-// So the bound is swept rather than chosen. Converge's element 0 is the manifest
-// the agent writes itself; 1..n are the driver's, the only ones carrying a
-// metadata.namespace — which is why "the first one is checked" is the least
-// useful place for a guard to hold.
+// So the fixtures ARE the real thing. tenancy.Render and cnpg.Driver.Render
+// produce exactly what Converge applies — a ~133B Namespace with labels, an ~800B
+// Cluster with a nested spec, a ~250B ScheduledBackup — and the offenders are
+// those same manifests with their namespace rewritten or a document appended.
+// A guard keyed on any property of the bytes now has nowhere to hide, because the
+// bytes are the ones production sends.
 func TestApplyGuardsEveryManifestAtEveryIndexAtAnyLength(t *testing.T) {
-	// 16 is twice the largest batch this branch has ever applied (commit 7e94f26
-	// rendered six tenancy manifests plus two service ones). It is still a
-	// ceiling: a guard skipping index >= 16 survives this test. Stated rather
-	// than papered over — the fix for a hardcoded bound of 4 is a swept bound,
-	// not a claim of exhaustiveness. A property test over random n is the real
-	// close, and is recorded as a gap.
-	const maxLen = 16
+	const maxLen = 12
 
-	// HETEROGENEOUS, and shaped like production. Sixteen byte-identical Secrets
-	// sweep length and index and leave COMPOSITION fixed, so a guard that keys off
-	// content — or off state accumulated earlier in the loop — is unpinned. The
-	// variant that survived was "skip every manifest after a Namespace", and
-	// CNPGRenderer.Converge applies [Namespace, Cluster, ScheduledBackup]: element
-	// 0 is ALWAYS a Namespace, so that skip disabled both guards for 100% of the
-	// driver's manifests with the whole suite green.
-	//
-	// Index 0 is cluster-scoped when the batch has more than one element, matching
-	// Converge; the rest cycle through the kinds it actually emits.
-	filler := func(i, n int) []byte {
-		if i == 0 && n > 1 {
-			return []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: env-mine\n")
+	real := productionManifests(t)
+	if len(real) < 3 {
+		t.Fatalf("expected the real renderers to produce at least 3 manifests, got %d", len(real))
+	}
+	// The sweep must cover bodies of materially different shape, or "production
+	// bytes" is one byte-length again.
+	var shortest, longest int = 1 << 30, 0
+	for _, m := range real {
+		if len(m) < shortest {
+			shortest = len(m)
 		}
-		switch i % 3 {
-		case 0:
-			return []byte(fmt.Sprintf("apiVersion: v1\nkind: Secret\nmetadata:\n  name: ok%d\n  namespace: env-mine\n", i))
-		case 1:
-			return []byte(fmt.Sprintf("apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata:\n  name: db%d\n  namespace: env-mine\n", i))
-		default:
-			return []byte(fmt.Sprintf("apiVersion: postgresql.cnpg.io/v1\nkind: ScheduledBackup\nmetadata:\n  name: sb%d\n  namespace: env-mine\n", i))
+		if len(m) > longest {
+			longest = len(m)
 		}
 	}
+	if longest < shortest*2 {
+		t.Fatalf("the fixtures span %d..%d bytes — too uniform to catch a length-keyed guard", shortest, longest)
+	}
+
+	filler := func(i int) []byte { return real[i%len(real)] }
+
 	offenders := map[string]struct {
 		yaml  []byte
 		names string
-	}{
-		"declaring another namespace": {[]byte(`apiVersion: v1
-kind: Secret
-metadata:
-  name: stolen
-  namespace: env-victim
-`), "env-victim"},
-		"carrying two documents": {[]byte(`apiVersion: v1
-kind: Secret
-metadata:
-  name: ok
-  namespace: env-mine
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: smuggled
-  namespace: env-victim
-`), "2 YAML documents"},
-		"cluster-scoped but namespaced": {[]byte(`apiVersion: v1
-kind: Namespace
-metadata:
-  name: env-mine
-  namespace: env-somewhere
-`), "cluster-scoped"},
-		// A ScheduledBackup is emitted on every converge and was never driven
-		// through either guard, so skipping the guards for that kind was green.
-		"a ScheduledBackup in another namespace": {[]byte(`apiVersion: postgresql.cnpg.io/v1
-kind: ScheduledBackup
-metadata:
-  name: nightly
-  namespace: env-victim
-`), "env-victim"},
-		"a Cluster in another namespace": {[]byte(`apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: db
-  namespace: env-victim
-`), "env-victim"},
+	}{}
+	for idx, base := range real {
+		kind := yamlKind(t, base)
+		// Same object, foreign namespace. Built by rewriting the REAL manifest so
+		// it keeps its labels, spec and size.
+		if bytes.Contains(base, []byte("namespace: "+testNS)) {
+			offenders[kind+" in another namespace"] = struct {
+				yaml  []byte
+				names string
+			}{bytes.Replace(base, []byte("namespace: "+testNS), []byte("namespace: env-victim"), 1), "env-victim"}
+		}
+		// Same object plus a smuggled second document.
+		smuggled := append(append([]byte{}, base...),
+			[]byte("---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: smuggled\n  namespace: env-victim\n")...)
+		offenders[kind+" carrying two documents"] = struct {
+			yaml  []byte
+			names string
+		}{smuggled, "2 YAML documents"}
+		_ = idx
+	}
+	// A cluster-scoped object that names a namespace — the third guard arm.
+	offenders["a cluster-scoped object declaring a namespace"] = struct {
+		yaml  []byte
+		names string
+	}{[]byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: " + testNS + "\n  namespace: env-somewhere\n"), "cluster-scoped"}
+
+	if len(offenders) < 4 {
+		t.Fatalf("only %d offenders derived from the real manifests", len(offenders))
 	}
 
 	for label, off := range offenders {
@@ -526,7 +519,7 @@ metadata:
 				t.Run(fmt.Sprintf("%s/len%d/at%d", label, n, idx), func(t *testing.T) {
 					manifests := make([][]byte, n)
 					for i := range manifests {
-						manifests[i] = filler(i, n)
+						manifests[i] = filler(i)
 					}
 					manifests[idx] = off.yaml
 
@@ -534,7 +527,7 @@ metadata:
 					srv := serverCapturing(t, 200, `{}`, &got)
 					c := NewClientForTest(srv.URL, "tok", srv.Client())
 
-					err := c.Apply(context.Background(), "env-mine", manifests)
+					err := c.Apply(context.Background(), testNS, manifests)
 					if err == nil {
 						t.Fatalf("Apply accepted an offending manifest at index %d of %d", idx, n)
 					}
@@ -543,9 +536,7 @@ metadata:
 					}
 					// ABORT, do not merely refuse. Namespace-first ordering is
 					// load-bearing, so continuing past a refused manifest would
-					// apply everything behind it — a refused Namespace with the
-					// Cluster written anyway. Exactly idx manifests precede the
-					// offender, so exactly idx may have been sent.
+					// apply everything behind it.
 					if len(got) != idx {
 						t.Fatalf("Apply sent %d manifests, want %d — it did not abort at the offender", len(got), idx)
 					}
@@ -560,17 +551,17 @@ metadata:
 		}
 	}
 
-	// Positive control at every length, or every case above is satisfied by an
-	// Apply that refuses anything past some index.
+	// Positive control at every length: the real batch must apply untouched, or
+	// every case above is satisfied by an Apply that refuses things.
 	for n := 1; n <= maxLen; n++ {
 		var got []capture
 		srv := serverCapturing(t, 200, `{}`, &got)
 		c := NewClientForTest(srv.URL, "tok", srv.Client())
 		clean := make([][]byte, n)
 		for i := range clean {
-			clean[i] = filler(i, n)
+			clean[i] = filler(i)
 		}
-		if err := c.Apply(context.Background(), "env-mine", clean); err != nil {
+		if err := c.Apply(context.Background(), testNS, clean); err != nil {
 			t.Fatalf("a legitimate %d-manifest apply was refused: %v", n, err)
 		}
 		if len(got) != n {
@@ -578,6 +569,50 @@ metadata:
 		}
 		srv.Close()
 	}
+}
+
+const testNS = "env-9f3c1a2b"
+
+// productionManifests is what CNPGRenderer.Converge actually applies: the
+// environment's Namespace, then the service's Cluster and ScheduledBackup.
+// DERIVED from the renderers, so a manifest that changes shape changes these
+// fixtures too.
+func productionManifests(t *testing.T) [][]byte {
+	t.Helper()
+	out := [][]byte{}
+	tm, err := tenancy.Render(tenancy.Spec{Namespace: testNS, Cell: "cell-0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range tm {
+		out = append(out, m.YAML)
+	}
+	sm, err := cnpg.New().Render(driver.Spec{
+		Name: "svc_db01", Namespace: testNS, Product: "postgres",
+		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
+		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range sm {
+		out = append(out, m.YAML)
+	}
+	return out
+}
+
+func yamlKind(t *testing.T, m []byte) string {
+	t.Helper()
+	var doc struct {
+		Kind string `yaml:"kind"`
+	}
+	if err := yaml.Unmarshal(m, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Kind == "" {
+		t.Fatalf("fixture has no kind:\n%s", m)
+	}
+	return doc.Kind
 }
 
 // `plurals` says which kinds are addressable; `apiVersions` says under which
@@ -627,5 +662,51 @@ func TestDeleteRefusesAKindThatIsAddressableButHasNoAPIVersion(t *testing.T) {
 	}
 	if called {
 		t.Fatal("a request was sent")
+	}
+}
+
+// THE TOKEN RE-READ. GKE projected ServiceAccount tokens expire (~1h) and are
+// rotated IN PLACE in the file, so caching the value at boot means every apply
+// 401s after the TTL and never recovers without a restart. The code says so; no
+// test said so, and deleting the re-read was a green change — an unreported
+// survivor, which is indistinguishable from one nobody looked for.
+func TestAuthRereadsTheRotatedServiceAccountToken(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenPath, []byte("first-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	c := NewClientForTest(srv.URL, "", srv.Client())
+	c.tokenFile = tokenPath
+
+	manifest := []byte("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: " + testNS + "\n")
+	if err := c.Apply(context.Background(), testNS, [][]byte{manifest}); err != nil {
+		t.Fatal(err)
+	}
+	// Rotated in place, exactly as the kubelet does it.
+	if err := os.WriteFile(tokenPath, []byte("rotated-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Apply(context.Background(), testNS, [][]byte{manifest}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(seen) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(seen))
+	}
+	if seen[0] != "Bearer first-token" {
+		t.Fatalf("first request sent %q", seen[0])
+	}
+	if seen[1] != "Bearer rotated-token" {
+		t.Fatalf("the rotated token was not picked up: second request sent %q — every apply "+
+			"401s once the projected token expires, and never recovers without a restart", seen[1])
 	}
 }

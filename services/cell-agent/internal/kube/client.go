@@ -45,7 +45,12 @@ type Client struct {
 	fieldOwner string
 }
 
-const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+// saDir is a var, not a const, for the same reason NewClientForTest exists: the
+// in-cluster arm is the ONLY one that runs on a cell, and with a fixed path it is
+// unreachable from a test — substituting a panic for the CNPG renderer in
+// main.run was a green change. A test points this at a temp dir; nothing in
+// production writes it.
+var saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // NewInCluster builds a Client from the pod's projected ServiceAccount. It
 // returns an error (never a partially-configured client) when the agent is not

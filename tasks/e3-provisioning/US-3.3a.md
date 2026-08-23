@@ -216,7 +216,7 @@ described as unchanged: a SIGTERM during boot would be absorbed and exit 0.
 Reverted, ordering verified byte-identical to `origin/main`, and SIGTERM is now
 pinned by a subprocess test that kills two further green mutations.
 
-## Negative evidence — forty-five mutations, and a correction to an earlier table
+## Negative evidence — fifty-one mutations, and a correction to an earlier table
 
 **An earlier mutation table was invalid and is withdrawn.** Round 3's was produced
 with `cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
@@ -255,9 +255,15 @@ for 10 minutes at 0% CPU, because `run()` got past validation and blocked in
 | `Apply`'s guards skipped for everything after a Namespace | RED *(was GREEN — production's exact batch)* |
 | `Apply`'s guards skipped for `kind: ScheduledBackup` | RED *(was GREEN)* |
 | signal handling deleted (`parent` passed straight to `a.Run`) | RED *(was GREEN)* |
+| `Apply`'s guards skipped for manifests over 200 bytes | RED *(was GREEN)* |
+| `Apply`'s guards skipped for any manifest containing `spec:` | RED *(was GREEN — the Cluster and ScheduledBackup, i.e. everything carrying a namespace)* |
+| `Apply`'s guards skipped for any manifest containing `labels:` | RED *(was GREEN)* |
+| `panic()` substituted for the in-cluster CNPG renderer | RED *(was GREEN — the only arm that runs on a cell)* |
+| the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` requirement removed | RED *(was GREEN — silent loss of PITR)* |
+| the per-request ServiceAccount token re-read deleted | RED *(was GREEN, and unreported)* |
 | `signal.NotifyContext` → `context.WithCancel` | RED *(was GREEN)* |
 
-The remaining **28 rows** — ordering, cluster-scoped routing, every arm of the
+The remaining **29 rows** — ordering, cluster-scoped routing, every arm of the
 `Apply` mismatch and `Delete` apiVersion guards, label and namespace validation,
 the teardown path, and four refuse-everything controls — are all RED and listed
 in full in the PR. Only the rows above are recorded here, because a mutation that
@@ -271,8 +277,8 @@ looked for.
 | survivor | why it stands |
 |---|---|
 | `Apply` guards skipped for index ≥ 16 | Any hand-written sweep has a ceiling. 16 is twice the largest batch this branch ever applied (8, at `7e94f26`). The real close is a property test over random `n` and random composition, filed with US-3.3c. |
-| `defer stop()` dropped in `run` | `stop()` only releases the signal handler, and the process exits immediately after `run` returns. Leaking it until exit is a no-op; contriving a test would pin an artefact, not a behaviour. |
-| the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard | Reaching it requires `kube.NewInCluster()` to succeed, i.e. a real cluster. There is none (see AC 3). US-3.3c owns it alongside the RBAC grant. |
+| `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
+| ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
 | the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
 
 ## Outcome
@@ -293,8 +299,8 @@ it; `manifests[0]` vs. `_mi<2` vs. `_mi<4` vs. the batch's *composition*; and,
 worst, 25 mutation results vs. the harness that produced them — a module-only
 `cp -R` whose baseline was already RED, published as evidence.
 
-45 mutations RED on one harness with a green baseline asserted before and after;
-four accepted survivors named above. Five lessons in `contexts/provisioning.md`.
+51 mutations RED on one harness with a green baseline asserted before and after
+(22 of them once GREEN); two accepted survivors named above. Five lessons in `contexts/provisioning.md`.
 
 **As merged, an environment is a namespace and nothing else, and deleting one
 leaks it (US-3.3b).**

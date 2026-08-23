@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -221,6 +223,12 @@ func TestMainStopsGracefullyOnSIGTERM(t *testing.T) {
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestMainStopsGracefullyOnSIGTERM")
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Env = append(os.Environ(),
+		// Hermetic, exactly as the ACK test above. cmd.Env inherits os.Environ(),
+		// so on a pod-based runner the child takes the in-cluster branch and dies
+		// on CELL_GSA_EMAIL instead of reaching the loop — measured as a 20s
+		// failure. One guard, two call sites; the sibling had it and this did not.
+		"KUBERNETES_SERVICE_HOST=",
+		"KUBERNETES_SERVICE_PORT=",
 		"CELL_AGENT_SIGTERM_UNDER_TEST=1",
 		"RECONCILER_CELL=cell-0",
 		"CONTROL_PLANE_URL=http://127.0.0.1:1", // refused fast; the agent logs and keeps polling
@@ -235,6 +243,14 @@ func TestMainStopsGracefullyOnSIGTERM(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// The early-fatal paths below return without Wait(), leaking the copy
+	// goroutine and its pipe fds. cancel() kills the process; this reaps it.
+	waited := false
+	defer func() {
+		if !waited {
+			_ = cmd.Wait()
+		}
+	}()
 
 	// Wait until the agent is past boot and actually in the loop, so the signal
 	// exercises a.Run's context rather than the boot path.
@@ -251,6 +267,7 @@ func TestMainStopsGracefullyOnSIGTERM(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := cmd.Wait()
+	waited = true
 
 	if ctx.Err() != nil {
 		t.Fatalf("SIGTERM did not stop the agent within the deadline — the signal is not "+
@@ -282,3 +299,103 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// THE IN-CLUSTER ARM — the only arm that runs on a cell, and it was dead code to
+// this suite: substituting a panic for render.NewCNPGRenderer was a GREEN change,
+// and the ACK test above explicitly forces the other branch, so 100% of run()'s
+// renderer-selection coverage sat on the path that never runs in production.
+//
+// It was excused as "needs a real cluster". It does not: kube.NewInCluster reads
+// two env vars and two files, so a temp SA dir and t.Setenv reach it in
+// milliseconds. The excuse was the finding.
+func TestRunTakesTheInClusterBranchAndRequiresGSAandWAL(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "token"), []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A syntactically valid CA, or the client refuses for the wrong reason.
+	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), []byte(testCAPEM), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kube.SetSADirForTest(t, dir)
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	base := map[string]string{
+		"RECONCILER_CELL":   "cell-0",
+		"CONTROL_PLANE_URL": "http://cp",
+		"RECONCILER_SECRET": "s3cret",
+	}
+	getenv := func(extra map[string]string) func(string) string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return func(k string) string { return m[k] }
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// WITHOUT the credentials the agent must refuse to boot. What that guard
+	// protects: with it gone the renderer is built with an empty GSA and bucket,
+	// rendering `iam.gke.io/gcp-service-account:` (empty) and
+	// `destinationPath: gs:///<name>` — no workload identity, no WAL archiving,
+	// therefore no base backup and NO PITR (ADR-0007 F3) — while the cluster
+	// still reaches ready and reports success. Silent loss of restorability.
+	for _, missing := range []map[string]string{
+		{"CELL_WAL_BUCKET": "b"},                           // no GSA
+		{"CELL_GSA_EMAIL": "sa@p.iam.gserviceaccount.com"}, // no bucket
+		{}, // neither
+	} {
+		err := run(ctx, getenv(missing), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if err == nil {
+			t.Fatalf("in-cluster boot accepted %v — an agent with no WAL bucket provisions "+
+				"clusters that reach ready and can never be restored", missing)
+		}
+		if !strings.Contains(err.Error(), "CELL_GSA_EMAIL") || !strings.Contains(err.Error(), "CELL_WAL_BUCKET") {
+			t.Fatalf("the error must name both variables: %v", err)
+		}
+	}
+
+	// WITH them, the in-cluster branch is taken — and says so. The ACK warning
+	// must NOT appear, or this test would pass on the fallback path.
+	var buf bytes.Buffer
+	err := run(ctx, getenv(map[string]string{
+		"CELL_GSA_EMAIL":  "sa@p.iam.gserviceaccount.com",
+		"CELL_WAL_BUCKET": "steloit-dev-wal-customer",
+	}), slog.New(slog.NewTextHandler(&buf, nil)))
+	if err != nil {
+		t.Fatalf("in-cluster boot failed with credentials present: %v", err)
+	}
+	if !strings.Contains(buf.String(), "in-cluster, real apply") {
+		t.Fatalf("run did not take the in-cluster branch: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "NOTHING is provisioned") {
+		t.Fatalf("run fell back to ACK while in-cluster: %s", buf.String())
+	}
+}
+
+// testCAPEM is a throwaway self-signed cert: NewInCluster requires the CA to
+// parse, and a bogus string would make the test pass for the wrong reason.
+const testCAPEM = `-----BEGIN CERTIFICATE-----
+MIIDBTCCAe2gAwIBAgIUGQIaQJw8jwr4dUf7XqH7oz7l3AwwDQYJKoZIhvcNAQEL
+BQAwEjEQMA4GA1UEAwwHdGVzdC1jYTAeFw0yNjA4MjMwODMxMjBaFw0yNjA4MjQw
+ODMxMjBaMBIxEDAOBgNVBAMMB3Rlc3QtY2EwggEiMA0GCSqGSIb3DQEBAQUAA4IB
+DwAwggEKAoIBAQC/V4JAZNm9d9QTTjFVBBhZ8I9ahQulJmp7w0GXJXIkSdIeYaIg
+y2LvIt9gVkp6gyLC6pYiMAONsecKNIwxN9j3OvZ9eAM3kxpwXly3gnmqmbcpSVLm
+H4UNpMmKry7ET1SqlWFh8tCaXNb//3xaUj+iqaLL+kiMUuM8XVqjPkzFSGRQR7nk
+UKWZ49Jss6OKh9bc+z4X+6JNQ9dHbByXfzP1UEArxT4uhZT4AHKhvzY9vH7D7Cea
+aWmpvOHc6ufIUYBTAKCbAiv0RT+Aurm0tYSLijpL2eXBuWToAd2TAwnzWicxdo2e
+e97pfar8qzFC1JQMDCYN94kLLmxUT6hzsL9DAgMBAAGjUzBRMB0GA1UdDgQWBBRm
+gVBI+9FPNpemgPOK9n0p6tn7kDAfBgNVHSMEGDAWgBRmgVBI+9FPNpemgPOK9n0p
+6tn7kDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQBGyXvVGiCX
+9GCzL9iWcXjUP2hNSAjo3+bBphXQkVN7d2PCfKrXPdnu4SxM/GB1v2dSRlktGm1/
+LH1eeJgciBM0VvIQ5mQJWNBH2LAbSeGptjooDsktnHif3dDyf8SuvFwIDJIy1fv4
+5/dPukUyGnNWQhpkSfRWdchbd5EeeHfb2+UHPsZpJ0pBGeMZ9VlxMERcArxM9W96
+q4tjhJdddSDnOcNdKwQ1l3wrus6WFKr5kXch5FpPSesQajAofb0RzGGjpsfvxkow
+JZgRQCMK5Xlk4KwYZES83QCB8vrRjXZrLVsGFyiniP8RUVpPp0nti5urky6HzVsb
+mwuNuMvAyUvC
+-----END CERTIFICATE-----`
