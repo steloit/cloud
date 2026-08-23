@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-23 (late) · `main` @ `0f3bc15` · CI green · **3 open PRs + US-3.3e unopened**
+**Updated:** 2026-08-23 (night) · `main` @ `f9f0ad5` · **5 open PRs**
 
 ---
 
@@ -18,18 +18,23 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 | PR | task | state |
 |---|---|---|
-| **#320** | US-3.3a | **round 12** pushed (`9c7885c`). FROM-aware `statusFor`, shared status artifact, counts corrected. reviewer+qa RUNNING. |
-| **#322** | T3.4c | round 3 (`aac654e`), CI green. Needs a re-review before merge — its rounds were never posted to the PR. |
-| **#323** | US-3.3f | `39a50b3`, CI green. reviewer+qa RUNNING (re-review after blocker fixes). |
-| **—** | US-3.3e | `task/US-3.3e` @ `6e42624`, stacked on US-3.3a. All 7 blockers closed; **PR not opened yet** (waiting on #320). |
+| **#320** | US-3.3a | **round 13 = a REVERT of round 12.** Both reviewers measured that r12's agent-side `statusFor` collapsed the transient guard (a READY service mid-upgrade reported `ready, nil` instead of ErrNotConverged). Reverted; real fix filed as **US-3.3h**. CI green. Needs re-review. |
+| **#322** | T3.4c | round 3 (`aac654e`), CI green. Reviews were never posted to the PR — needs a confirming re-review before merge. |
+| **#323** | US-3.3f | **round 4** (`fc83d96`): two CI fail-opens closed, the env-layer `network_policy` half asserted, 5 measured survivors killed, US-3.3c filed. CI green. Needs re-review. |
+| **#324** | US-3.3e | opened, based on `task/US-3.3a`. All 7 blockers closed. CI green. |
+| **#325** | O19 | `money.Accrual` (128-bit). reviewer+qa RUNNING. |
 
 **Stacking:** US-3.3e branches from US-3.3a. Merge order must be
 US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
 
 ## Next action
 
-Land #322 (T3.4c) and #320 (US-3.3a) once their reviews report. Then take the
-next `high` from the ready queue: **O19**, **O9**, **T1.4a**, **US-10.7**.
+Re-review #320 (r13), #323 (r4), #322. Merge order: **#320 → #324** (stacked);
+#322, #323, #325 independent. Then the ready queue: **O9**, **T1.4a**, **US-10.7**.
+
+**Merge-time conflict to expect:** #320 r13 and #323 r4 BOTH edit
+`services/api/internal/platform/testenv/wiring_test.go` (`ciGates`) and
+`.github/workflows/ci.yml`. Different hunks, but resolve deliberately.
 
 ## Blocked on a human
 
@@ -37,6 +42,7 @@ next `high` from the ready queue: **O19**, **O9**, **T1.4a**, **US-10.7**.
 |---|---|---|
 | 1 | **O2 cost guardrail.** The founder gave ₹1,000/mo at 50/80/100 and "use the existing ops recipient", then said an **updated spec is coming**. Nothing has been written for O2 — `task/O2` worktree is clean. WAIT for it. | `tasks/eops/O2.md` |
 | 2 | **A SIZE downgrade's price** while storage is retained (T3.4c). Not ruled; three options recorded with market evidence. | `docs/founder-config.md` §5 |
+| 3 | **O30 — `quota_usage.rate_cents` is written as cent-seconds and read as cents.** Measured: a $24/mo service billed one hour invoices **$86,400**. Which side moves, and the proration divisor, are pricing decisions. | `tasks/eops/O30.md` |
 
 **Answered 2026-08-23:** T3.4c `included_gb` semantics · ADR-0014 **ratified**
 (merged, #321) · US-3.3e envelope (free 1/2Gi/10Gi · pro 8/16Gi/100Gi ·
@@ -88,13 +94,22 @@ These are in `contexts/provisioning.md` in full. The short form:
    generalisation and is a weakening.
 4. **Never merge on your own read of a pending review.**
 5. `git worktree remove` refusing and naming `--force` IS the warning.
-6. **A count restated is not a count measured.** US-3.3a published "59 distinct"
+6. **Verify the branch you are about to change, not the one you remember.** r12
+   asserted "separate go.mod files, so neither module can import the other" —
+   `apps/cli/go.mod` already imports `packages/contracts/go` across exactly that
+   boundary with a `replace`. An architectural premise is checkable in ten seconds.
+7. **A fix can be a regression.** r12's mapping made a transient phase terminal
+   for any non-provisioning from-state, defeating the guard three lines below it.
+   When a change makes a guard's INPUT different, re-check the guard.
+8. **A count restated is not a count measured.** US-3.3a published "59 distinct"
    and "one short fixture kept"; counting mechanically gave **61 distinct** (34+29
    entries, 2 duplicates) and **four** fixture lengths. Re-derive every number you
    repeat — a figure carried forward from a previous round is an assertion.
-7. **Pin duplicated knowledge against a SHARED ARTIFACT, not against a copy of the
-   other side.** Round 11 had each module compare its table to a hardcoded literal
-   of the other's; the other side was never read, so widening it failed nothing.
+9. **Pin duplicated knowledge against a shared artifact, not a copy of the other
+   side** — and note a repo-root fixture is invisible to the Go test cache
+   (`-count=1` is now in CI for all three modules, pinned through executable text).
+10. **A legality sweep cannot see "no change".** Skipping answers equal to `from`
+   hides the case where no change is the WRONG answer. Assert the DESTINATION.
 
 ## Conventions
 
