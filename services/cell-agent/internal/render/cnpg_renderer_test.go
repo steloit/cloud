@@ -624,3 +624,98 @@ func TestTeardownDoesNotNeedAnEnvelope(t *testing.T) {
 		t.Fatalf("teardown reported %q, want gone", status)
 	}
 }
+
+// EVERY PHASE IS PINNED BY CLASSIFICATION, NOT JUST BY COUNT.
+//
+// The sibling tests assert that the table is non-empty and that its terminal
+// values are legal edges. Neither sees a RECLASSIFICATION: measured, moving
+// "Cluster has incomplete or invalid image catalog" from `failed` to
+// `provisioning` left the whole suite green in both modules — a permanently
+// broken cluster read as still-converging and retried forever, which is the
+// exact defect statusFromPhase's own comment argues thirty lines about.
+//
+// The expectations are written out, because a test that derives them from the
+// table it is checking asserts nothing. Iterating phaseStatus (rather than the
+// expectations) also means a NEW phase cannot be added unclassified: it has no
+// entry here and fails.
+func TestEveryCNPGPhaseKeepsItsClassification(t *testing.T) {
+	want := map[string]string{
+		"Cluster in healthy state": "ready",
+
+		"":                   "provisioning",
+		"Setting up primary": "provisioning",
+		"Waiting for the instances to become active":   "provisioning",
+		"Creating a new replica":                       "provisioning",
+		"Primary instance is being restarted in-place": "provisioning",
+		"Switchover in progress":                       "provisioning",
+		"Failing over":                                 "provisioning",
+		"Upgrading cluster":                            "provisioning",
+
+		// Terminal-bad. None of these contains "failed", "failure" or "error",
+		// which is why the substring heuristic was abandoned — and why each one
+		// has to be named rather than matched.
+		"Waiting for user action":                                                                 "failed",
+		"Cluster is unrecoverable and needs manual intervention":                                  "failed",
+		"Invalid cluster definition":                                                              "failed",
+		"Unable to create required cluster objects":                                               "failed",
+		"Cluster has incomplete or invalid image catalog":                                         "failed",
+		"Cluster cannot proceed to reconciliation due to an unknown plugin being required":        "failed",
+		"Cluster cannot execute instance online upgrade due to missing architecture binary":       "failed",
+		"Cluster cannot proceed to reconciliation due to an error while interacting with plugins": "failed",
+	}
+
+	for phase, got := range phaseStatus {
+		exp, ok := want[phase]
+		if !ok {
+			t.Errorf("phase %q is in the table but not classified here — a new CNPG phase must be "+
+				"classified deliberately, not inherit whatever the table says", phase)
+			continue
+		}
+		if got != exp {
+			t.Errorf("phase %q maps to %q, want %q. Reclassifying a terminal-bad phase as "+
+				"transient makes a permanently broken cluster read as still-converging and "+
+				"retried forever with no signal.", phase, got, exp)
+		}
+	}
+	for phase := range want {
+		if _, ok := phaseStatus[phase]; !ok {
+			t.Errorf("phase %q was removed from the table; CNPG still emits it", phase)
+		}
+	}
+	if len(phaseStatus) != len(want) {
+		t.Fatalf("table has %d phases, expectations have %d", len(phaseStatus), len(want))
+	}
+}
+
+// THE TEARDOWN TRIGGER HAS TWO REPRESENTATIONS AND ONLY ONE WAS DRIVEN.
+//
+// `svc.Status == "deleting" || asBool(svc.Desired["deleting"])` — every existing
+// teardown test uses the STATUS arm (the svc() helper sets it), so deleting the
+// desired-flag arm was a green mutation.
+//
+// That arm is not redundant: DeleteService writes the deleting desired doc and
+// bumps the generation BEFORE the status transition, so there is a window where
+// the agent is handed a service whose DESIRED says deleting and whose STATUS does
+// not. Without this arm the agent re-APPLIES that service's manifests in that
+// window and reports it ready — recreating what the control plane is tearing down.
+func TestATeardownFlagInDesiredIsHonouredWithoutTheStatus(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	s.Desired["deleting"] = true
+
+	status, err := newRenderer(a).Converge(context.Background(), s)
+	if err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if status != "gone" {
+		t.Errorf("a service flagged deleting in its desired doc converged to %q, not gone — "+
+			"DeleteService bumps the generation before the status edge, so this is the window "+
+			"where the agent would re-apply what is being torn down", status)
+	}
+	if len(a.applied) != 0 {
+		t.Errorf("manifests were APPLIED for a service being torn down: %v", keysOf(a.applied))
+	}
+	if len(a.deleted) == 0 {
+		t.Error("nothing was deleted for a service flagged deleting in its desired doc")
+	}
+}

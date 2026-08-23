@@ -98,8 +98,12 @@ migration is worse than splitting them out. They are **US-3.3d** and **US-3.3e**
 
 ## Acceptance criteria
 
-1. The gke-cell module enables NetworkPolicy enforcement, asserted by a test
-   against the module rather than by reading a plan by hand. **There are zero GKE
+1. ~~The gke-cell module enables NetworkPolicy enforcement, asserted by a test
+   against the module rather than by reading a plan by hand.~~ **TAKEN BY
+   US-3.3f** (PR #323, Dataplane V2 + `terraform test` at the module AND both env
+   layers). Left here struck through rather than deleted, because the rest of
+   this task is written on the assumption that it lands first — this is now a
+   dependency, not a deliverable. **There are zero GKE
    clusters in `steloit-dev` today** (`gcloud container clusters list
    --format=json` → `[]`, exit 0, with `projects describe` proving the credential
    works), so `infra/modules/gke-cell` has never been applied — this is the
@@ -135,6 +139,38 @@ migration is worse than splitting them out. They are **US-3.3d** and **US-3.3e**
    namespace exists with its labels, the policies exist, a pod in env A cannot
    reach a pod in env B, and a pod can still resolve DNS and reach its own
    database.
+
+## Four more obligations, delegated here by ADR-0015
+
+Numbered from 8: **AC 7 already exists** (the `infra/spike/us33-e2e.sh` runbook
+assertion), and `US-3.3a.md` cites "US-3.3c AC 7" twice for it — so numbering
+these 7-10 made a section written to stop obligations being cited without an
+owner break the citation of a different one.
+
+Named because they were being *cited* as owned by this task before they were in
+it — ADR-0015 states, in the present tense, that "US-3.3c carries an AC that
+`tenancy.Render` must refuse a policy carrying `endPort`". It did not. Now it
+does:
+
+8. **`endPort` must be REFUSED, not written.** Dataplane V2 silently does not
+   enforce port RANGES on affected versions — the same class of defect ADR-0015
+   exists to close: a policy the API server accepts and does not apply. The
+   refusal belongs in `tenancy.Render`, where policies are produced, so no caller
+   can forget it. A test must show a policy carrying `endPort` is rejected.
+9. **Customer code blocked from `169.254.169.254`; managed CNPG allowed.** GKE
+   Sandbox's own documentation recommends NetworkPolicy as the control for
+   blocking the metadata server from sandboxed pods, while CNPG *requires* it for
+   Workload Identity. Different pools, different policies — a design point, not
+   one rule, and the asymmetry is the whole content of it.
+10. **`infra/k8s/policy/network-logging.yaml` is applied by something**, and a
+   denied connection actually appears in logs. It is authored and wired to
+   nothing today (recorded in `spec-change-proposals.md`), while denied-connection
+   logging is ADR-0015's FIRST stated reason for choosing Dataplane V2 over
+   Calico — so that decision's primary rationale currently rests on a capability
+   nothing installs.
+11. **NetworkLogging's coverage of gVisor pods is confirmed either way.** Google
+   documents it neither as supported nor unsupported, and this cell runs customer
+   code under gVisor by design.
 
 ## Read first
 

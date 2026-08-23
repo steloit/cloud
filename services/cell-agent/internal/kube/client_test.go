@@ -115,8 +115,20 @@ func TestObserveReadsClusterPhase(t *testing.T) {
 	if phase != "Cluster in healthy state" {
 		t.Fatalf("phase wrong: %q", phase)
 	}
-	if got[0].method != http.MethodGet || !strings.HasSuffix(got[0].path, "/clusters/svc-0123456789abcdef0123456789abcdef") {
-		t.Fatalf("observe request wrong: %s %s", got[0].method, got[0].path)
+	// EXACT, not HasSuffix. Apply's path is compared exactly for precisely this
+	// reason and Observe was left on a suffix twelve lines below it — so two
+	// mutations survived the whole module: routing Observe at a FIXED namespace
+	// (`cnpg-system`), which reads one tenant's readiness off another tenant's
+	// cluster, and swapping the apiVersion to `v1beta1`, which 404s on every poll
+	// so the phase reads "" -> provisioning -> ErrNotConverged, retried forever
+	// with nothing visible. A suffix match cannot see either: both keep the tail.
+	wantPath, err := resourcePath("postgresql.cnpg.io/v1", "Cluster", "acme--prod",
+		"svc-0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].method != http.MethodGet || got[0].path != wantPath {
+		t.Fatalf("observe addressed %s %s, want GET %s", got[0].method, got[0].path, wantPath)
 	}
 }
 

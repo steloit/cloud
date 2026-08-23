@@ -19,7 +19,7 @@ files:
   - tasks/e3-provisioning/US-3.3*.md
 verify:
   - "a service in a brand-new environment converges without a hand-created namespace (LIVE — needs a cell; NOT YET RUN, see AC 3)"
-  - "cd \"$(git rev-parse --show-toplevel)/services/cell-agent\" && go build ./... && go vet ./... && go test -race ./..."
+  - "cd \"$(git rev-parse --show-toplevel)/services/cell-agent\" && go build ./... && go vet ./... && go test -count=1 -race ./..."
   - "cd \"$(git rev-parse --show-toplevel)/services/cell-agent\" && test -z \"$(gofmt -l .)\""
 owner: agent
 ---
@@ -137,153 +137,101 @@ Corrected to `env-9f3c1a2b` (`sanitize(env_id)`, ADR-0012 §36). The review
 independently diffed all eleven and confirmed none asserted anything *about* the
 `proj--env` shape, so no coverage was destroyed.
 
-## What six review rounds found — all blocking, all mine
+## What fifteen review rounds found — all blocking, all mine
 
-Recorded because the pattern is the finding: **each round I verified the
-representation I had just edited and not the one that decides.**
+The pattern IS the finding: **each round I verified the representation I had just
+edited and not the one that decides.** The full narrative is in the PR; what is
+kept here is the class and the evidence for it.
 
-**I WEAKENED A TEST AND CLAIMED THE OPPOSITE.**
-`TestCNPGRendererAppliesRenderedManifests`'s D8 assertion — "the namespace came
-from placement, not a guess" — went from `objs[0]`, the CNPG Cluster
-specifically, to a substring search over the **concatenated** applied set. Every
-tenancy manifest also contains `namespace: env-9f3c1a2b`, so it was answered by a
-different object than the one it names: rendering one tenant's database into
-another tenant's namespace (`driver.Spec.Namespace` → `env-victim`) left it
-**GREEN**, and the branch described the change as making it stronger. Widening an
-assertion from one object to a set reads as generalisation and is a weakening. It
-now parses the `kind: Cluster` object and compares `metadata.namespace` as a
-value — the first repair was still `strings.Contains`, so `…-shadow` survived.
+**I weakened a test and claimed the opposite.** The D8 assertion — "the namespace
+came from placement, not a guess" — went from `objs[0]`, the CNPG Cluster, to a
+substring search over the CONCATENATED applied set. Every tenancy manifest also
+contains the namespace, so it was answered by a different object than the one it
+names: rendering one tenant's database into `env-victim` stayed GREEN, and the
+branch described the change as making it stronger. Widening an assertion from one
+object to a set reads as generalisation and IS a weakening.
 
-**One test genuinely was made stronger.**
-`TestDeletingAFailedServiceLeavesNothingBehind` began failing because env objects
-survive a *service* teardown — correct: the namespace belongs to the environment.
-It now pins **both** directions, with the env set DERIVED from `tenancy.Render`
-rather than retyped.
-
-**Six more of mine, each measured:** a `steloit.dev/environment-id` label that
-named nothing (`9f3c1a2b` for the id `env_9f3c1a2b`, and US-3.3b planned to
-delete by it); `Apply` routing by the caller's namespace without ever reading
-`metadata.namespace`, so a cross-namespace write was fail-closed only because the
-API server answers 400; widening `plurals` while `Delete` hardcoded the CNPG
-apiVersion, turning a loud refusal into "already gone" — the exact call US-3.3b
-will make, and a **pre-existing** trap for `Secret` and `StatefulSet`; two
-multi-document bypasses, since `yaml.Unmarshal` returns only document 1; a
-teardown path that never validated the namespace, so
-`"../../../api/v1/namespaces/kube-system"` was refused on create and **accepted
-on teardown**; and boot validation split across three representations where only
-two were covered.
+**Seven more, each measured:** a `steloit.dev/environment-id` label that named
+nothing; `Apply` routing by the caller's namespace without reading
+`metadata.namespace`, fail-closed only because the API server answers 400;
+widening `plurals` while `Delete` hardcoded the CNPG apiVersion, turning a loud
+refusal into "already gone"; two multi-document bypasses (`yaml.Unmarshal`
+returns only document 1); a teardown path that never validated the namespace, so
+`"../../../api/v1/namespaces/kube-system"` was refused on create and ACCEPTED on
+teardown; boot validation split across three representations with two covered;
+and Observe's request path pinned by SUFFIX while Apply's was exact — which hid
+both a fixed-namespace route (one tenant's readiness read off another's cluster)
+and a wrong apiVersion (404 every poll, retried forever, invisibly).
 
 **Then the same class relocated eight times** — `manifests[0]` → `_mi<2` →
 `_mi<4` → kind → body shape → the request contract → the path → the response.
 Every one had the shape "correct for index 0 only", expressible only because the
 rules lived inline in a loop. `Apply` is now a loop that orders and aborts over
-`applyOne`, which takes one manifest and has no index, so the state is
+`applyOne`, which takes ONE manifest and has no index, so the state is
 unrepresentable rather than tested-against. That also closed real defects: a
 swallowed non-2xx (ready with no ScheduledBackup — no PITR), `Delete` treating
 any 4xx/5xx as gone (service marked deleted, metering stopped, cluster running),
 and a transport where dropping `RootCAs`, adding `InsecureSkipVerify` or
 downgrading to `http://` were all green.
 
-**THE FIXTURES WERE THREE TIMES SHORTER THAN ANYTHING PRODUCTION CAN MINT.**
-`ids.New` produces a 32-hex suffix, so a real namespace is `env-<32 hex>` (36
-chars) and a real service id `svc_<32 hex>`. Every fixture drove `env-9f3c1a2b`
-(12) and `svc_db01` (8), so any rule keyed on identifier LENGTH was unpinned —
-four mutations survived, and two of them switch off this task's headline
-behaviours for **every real environment**: a `Delete` that no-ops above 12
-characters, and a teardown that deletes nothing and still reports `gone`.
+**The fixtures were three times shorter than anything production can mint.**
+`ids.New` yields a 32-hex suffix, so a real namespace is `env-<32 hex>` (36
+chars); every fixture drove `env-9f3c1a2b` (12), leaving any rule keyed on
+identifier LENGTH unpinned — four survivors, two of which switch off this task's
+headline behaviours for EVERY real environment (a `Delete` that no-ops above 12
+characters; a teardown that deletes nothing and still reports `gone`). The
+provenance is the lesson: ADR-0012 writes the shape with a typographic
+**ellipsis**, and the fixture read the elision as a literal, then described itself
+as "the ADR-0012 shape". Production-shaped now (32-hex, 22 places), with four
+lengths kept deliberately — "with one short case kept" was another count asserted
+without running one.
 
-The provenance is the lesson. ADR-0012 writes the shape as
-`env_9f3c… → env-9f3c…` with a typographic **ellipsis**, and the fixture read
-that elision as a literal, then described itself as "the ADR-0012 shape". An
-elided example became the test data — which is what AGENTS.md means by *examples
-are normative*. Fixtures are production-shaped now, with one short case kept so
-both classes stay swept.
+**An illegal status edge, retried forever.** `"Waiting for user action"` mapped to
+`degraded`, which the machine rejects from `provisioning`; the writeback is
+refused every tick, `observed_generation` never advances, and the service is
+retried forever with nothing visible. Now `failed` — and that is ALL that shipped
+of it. Round 12 went further with a FROM-aware `statusFor` in the AGENT and a
+repo-root artifact pinning two copies of the table; **round 13 reverted all of
+it** as a regression. The three measured reasons, and where the real fix lives,
+are in the Outcome.
 
-**An illegal status edge, retried forever.** `"Waiting for user action"` mapped
-to `degraded`, but the control plane allows `provisioning → {ready, failed,
-deleting}` only. The writeback is rejected every tick, `observed_generation`
-never advances, and the service is retried forever with nothing visible — the
-exact failure `statusFromPhase` argues against thirty lines below, arrived at
-from the other side. Now `failed`, with the legal-edge set pinned on BOTH sides
-of the module boundary (the two have separate go.mod files and no go.work, so it
-is duplicated knowledge and each copy fails if the other moves).
+**And `-count=1` in CI, which is not hygiene.** The boundary is the MODULE root —
+see the Outcome for the measurement; an earlier version of this paragraph said
+"package directory" and was corrected in the two code sites and not here, which
+is this file's recurring failure one round later. A fixture outside the module
+root comes back `ok (cached)`, and `actions/setup-go` restores GOCACHE across
+commits, so it failed OPEN.
 
-**Boot validation, in three representations.** `RECONCILER_CELL` was unvalidated,
-so a typo booted cleanly then failed every converge with no writeback. Validating
-it was not enough: the *call* was unpinned (`cmd/` had no tests), and then `main`
-**honouring** the result was unpinned too — `if err := run(...); false` was green
-and the agent would exit **0**, which an orchestrator reads as "completed". A
-test that hoisted `signal.NotifyContext` into `main()` also changed behaviour I
-described as unchanged: a SIGTERM during boot would be absorbed and exit 0.
-Reverted, ordering verified byte-identical to `origin/main`, and SIGTERM is now
-pinned by a subprocess test that kills two further green mutations.
+## Negative evidence — sixty-one mutations, and corrections to four earlier tables
 
-## Negative evidence — fifty-nine mutations, and corrections to three earlier tables
-
-**An earlier mutation table was invalid and is withdrawn.** Round 3's came from
-`cp -R services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
+**Round 3's table was invalid and is withdrawn.** It came from `cp -R
+services/cell-agent` + `go test ./...` + "any FAIL means killed", and a
 module-only copy has a **RED baseline** (three `parity_test.go` cases need the
 repo root) — so every row reported RED whether the mutation was caught or not.
-That is the mistake bank entry directly above the one this branch added,
-violated in the same round. Of its 25 rows, 24 were genuinely RED and one GREEN.
+That is the mistake bank entry directly above the one this branch added, violated
+in the same round. Of its 25 rows, 24 were genuinely RED and one GREEN.
 
 A RED baseline can only manufacture false REDs, never false GREENs, so every
-*survivor* found in rounds 1–3 stands; what was unreliable was the evidence that
-the fixes worked. Everything below was re-measured on ONE harness — a scaffolded
-repo root with a GREEN no-mutation baseline asserted before and after every row,
-each mutation carrying an assert-it-applied guard.
+*survivor* found in rounds 1-3 stands; what was unreliable was the evidence that
+the fixes worked. Everything was re-measured on ONE harness — a scaffolded repo
+root, GREEN baseline asserted before and after every row, each mutation carrying
+an assert-it-applied guard. The sweep has since caught two defects in the TESTS:
+a `run()` that HUNG for 10 minutes instead of failing, and a legal-edge test
+accidentally reverted by a `git checkout`, which "survived" because it no longer
+existed.
 
-The sweep has since caught two defects in the tests themselves: a `run()` that
-HUNG for 10 minutes instead of failing, and — this round — a legal-edge test I
-had accidentally reverted with a `git checkout` while undoing an unrelated
-mangled edit. It survived because it no longer existed.
+**Every row is enumerated in the PR**, in ONE table, because the split across two
+documents is what produced the count errors — twice, in the same way. "59
+distinct over 60 mutations" and "32 rows here plus 29 in the PR" were both
+asserted without counting: the task-file table held **34** once-GREEN rows, not
+32. Counted mechanically: **34 + 29 = 63 entries, minus the 2 that appear
+verbatim in both (the `ValidateCell` call; `main` ignoring `run`'s error) = 61
+DISTINCT**, over 62 mutations (one PR row bundles two controls). A number
+repeated from a previous round is not evidence.
 
-| mutation | |
-|---|---|
-| the CNPG Cluster rendered into `env-victim` | RED *(was GREEN — the weakened D8 assertion)* |
-| **a D7 policy re-added as a second YAML document** *(was GREEN)* | RED |
-| **a second document smuggling a Secret into `env-victim`** (was GREEN) | RED |
-| the Cluster namespace gains a `-shadow` suffix | RED *(was GREEN — the first D8 repair was a substring)* |
-| `exactlyOneDocument` applied only to `manifests[0]` | RED *(was GREEN)* |
-| the cross-namespace guard applied only to `manifests[0]` | RED *(was GREEN)* |
-| `plurals` widened alone, as US-3.3c will do | RED *(was GREEN)* |
-| the Namespace rendered with a `metadata.namespace` | RED *(was GREEN)* |
-| the `ValidateCell` **call** deleted from boot | RED *(was GREEN — `cmd/` had no tests)* |
-| the fixtures' namespace and service id shortened below production's 36 chars | RED *(was GREEN ×4 — see below)* |
-| `"Waiting for user action"` mapped to `degraded` | RED *(was GREEN — an illegal edge, retried forever)* |
-| `main` IGNORES `run`'s error | RED *(was GREEN)* |
-| `Apply`'s guards restricted to indices 0–1 (`Converge` passes three) | RED *(was GREEN)* |
-| `Apply`'s guards restricted to indices 0–3 | RED *(was GREEN — the length is swept)* |
-| `Apply`'s guards skipped for everything after a Namespace | RED *(was GREEN — production's exact batch)* |
-| `Apply`'s guards skipped for `kind: ScheduledBackup` | RED *(was GREEN)* |
-| signal handling deleted (`parent` passed straight to `a.Run`) | RED *(was GREEN)* |
-| `Apply`'s guards skipped for manifests over 200 bytes | RED *(was GREEN)* |
-| `Apply`'s guards skipped for any manifest containing `spec:` | RED *(was GREEN — the Cluster and ScheduledBackup, i.e. everything carrying a namespace)* |
-| `Apply`'s guards skipped for any manifest containing `labels:` | RED *(was GREEN)* |
-| `panic()` substituted for the in-cluster CNPG renderer | RED *(was GREEN — the only arm that runs on a cell)* |
-| the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` requirement removed | RED *(was GREEN — silent loss of PITR)* |
-| the per-request ServiceAccount token re-read deleted | RED *(was GREEN, and unreported)* |
-| `force=true` dropped for manifests after the first | RED *(was GREEN — the SILENT one: those objects stop being force-owned, so a manual `kubectl edit` is never corrected)* |
-| content-type reverts to merge-patch after the first | RED *(was GREEN)* |
-| auth applied only to the first manifest | RED *(was GREEN)* |
-| the namespace fence restricted to the CNPG API group | RED *(was GREEN — every offender was CNPG-group)* |
-| `exactlyOneDocument` skipped when document 1 is a `Secret` | RED *(was GREEN)* |
-| the CNPG renderer built, discarded, and an Ack renderer handed to the agent | RED *(was GREEN — logs "real apply", provisions nothing)* |
-| the GSA and WAL bucket arguments swapped | RED *(was GREEN — `gs://<an email>/`, no PITR, log line correct)* |
-| the cell hardcoded to `cell-0` in the in-cluster renderer | RED *(was GREEN)* |
-| `NewInCluster` caches the token instead of wiring the file | RED *(was GREEN — the production constructor, which B4's test could not see)* |
-| the cluster CA read and its PEM validation removed | RED *(was GREEN — empty pool, every converge fails TLS behind "real apply")* |
-| `signal.NotifyContext` → `context.WithCancel` | RED *(was GREEN)* |
-
-The remaining **27 rows** — ordering, cluster-scoped routing, every arm of the
-`Apply` mismatch and `Delete` apiVersion guards, label and namespace validation,
-the teardown path, and four refuse-everything controls — are all RED and listed
-in full in the PR. Only the rows above are recorded here, because a mutation that
-was once GREEN is the only kind that says something a green suite did not.
-
-*(Round 9 note: an earlier version of this line claimed the 29 were "listed in
-full in the PR" when the PR named six categories in a sentence and enumerated
-none. They are enumerated there now.)*
+*(This section was itself DELETED by round 13's span-replace and round 14's
+message claimed it restored — it restored two of the three. Round 16 put it back.
+Four rounds of this file's errors have been counts and citations, not code.)*
 
 ## Accepted survivors — measured green, deliberately not closed
 
@@ -295,32 +243,56 @@ looked for.
 | `Apply` guards skipped for index ≥ **12** | Any hand-written sweep has a ceiling; this one is 12, against a largest-ever batch of 8 (`7e94f26`). **This was published as "≥ 16" for one round while the sweep already ran to 12** — the ceiling was lowered in the same commit that widened the fixtures, and four claims were not updated. Corrected here and measured: ≥ 12 GREEN, ≥ 13 GREEN, ≥ 16 vacuous. The real close is a property test over random `n` and random composition, filed with US-3.3c. |
 | `defer stop()` dropped in `run` | `stop()` only releases the signal handler and the process exits immediately after `run` returns, so leaking it until exit is a no-op. True only because `run` has exactly ONE production caller — a second one reopens this. |
 | ~~the in-cluster `CELL_GSA_EMAIL`/`CELL_WAL_BUCKET` guard~~ | **CLOSED.** The stated reason was false: `NewInCluster` reads two env vars and two files, so a temp SA dir reaches it in milliseconds — `saDir` is now a `var` (the `NewClientForTest` precedent) and `TestRunTakesTheInClusterBranchAndRequiresGSAandWAL` drives it. Substituting `panic()` for the CNPG renderer had been green: the only arm that runs on a cell was dead code to the suite. |
-| the `signal.NotifyContext` hoist into `main()` | Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
+| the `signal.NotifyContext` hoist into `main()` | Narrower than it reads: the PARENT-DERIVATION half IS pinned (deriving the context from `context.Background()` inside `run` is caught), so only the hoist-into-`main` representation is open. Reverted, and the landmark ordering is verified byte-identical to `origin/main`, but only a comment stops the next refactor re-landing it. Pinning it needs a subprocess that can be signalled *during* boot, which is a race against a sub-millisecond window. |
 
 ## Outcome
 
-Shipped: the environment's Kubernetes namespace, created agent-side on every
-converge (level-triggered), with `resourcePath` taught cluster-scoped routing and
-`Apply`/`Delete` taught to refuse what they cannot address. **D7's policy objects
-are NOT here** — implemented, then withdrawn to US-3.3c/d/e once the security
-review showed the cell enforces no NetworkPolicy, the allow-set would fence CNPG
-off Workload Identity, GCS and the apiserver, and the LimitRange would cap every
-managed Postgres at 512Mi.
+Shipped: the environment's Kubernetes namespace, created **agent-side** on every
+converge (level-triggered, so a namespace deleted out from under us comes back),
+with `resourcePath` taught cluster-scoped routing, `Apply` restructured so the
+"correct for index 0 only" class is unrepresentable, and the transport pinned.
+D7's policy objects are deliberately NOT here — see the withdrawal section above.
 
-Six review rounds, every one blocking, and the pattern is the finding: **each
-round I verified the representation I had just edited and not the one that
-decides.** Manifests vs. what enforces them; the struct field vs. the bytes; the
-create path vs. teardown; the validator vs. its call site vs. `main` honouring
-it; `manifests[0]` vs. `_mi<2` vs. `_mi<4` vs. the batch's *composition*; and,
-worst, 25 mutation results vs. the harness that produced them — a module-only
-`cp -R` whose baseline was already RED, published as evidence.
+**The status work is a single line: `"Waiting for user action"` maps to `failed`,
+not `degraded`.** Round 12 tried to go further — a FROM-aware `statusFor` and a
+transition table in the agent, pinned by a repo-root JSON artifact — and **round
+13 reverted all of it**, because both reviewers measured it as a regression:
 
-59 DISTINCT mutations RED on one harness with a green baseline asserted before
-and after (32 of them once GREEN); two accepted survivors named above. The count
-was published as 61 for one round: 32 rows here plus 29 in the PR, with two
-verbatim duplicates across the two tables (the `ValidateCell` call, and `main`
-ignoring `run`'s error). Rows, not mutations — one PR row bundles two
-refuse-everything controls, so it is 59 rows over 60 mutations. Five lessons in `contexts/provisioning.md`.
+- It **collapsed the transient guard.** `statusFor("ready","provisioning")` finds
+  no legal edge and returns `from`; `ready` IS terminal, so Converge's
+  `!terminal(status)` BLOCKER never fired. A READY service observed mid-upgrade
+  reported `"ready", nil` instead of `ErrNotConverged` — the agent declaring a
+  generation converged during an apply, `observed_generation` advancing, the row
+  leaving the outstanding set. Strictly worse than the 409 loop it replaced.
+- **Its premise was false.** "Separate go.mod files, so neither module can import
+  the other" — `apps/cli/go.mod` already `require`s and `replace`s
+  `packages/contracts/go` across exactly that boundary, and
+  `docs/architecture.md` names the cell-agent as an importer too. An
+  architectural constraint I asserted without checking the repo.
+- **It deleted the test that caught its own headline incident.** The replacement
+  cross-product skips any answer where `got == from`, so the
+  `"Waiting for user action": "degraded"` mutation — cited three times as the
+  motivating live consequence — became a survivor.
+
+The real fix is **US-3.3h**, in `reconcile.Writeback`: the only place holding
+both `from` and the machine, and where this is not a plane leak (ADR-0001
+D9/A2.5). **O31** owns the five-representation status vocabulary.
+
+Round 13 also keeps two pre-existing closures: every CNPG phase pinned by
+CLASSIFICATION (reclassifying a terminal-bad phase as transient was green in both
+modules), and `-count=1` on all three Go modules in CI. **The boundary is the MODULE
+root** — measured three ways after two earlier attempts got it wrong in opposite
+directions: a fixture in the test's own `testdata/` is caught on edit, a fixture
+elsewhere in the SAME module is caught, and a fixture OUTSIDE the module root
+comes back `ok (cached)` with the edit invisible. Live, with this repo's own
+`wiring_test.go` (which reads `ci.yml` five directories up): disarming a gate is
+cached-green without the flag and FAIL with it. setup-go restores GOCACHE across
+commits, so it failed OPEN. `cell-agent`'s `parity_test.go`, which reads
+repo-root `infra/k8s/`, is in the same class.
+
+**61 DISTINCT rows RED** across the branch (34 once-GREEN, enumerated in the PR
+with the other 27), three accepted survivors above. Five lessons in
+`contexts/provisioning.md`.
 
 **As merged, an environment is a namespace and nothing else, and deleting one
 leaks it (US-3.3b).**

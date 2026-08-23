@@ -152,10 +152,31 @@ jobs:
         # failure presents as a broken suite rather than as "raise the limit",
         # which is the kind of failure that gets diagnosed wrong.
         run: |
-          cd services/api && go build ./... && go vet ./... && go test -race -timeout 30m ./...
-          cd ../cell-agent && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          # -count=1 DISABLES THE TEST CACHE, and it is load-bearing, not hygiene.
+          #
+          # THE BOUNDARY IS THE MODULE ROOT. Measured three ways (scratch module
+          # and this repo):
+          #   fixture in the test's own package testdata/   -> edit is caught
+          #   fixture elsewhere in the SAME module          -> edit is caught
+          #   fixture OUTSIDE the module root               -> `ok (cached)`,
+          #                                                    edit is INVISIBLE
+          # Live, with this repo's own wiring_test.go (which reads ci.yml five
+          # directories up, outside services/api): disarming a gate is
+          # `ok (cached)` without the flag and FAIL with it.
+          #
+          # actions/setup-go restores GOCACHE across commits keyed on go.sum, so a
+          # PR touching only such a file could report green while broken. It fails
+          # OPEN, which is the direction that matters. services/cell-agent's
+          # parity_test.go reads repo-root infra/k8s/ and is in the same class.
+          #
+          # (An earlier revision of this comment said such a test is simply
+          # UNCACHEABLE in and out of the module. That was wrong in both halves —
+          # from a probe that read two fixtures in one test and never achieved a
+          # cached run at all.)
+          cd services/api && go build ./... && go vet ./... && go test -count=1 -race -timeout 30m ./...
+          cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
           cd ../../packages/contracts/go && go build ./...
-          cd ../../../apps/cli && go build ./... && go vet ./... && go test -race -timeout 10m ./...
+          cd ../../../apps/cli && go build ./... && go vet ./... && go test -count=1 -race -timeout 10m ./...
   infra:
     runs-on: ubuntu-latest
     steps:
@@ -170,9 +191,110 @@ jobs:
           terraform -chdir=infra/envs/dev validate
           terraform -chdir=infra/envs/cell0 init -backend=false -input=false
           terraform -chdir=infra/envs/cell0 validate
+      - name: Terraform tests (credential-free, mocked providers)
+        shell: bash
+        run: |
+          # `terraform validate` checks syntax and types; it cannot check a VALUE.
+          # These assert against the planned resource — e.g. that each ENV's cell
+          # enables NetworkPolicy enforcement, which US-3.3a found nothing did
+          # while every manifest and every test looked correct.
+          #
+          # `shell: bash` is load-bearing: GitHub's default is `bash -e {0}` with NO
+          # pipefail. (`shell: bash` is already `-eo pipefail`, so the explicit
+          # set below is redundant and kept only so the property is visible here.)
+          #
+          # DISCOVERY IS COMPARED AGAINST AN EXPECTED SET, not merely checked for
+          # emptiness. Review measured both holes in the emptiness-only version:
+          # deleting ONE env's tests/ directory left the gate green over the
+          # remaining two, and hardcoding `dirs=infra/modules/gke-cell` passed the
+          # Go pin as well — in both cases an env silently stopped being covered.
+          # Every directory that instantiates the cell module must own a test.
+          # `xargs -r` (--no-run-if-empty) is here for CI's shell, not for tidiness,
+          # and it is NOT pinned by the harness — stated rather than left as an
+          # apparent oversight. GNU xargs runs the command once on EMPTY input, so
+          # `| xargs -0 -n1 dirname` exits 123 with "dirname: missing operand" and
+          # `-e` kills the script at the assignment (measured in ubuntu:24.04,
+          # rc=123 with no ::error:: annotation). BSD xargs on macOS does not run
+          # on empty input at all and accepts -r as a no-op, so the two behave
+          # identically here and no local test can tell them apart.
+          #
+          # Losing it therefore fails CLOSED — a red job with an opaque message,
+          # not a green one — which is why this is a diagnostics fix rather than
+          # a hole. The reason it matters is that rc=123 kills the script before
+          # the coverage loop can name the uncovered directory.
+          set -o pipefail
+          dirs=$(git ls-files -z 'infra/**/*.tftest.hcl' 'infra/**/*.tftest.json' | xargs -0 -r -n1 dirname | sed 's#/tests$##' | sort -u)
+          # DISCOVERY KEYS OFF THE MODULE SOURCE, not a label or a filename.
+          # Measured: keying on `module "gke_cell"` in `*/main.tf` let three
+          # semantics-preserving refactors drop an env out of the expected set
+          # while its tests were deleted — the block moved to cell.tf (Terraform
+          # loads every *.tf identically), the label renamed, or a cell placed
+          # outside infra/envs/. The source path is the one string a cell
+          # instantiation cannot omit.
+          envs=$(git grep -lE 'source[[:space:]]*=[[:space:]]*".*modules/gke-cell"' -- 'infra/**/*.tf' ':(exclude)infra/modules/**' | xargs -r -n1 dirname | sort -u || true)
+          if [ -z "$envs" ]; then
+            echo "::error::cell discovery found no environments — this gate did not run"
+            exit 1
+          fi
+          expected=$(printf '%s\ninfra/modules/gke-cell\n' "$envs" | sort -u)
+          # There is deliberately no `-z "$dirs"` guard. It was here, and it is the
+          # third branch on this step that turned out to be subsumed by the
+          # per-directory loop below — which reports WHICH directory is uncovered
+          # instead of "something is missing". Dropping it changed no outcome,
+          # measured. Guards that nothing can distinguish are not guards.
+          # ONE check per expected directory, not two. A set-difference against
+          # $dirs was here and is gone: the loop below catches strictly more
+          # (a directory with no tests AND one whose tests assert nothing), so
+          # the comparison was a branch nothing could distinguish — dropping it
+          # changed no outcome, measured. Fewer branches, each pinned.
+          #
+          # OWNING a test file is not asserting anything: a suite with zero run
+          # blocks, and a directory with zero test files, BOTH exit 0 with
+          # "Success! 0 passed, 0 failed".
+          for d in $expected; do
+            if ! grep -rqE '^[[:space:]]*run[[:space:]]+"' "$d"/tests/*.tftest.hcl "$d"/tests/*.tftest.json 2>/dev/null; then
+              echo "::error::$d instantiates the cell but owns no terraform test with a run block — it asserts nothing"
+              exit 1
+            fi
+            if ! grep -rq 'datapath_provider' "$d"/tests/*.tftest.hcl "$d"/tests/*.tftest.json 2>/dev/null; then
+              echo "::error::$d's terraform test never mentions datapath_provider"
+              exit 1
+            fi
+          done
+          fail=0
+          for d in $dirs; do
+            echo "::group::terraform test $d"
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" test || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
       - name: k8s manifests parse (always)
         run: |
           python3 -c "import glob,yaml; [list(yaml.safe_load_all(open(f))) for f in glob.glob('infra/k8s/**/*.yaml', recursive=True)]"
+          # A parse is CONTENT-BLIND: deny.log=false, a bogus apiVersion, a
+          # misspelled kind, a different metadata.name and an empty spec all
+          # parse. Nothing applies this file yet (US-3.3f AC 4 is explicitly
+          # unticked for that), so these assertions pin the file itself until
+          # something does.
+          python3 - <<'PY'
+          import yaml
+          d = yaml.safe_load(open('infra/k8s/policy/network-logging.yaml'))
+          assert d['apiVersion'] == 'networking.gke.io/v1alpha1', d['apiVersion']
+          assert d['kind'] == 'NetworkLogging', d['kind']
+          # GKE PRE-CREATES this object on every Dataplane V2 cluster; any other
+          # name is a second object that logs nothing.
+          assert d['metadata']['name'] == 'default', d['metadata']['name']
+          assert d['spec']['cluster']['deny']['log'] is True
+          assert d['spec']['cluster']['allow']['log'] is False
+          # `delegate` is the OTHER leaf on each side and was pinned by nothing:
+          # flipping either was green. It hands per-namespace override to
+          # NetworkLoggingConfig objects; false keeps this cluster-scoped object
+          # the single answer, which is what "deny is logged everywhere" needs.
+          assert d['spec']['cluster']['deny']['delegate'] is False
+          assert d['spec']['cluster']['allow']['delegate'] is False
+          PY
       - name: Spike scripts + manifests (when present)
         run: |
           if [ -d infra/spike ]; then
