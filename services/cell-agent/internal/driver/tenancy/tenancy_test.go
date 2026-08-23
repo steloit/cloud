@@ -1,192 +1,184 @@
-package tenancy
+package tenancy_test
 
 import (
 	"strings"
 	"testing"
 
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 	"gopkg.in/yaml.v3"
 )
 
-func render(t *testing.T) []Manifest {
+const (
+	ns   = "env-9f3c1a2b"
+	cell = "cell0"
+)
+
+func mustRender(t *testing.T) []tenancy.Manifest {
 	t.Helper()
-	ms, err := Render(Spec{Namespace: "env-e_123", Cell: "cell-0", EnvID: "e_123"})
+	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell})
 	if err != nil {
-		t.Fatalf("Render: %v", err)
+		t.Fatal(err)
 	}
-	return ms
+	return objs
 }
 
-// D7 names four things. Rendering three of them is not the isolation boundary,
-// so the set is asserted by KIND rather than by count — a count passes when one
-// kind is rendered twice and another not at all.
-func TestRenderProducesEveryD7Object(t *testing.T) {
-	got := map[string]int{}
-	for _, m := range render(t) {
-		got[m.Kind]++
+// The environment's namespace is the object nothing in the system created before
+// US-3.3a — the defect was a 404 on the first converge into a new environment.
+func TestRenderProducesTheNamespace(t *testing.T) {
+	objs := mustRender(t)
+	if len(objs) != 1 {
+		t.Fatalf("want exactly the Namespace, got %d objects: %+v", len(objs), kinds(objs))
 	}
-	for kind, want := range map[string]int{
-		"Namespace":     1,
-		"NetworkPolicy": 3, // default-deny + the DNS and same-namespace exceptions
-		"ResourceQuota": 1,
-		"LimitRange":    1,
-	} {
-		if got[kind] != want {
-			t.Errorf("%s rendered %d times, want %d — D7 requires the namespace, "+
-				"default-deny NetworkPolicies, a ResourceQuota AND a LimitRange", kind, got[kind], want)
-		}
+	if objs[0].Kind != "Namespace" || objs[0].Name != ns {
+		t.Fatalf("got %s/%s, want Namespace/%s", objs[0].Kind, objs[0].Name, ns)
 	}
 }
 
-// The Namespace must come FIRST. Everything after it is namespaced, so applying
-// out of order is a 404 on a live cluster — the class of defect that is
-// expensive to find there and free to prevent here.
-func TestNamespaceIsRenderedFirst(t *testing.T) {
-	ms := render(t)
-	if ms[0].Kind != "Namespace" {
-		t.Fatalf("first manifest is %s, want Namespace — every later object is "+
-			"namespaced and would 404 into a namespace that does not exist yet", ms[0].Kind)
-	}
-}
-
-// Every manifest must be valid YAML with the fields the applier reads
-// (apiVersion, kind, metadata.name), because kube.Client.Apply parses exactly
-// those and a malformed one fails at apply time, on a cluster.
-func TestEveryManifestParsesAndCarriesWhatTheApplierReads(t *testing.T) {
-	for _, m := range render(t) {
-		var obj struct {
-			APIVersion string `yaml:"apiVersion"`
-			Kind       string `yaml:"kind"`
-			Metadata   struct {
-				Name      string `yaml:"name"`
-				Namespace string `yaml:"namespace"`
-			} `yaml:"metadata"`
-		}
-		if err := yaml.Unmarshal(m.YAML, &obj); err != nil {
-			t.Errorf("%s/%s is not valid YAML: %v", m.Kind, m.Name, err)
-			continue
-		}
-		if obj.APIVersion == "" || obj.Kind != m.Kind || obj.Metadata.Name != m.Name {
-			t.Errorf("%s/%s: manifest disagrees with its own descriptor (apiVersion=%q kind=%q name=%q)",
-				m.Kind, m.Name, obj.APIVersion, obj.Kind, obj.Metadata.Name)
-		}
-		// A Namespace is cluster-scoped and must NOT carry metadata.namespace;
-		// everything else must.
-		if m.Kind == "Namespace" && obj.Metadata.Namespace != "" {
-			t.Errorf("the Namespace carries metadata.namespace=%q — it is cluster-scoped", obj.Metadata.Namespace)
-		}
-		if m.Kind != "Namespace" && obj.Metadata.Namespace == "" {
-			t.Errorf("%s/%s has no metadata.namespace — it would apply to the wrong place", m.Kind, m.Name)
-		}
-	}
-}
-
-// The default-deny must deny BOTH directions. A policy with only Ingress leaves
-// egress wide open, and egress is the half that reaches the metadata server and
-// other tenants. Asserted as two separate facts because they are two.
-func TestDefaultDenyCoversIngressAndEgress(t *testing.T) {
-	var spec struct {
-		Spec struct {
-			PodSelector map[string]any `yaml:"podSelector"`
-			PolicyTypes []string       `yaml:"policyTypes"`
-			Ingress     []any          `yaml:"ingress"`
-			Egress      []any          `yaml:"egress"`
-		} `yaml:"spec"`
-	}
-	found := false
-	for _, m := range render(t) {
-		if m.Name != "default-deny-all" {
-			continue
-		}
-		found = true
-		if err := yaml.Unmarshal(m.YAML, &spec); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !found {
-		t.Fatal("no default-deny-all policy was rendered")
-	}
-	types := strings.Join(spec.Spec.PolicyTypes, ",")
-	if !strings.Contains(types, "Ingress") {
-		t.Error("default-deny does not name Ingress — inbound traffic is unrestricted")
-	}
-	if !strings.Contains(types, "Egress") {
-		t.Error("default-deny does not name Egress — a compromised pod can reach the metadata server and other tenants")
-	}
-	// An empty podSelector selects EVERY pod. A non-empty one would silently
-	// exempt everything that does not match it.
-	if len(spec.Spec.PodSelector) != 0 {
-		t.Errorf("default-deny podSelector is %v, want {} — anything else exempts the pods it does not match", spec.Spec.PodSelector)
-	}
-	// Naming a policyType with NO rules is what denies it. A rule list here
-	// would turn the denial into an allowance.
-	if len(spec.Spec.Ingress) != 0 || len(spec.Spec.Egress) != 0 {
-		t.Error("default-deny carries rules — a policyType with rules ALLOWS that traffic; the denial requires none")
-	}
-}
-
-// The quota and the LimitRange are a pair: a quota constraining requests/limits
-// rejects any pod that omits them, so without defaults the namespace refuses
-// ordinary workloads.
-func TestQuotaIsShippedWithDefaultsThatMakeItUsable(t *testing.T) {
-	var quota, limits bool
-	var lr struct {
-		Spec struct {
-			Limits []struct {
-				Default        map[string]string `yaml:"default"`
-				DefaultRequest map[string]string `yaml:"defaultRequest"`
-			} `yaml:"limits"`
-		} `yaml:"spec"`
-	}
-	for _, m := range render(t) {
+// D7's NetworkPolicies, ResourceQuota and LimitRange are deliberately absent
+// until US-3.3c lands them WITH enforcement and a CNPG allow-set. This pins the
+// absence so it stays a decision: re-adding any of them without changing this
+// test is not possible, and changing it means reading why.
+func TestTheD7PolicyObjectsAreDeliberatelyNotRenderedYet(t *testing.T) {
+	for _, m := range mustRender(t) {
 		switch m.Kind {
-		case "ResourceQuota":
-			quota = true
-			if !strings.Contains(string(m.YAML), "requests.cpu") || !strings.Contains(string(m.YAML), "limits.cpu") {
-				t.Error("the quota does not constrain cpu requests and limits")
-			}
-		case "LimitRange":
-			limits = true
-			if err := yaml.Unmarshal(m.YAML, &lr); err != nil {
-				t.Fatal(err)
-			}
+		case "NetworkPolicy", "ResourceQuota", "LimitRange":
+			t.Fatalf("%s/%s is rendered again. It must not ship before US-3.3c: "+
+				"NetworkPolicies are not enforced on the cell (gke-cell sets no "+
+				"network_policy / ADVANCED_DATAPATH), the allow-set as written fences "+
+				"CNPG off its metadata server, GCS and the apiserver, and the LimitRange "+
+				"default becomes the hard cap on every managed Postgres.", m.Kind, m.Name)
 		}
-	}
-	if !quota || !limits {
-		t.Fatalf("quota=%v limits=%v — both are required; the quota alone makes the namespace reject pods that omit requests", quota, limits)
-	}
-	if len(lr.Spec.Limits) == 0 || len(lr.Spec.Limits[0].Default) == 0 || len(lr.Spec.Limits[0].DefaultRequest) == 0 {
-		t.Error("the LimitRange sets no default/defaultRequest — the quota then rejects any pod that omits them")
 	}
 }
 
-// The namespace name belongs to the control plane (ADR-0012). Deriving a second
-// opinion here is how two derivations drift.
-func TestRenderRefusesANamespaceItDidNotExpect(t *testing.T) {
-	for _, bad := range []Spec{
-		{Namespace: "", Cell: "cell-0", EnvID: "e_1"},
-		{Namespace: "env-e_1", Cell: "cell-0", EnvID: ""},
-		{Namespace: "env-e_1", Cell: "", EnvID: "e_1"},
-		{Namespace: "proj--env", Cell: "cell-0", EnvID: "e_1"}, // the pre-ADR-0012 shape
-		{Namespace: "default", Cell: "cell-0", EnvID: "e_1"},
+// What the applier reads is metadata.name and the object's kind; what an operator
+// reads later is the labels. Parsed, not substring-matched, because a substring
+// test passes on a manifest the API server would reject.
+func TestTheNamespaceParsesAndCarriesWhatItClaims(t *testing.T) {
+	var obj struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
+		Metadata   struct {
+			Name   string            `yaml:"name"`
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"metadata"`
+	}
+	m := mustRender(t)[0]
+	if err := yaml.Unmarshal(m.YAML, &obj); err != nil {
+		t.Fatalf("Namespace does not parse: %v\n%s", err, m.YAML)
+	}
+	if obj.APIVersion != "v1" || obj.Kind != "Namespace" {
+		t.Fatalf("got %s/%s", obj.APIVersion, obj.Kind)
+	}
+	if obj.Metadata.Name != ns {
+		t.Fatalf("metadata.name = %q, want %q — the applier addresses by this", obj.Metadata.Name, ns)
+	}
+	want := map[string]string{"steloit.dev/cell": cell, "steloit.dev/tenant": "true"}
+	for k, v := range want {
+		if obj.Metadata.Labels[k] != v {
+			t.Fatalf("label %s = %q, want %q", k, obj.Metadata.Labels[k], v)
+		}
+	}
+	// US-3.3a shipped steloit.dev/environment-id set to TrimPrefix(ns, "env-").
+	// The real id is env_9f3c1a2b, so the label read "9f3c1a2b" — a value that
+	// names nothing the control plane knows. Absent is better than wrong; the
+	// namespace NAME already identifies the environment.
+	if _, ok := obj.Metadata.Labels["steloit.dev/environment-id"]; ok {
+		t.Fatal("steloit.dev/environment-id is back. The agent is not given the " +
+			"environment id — the desired doc carries the namespace only — so any " +
+			"value here is a re-derivation. Add it to the desired doc first.")
+	}
+}
+
+// The namespace and the cell are interpolated into a manifest. Both are
+// control-plane-minted today, and both are the guard that defines a tenant
+// boundary, so neither gets to be trusted on a prefix alone.
+func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
+	long := "env-" + strings.Repeat("a", 60) // 64 chars
+
+	badNS := map[string]string{
+		"empty":              "",
+		"no env- prefix":     "acme--prod",
+		"bare prefix":        "env-",
+		"uppercase":          "env-9F3C1A2B",
+		"embedded space":     "env- x",
+		"trailing space":     "env-x ",
+		"dot":                "env-x.y",
+		"underscore":         "env-x_y",
+		"bang":               "env-x!",
+		"trailing dash":      "env-x-",
+		"over 63 chars":      long,
+		"yaml key injection": "env-x\n  labels:\n    steloit.dev/tenant: \"false\"\nextra: injected",
+		"label injection":    "env-x\n    steloit.dev/tenant: \"false\"",
+	}
+	for name, v := range badNS {
+		t.Run("namespace/"+name, func(t *testing.T) {
+			if _, err := tenancy.Render(tenancy.Spec{Namespace: v, Cell: cell}); err == nil {
+				t.Fatalf("Render accepted namespace %q", v)
+			}
+		})
+	}
+
+	badCell := map[string]string{
+		"empty":         "",
+		"uppercase":     "Cell0",
+		"space":         "cell 0",
+		"key injection": "cell0\n    steloit.dev/tenant: \"false\"",
+		"over 63 chars": strings.Repeat("c", 64),
+		"leading dash":  "-cell0",
+		"underscore":    "cell_0",
+	}
+	for name, v := range badCell {
+		t.Run("cell/"+name, func(t *testing.T) {
+			if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: v}); err == nil {
+				t.Fatalf("Render accepted cell %q", v)
+			}
+		})
+	}
+
+	// The negative half is only meaningful if the positive half still passes:
+	// a Render that refuses everything would satisfy every case above.
+	for _, good := range []string{"env-a", "env-9f3c1a2b", "env-" + strings.Repeat("a", 59)} {
+		if _, err := tenancy.Render(tenancy.Spec{Namespace: good, Cell: cell}); err != nil {
+			t.Fatalf("Render refused a legitimate namespace %q: %v", good, err)
+		}
+	}
+}
+
+// Every namespace the control plane can mint must be one Render accepts. If this
+// ever parts company, the agent hard-errors on EVERY converge for that
+// environment and the control plane sees no signal at all.
+func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
+	// namespaceForEnv is services/api-side: k8sNamespace lowercases, replaces
+	// each run of invalid characters with "-", trims dashes, truncates to 63.
+	// These are the outputs it produces for ids of the shape env_<hex>.
+	for _, produced := range []string{
+		"env-9f3c1a2b",
+		"env-0",
+		"env-" + strings.Repeat("f", 59), // exactly 63
 	} {
-		if _, err := Render(bad); err == nil {
-			t.Errorf("Render(%+v) was accepted — a wrong namespace applies the tenant boundary to the wrong place", bad)
+		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell}); err != nil {
+			t.Fatalf("the control plane can mint %q and Render refuses it: %v", produced, err)
 		}
 	}
 }
 
-// Rendering is deterministic; the applier reapplies these every converge.
 func TestRenderIsDeterministic(t *testing.T) {
-	first := render(t)
-	for i := 0; i < 20; i++ {
-		next := render(t)
-		if len(next) != len(first) {
-			t.Fatalf("run %d produced %d manifests, first produced %d", i, len(next), len(first))
-		}
-		for j := range first {
-			if string(next[j].YAML) != string(first[j].YAML) || next[j].Kind != first[j].Kind {
-				t.Fatalf("run %d differs at %s/%s — SSA reapplies these every converge", i, first[j].Kind, first[j].Name)
-			}
+	a, b := mustRender(t), mustRender(t)
+	if len(a) != len(b) {
+		t.Fatal("length differs between calls")
+	}
+	for i := range a {
+		if a[i].Kind != b[i].Kind || a[i].Name != b[i].Name || string(a[i].YAML) != string(b[i].YAML) {
+			t.Fatalf("object %d differs between calls", i)
 		}
 	}
+}
+
+func kinds(objs []tenancy.Manifest) []string {
+	out := make([]string, len(objs))
+	for i, o := range objs {
+		out[i] = o.Kind + "/" + o.Name
+	}
+	return out
 }

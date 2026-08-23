@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
@@ -58,17 +57,15 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	return ns, nil
 }
 
-// tenancyManifests renders the environment's namespace and D7 isolation objects.
+// tenancyManifests renders the environment's namespace.
 //
-// The env id is the namespace's suffix — a DECOMPOSITION of the single value the
-// control plane resolved (ADR-0012, env-<environment_id>), not a second
-// derivation of it. tenancy.Render rejects a namespace that is not in that shape
-// rather than trusting this.
+// The namespace is passed through, never re-derived: it is the single value the
+// control plane resolved (ADR-0012, env-<environment_id>), and tenancy.Render
+// refuses anything that is not in that shape rather than trusting this caller.
 func (r *CNPGRenderer) tenancyManifests(namespace string) ([][]byte, error) {
 	objs, err := tenancy.Render(tenancy.Spec{
 		Namespace: namespace,
 		Cell:      r.cell,
-		EnvID:     strings.TrimPrefix(namespace, "env-"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)
@@ -117,9 +114,11 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// kube dependency at all), not terraform (which makes only cnpg-system and
 	// control-plane), not the agent. The live e2e worked because a runbook ran
 	// `kubectl create ns` in preflight, so a genuinely new project/env would 404
-	// on first apply. And D7 requires the namespace to CARRY default-deny
-	// NetworkPolicies, a ResourceQuota and a LimitRange — none existed, so the
-	// isolation boundary was nominal.
+	// on first apply.
+	//
+	// D7 also requires the namespace to CARRY default-deny NetworkPolicies, a
+	// ResourceQuota and a LimitRange. Those are NOT rendered here — see the
+	// tenancy package doc and US-3.3c. The boundary is a namespace today.
 	//
 	// Applied on every converge, not once: SSA is idempotent, and level-triggered
 	// means a namespace or policy deleted out from under us comes back.
@@ -138,7 +137,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	if err != nil {
 		return "", fmt.Errorf("render: %w", err)
 	}
-	// ONE Apply, in order: the namespace, then its D7 policies, then the service.
+	// ONE Apply, in order: the namespace, then the service.
 	// Apply iterates in slice order, so the ordering invariant lives in
 	// tenancy.Render's documented ordering rather than being re-established here
 	// — and a single call keeps "how many times did we apply" meaning one

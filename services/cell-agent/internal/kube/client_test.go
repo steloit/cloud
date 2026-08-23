@@ -248,3 +248,88 @@ func TestD7KindsAreRoutable(t *testing.T) {
 		}
 	}
 }
+
+// Apply routes by the CALLER's namespace argument. A manifest declaring a
+// DIFFERENT namespace was therefore written into the caller's, and the only
+// thing stopping it was the API server answering 400 — a tenant boundary
+// enforced a network hop away, on a code path nothing pinned. It must be refused
+// here, before the request is built.
+func TestApplyRefusesAManifestBelongingToAnotherNamespace(t *testing.T) {
+	foreign := []byte(`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db
+  namespace: env-victim
+`)
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	err := c.Apply(context.Background(), "env-mine", [][]byte{foreign})
+	if err == nil {
+		t.Fatal("Apply accepted a manifest declaring env-victim into env-mine")
+	}
+	if !strings.Contains(err.Error(), "env-victim") || !strings.Contains(err.Error(), "env-mine") {
+		t.Fatalf("the error must name both namespaces so the operator can see the mismatch: %v", err)
+	}
+	// Refused BEFORE the request, not after a 400: a fake server that answers
+	// 200 to everything must never have been asked.
+	if len(got) != 0 {
+		t.Fatalf("the foreign manifest was sent to the API server anyway: %+v", got)
+	}
+}
+
+// The matching-namespace and the omitted-namespace cases must still apply, or
+// the guard above would be satisfied by an Apply that refuses everything.
+func TestApplyStillAcceptsMatchingAndUnqualifiedManifests(t *testing.T) {
+	matching := []byte(`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db
+  namespace: env-mine
+`)
+	unqualified := []byte(`apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db2
+`)
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	if err := c.Apply(context.Background(), "env-mine", [][]byte{matching, unqualified}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected both to be applied, got %d", len(got))
+	}
+	for _, g := range got {
+		if !strings.Contains(g.path, "/namespaces/env-mine/") {
+			t.Fatalf("applied to %q, want the caller's namespace", g.path)
+		}
+	}
+}
+
+// A cluster-scoped object carrying a namespace is a renderer bug in the other
+// direction: resourcePath ignores the namespace for these kinds, so the
+// declaration would be silently dropped rather than honoured.
+func TestApplyRefusesAClusterScopedObjectThatDeclaresANamespace(t *testing.T) {
+	confused := []byte(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: env-mine
+  namespace: env-somewhere
+`)
+	var got []capture
+	srv := serverCapturing(t, 200, `{}`, &got)
+	c := NewClientForTest(srv.URL, "tok", srv.Client())
+
+	if err := c.Apply(context.Background(), "env-mine", [][]byte{confused}); err == nil {
+		t.Fatal("Apply accepted a cluster-scoped object declaring a namespace")
+	} else if !strings.Contains(err.Error(), "cluster-scoped") {
+		t.Fatalf("unhelpful error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("it was sent anyway: %+v", got)
+	}
+}

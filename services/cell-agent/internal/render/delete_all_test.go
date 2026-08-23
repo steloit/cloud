@@ -115,15 +115,13 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 const testNamespace = "env-9f3c1a2b"
 
 // envObjectKeys is the set of objects that belong to the ENVIRONMENT rather than
-// to any service — the namespace and its D7 policies. DERIVED from
-// tenancy.Render, never retyped: a hardcoded list silently stops covering a
-// policy added there, which is how a test starts asserting less than it claims.
+// to any service — today the namespace, and whatever US-3.3c adds beside it.
+// DERIVED from tenancy.Render, never retyped: a hardcoded list silently stops
+// covering an object added there, which is how a test starts asserting less
+// than it claims.
 func envObjectKeys(t *testing.T) map[string]bool {
 	t.Helper()
-	ms, err := tenancy.Render(tenancy.Spec{
-		Namespace: testNamespace, Cell: "cell-0",
-		EnvID: strings.TrimPrefix(testNamespace, "env-"),
-	})
+	ms, err := tenancy.Render(tenancy.Spec{Namespace: testNamespace, Cell: "cell-0"})
 	if err != nil {
 		t.Fatal(err)
 	}

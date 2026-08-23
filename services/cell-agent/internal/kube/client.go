@@ -108,6 +108,23 @@ func (c *Client) Apply(ctx context.Context, namespace string, manifests [][]byte
 		if err := yaml.Unmarshal(m, &meta); err != nil {
 			return fmt.Errorf("kube: parse manifest: %w", err)
 		}
+		// A manifest is routed by the CALLER's namespace, not by its own
+		// metadata.namespace — so a manifest declaring a different namespace
+		// would be written into the caller's. The API server rejects that with a
+		// 400, which makes it fail-closed but leaves the tenant boundary being
+		// enforced a network hop away, and only for namespaced kinds. Refuse
+		// locally instead: a cross-namespace write is a bug in the renderer, and
+		// the agent should not need a round trip to say so.
+		if got := meta.Metadata.Namespace; got != "" {
+			if clusterScoped[meta.Kind] {
+				return fmt.Errorf("kube: %s/%s is cluster-scoped but declares namespace %q",
+					meta.Kind, meta.Metadata.Name, got)
+			}
+			if got != namespace {
+				return fmt.Errorf("kube: %s/%s declares namespace %q but is being applied to %q",
+					meta.Kind, meta.Metadata.Name, got, namespace)
+			}
+		}
 		path, err := resourcePath(meta.APIVersion, meta.Kind, namespace, meta.Metadata.Name)
 		if err != nil {
 			return err

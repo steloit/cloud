@@ -22,8 +22,8 @@ owner: agent
 
 ## Goal
 
-US-3.3a made the cell-agent create an environment's namespace and its D7
-isolation objects on every converge. **Nothing removes them.**
+US-3.3a made the cell-agent create an environment's namespace on every converge
+(its D7 isolation objects were withdrawn to US-3.3c). **Nothing removes it.**
 
 That was US-3.3a's AC 4 ("Deleting an environment removes the namespace — and
 nothing else's"), and it was deliberately not implemented there. This task says
@@ -53,9 +53,15 @@ are torn down by the per-service path — but the namespace is not free:
 
 The delete must be **narrower than the create**. `tenancy.Render` is applied on
 every converge for the whole environment; deletion must remove the namespace *of
-that environment only*. Deleting by label selector (`steloit.dev/environment-id`)
-is safer than by name-prefix, because the label is set by the agent and the name
-is derived — two representations, and the label is the one the agent owns.
+that environment only*.
+
+**Do not delete by `steloit.dev/environment-id`.** US-3.3a shipped that label set
+to `TrimPrefix(namespace, "env-")`, which yields `9f3c1a2b` for the id
+`env_9f3c1a2b` — it named nothing the control plane knows, and it has been
+removed. The agent is not given the environment id: the desired doc carries the
+namespace only. Either delete by the namespace NAME (which the control plane
+resolved and therefore knows exactly), or add `environment_id` to the desired doc
+first and label from that — one derivation, not two.
 
 Deleting the namespace deletes everything in it, so ordering matters in reverse:
 the per-service teardown should already have run.

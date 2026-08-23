@@ -1,5 +1,4 @@
-// Package tenancy renders an environment's namespace and the D7 isolation
-// boundary that makes it a tenant boundary rather than just a name.
+// Package tenancy renders an environment's Kubernetes namespace.
 //
 // WHY THE AGENT AND NOT THE CONTROL PLANE — US-3.3a asked for this decision to
 // be made and recorded. The control plane has NO Kubernetes dependency:
@@ -14,22 +13,46 @@
 // under us is recreated on the next converge, where a create-once call at
 // environment creation would never notice.
 //
-// D7 (INF-001 §1): "Environment → Kubernetes namespace (env-<environment_id>)
-// with default-deny NetworkPolicies, ResourceQuota, LimitRange." All of them are
-// rendered together, because a namespace without them is the isolation boundary
-// in name only — which is exactly the state US-3.3 left behind.
+// WHAT THIS PACKAGE DELIBERATELY DOES NOT RENDER — D7 (INF-001 §1) also calls
+// for "default-deny NetworkPolicies, ResourceQuota, LimitRange". US-3.3a shipped
+// all of them and the security review found each one either inert or harmful:
+//
+//   - NetworkPolicies are NOT ENFORCED on the cells we build. infra/modules/
+//     gke-cell creates a GKE Standard cluster with no network_policy block and no
+//     ADVANCED_DATAPATH, so the API server stores every policy and no packet is
+//     ever dropped. Shipping them would put a green suite and a "D7 done" behind
+//     a boundary that does not exist.
+//   - Worse, the allow-set as written denies what CNPG requires — the metadata
+//     server (Workload Identity), GCS (WAL archiving) and the apiserver (the
+//     in-pod instance manager). Turning enforcement on would fence the first
+//     Postgres pod before it reached ready.
+//   - The LimitRange default (500m/512Mi) IS enforced, at admission, and the
+//     Cluster template declares no resources of its own — so it would silently
+//     become the hard cap on every managed Postgres, existing ones included.
+//   - The ResourceQuota envelope is a product decision with no owner in
+//     docs/founder-config.md and no dependence on plan.
+//
+// They are one change, not four: US-3.3c lands enforcement, the CNPG allow-set
+// and a founder-owned envelope together, because any one of them alone is either
+// a no-op or an outage.
 package tenancy
 
 import (
 	"fmt"
-	"strings"
+	"regexp"
 )
+
+// rfc1123Label is what the API server will accept as a namespace name, and it is
+// also the guard on a value this package interpolates into a manifest. A
+// namespace carrying a newline injects arbitrary YAML keys into the object; one
+// carrying an uppercase letter or a space is accepted here and rejected by the
+// API server, which converges forever with no control-plane signal.
+var rfc1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // Spec is what an environment needs in order to become a tenant boundary.
 type Spec struct {
 	Namespace string // env-<environment_id> (ADR-0012)
 	Cell      string
-	EnvID     string
 }
 
 // Manifest is one rendered object.
@@ -38,14 +61,14 @@ type Manifest struct {
 	YAML       []byte
 }
 
-// Render produces the namespace and its D7 policies.
+// Render produces the environment's namespace.
 //
-// ORDER IS LOAD-BEARING: the Namespace is first, because everything after it is
-// namespaced and applying into a namespace that does not exist yet is a 404.
-// Callers must apply in slice order.
+// ORDER IS LOAD-BEARING for callers: the Namespace must be applied before
+// anything namespaced, because applying into a namespace that does not exist yet
+// is a 404. Callers must apply in slice order.
 func Render(s Spec) ([]Manifest, error) {
-	if s.Namespace == "" || s.EnvID == "" {
-		return nil, fmt.Errorf("tenancy: namespace and env id are required")
+	if s.Namespace == "" {
+		return nil, fmt.Errorf("tenancy: namespace is required")
 	}
 	if s.Cell == "" {
 		return nil, fmt.Errorf("tenancy: cell is required — every row carries cell_id (D7)")
@@ -53,123 +76,36 @@ func Render(s Spec) ([]Manifest, error) {
 	// The namespace name is the control plane's to choose (ADR-0012,
 	// env-<environment_id>). Refuse anything else rather than deriving a second
 	// opinion here — two derivations is how they drift.
-	if !strings.HasPrefix(s.Namespace, "env-") {
+	//
+	// Checked as a whole label, not as a prefix: "env- x" and "env-UP" and a
+	// namespace with an embedded newline all carry the prefix.
+	if len(s.Namespace) > 63 || !rfc1123Label.MatchString(s.Namespace) {
+		return nil, fmt.Errorf("tenancy: namespace %q is not an RFC1123 label", s.Namespace)
+	}
+	if len(s.Namespace) < 5 || s.Namespace[:4] != "env-" {
 		return nil, fmt.Errorf("tenancy: namespace %q is not env-<environment_id> (ADR-0012)", s.Namespace)
 	}
+	// The cell is interpolated as a label VALUE and is subject to the same
+	// injection: a newline in it adds a key to the object.
+	if len(s.Cell) > 63 || !rfc1123Label.MatchString(s.Cell) {
+		return nil, fmt.Errorf("tenancy: cell %q is not an RFC1123 label", s.Cell)
+	}
 
-	ns := s.Namespace
+	// NOTE ON LABELS — there is deliberately no steloit.dev/environment-id here.
+	// The agent does not receive the environment id; the desired doc carries the
+	// namespace only. US-3.3a labelled it strings.TrimPrefix(namespace, "env-"),
+	// which yields "9f3c1a2b" for the id "env_9f3c1a2b" — the label named
+	// something that exists nowhere. The namespace NAME already identifies the
+	// environment (it is env-<id>); a label restating a lossy re-derivation of
+	// the name is not a second source, it is a second chance to be wrong.
 	return []Manifest{
-		{Kind: "Namespace", Name: ns, YAML: []byte(fmt.Sprintf(`apiVersion: v1
+		{Kind: "Namespace", Name: s.Namespace, YAML: []byte(fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
   name: %s
   labels:
-    steloit.dev/environment-id: %s
     steloit.dev/cell: %s
     steloit.dev/tenant: "true"
-`, ns, s.EnvID, s.Cell))},
-
-		// DEFAULT-DENY, BOTH DIRECTIONS, stated rather than implied.
-		//
-		// An empty podSelector selects every pod in the namespace, and naming a
-		// policyType with no matching rules denies all traffic of that type.
-		// Ingress and Egress are SEPARATE denials: a policy with only Ingress
-		// leaves egress wide open, and egress is the half that lets a compromised
-		// pod reach the metadata server and other tenants.
-		{Kind: "NetworkPolicy", Name: "default-deny-all", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-all
-  namespace: %s
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-`, ns))},
-
-		// DNS is the one egress exception, scoped to kube-dns rather than opened
-		// to the cluster. Without it every pod fails to resolve anything,
-		// including its own database service — a default-deny that breaks the
-		// product does not ship, it gets reverted.
-		{Kind: "NetworkPolicy", Name: "allow-dns-egress", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-dns-egress
-  namespace: %s
-spec:
-  podSelector: {}
-  policyTypes:
-    - Egress
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-`, ns))},
-
-		// Same-namespace traffic. A service must reach its own database, and the
-		// default-deny above forbids even that until this allows it. Scoped to
-		// the namespace, so it is not a hole in the tenant boundary.
-		{Kind: "NetworkPolicy", Name: "allow-same-namespace", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: allow-same-namespace
-  namespace: %s
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector: {}
-  egress:
-    - to:
-        - podSelector: {}
-`, ns))},
-
-		{Kind: "ResourceQuota", Name: "env-quota", YAML: []byte(fmt.Sprintf(`apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: env-quota
-  namespace: %s
-spec:
-  hard:
-    requests.cpu: "8"
-    requests.memory: 16Gi
-    limits.cpu: "16"
-    limits.memory: 32Gi
-    persistentvolumeclaims: "16"
-    count/services: "32"
-`, ns))},
-
-		// A ResourceQuota constraining requests/limits REJECTS any pod that omits
-		// them. LimitRange supplies the defaults, so the quota is enforceable
-		// without every workload spelling them out. The two are a PAIR — shipping
-		// the quota alone makes the namespace refuse ordinary pods.
-		{Kind: "LimitRange", Name: "env-limits", YAML: []byte(fmt.Sprintf(`apiVersion: v1
-kind: LimitRange
-metadata:
-  name: env-limits
-  namespace: %s
-spec:
-  limits:
-    - type: Container
-      default:
-        cpu: 500m
-        memory: 512Mi
-      defaultRequest:
-        cpu: 100m
-        memory: 128Mi
-`, ns))},
+`, s.Namespace, s.Cell))},
 	}, nil
 }

@@ -149,9 +149,19 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 			"first converge into a new environment 404s", nsAt, clusterAt)
 	}
 
-	// D8-adjacent: the namespace came from placement, not a guess.
-	if !strings.Contains(joined, "namespace: env-9f3c1a2b") {
-		t.Fatal("rendered manifest not placed in the resolved namespace")
+	// D8-adjacent: the SERVICE manifest came from placement, not a guess.
+	//
+	// Asserted against the Cluster object specifically. US-3.3a's first version
+	// searched the concatenated applied set, which the tenancy Namespace also
+	// satisfies — so mutating driver.Spec.Namespace to "env-victim", rendering
+	// one tenant's database into another tenant's namespace, left this test
+	// GREEN. An assertion answered by a different object than the one it names
+	// is not an assertion.
+	if clusterAt < 0 {
+		t.Fatal("no Cluster in the applied set")
+	}
+	if !strings.Contains(string(objs[clusterAt]), "namespace: env-9f3c1a2b") {
+		t.Fatalf("the CNPG Cluster was not placed in the resolved namespace:\n%s", objs[clusterAt])
 	}
 }
 
@@ -248,14 +258,14 @@ func TestApplyIsIdempotent(t *testing.T) {
 	}
 }
 
-// mustRender is what ONE converge applies: the environment's namespace and D7
-// policies first (US-3.3a), then the service's own manifests. Both halves are
+// mustRender is what ONE converge applies: the environment's namespace first
+// (US-3.3a), then the service's own manifests. Both halves are
 // DERIVED from the renderers rather than retyped, so a manifest added to either
 // is covered without anyone remembering.
 func mustRender(t *testing.T) [][]byte {
 	t.Helper()
 	tm, err := tenancy.Render(tenancy.Spec{
-		Namespace: "env-9f3c1a2b", Cell: "cell-0", EnvID: "9f3c1a2b",
+		Namespace: "env-9f3c1a2b", Cell: "cell-0",
 	})
 	if err != nil {
 		t.Fatal(err)
