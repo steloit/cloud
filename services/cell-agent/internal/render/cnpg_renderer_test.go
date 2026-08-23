@@ -13,6 +13,7 @@ import (
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver/cnpg"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -95,7 +96,7 @@ func svc(id, status string) agent.DesiredService {
 		ID: id, CellID: "cell-0", Product: "postgres", Status: status, Generation: 1,
 		Desired: map[string]any{
 			"product": "postgres", "shape": map[string]any{"size": "dev"},
-			"namespace": "acme--prod",
+			"namespace": "env-9f3c1a2b",
 		},
 	}
 }
@@ -113,16 +114,43 @@ func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
 	if status != "ready" {
 		t.Fatalf("healthy cluster → want ready, got %q", status)
 	}
-	objs := a.applied["acme--prod"]
-	if len(objs) != 2 { // Cluster + ScheduledBackup (T3.4)
-		t.Fatalf("expected the CNPG Cluster + base backup applied, got %d objects", len(objs))
+	objs := a.applied["env-9f3c1a2b"]
+	// Asserted by KIND, not by count or position: a count breaks whenever either
+	// renderer legitimately grows an object, and then gets "fixed" by bumping the
+	// number, which asserts nothing.
+	joined := ""
+	for _, o := range objs {
+		joined += string(o)
 	}
-	joined := string(objs[0]) + string(objs[1])
-	if !strings.Contains(joined, "kind: Cluster") || !strings.Contains(joined, "kind: ScheduledBackup") {
-		t.Fatal("applied objects are not the CNPG cluster + base backup")
+	for _, kind := range []string{"kind: Cluster", "kind: ScheduledBackup"} {
+		if !strings.Contains(joined, kind) {
+			t.Fatalf("the applied set does not contain %q", kind)
+		}
 	}
+
+	// ORDERING IS THE INVARIANT (US-3.3a). The Namespace must be applied before
+	// anything namespaced, or the first converge into a new environment 404s.
+	// Asserted on the real applied slice rather than on tenancy.Render's output,
+	// because the ordering that matters is the one the APPLIER sees.
+	nsAt, clusterAt := -1, -1
+	for i, o := range objs {
+		if strings.Contains(string(o), "kind: Namespace") && nsAt < 0 {
+			nsAt = i
+		}
+		if strings.Contains(string(o), "kind: Cluster") && clusterAt < 0 {
+			clusterAt = i
+		}
+	}
+	if nsAt < 0 {
+		t.Fatal("no Namespace was applied — nothing creates the env namespace, which is the whole of US-3.3a")
+	}
+	if clusterAt < 0 || nsAt > clusterAt {
+		t.Fatalf("Namespace applied at %d, Cluster at %d — the namespace must come FIRST or the "+
+			"first converge into a new environment 404s", nsAt, clusterAt)
+	}
+
 	// D8-adjacent: the namespace came from placement, not a guess.
-	if !strings.Contains(string(objs[0]), "namespace: acme--prod") {
+	if !strings.Contains(joined, "namespace: env-9f3c1a2b") {
 		t.Fatal("rendered manifest not placed in the resolved namespace")
 	}
 }
@@ -185,7 +213,7 @@ func TestDeletingConvergesToGoneAndDeletes(t *testing.T) {
 			t.Fatalf("teardown addressed the RAW service id %q — the driver named it svc-db01", d)
 		}
 	}
-	if a.deleted[0] != "acme--prod/Cluster/svc-db01" {
+	if a.deleted[0] != "env-9f3c1a2b/Cluster/svc-db01" {
 		t.Fatalf("teardown must delete the cluster by its driver name: %v", a.deleted)
 	}
 	if a.applies != 0 {
@@ -215,24 +243,37 @@ func TestApplyIsIdempotent(t *testing.T) {
 	if a.applies != 3 {
 		t.Fatalf("expected 3 idempotent applies, got %d", a.applies)
 	}
-	if !bytesEqual(a.applied["acme--prod"], mustRender(t)) {
+	if !bytesEqual(a.applied["env-9f3c1a2b"], mustRender(t)) {
 		t.Fatal("repeated converge produced different manifests — not idempotent")
 	}
 }
 
+// mustRender is what ONE converge applies: the environment's namespace and D7
+// policies first (US-3.3a), then the service's own manifests. Both halves are
+// DERIVED from the renderers rather than retyped, so a manifest added to either
+// is covered without anyone remembering.
 func mustRender(t *testing.T) [][]byte {
 	t.Helper()
+	tm, err := tenancy.Render(tenancy.Spec{
+		Namespace: "env-9f3c1a2b", Cell: "cell-0", EnvID: "9f3c1a2b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out [][]byte
+	for _, o := range tm {
+		out = append(out, o.YAML)
+	}
 	m, err := cnpg.New().Render(driver.Spec{
-		Name: "svc_db01", Namespace: "acme--prod", Product: "postgres",
+		Name: "svc_db01", Namespace: "env-9f3c1a2b", Product: "postgres",
 		Shape: map[string]any{"size": "dev"}, Instances: 1, Cell: "cell-0",
 		GSAEmail: "sa@steloit-dev.iam.gserviceaccount.com", WALBucket: "steloit-dev-wal-customer",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := make([][]byte, len(m))
-	for i, o := range m {
-		out[i] = o.YAML
+	for _, o := range m {
+		out = append(out, o.YAML)
 	}
 	return out
 }
@@ -264,7 +305,7 @@ func TestApplyErrorSurfaces(t *testing.T) {
 // rather than at apply time on a live cluster.
 func TestNamespaceSurvivesTheWire(t *testing.T) {
 	// exactly what the api's desiredDoc produces (US-3.3 Step 1)
-	apiDesired := []byte(`{"product":"postgres","namespace":"acme--prod","shape":{"size":"dev"}}`)
+	apiDesired := []byte(`{"product":"postgres","namespace":"env-9f3c1a2b","shape":{"size":"dev"}}`)
 	// exactly how the poll ships a row and the agent decodes it
 	wire := []byte(`{"id":"svc_db01","cell_id":"cell-0","product":"postgres","status":"provisioning","generation":1,"desired":` + string(apiDesired) + `}`)
 	var decoded agent.DesiredService
@@ -275,7 +316,7 @@ func TestNamespaceSurvivesTheWire(t *testing.T) {
 	if _, err := newRenderer(a).Converge(context.Background(), decoded); err != nil {
 		t.Fatalf("the renderer could not use the api-produced desired doc: %v", err)
 	}
-	if _, ok := a.applied["acme--prod"]; !ok {
+	if _, ok := a.applied["env-9f3c1a2b"]; !ok {
 		t.Fatalf("namespace did not survive api → wire → agent → renderer; applied into %v", keysOf(a.applied))
 	}
 }

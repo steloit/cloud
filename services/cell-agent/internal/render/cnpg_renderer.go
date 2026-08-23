@@ -10,9 +10,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 )
 
@@ -56,6 +58,28 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	return ns, nil
 }
 
+// tenancyManifests renders the environment's namespace and D7 isolation objects.
+//
+// The env id is the namespace's suffix — a DECOMPOSITION of the single value the
+// control plane resolved (ADR-0012, env-<environment_id>), not a second
+// derivation of it. tenancy.Render rejects a namespace that is not in that shape
+// rather than trusting this.
+func (r *CNPGRenderer) tenancyManifests(namespace string) ([][]byte, error) {
+	objs, err := tenancy.Render(tenancy.Spec{
+		Namespace: namespace,
+		Cell:      r.cell,
+		EnvID:     strings.TrimPrefix(namespace, "env-"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)
+	}
+	yamls := make([][]byte, len(objs))
+	for i, o := range objs {
+		yamls[i] = o.YAML
+	}
+	return yamls, nil
+}
+
 // Converge renders → applies → observes. A deleting service tears down and
 // reports gone. Everything else applies the CNPG manifests and returns the
 // observed status mapped to the reconciler vocabulary (ADR-024): the cluster is
@@ -87,6 +111,23 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 		return "gone", nil
 	}
 
+	// THE ENV NAMESPACE AND ITS D7 BOUNDARY COME FIRST (US-3.3a).
+	//
+	// Nothing created this namespace before: not the control plane (which has no
+	// kube dependency at all), not terraform (which makes only cnpg-system and
+	// control-plane), not the agent. The live e2e worked because a runbook ran
+	// `kubectl create ns` in preflight, so a genuinely new project/env would 404
+	// on first apply. And D7 requires the namespace to CARRY default-deny
+	// NetworkPolicies, a ResourceQuota and a LimitRange — none existed, so the
+	// isolation boundary was nominal.
+	//
+	// Applied on every converge, not once: SSA is idempotent, and level-triggered
+	// means a namespace or policy deleted out from under us comes back.
+	tenancyObjs, err := r.tenancyManifests(namespace)
+	if err != nil {
+		return "", err
+	}
+
 	spec := driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
@@ -97,9 +138,15 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	if err != nil {
 		return "", fmt.Errorf("render: %w", err)
 	}
-	objs := make([][]byte, len(manifests))
-	for i, m := range manifests {
-		objs[i] = m.YAML
+	// ONE Apply, in order: the namespace, then its D7 policies, then the service.
+	// Apply iterates in slice order, so the ordering invariant lives in
+	// tenancy.Render's documented ordering rather than being re-established here
+	// — and a single call keeps "how many times did we apply" meaning one
+	// converge, which is what the retry accounting asserts.
+	objs := make([][]byte, 0, len(tenancyObjs)+len(manifests))
+	objs = append(objs, tenancyObjs...)
+	for _, m := range manifests {
+		objs = append(objs, m.YAML)
 	}
 	if err := r.applier.Apply(ctx, namespace, objs); err != nil {
 		return "", fmt.Errorf("render: apply %s: %w", svc.ID, err)

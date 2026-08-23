@@ -221,8 +221,8 @@ func (c *Client) auth(req *http.Request) {
 // (Cluster→clusters, ScheduledBackup→scheduledbackups, VolumeSnapshot→
 // volumesnapshots); an unknown kind is an error rather than a wrong guess.
 func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
-	if kind == "" || name == "" || namespace == "" {
-		return "", fmt.Errorf("kube: manifest missing kind/name/namespace")
+	if kind == "" || name == "" {
+		return "", fmt.Errorf("kube: manifest missing kind/name")
 	}
 	plural, ok := plurals[kind]
 	if !ok {
@@ -232,7 +232,23 @@ func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
 	if !strings.Contains(apiVersion, "/") { // core group, e.g. "v1"
 		prefix = "/api/" + apiVersion
 	}
+	// CLUSTER-SCOPED kinds live at /<prefix>/<plural>/<name>. A Namespace nested
+	// under /namespaces/<ns>/ is a 404 at apply time — the same class the plural
+	// map exists to prevent, one level up. US-3.3a needs this because the agent
+	// must create the env namespace itself, and a namespace has no namespace.
+	if clusterScoped[kind] {
+		return fmt.Sprintf("%s/%s/%s", prefix, plural, name), nil
+	}
+	if namespace == "" {
+		return "", fmt.Errorf("kube: %s/%s is namespaced but no namespace was given", kind, name)
+	}
 	return fmt.Sprintf("%s/namespaces/%s/%s/%s", prefix, namespace, plural, name), nil
+}
+
+// clusterScoped is explicit for the same reason plurals is: guessing scope from
+// the kind name is how a manifest silently applies to the wrong path.
+var clusterScoped = map[string]bool{
+	"Namespace": true,
 }
 
 // plurals is explicit, not inferred: a wrong pluralization is a 404 at apply
@@ -245,4 +261,9 @@ var plurals = map[string]string{
 	"Backup":          "backups",
 	"Secret":          "secrets",
 	"StatefulSet":     "statefulsets",
+	// US-3.3a — the env namespace and its D7 isolation boundary.
+	"Namespace":     "namespaces",
+	"NetworkPolicy": "networkpolicies",
+	"ResourceQuota": "resourcequotas",
+	"LimitRange":    "limitranges",
 }

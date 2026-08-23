@@ -193,3 +193,58 @@ func TestDeleteRoutesByKind(t *testing.T) {
 		t.Fatalf("ScheduledBackup delete routed to %q, want %q (a /clusters/ path 404s and orphans it)", got[0].path, want)
 	}
 }
+
+// A Namespace is CLUSTER-SCOPED: it lives at /api/v1/namespaces/<name>, not
+// nested under /namespaces/<ns>/. Nesting it is a 404 at apply time on a live
+// cluster — the same class the plural map exists to prevent, one level up.
+// US-3.3a needs this because the agent creates the env namespace itself, and a
+// namespace has no namespace.
+func TestClusterScopedKindsGetAClusterScopedPath(t *testing.T) {
+	got, err := resourcePath("v1", "Namespace", "", "env-9f3c1a2b")
+	if err != nil {
+		t.Fatalf("a Namespace with no namespace must be routable: %v", err)
+	}
+	if want := "/api/v1/namespaces/env-9f3c1a2b"; got != want {
+		t.Fatalf("Namespace path = %q, want %q", got, want)
+	}
+	// Even when a namespace IS supplied (the applier passes the env namespace for
+	// the whole batch), a cluster-scoped kind must ignore it rather than nest.
+	got, err = resourcePath("v1", "Namespace", "env-9f3c1a2b", "env-9f3c1a2b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/api/v1/namespaces/env-9f3c1a2b"; got != want {
+		t.Fatalf("Namespace path with a namespace arg = %q, want %q — it must not nest", got, want)
+	}
+}
+
+// The negative half: a NAMESPACED kind with no namespace must be refused, not
+// silently routed to a cluster-scoped path where it would apply to the wrong
+// place or 404.
+func TestNamespacedKindsStillRequireANamespace(t *testing.T) {
+	if _, err := resourcePath("v1", "Secret", "", "creds"); err == nil {
+		t.Fatal("a namespaced kind with no namespace was accepted — it would apply to the wrong path")
+	}
+}
+
+// The four D7 kinds must all be routable; an unknown kind is a 404 at apply time.
+func TestD7KindsAreRoutable(t *testing.T) {
+	for kind, want := range map[string]string{
+		"NetworkPolicy": "/apis/networking.k8s.io/v1/namespaces/env-x/networkpolicies/p",
+		"ResourceQuota": "/api/v1/namespaces/env-x/resourcequotas/p",
+		"LimitRange":    "/api/v1/namespaces/env-x/limitranges/p",
+	} {
+		api := "v1"
+		if kind == "NetworkPolicy" {
+			api = "networking.k8s.io/v1"
+		}
+		got, err := resourcePath(api, kind, "env-x", "p")
+		if err != nil {
+			t.Errorf("%s is not routable: %v", kind, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s path = %q, want %q", kind, got, want)
+		}
+	}
+}
