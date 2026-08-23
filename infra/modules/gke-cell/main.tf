@@ -67,11 +67,15 @@ resource "google_container_cluster" "cell" {
   # for an existing Standard cluster; changing it later rebuilds the cluster and
   # its node pools.
   #
-  # The premise is that no cell exists yet. Corroborated but DATED: this module
-  # has never been applied (no env has completed the README bootstrap, so no
-  # state exists), and infra/spike/results/teardown.log's orphan sweep shows an
-  # empty cluster listing as of 2026-07-19. It is not a present-tense verified
-  # fact — an earlier revision of this comment asserted one.
+  # The premise is that no cell exists yet. VERIFIED 2026-08-23 against the live
+  # project, not inferred: `gcloud container clusters list --project=steloit-dev`
+  # returns `[]`, and `gs://steloit-dev-tfstate/dev/default.tfstate` (serial 47)
+  # holds exactly ONE resource — module.project_base's state bucket. This module
+  # has never been in state. No Cloud SQL, no compute instances either.
+  #
+  # (An earlier revision asserted this in the present tense while the author
+  # could not run the command; it was then softened to dated corroboration. This
+  # is the measured version.)
   #
   # If a cell DOES exist, the two envs differ sharply: cell0 sets
   # deletion_protection = true, so a forced replacement aborts at apply, loudly.

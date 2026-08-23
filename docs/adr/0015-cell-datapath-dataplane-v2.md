@@ -50,9 +50,11 @@ produces *no* denials at all is a namespace whose policies are being ignored.
 cluster, so this is create-time-only — free before the first cell exists, a full
 cluster-and-node-pool rebuild afterwards. Calico is the option whose cost does
 *not* depend on that premise, which is a real argument for it; the counter is that
-the premise is corroborated (the module has never been applied — no env has
-completed the README bootstrap, so no state exists) and the observability
-difference is permanent while the timing difference is one-off.
+the premise is **verified** — as of 2026-08-23, `gcloud container clusters list
+--project=steloit-dev` returns `[]` and `gs://steloit-dev-tfstate/dev/default.tfstate`
+(serial 47) holds exactly one resource, the state bucket itself, so `gke-cell` has
+never been in state — and the observability difference is permanent while the
+timing difference is one-off.
 
 ## Consequences
 
