@@ -2,7 +2,7 @@
 id: US-3.12
 title: "The reconcile status contract advertises two values the API now refuses, and one that no longer means what it says"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -72,3 +72,49 @@ change, not a drive-by (AGENTS.md §7).
 
 - `services/api/internal/provisioning/services.go` — `ReportableByCell`, `ObservedStatus`
 - `services/api/internal/reconcile/http.go` — `statusVocab` and the 422 arm
+
+## Outcome
+
+The request enum for `POST /reconcile/{cell}/status` is now
+`[provisioning, ready, degraded, failed, gone]` — exactly what a cell can
+observe, plus the teardown signal. `suspended` and `deleting` are gone from the
+contract because the API refuses them (422), and generated types were
+regenerated, not hand-edited.
+
+Both prose defects are fixed too: the operation description now names **both**
+409s (a generation mismatch, and a report that took its edge but did not finish
+the generation), and the `status` description says what an omitted status
+actually does — it asserts nothing about status, so it finishes the generation
+only when the row already rests on a settled one.
+
+### The binding reads the contract, not a third copy of it
+
+`TestTheRequestEnumAdmitsExactlyWhatACellMayReport` probes the **generated**
+`PostReconcileStatusJSONBodyStatus.Valid()` — which oapi-codegen derives from the
+spec — against `provisioning.ReportableByCell`, over the whole ADR-024 vocabulary
+plus `gone`/`""`/junk. So it asserts the contract *as shipped*, a status added to
+the machine is swept automatically, and there is no fourth list to drift.
+Re-adding `suspended` to the enum is RED (measured: 3 failing).
+
+### One asymmetry kept deliberately
+
+`reconcile`'s wire gate `statusVocab` stays WIDER than the contract enum. It
+mirrors the customer-facing `ServiceStatus` so that a cell sending `suspended`
+gets the specific refusal — *"a lifecycle state the control plane sets, not
+something a cell can observe"* — rather than the generic *"not in the ADR-024
+vocabulary"*, which is true of neither. `TestTheWireGateAcceptsEverythingTheContractAdvertises`
+asserts containment and pins the asymmetry so removing it is a deliberate act.
+
+### Evidence
+
+```
+make gen-go                                          types regenerated; re-running it is a no-op
+services/api        go test -count=1 -race ./...     all ok (containers)
+packages/contracts/go, apps/cli, services/cell-agent  go build && go vet   OK
+gofmt -l services/ packages/ apps/                   clean
+node scripts/spec-sync/validate.mjs                  OK: 244 tasks
+```
+
+CI's `make gen-go && git diff --cached --exit-code` gate is what makes the
+contract and the generated types unable to drift; this change is inside that
+gate, not beside it.

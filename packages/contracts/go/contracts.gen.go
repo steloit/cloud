@@ -1605,20 +1605,16 @@ func (e PostReconcileStatusJSONBodyConditionsStatus) Valid() bool {
 // Defines values for PostReconcileStatusJSONBodyStatus.
 const (
 	PostReconcileStatusJSONBodyStatusDegraded     PostReconcileStatusJSONBodyStatus = "degraded"
-	PostReconcileStatusJSONBodyStatusDeleting     PostReconcileStatusJSONBodyStatus = "deleting"
 	PostReconcileStatusJSONBodyStatusFailed       PostReconcileStatusJSONBodyStatus = "failed"
 	PostReconcileStatusJSONBodyStatusGone         PostReconcileStatusJSONBodyStatus = "gone"
 	PostReconcileStatusJSONBodyStatusProvisioning PostReconcileStatusJSONBodyStatus = "provisioning"
 	PostReconcileStatusJSONBodyStatusReady        PostReconcileStatusJSONBodyStatus = "ready"
-	PostReconcileStatusJSONBodyStatusSuspended    PostReconcileStatusJSONBodyStatus = "suspended"
 )
 
 // Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyStatus enum.
 func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
 	switch e {
 	case PostReconcileStatusJSONBodyStatusDegraded:
-		return true
-	case PostReconcileStatusJSONBodyStatusDeleting:
 		return true
 	case PostReconcileStatusJSONBodyStatusFailed:
 		return true
@@ -1627,8 +1623,6 @@ func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
 	case PostReconcileStatusJSONBodyStatusProvisioning:
 		return true
 	case PostReconcileStatusJSONBodyStatusReady:
-		return true
-	case PostReconcileStatusJSONBodyStatusSuspended:
 		return true
 	default:
 		return false
@@ -3445,7 +3439,7 @@ type PostReconcileStatusJSONBody struct {
 	ObservedGeneration int64  `json:"observed_generation"`
 	ServiceId          string `json:"service_id"`
 
-	// Status ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+	// Status what the cell OBSERVES about the workload. `suspended` and `deleting` are NOT accepted (422): they are lifecycle states the control plane sets, never things a cell can observe. `gone` means the workload is absent — a completed teardown when the service is deleting, and a workload that vanished while desired still wants it alive otherwise (the row deliberately stays outstanding so the next converge re-creates it). Omit for an observation-only heartbeat: it asserts nothing about status, so it finishes the generation only when the row already rests on a settled status (ready/failed).
 	Status *PostReconcileStatusJSONBodyStatus `json:"status,omitempty"`
 }
 
@@ -4564,7 +4558,7 @@ type ClientInterface interface {
 
 	// PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -4573,7 +4567,7 @@ type ClientInterface interface {
 
 	// PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -7063,7 +7057,7 @@ func (c *Client) GetDesiredState(ctx context.Context, cellPathParam string, para
 
 // PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 //
 // Takes any type of body and a specified content type.
 //
@@ -7082,7 +7076,7 @@ func (c *Client) PostReconcileStatusWithBody(ctx context.Context, cellPathParam 
 
 // PostReconcileStatus Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -14156,7 +14150,7 @@ type ClientWithResponsesInterface interface {
 
 	// PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -14165,7 +14159,7 @@ type ClientWithResponsesInterface interface {
 
 	// PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
-	// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+	// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -21774,7 +21768,7 @@ func (c *ClientWithResponses) GetDesiredStateWithResponse(ctx context.Context, c
 
 // PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -21789,7 +21783,7 @@ func (c *ClientWithResponses) PostReconcileStatusWithBodyWithResponse(ctx contex
 
 // PostReconcileStatusWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 //
-// The agent reports observed state. Advances observed_generation, stamps last_reconciled_at, and rides the cell heartbeat. A report whose generation is not the one desired holds right now is rejected (409) rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. Status edges follow ADR-024 and emit spine events; metering starts at ready, never before.
+// The agent reports observed state, and the control plane decides what it MEANS: the report is mapped onto a status legal from the service's current one (ADR-024), never applied raw. Rides the cell heartbeat, which is touched even for a report that is then refused. There are two distinct 409s. (1) A report whose generation is not the one desired holds right now is rejected rather than applied — a behind report (the agent converged an older desired) and an impossible ahead report are both refused, so a converge of stale desired never marks current desired done or drives its status. (2) A report that does not FINISH the generation: the status edge was taken and durably committed, but the row came to rest somewhere still being watched (`provisioning`, `degraded`) or the report could not be placed at all, so observed_generation is deliberately NOT advanced and the row stays outstanding for the next tick. Both are ordinary events for an agent — re-poll /desired and report again. Status edges emit spine events; metering starts at ready, never before.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
