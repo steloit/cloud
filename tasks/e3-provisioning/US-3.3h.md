@@ -188,6 +188,52 @@ hand. There is no per-hop flag left to get wrong.
   task exists to remove. `ErrNotConverged` now names both sides, which is the
   only trace such a report leaves.
 
+### Round 4: the guard had a second face, and it failed open
+
+QA's second pass found four blocking gaps. The worst is **the same defect round 3
+fixed, in the other representation.**
+
+Round 3 stopped a cell *asking* for a delete — `deleting`/`suspended` in the
+**observed** position, refused in the mapping and 422'd at the route. It did
+nothing about the **from** position, and 13 of the 16 held-row pairs were pinned
+by nothing. `DeleteService` bumps the generation and only *then* transitions to
+`deleting`, so a deleting row is outstanding **by construction** — that is what
+redelivers the `deleting:true` desired doc. One plain `ready` report from a cell
+that had torn nothing down finished the generation: the row left
+`ListDesiredForCell`, the desired doc was never redelivered, the cluster kept
+running, and `DeleteService` answered "deletion already in progress" forever.
+Measured through the real route: **HTTP 200, `observed_generation` 6→7.**
+
+A held row now converges only on `gone` — evidence the hold was *applied*. Step 2
+stops a cell asking for a delete; step 1 stops it **abandoning** one.
+
+**The sweeps were jointly vacuous.** Every convergence invariant was guarded by
+`if !o.Converged() { continue }`, so all of them could only punish converging too
+*eagerly*. Measured: replacing the whole body of `ObservedStatus` with
+`return Observation{}` — a mapping that does nothing for all 72 pairs — left
+**all five sweeps green**. Under-convergence is the *original* defect of this
+task, so the sweep was blind to half the harm it claimed. The positive half is
+now its own sweep; the inert mapping fails 26 tests.
+
+**The concurrency test did not race — and my first fix made it worse.** Adding
+the fixture barrier forced every caller to read the same status, so all computed
+the same destination and the fake's "already there" arm rejected the duplicates:
+detection of a deleted FROM-guard went from 3/20 to **0/10**. The window exists
+only when callers compute *different* destinations. Staged deterministically now
+(A reads `failed` and is held; B advances to `provisioning`; C finishes to
+`ready`; A is released still holding its stale read) — **10/10**. Both shapes are
+kept, for different properties.
+
+**Totality was a count, not coverage.** `len(everyPair()) == 8*8` stayed green
+with the whole `suspended` row, the whole `suspended` column and the empty-`from`
+row replaced by junk — the same defect as the `if checked < 30` floor round 3
+deleted. It asserts *membership* of the vocabulary now.
+
+Also: the ADR-024 vocabulary was retyped in **four** places with nothing tying
+them, so a status added to the machine would have been swept by none.
+`provisioning.StatusVocabulary` is the one definition and the rest derive from
+it. `settledStatuses`' `suspended`/`deleting` entries were dead and are gone.
+
 ### A defect the invariant found that no reviewer did
 
 Writing the harm as a sweep (*a converged row must not rest on a state still
@@ -267,8 +313,12 @@ node scripts/spec-sync/validate.mjs                 OK: 242 tasks
   its only writer). Nothing reads the column today; it matters to whatever
   staleness alerting consumes it.
 - A permanently degraded cluster now stays outstanding indefinitely — visible to
-  the customer as `degraded`, which the original defect was not. Terminalising it
-  is **US-3.11**.
+  the customer as `degraded`, which the original defect was not. **US-3.11 does
+  NOT cover this** (its ACs are about the *agent* distinguishing render errors);
+  citing it here was wrong, and the real gap is filed as **US-3.13**.
+- The route's OpenAPI **request enum** still advertises `suspended` and
+  `deleting`, which the API now refuses, and a heartbeat clause that no longer
+  holds. Real contract drift, outside this task's `files:` globs — **US-3.12**.
 - `ObservedStatus` is on the `Transitioner` interface as a method that ignores
   its receiver. `Transition` earns the interface; this member does not, and a
   package-level call would be equivalent. Left as-is to keep one owner for "when
