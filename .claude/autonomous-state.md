@@ -176,3 +176,13 @@ overflow wrote · `O28` medium — the container gate is negative-only · `O21`
 medium · `Q11` medium — a reveal-once webhook test failed once under `-race` ·
 `O18` low. Stray tracked empty file `300-line` at the repo root (from `c3f0876`,
 O24) — harmless, unowned, delete when convenient.
+
+**Container-suite flakiness is a PATTERN now, not one test.** Three separate
+local failures this session, each in a package the diff did not touch, each
+passing on a clean re-run: `TestConnectEnforcesThePostgres16Floor`
+(platform/db — "connection refused" then "invalid body length" against a
+just-started container) and `TestEmailOutboxDeliversInvite` (identity), plus
+`Q11`'s earlier one. CI has not reproduced any of them. Before treating one as a
+real failure: re-run the single package twice and check whether the diff touches
+it at all. Not yet filed — no diagnosis, and a flake report without one is
+noise; if a fourth appears, file it with the three timestamps.
