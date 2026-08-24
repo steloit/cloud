@@ -356,6 +356,13 @@ func TestDeleteRoutesEveryKindToItsOwnAPIGroup(t *testing.T) {
 		"Secret":          "/api/v1/namespaces/env-x/secrets/obj",
 		"StatefulSet":     "/apis/apps/v1/namespaces/env-x/statefulsets/obj",
 		"Namespace":       "/api/v1/namespaces/obj",
+		// US-3.3c/e. The two MAPS were bound to each other, but their VALUES
+		// were not: "networkpolicies" -> "networkpolicys" and v1 -> v1beta1 both
+		// survived, and per this file's own rule a 404 from a wrong path reads as
+		// "already gone" — a policy the agent believes it deleted and did not.
+		"NetworkPolicy": "/apis/networking.k8s.io/v1/namespaces/env-x/networkpolicies/obj",
+		"ResourceQuota": "/api/v1/namespaces/env-x/resourcequotas/obj",
+		"LimitRange":    "/api/v1/namespaces/env-x/limitranges/obj",
 	} {
 		var seen string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

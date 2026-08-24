@@ -594,3 +594,277 @@ func TestNoPolicyCarriesAnUnexpectedIPBlock(t *testing.T) {
 		}
 	}
 }
+
+// ---- the parsed policy model -------------------------------------------------
+//
+// The string tests above answer "does this text appear". That is not the same
+// question as "what does this policy DO", and the gap between them is where a
+// mutation lives: `operator: Exists` -> `DoesNotExist` inverts the AC 9
+// asymmetry and every substring still matches; a label left in a COMMENT
+// satisfies a grep while the selector is empty. Everything below parses.
+
+type npSelector struct {
+	MatchLabels      map[string]string `yaml:"matchLabels"`
+	MatchExpressions []struct {
+		Key      string   `yaml:"key"`
+		Operator string   `yaml:"operator"`
+		Values   []string `yaml:"values"`
+	} `yaml:"matchExpressions"`
+}
+
+func (s npSelector) empty() bool { return len(s.MatchLabels) == 0 && len(s.MatchExpressions) == 0 }
+
+type npPeer struct {
+	NamespaceSelector *npSelector `yaml:"namespaceSelector"`
+	PodSelector       *npSelector `yaml:"podSelector"`
+	IPBlock           *struct {
+		CIDR   string   `yaml:"cidr"`
+		Except []string `yaml:"except"`
+	} `yaml:"ipBlock"`
+}
+
+type npPort struct {
+	Protocol string `yaml:"protocol"`
+	Port     int    `yaml:"port"`
+	EndPort  *int   `yaml:"endPort"`
+}
+
+type npPolicy struct {
+	Metadata struct{ Name string } `yaml:"metadata"`
+	Spec     struct {
+		PodSelector npSelector `yaml:"podSelector"`
+		PolicyTypes []string   `yaml:"policyTypes"`
+		Ingress     []struct {
+			From  []npPeer `yaml:"from"`
+			Ports []npPort `yaml:"ports"`
+		} `yaml:"ingress"`
+		Egress []struct {
+			To    []npPeer `yaml:"to"`
+			Ports []npPort `yaml:"ports"`
+		} `yaml:"egress"`
+	} `yaml:"spec"`
+}
+
+func parsePolicies(t *testing.T) map[string]npPolicy {
+	t.Helper()
+	out := map[string]npPolicy{}
+	for _, m := range mustRender(t) {
+		if m.Kind != "NetworkPolicy" {
+			continue
+		}
+		var p npPolicy
+		if err := yaml.Unmarshal(m.YAML, &p); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+		out[p.Metadata.Name] = p
+	}
+	if len(out) == 0 {
+		t.Fatal("no policies parsed — every assertion below would be vacuous")
+	}
+	return out
+}
+
+// DEFAULT-DENY MUST ACTUALLY DENY, IN BOTH DIRECTIONS, FOR EVERY POD.
+//
+// Three mutations survived the name-only check: dropping `Egress` from
+// policyTypes (AC 9's metadata fencing evaporates), dropping `Ingress`
+// (cross-environment traffic opens — D7 is gone), and narrowing podSelector to
+// a label nothing carries (the boundary selects no pods at all). A policy NAMED
+// default-deny-all that denies nothing satisfied every other test in the package.
+func TestDefaultDenyDeniesBothDirectionsForEveryPod(t *testing.T) {
+	p, ok := parsePolicies(t)["default-deny-all"]
+	if !ok {
+		t.Fatal("no default-deny-all — the environment denies nothing by default")
+	}
+	if !p.Spec.PodSelector.empty() {
+		t.Errorf("default-deny-all selects %+v, not every pod — pods outside that selector are "+
+			"unrestricted and the boundary does not exist for them", p.Spec.PodSelector)
+	}
+	got := map[string]bool{}
+	for _, t2 := range p.Spec.PolicyTypes {
+		got[t2] = true
+	}
+	for _, want := range []string{"Ingress", "Egress"} {
+		if !got[want] {
+			t.Errorf("default-deny-all does not deny %s. Without Egress the metadata server is "+
+				"reachable by customer code (AC 9); without Ingress every environment is open "+
+				"to every other (D7).", want)
+		}
+	}
+	if len(p.Spec.PolicyTypes) != 2 {
+		t.Errorf("policyTypes = %v, want exactly [Ingress Egress]", p.Spec.PolicyTypes)
+	}
+}
+
+// THE CNPG SELECTOR IS EXACTLY `cnpg.io/cluster Exists` — parsed, not grepped.
+//
+// `Exists` -> `DoesNotExist` selects precisely the CUSTOMER pods: gVisor code
+// gets the metadata server and CNPG loses it, inverting AC 9 while every
+// substring check still passes. An empty matchLabels with the key left in a
+// comment does the same.
+func TestTheCNPGSelectorMatchesOperatorPodsAndOnlyThose(t *testing.T) {
+	for _, name := range []string{"allow-cnpg-egress", "allow-cnpg-operator-ingress"} {
+		p, ok := parsePolicies(t)[name]
+		if !ok {
+			t.Fatalf("%s is not rendered", name)
+		}
+		sel := p.Spec.PodSelector
+		if sel.empty() {
+			t.Errorf("%s selects EVERY pod — customer code obtains the metadata server and the "+
+				"API server, which AC 9 exists to prevent", name)
+			continue
+		}
+		if len(sel.MatchLabels) != 0 {
+			t.Errorf("%s uses matchLabels %v; the label is only present on some CNPG pods, so "+
+				"an equality match misses the bootstrap Job", name, sel.MatchLabels)
+		}
+		if len(sel.MatchExpressions) != 1 {
+			t.Fatalf("%s has %d matchExpressions, want exactly 1", name, len(sel.MatchExpressions))
+		}
+		e := sel.MatchExpressions[0]
+		if e.Key != "cnpg.io/cluster" || e.Operator != "Exists" {
+			t.Errorf("%s selects {key:%q operator:%q}, want {cnpg.io/cluster Exists}. "+
+				"DoesNotExist selects exactly the customer pods and inverts the asymmetry.",
+				name, e.Key, e.Operator)
+		}
+	}
+}
+
+// NO PEER MAY BE UNIVERSAL, in any of its spellings.
+//
+// The earlier check tested for a bare `{}` and for a namespaceSelector alone. It
+// missed `{namespaceSelector: {}, podSelector: {}}` — both keys PRESENT and both
+// EMPTY, which matches every pod in every namespace. On allow-same-namespace's
+// ingress that opens every environment to every other, which is D7 itself.
+func TestNoPeerIsUniversal(t *testing.T) {
+	for name, p := range parsePolicies(t) {
+		check := func(dir string, peers []npPeer) {
+			for i, peer := range peers {
+				nsEmpty := peer.NamespaceSelector == nil || peer.NamespaceSelector.empty()
+				podEmpty := peer.PodSelector == nil || peer.PodSelector.empty()
+				// A bare podSelector{} is namespace-scoped and is the intended
+				// "pods in THIS namespace" idiom — universal only when paired
+				// with an empty namespaceSelector, which widens it to all.
+				universal := peer.IPBlock == nil && podEmpty &&
+					peer.NamespaceSelector != nil && nsEmpty
+				if peer.IPBlock == nil && peer.PodSelector == nil && peer.NamespaceSelector == nil {
+					universal = true
+				}
+				if universal {
+					t.Errorf("%s %s peer %d matches EVERY pod in EVERY namespace — the boundary "+
+						"is a no-op for it", name, dir, i)
+				}
+				// A namespaceSelector with no podSelector is the whole namespace.
+				if peer.IPBlock == nil && peer.NamespaceSelector != nil && !nsEmpty && podEmpty {
+					if name == "allow-cnpg-operator-ingress" && dir == "ingress" {
+						// The one named exception (US-3.3j). Its argument is "that
+						// namespace is ours", so PIN THE NAMESPACE — keying the
+						// exception on the policy NAME alone let the selector be
+						// repointed at `default`, or emptied, green.
+						if peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "cnpg-system" {
+							t.Errorf("%s admits namespace %v, not cnpg-system — the exception's "+
+								"whole argument is that the namespace is one we create",
+								name, peer.NamespaceSelector.MatchLabels)
+						}
+						continue
+					}
+					t.Errorf("%s %s peer %d admits a whole namespace", name, dir, i)
+				}
+			}
+		}
+		for _, r := range p.Spec.Ingress {
+			check("ingress", r.From)
+		}
+		for _, r := range p.Spec.Egress {
+			check("egress", r.To)
+		}
+	}
+}
+
+// EVERY ALLOW RULE RESTRICTS ITS PORTS, and the metadata block stays a /32.
+//
+// Four survivors: the DNS rule losing `ports` (all ports to the resolver), the
+// metadata rule losing TCP/80, the operator rule losing TCP/8000, and the
+// metadata ipBlock widening 169.254.169.254/32 to 169.254.0.0/16.
+func TestEveryAllowRuleRestrictsItsPorts(t *testing.T) {
+	for name, p := range parsePolicies(t) {
+		if name == "default-deny-all" || name == "allow-same-namespace" {
+			continue // deny-all has no rules; same-namespace is intentionally all-ports
+		}
+		rules := 0
+		for _, r := range p.Spec.Ingress {
+			rules++
+			if len(r.Ports) == 0 {
+				t.Errorf("%s has an ingress rule with no port restriction", name)
+			}
+		}
+		for _, r := range p.Spec.Egress {
+			rules++
+			if len(r.Ports) == 0 {
+				t.Errorf("%s has an egress rule with no port restriction — the allowance is "+
+					"every port to that peer", name)
+			}
+			for _, pt := range r.Ports {
+				if pt.EndPort != nil {
+					t.Errorf("%s carries endPort, which Dataplane V2 does not enforce", name)
+				}
+			}
+			for _, peer := range r.To {
+				if peer.IPBlock != nil && strings.HasPrefix(peer.IPBlock.CIDR, "169.254.") &&
+					peer.IPBlock.CIDR != "169.254.169.254/32" {
+					t.Errorf("%s allows %s — the metadata allowance must be the single host, "+
+						"not the link-local range", name, peer.IPBlock.CIDR)
+				}
+			}
+		}
+		if rules == 0 {
+			t.Errorf("%s has no rules at all — it isolates its pods and allows nothing", name)
+		}
+	}
+}
+
+// THE API SERVER CIDR IS THE SPEC VALUE, NOT A CONSTANT.
+//
+// Hardcoding it in the template and dropping the Fprintf argument survived every
+// other test. This package already has TestTheCellLabelIsTheSpecCellAndNotAConstant
+// for exactly this class; the CIDR needs the same, and its own doc comment says
+// a wrong value here costs a live debugging session.
+func TestTheAPIServerCIDRIsTheSpecValueAndNotAConstant(t *testing.T) {
+	for _, cidr := range []string{"10.30.0.2/32", "172.31.4.9/32"} {
+		ms, err := tenancy.Render(tenancy.Spec{
+			Namespace: ns, Cell: cell, APIServerCIDR: cidr, Quota: proQuota,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body string
+		for _, m := range ms {
+			if m.Name == "allow-cnpg-egress" {
+				body = string(m.YAML)
+			}
+		}
+		if !strings.Contains(body, cidr) {
+			t.Errorf("rendered with APIServerCIDR=%s and the policy does not name it — the "+
+				"value is hardcoded, and a cell whose endpoint differs is fenced", cidr)
+		}
+	}
+}
+
+// ValidateCIDR is the boot gate; it must actually refuse.
+func TestValidateCIDRRefusesWhatWouldFenceOrWidenTheCell(t *testing.T) {
+	for _, bad := range []string{
+		"", "10.0.0.0", "not-a-cidr", "10.0.0.0/28 ", "999.999.999.999/99",
+		"0.0.0.0/0",  // unrestricted TCP/443 egress for every CNPG pod
+		"10.0.0.0/8", // a whole private range
+		"::1/128",    // not IPv4
+	} {
+		if err := tenancy.ValidateCIDR(bad); err == nil {
+			t.Errorf("ValidateCIDR accepted %q", bad)
+		}
+	}
+	for _, good := range []string{"10.30.0.2/32", "172.16.0.0/24"} {
+		if err := tenancy.ValidateCIDR(good); err != nil {
+			t.Errorf("ValidateCIDR refused %q: %v", good, err)
+		}
+	}
+}

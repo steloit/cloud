@@ -119,7 +119,15 @@ migration is worse than splitting them out. They are **US-3.3d** and **US-3.3e**
    proved the policies EXISTED and that default-deny denied; three mutations that
    widen the allows into a hole (`podSelector:{}`→`namespaceSelector:{}`,
    `egress: [- {}]`, DNS widened to all of kube-system) all survived green.
-4. **The agent has RBAC for the cluster-scoped namespace write.** This branch
+4. ~~**The agent has RBAC for the cluster-scoped namespace write.**~~ **MOVED TO
+   US-3.3k** — struck through here rather than deleted, the same way AC 1 was
+   when US-3.3f took it. There is still no ServiceAccount, ClusterRole or
+   Deployment for the agent anywhere in the repo, so there was nothing to grant a
+   permission TO; and this task ADDS a privilege (the agent now writes
+   `networkpolicies` on top of the cluster-scoped namespace write), which makes
+   the gap wider, not smaller. Original text follows.
+
+   **The agent has RBAC for the cluster-scoped namespace write.** This branch
    made the agent PATCH `/api/v1/namespaces/<name>` on every converge — a
    privilege it never had. There is no ServiceAccount, ClusterRole or Deployment
    artifact anywhere in the repo (`grep -rn "kind: ClusterRole\|kind: ServiceAccount\|serviceAccountName"`
@@ -230,7 +238,7 @@ the exact failure US-3.3a shipped.
 | 1 (struck) | already US-3.3f — Dataplane V2 confirmed live (`anetd` on every node) |
 | 2 | done — policy set restored WITH five CNPG allowances |
 | 3 | done — peers asserted structurally (parsed), one named exception → US-3.3j |
-| 4 | **NOT DONE** — see below |
+| 4 | ~~struck~~ → **US-3.3k** (this PR WIDENS the gap: it adds `networkpolicies` to what the agent writes) |
 | 5 | done — NodeLocal DNSCache confirmed live; Cloud DNS variant still unpinned |
 | 7 | done — `us33-e2e.sh` now FAILS on a broken boundary instead of describing it |
 | 8 | done — `endPort` refused on the rendered bytes |
@@ -268,5 +276,5 @@ fence the operator off every managed Postgres.
 services/cell-agent  go build && go vet && go test -count=1 -race ./...   ok
 gofmt -l services/ · terraform fmt -check -recursive infra/               clean
 terraform validate (envs/dev, envs/cell0)                                 Success
-node scripts/spec-sync/validate.mjs                                       OK: 246 tasks
+node scripts/spec-sync/validate.mjs                                       OK: 247 tasks
 ```
