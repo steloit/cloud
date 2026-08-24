@@ -4292,9 +4292,9 @@ export type PostReconcileStatusData = {
          */
         observed_generation: number;
         /**
-         * ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+         * what the cell OBSERVES about the workload. `suspended` and `deleting` are NOT accepted (422): they are lifecycle states the control plane sets, never things a cell can observe. `gone` means the workload is absent — a completed teardown when the service is deleting, and a workload that vanished while desired still wants it alive otherwise (the row deliberately stays outstanding so the next converge re-creates it). Omit for an observation-only heartbeat: it asserts nothing about status, so it finishes the generation only when the row already rests on a settled status (ready/failed).
          */
-        status?: 'provisioning' | 'ready' | 'degraded' | 'failed' | 'suspended' | 'deleting' | 'gone';
+        status?: 'provisioning' | 'ready' | 'degraded' | 'failed' | 'gone';
         /**
          * reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
          */

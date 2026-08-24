@@ -1596,20 +1596,16 @@ func (e PostReconcileStatusJSONBodyConditionsStatus) Valid() bool {
 // Defines values for PostReconcileStatusJSONBodyStatus.
 const (
 	PostReconcileStatusJSONBodyStatusDegraded     PostReconcileStatusJSONBodyStatus = "degraded"
-	PostReconcileStatusJSONBodyStatusDeleting     PostReconcileStatusJSONBodyStatus = "deleting"
 	PostReconcileStatusJSONBodyStatusFailed       PostReconcileStatusJSONBodyStatus = "failed"
 	PostReconcileStatusJSONBodyStatusGone         PostReconcileStatusJSONBodyStatus = "gone"
 	PostReconcileStatusJSONBodyStatusProvisioning PostReconcileStatusJSONBodyStatus = "provisioning"
 	PostReconcileStatusJSONBodyStatusReady        PostReconcileStatusJSONBodyStatus = "ready"
-	PostReconcileStatusJSONBodyStatusSuspended    PostReconcileStatusJSONBodyStatus = "suspended"
 )
 
 // Valid indicates whether the value is a known member of the PostReconcileStatusJSONBodyStatus enum.
 func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
 	switch e {
 	case PostReconcileStatusJSONBodyStatusDegraded:
-		return true
-	case PostReconcileStatusJSONBodyStatusDeleting:
 		return true
 	case PostReconcileStatusJSONBodyStatusFailed:
 		return true
@@ -1618,8 +1614,6 @@ func (e PostReconcileStatusJSONBodyStatus) Valid() bool {
 	case PostReconcileStatusJSONBodyStatusProvisioning:
 		return true
 	case PostReconcileStatusJSONBodyStatusReady:
-		return true
-	case PostReconcileStatusJSONBodyStatusSuspended:
 		return true
 	default:
 		return false
@@ -3436,7 +3430,7 @@ type PostReconcileStatusJSONBody struct {
 	ObservedGeneration int64  `json:"observed_generation"`
 	ServiceId          string `json:"service_id"`
 
-	// Status ADR-024 vocabulary; omit for an observation-only heartbeat; gone reports a completed teardown
+	// Status what the cell OBSERVES about the workload. `suspended` and `deleting` are NOT accepted (422): they are lifecycle states the control plane sets, never things a cell can observe. `gone` means the workload is absent — a completed teardown when the service is deleting, and a workload that vanished while desired still wants it alive otherwise (the row deliberately stays outstanding so the next converge re-creates it). Omit for an observation-only heartbeat: it asserts nothing about status, so it finishes the generation only when the row already rests on a settled status (ready/failed).
 	Status *PostReconcileStatusJSONBodyStatus `json:"status,omitempty"`
 }
 
