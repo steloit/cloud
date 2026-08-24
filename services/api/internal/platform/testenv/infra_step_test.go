@@ -16,6 +16,7 @@ package testenv
 // class dies with it.
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -295,4 +296,150 @@ func stripHCLComments(src string) string {
 		out.WriteString("\n")
 	}
 	return out.String()
+}
+
+// NOTHING MAY REINTRODUCE `kubernetes_manifest` (T1.4a).
+//
+// That resource resolves its GroupVersionKind against the live API at PLAN time.
+// On a from-zero apply there is no API yet — the cluster is created by the same
+// apply — and for a custom resource there is no CRD yet either, so the plan
+// fails before anything is created:
+//
+//	Error: API did not recognize GroupVersionKind from manifest
+//	       (CRD may not be installed)
+//
+// It is an acknowledged, still-open limitation of hashicorp/kubernetes (#1367,
+// #2597) and `depends_on` cannot fix it: validation runs before dependency
+// resolution. One such resource anywhere in `infra/` puts the whole cell back on
+// the `-target` bootstrap that T1.4a removed — and it would look completely
+// reasonable in review, because the failure only appears on a from-zero apply
+// that nobody runs by hand.
+//
+// A text guard, and it says so: the property is "this resource type is not used
+// here", which no terraform test can assert about a file that would fail to plan.
+func TestInfraNeverUsesKubernetesManifest(t *testing.T) {
+	root := filepath.Join(repoRoot, "infra")
+	var offenders []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".tf") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for i, line := range strings.Split(string(b), "\n") {
+			// The declaration only — the explanatory comments in cnpg/main.tf
+			// name the type deliberately and must stay readable.
+			if strings.HasPrefix(strings.TrimSpace(line), `resource "kubernetes_manifest"`) {
+				rel, _ := filepath.Rel(repoRoot, path)
+				offenders = append(offenders, fmt.Sprintf("%s:%d", rel, i+1))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking infra/: %v — this check must not pass by failing to look", err)
+	}
+	if len(offenders) > 0 {
+		t.Errorf("kubernetes_manifest is back at %v.\nIt needs the Kubernetes API at PLAN time, so a "+
+			"from-zero `terraform apply` cannot plan it — the cell returns to the -target bootstrap "+
+			"T1.4a removed. Use kubectl_manifest (alekc/kubectl), which defers to apply time.",
+			offenders)
+	}
+	// ...and the check must be looking at something.
+	if n := countTF(t, root); n < 5 {
+		t.Fatalf("only %d .tf files scanned under infra/ — the walk is not finding the tree", n)
+	}
+}
+
+func countTF(t *testing.T, root string) int {
+	t.Helper()
+	n := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".tf") {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+// EVERY `provider "kubectl"` MUST SET lazy_load (T1.4a).
+//
+// alekc/kubectl CONFIGURES at plan time and errors when host/CA are still
+// unknown — which is exactly the from-zero case T1.4a exists to fix. Measured
+// with the provider block copied verbatim and its host taken from a
+// not-yet-applied resource:
+//
+//	without lazy_load: Plan: 1 to add, then
+//	  Error: invalid provider configuration: default cluster has no server defined
+//	with lazy_load:    Plan: 2 to add, clean
+//
+// hashicorp/kubernetes and helm tolerate an unconfigured client at plan; this
+// one does not. So removing this one line reintroduces the -target bootstrap in
+// a different disguise, and it would read as tidying.
+//
+// NOTHING ELSE CAN SEE IT. `terraform validate` never configures providers, and
+// the env `terraform test` suites mock this provider wholesale — which is what
+// makes them pass. This is the only instrument left, so it is a text guard and
+// says so.
+func TestTheKubectlProviderLoadsLazily(t *testing.T) {
+	root := filepath.Join(repoRoot, "infra")
+	blocks := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".tf") {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		src := string(b)
+		i := strings.Index(src, `provider "kubectl" {`)
+		for i >= 0 {
+			depth, j := 0, i
+			for ; j < len(src); j++ {
+				if src[j] == '{' {
+					depth++
+				} else if src[j] == '}' {
+					if depth--; depth == 0 {
+						break
+					}
+				}
+			}
+			body := src[i:min(j+1, len(src))]
+			blocks++
+			rel, _ := filepath.Rel(repoRoot, path)
+			if !strings.Contains(body, "lazy_load") || !strings.Contains(body, "lazy_load = true") {
+				t.Errorf("%s: the kubectl provider does not set `lazy_load = true`. It configures at "+
+					"PLAN time, so a from-zero apply fails with \"default cluster has no server "+
+					"defined\" before anything is created — the -target bootstrap T1.4a removed, "+
+					"back in a different disguise.", rel)
+			}
+			if !strings.Contains(body, "apply_retry_count") {
+				t.Errorf("%s: the kubectl provider does not set `apply_retry_count`. The 2.4.1 "+
+					"default is a SINGLE attempt, and the CNPG Cluster is applied moments after the "+
+					"operator's chart returns — a transient CRD-registration window then fails the "+
+					"whole apply.", rel)
+			}
+			next := strings.Index(src[j:], `provider "kubectl" {`)
+			if next < 0 {
+				break
+			}
+			i = j + next
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking infra/: %v — this check must not pass by failing to look", err)
+	}
+	// Every env that instantiates the cell configures this provider; if the walk
+	// finds none, the check is asserting nothing.
+	if blocks < 2 {
+		t.Fatalf("found %d `provider \"kubectl\"` blocks under infra/, want at least 2 (dev, cell0)", blocks)
+	}
 }

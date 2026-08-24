@@ -33,13 +33,35 @@ resource "helm_release" "cnpg_operator" {
 
 # --- storage: the T1.0-proven classes, VERBATIM ------------------------------
 # Source of truth is infra/k8s/storage/*.yaml (the yaml the spike proved);
-# Terraform applies the same files — one truth, one tool (apply is staged).
-resource "kubernetes_manifest" "pd_storageclass" {
-  manifest = yamldecode(file("${path.module}/../../k8s/storage/pd-storageclass.yaml"))
+# Terraform applies the same files — one truth, one tool, ONE PASS (T1.4a).
+#
+# WHY kubectl_manifest AND NOT kubernetes_manifest — this is the whole of T1.4a.
+# `kubernetes_manifest` resolves its GroupVersionKind against the live API at
+# PLAN time, to build Terraform's type information from the OpenAPI schema. On a
+# from-zero apply there is no API yet (the cluster is created by this same
+# apply), and for a CR there is no CRD yet either — so the plan fails before
+# anything is created:
+#
+#   Error: API did not recognize GroupVersionKind from manifest
+#          (CRD may not be installed)
+#
+# That is an acknowledged, still-open limitation (hashicorp/terraform-provider-
+# kubernetes#1367, #2597), not a transient error, and `depends_on` cannot fix it:
+# validation happens before dependency resolution. `kubectl_manifest` applies
+# raw YAML the way `kubectl apply` does and resolves nothing at plan time, so the
+# cluster, the CRDs and the objects that need them all land in one pass — which
+# is what HashiCorp's own GKE example does for everything except this resource.
+#
+# It applies to the STORAGE classes too, not only the CNPG CRs. A `kubernetes_
+# manifest` needs the API at plan time whatever its kind, so on a genuine
+# from-zero apply these two failed as well; the original report only named the
+# CNPG resources because that apply already ran `-target=module.gke_cell` first.
+resource "kubectl_manifest" "pd_storageclass" {
+  yaml_body = file("${path.module}/../../k8s/storage/pd-storageclass.yaml")
 }
 
-resource "kubernetes_manifest" "pd_snapshotclass" {
-  manifest = yamldecode(file("${path.module}/../../k8s/storage/pd-snapshotclass.yaml"))
+resource "kubectl_manifest" "pd_snapshotclass" {
+  yaml_body = file("${path.module}/../../k8s/storage/pd-snapshotclass.yaml")
 }
 
 # --- control-plane database (invariant 10: its OWN bucket) -------------------
@@ -79,7 +101,7 @@ resource "kubernetes_namespace" "control_plane" {
   }
 }
 
-resource "kubernetes_manifest" "control_plane_cluster" {
+resource "kubectl_manifest" "control_plane_cluster" {
   count = var.control_plane ? 1 : 0
   lifecycle {
     precondition {
@@ -87,25 +109,27 @@ resource "kubernetes_manifest" "control_plane_cluster" {
       error_message = "control_plane = true requires control_plane_storage_size from the env (capacity lives in envs)."
     }
   }
-  manifest = yamldecode(templatefile("${path.module}/../../k8s/control-plane/cnpg-cluster.yaml", {
+  yaml_body = templatefile("${path.module}/../../k8s/control-plane/cnpg-cluster.yaml", {
     namespace          = local.cp_namespace
     cluster_name       = local.cp_cluster
     wal_control_bucket = var.wal_control_bucket
     gsa_email          = google_service_account.cnpg_control[0].email
     storage_size       = var.control_plane_storage_size
-  }))
+  })
+  # The CRDs arrive with the operator's chart, in this same apply. depends_on is
+  # what orders that; kubectl_manifest is what makes the ordering SUFFICIENT.
   depends_on = [
     helm_release.cnpg_operator,
-    kubernetes_manifest.pd_storageclass,
+    kubectl_manifest.pd_storageclass,
     kubernetes_namespace.control_plane,
   ]
 }
 
-resource "kubernetes_manifest" "control_plane_backup_schedule" {
+resource "kubectl_manifest" "control_plane_backup_schedule" {
   count = var.control_plane ? 1 : 0
-  manifest = yamldecode(templatefile("${path.module}/../../k8s/control-plane/cnpg-scheduled-backup.yaml", {
+  yaml_body = templatefile("${path.module}/../../k8s/control-plane/cnpg-scheduled-backup.yaml", {
     namespace    = local.cp_namespace
     cluster_name = local.cp_cluster
-  }))
-  depends_on = [kubernetes_manifest.control_plane_cluster]
+  })
+  depends_on = [kubectl_manifest.control_plane_cluster]
 }

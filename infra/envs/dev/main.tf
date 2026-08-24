@@ -8,11 +8,10 @@ provider "google-beta" {
   region  = var.region
 }
 
-# k8s providers ride the gke-cell outputs (T1.2). IMPORTANT: kubernetes_manifest
-# plans against the LIVE cluster API (schema fetch at plan time), so a fresh
-# project needs the STAGED apply documented in infra/README.md — a bare full
-# apply on empty state fails by design of the provider, not of this config.
-# Auth via the caller's gcloud token (zero static keys, D5).
+# k8s providers ride the gke-cell outputs (T1.2). ONE PASS, no -target (T1.4a,
+# ADR-0017): every raw manifest uses kubectl_manifest, which resolves nothing at
+# plan time, so the cluster, the CRDs and the objects that need them all land in
+# a single apply. Auth via the caller's gcloud token (zero static keys, D5).
 data "google_client_config" "current" {}
 
 provider "kubernetes" {
@@ -28,6 +27,33 @@ provider "helm" {
     cluster_ca_certificate = base64decode(module.gke_cell.cluster_ca_certificate)
   }
 }
+
+# The kubectl provider carries the SAME credentials as the other two — one
+# cluster, one identity. `load_config_file = false` is load-bearing: without it
+# the provider falls back to whatever ~/.kube/config happens to point at, which
+# on a developer machine is a different cluster and on a runner is nothing.
+provider "kubectl" {
+  host                   = "https://${module.gke_cell.cluster_endpoint}"
+  token                  = data.google_client_config.current.access_token
+  cluster_ca_certificate = base64decode(module.gke_cell.cluster_ca_certificate)
+  load_config_file       = false
+
+  # lazy_load IS THE ONE-PASS APPLY. Without it this provider CONFIGURES at plan
+  # time and fails when host/CA are still unknown — which is the from-zero case,
+  # the whole point of T1.4a. Measured: `Plan: 1 to add` then
+  #   Error: invalid provider configuration: default cluster has no server defined
+  # and with it, a clean plan. hashicorp/kubernetes and helm tolerate an
+  # unconfigured client at plan; this one does not, so removing this line
+  # reintroduces the -target bootstrap in a different disguise.
+  lazy_load = true
+
+  # A single attempt is the 2.4.1 default. The CNPG Cluster is applied moments
+  # after the operator's Helm release returns, so a transient CRD-registration
+  # or admission-webhook window would fail the whole apply with no retry — the
+  # difference between a one-pass apply that works and one that is lucky.
+  apply_retry_count = 3
+}
+
 
 module "project_base" {
   source     = "../../modules/project-base"
