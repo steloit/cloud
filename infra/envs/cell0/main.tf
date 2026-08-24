@@ -26,6 +26,18 @@ provider "helm" {
   }
 }
 
+# The kubectl provider carries the SAME credentials as the other two — one
+# cluster, one identity. `load_config_file = false` is load-bearing: without it
+# the provider falls back to whatever ~/.kube/config happens to point at, which
+# on a developer machine is a different cluster and on a runner is nothing.
+provider "kubectl" {
+  host                   = "https://${module.gke_cell.cluster_endpoint}"
+  token                  = data.google_client_config.current.access_token
+  cluster_ca_certificate = base64decode(module.gke_cell.cluster_ca_certificate)
+  load_config_file       = false
+}
+
+
 module "project_base" {
   source     = "../../modules/project-base"
   project_id = var.project_id

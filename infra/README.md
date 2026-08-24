@@ -26,21 +26,45 @@ Two GCP projects, one shape. **Shape lives in `modules/`, capacity in `envs/`**
    `terraform -chdir=infra/envs/<env> init -backend-config="bucket=<id>-tfstate" -backend-config="prefix=<env>" -migrate-state`
 4. Full `apply`.
 
-### Staged apply (REQUIRED on a fresh project — not optional)
+### One apply, no `-target` (T1.4a)
 
-`kubernetes_manifest` resources plan against the **live cluster API** (schema
-fetch at plan time), and the CNPG custom resources additionally need the
-operator's CRDs to exist. A bare full `apply` on empty state therefore fails by
-provider design. The working sequence:
+A fresh project is: bootstrap (steps 1-3 above, which exist only to create the
+state bucket the backend lives in), then **one full `apply`**. The cluster, the
+CNPG operator and its CRDs, the storage classes and the control-plane Cluster +
+ScheduledBackup all land in that single pass.
 
-1. `apply -target=module.project_base` (bootstrap, above)
-2. `apply -target=module.network -target=module.gke_cell` — the cluster exists
-3. `apply -target=module.cnpg.helm_release.cnpg_operator` — CRDs installed
-4. Full `apply` — storage classes, control-plane Cluster + ScheduledBackup, rest
+**This used to require a four-step `-target` sequence, and the reason is worth
+keeping.** `kubernetes_manifest` resolves its GroupVersionKind against the live
+API at **plan** time, to build Terraform's type information from the OpenAPI
+schema. On a from-zero apply there is no API yet, and for a custom resource
+there is no CRD yet either, so the plan failed before anything was created:
+
+```
+Error: API did not recognize GroupVersionKind from manifest (CRD may not be installed)
+```
+
+`depends_on` cannot fix it — validation runs before dependency resolution — and
+it is an acknowledged, still-open limitation
+([#1367](https://github.com/hashicorp/terraform-provider-kubernetes/issues/1367),
+[#2597](https://github.com/hashicorp/terraform-provider-kubernetes/issues/2597)),
+not a transient error. Everything else about creating a cluster and deploying
+into it in one apply is fine: HashiCorp's own GKE example does exactly that, and
+the Kubernetes/Helm providers simply are not initialised until apply.
+
+So `infra/` uses **`kubectl_manifest`** (`alekc/kubectl`) for every raw manifest.
+It applies YAML the way `kubectl apply` does and resolves nothing at plan time.
+`TestInfraNeverUsesKubernetesManifest` fails if `kubernetes_manifest` reappears
+anywhere under `infra/` — one of them puts the whole cell back on `-target`, and
+it would look reasonable in review because the failure only shows on a from-zero
+apply nobody runs by hand.
 
 `terraform validate` never contacts a cluster, so CI validation is unaffected.
-Destroy note: the k8s providers are configured from `module.gke_cell` outputs —
-destroy the k8s resources (`-target=module.cnpg`) before destroying the cluster.
+
+**Destroy** still has an ordering constraint, and it is real: the Kubernetes and
+Helm providers are configured from `module.gke_cell` outputs, so destroy the
+in-cluster resources first (`destroy -target=module.cnpg`) and the cluster after.
+Terraform cannot express "tear this down before the thing that configures my
+provider", so this one is documented rather than solved.
 
 ## CI
 

@@ -36,6 +36,12 @@ mock_provider "google-beta" {}
 mock_provider "kubernetes" {}
 mock_provider "helm" {}
 
+# kubectl is mocked for the same reason kubernetes and helm are: this suite
+# asserts the PLANNED cell, and an unmocked provider tries to reach a real API
+# (measured: it dialled a cluster IP and timed out). ADR-0017 moved every raw
+# manifest onto it, so it is now part of the plan the same way helm is.
+mock_provider "kubectl" {}
+
 variables {
   project_id = "steloit-test"
   # Required with no default so a real plan refuses until the amount is chosen
