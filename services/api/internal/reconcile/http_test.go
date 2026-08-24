@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -279,8 +278,33 @@ func TestHTTPACellCannotSuspendOrDeleteAService(t *testing.T) {
 		if got := q.services["svc_r"].ObservedGeneration; got != 1 {
 			t.Errorf("%s: observed_generation advanced to %d on a refused report", status, got)
 		}
-		if !strings.Contains(fmt.Sprint(m), "status") {
-			t.Errorf("%s: the refusal does not name the offending field: %v", status, m)
+		// Assert on m["errors"], NEVER on the whole body: every problem+json
+		// carries `"status": 422`, so `strings.Contains(fmt.Sprint(m), "status")`
+		// — which is what this used to be — cannot fail. Measured: blanking the
+		// FieldError's Field survived it.
+		errs, _ := m["errors"].([]any)
+		if len(errs) == 0 {
+			t.Fatalf("%s: no field errors on the refusal: %v", status, m)
+		}
+		var detail string
+		for _, e := range errs {
+			fe, _ := e.(map[string]any)
+			if f, _ := fe["field"].(string); f == "status" {
+				detail, _ = fe["detail"].(string)
+			}
+		}
+		if detail == "" {
+			t.Errorf("%s: the refusal does not name `status` as the offending field: %v", status, m)
+		}
+		// The SPECIFIC message is the entire justification for statusVocab being
+		// wider than the contract enum, so it is asserted, not assumed. Measured:
+		// replacing it with the generic vocabulary message survived.
+		if !strings.Contains(detail, "lifecycle state the control plane sets") {
+			t.Errorf("%s: the refusal is generic (%q) — a cell is told the value is not in the "+
+				"ADR-024 vocabulary, which is true of neither value", status, detail)
+		}
+		if !strings.Contains(detail, status) {
+			t.Errorf("%s: the refusal does not quote the offending value: %q", status, detail)
 		}
 	}
 }
@@ -311,5 +335,55 @@ func TestHTTPDesiredCarriesStatus(t *testing.T) {
 	}
 	if row["status"] == "" {
 		t.Fatal("status present but empty — the renderer cannot distinguish a deleting service")
+	}
+}
+
+// AN OMITTED STATUS IS NOT `gone`, ON THE ROUTE.
+//
+// The handler used to normalise the wire's `gone` into "" and US-3.3h stopped
+// it, because the two mean opposite things: "" is the observation-only ack and
+// finishes the generation on a settled row, while `gone` on a live row means the
+// workload VANISHED and must keep the row outstanding so the agent re-creates it.
+//
+// Only the gone→"" direction was pinned. Measured: adding the REVERSE
+// (`if b.Status == "" { b.Status = "gone" }` just before Writeback) survived the
+// entire reconcile suite — and this PR's own spec text newly claims an omitted
+// status "finishes the generation only when the row already rests on a settled
+// status". Both directions are driven here, through the real route.
+func TestHTTPAnOmittedStatusIsNotGone(t *testing.T) {
+	// The ack: settled row, nothing reported → finished.
+	ts, q, tr := mount(t)
+	q.services["svc_s"] = store.Service{
+		ID: "svc_s", CellID: "cell-0", Status: "ready", Generation: 5, ObservedGeneration: 4,
+	}
+	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_s","observed_generation":5}`)
+	if r.StatusCode != 200 {
+		t.Fatalf("an observation-only ack on a settled row: want 200, got %d", r.StatusCode)
+	}
+	if got := q.services["svc_s"].ObservedGeneration; got != 5 {
+		t.Errorf("observed_generation = %d, want 5 — the ack must finish the generation", got)
+	}
+	if got := q.services["svc_s"].Status; got != "ready" {
+		t.Errorf("the ack moved status to %q", got)
+	}
+	if tr.calls != 0 {
+		t.Error("an ack drove the status machine")
+	}
+
+	// `gone` on the SAME row: the workload vanished, so it must NOT finish.
+	ts2, q2, _ := mount(t)
+	q2.services["svc_s"] = store.Service{
+		ID: "svc_s", CellID: "cell-0", Status: "ready", Generation: 5, ObservedGeneration: 4,
+	}
+	r2, _ := call(t, ts2, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_s","observed_generation":5,"status":"gone"}`)
+	if r2.StatusCode != 409 {
+		t.Fatalf("`gone` on a live service: want 409, got %d — it is being treated as an ack, "+
+			"so a vanished workload leaves the outstanding set and nothing re-creates it",
+			r2.StatusCode)
+	}
+	if got := q2.services["svc_s"].ObservedGeneration; got == 5 {
+		t.Error("`gone` on a live service advanced observed_generation")
 	}
 }
