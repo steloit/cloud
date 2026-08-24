@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 · **3 of 5 PRs MERGED** (US-3.3f, US-3.3a, O19) · 2 open
+**Updated:** 2026-08-24 · **ALL 5 PRs MERGED** · `main` @ `392152b` · queue is clear
 
 ---
 
@@ -16,27 +16,30 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 ## In flight
 
-| PR | task | state |
-|---|---|---|
-| ~~#320~~ | US-3.3a | **MERGED.** 16 rounds. r12 was a regression (reverted in r13). |
-| **#322** | T3.4c | **round 5.** 3 migration blockers + a teardown deleting another product's objects, all fixed and verified on real postgres. QA in flight from before ADR-0016. |
-| ~~#323~~ | US-3.3f | **MERGED.** CI gate pinned by EXECUTING it. |
-| **#324** | US-3.3e | conflict with main resolved (one import line). CI watched. `requests.storage` WITHDRAWN — see US-3.3i. |
-| ~~#325~~ | O19 | **MERGED.** `money.Accrual`; my SpendToDate justification was false and the invoice saturation was worse than the wrap — both corrected in r4. |
-
-**Stacking:** US-3.3e branches from US-3.3a. Merge order must be
-US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
+**Nothing.** US-3.3a (#320), US-3.3f (#323), US-3.3e (#324), O19 (#325) and
+T3.4c (#322) all merged. Only `task/O2` remains as a worktree, still waiting on
+the founder's revised spec.
 
 ## Next action
 
-Land **#322** and **#324**. Then the ready queue: **O9**, **T1.4a**, **US-10.7**,
-and this session's filings: **US-3.3c/d/g/h/i**, **O30**, **O31**, **O32**.
+Claim from the ready queue: **O9**, **T1.4a**, **US-10.7** — plus the ten tasks
+this session filed: **US-3.3c/d/g/h/i**, **O30**, **O31**, **O32**, **O33**, and
+**T3.4d**.
 
-**ADR-0016 (founder, 2026-08-24) changes how reviews run:** both reviewers, but
-**ONCE per PR on the final diff**, scoped to **code and behavioural claims only**.
-Task-file narrative, counts and citations are the implementer's own pass. The
-biggest lever is not the pipeline though — **do the task and nothing more**: four
-rounds this session went to undoing an improvement nobody asked for.
+**ADR-0016 (founder, 2026-08-24):** both reviewers, **ONCE per PR on the final
+diff**, scoped to **code and behavioural claims**. Records — counts, citations,
+task narrative — are the implementer's own pass; it has already caught a stale
+citation that survived a targeted fix (the name was WRAPPED across two comment
+lines) and eight more repo-wide (filed as O33). The bigger lever is not the
+pipeline: **do the task and nothing more.** Four rounds this session went to
+undoing an improvement nobody asked for.
+
+**Merge hygiene that earned itself twice:** verify the MERGED tree, not the
+branch. Two bad conflict resolutions were caught by `gofmt -e`/`go vet` and by
+asserting every top-level function from both sides survived. Resolve by asking
+what each side changed relative to the MERGE BASE — `git show :2:` is the
+conflict side, not the auto-merged result, and rebuilding from it silently
+discards the other side's non-conflicting work.
 
 ## Blocked on a human
 
