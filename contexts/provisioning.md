@@ -134,17 +134,26 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   in another directory, in another task.
 - **Widening a lookup table without widening its consumer turns a loud error into a silent success.**
   Four kinds added to `kube`'s `plurals` were not inert: `Delete` hardcoded the CNPG apiVersion, so they
-  built plausible paths under the wrong group, 404'd, and 404 maps to "already gone" —
-  `Delete(ns,"Namespace",ns)`, US-3.3b's exact call, would report success while the namespace lived. A
-  kind absent from the consumer must be REFUSED, and the two key sets asserted EQUAL: the first fix's
-  own test could not fail from changing the new map, because every kind it tried was missing from both,
-  so the refusal came from the path builder, not the guard it named.
+  built plausible paths under the wrong group, 404'd, and 404 maps to "already gone" — US-3.3b's exact
+  call would report success while the namespace lived. A kind absent from the consumer must be REFUSED,
+  and the two key sets asserted EQUAL: the first fix's own test could not fail, because every kind it
+  tried was missing from BOTH maps, so the refusal came from the path builder, not the guard it named.
 - **Guard every document, element and path — not the first of each.** Four green survivors in one
-  branch; the index fix alone needed four attempts. `yaml.Unmarshal` returns only document 1, so a kind-based absence guard and a
-  cross-namespace check both passed while a second document carried an arbitrary object elsewhere. Both
-  were then pinned for one element, then 0–1, then 0–3 (a hardcoded ceiling is a constant a mutation
-  can match), then all kinds — and a skip keyed on byte length or on `spec:` was STILL green, because
-  every fixture was a hand-written stub. Build fixtures from the real renderers. And `Converge`'s
-  deleting branch returns before the renderer, so a guard in `Render` covered create only:
-  `"../../../api/v1/namespaces/kube-system"` was refused on create and accepted on teardown — the path
-  that `fmt.Sprintf`s it into a DELETE URL. One owner, called from the accessor both paths use.
+  branch; the index fix alone needed four attempts. `yaml.Unmarshal` returns only document 1, so a
+  kind-based absence guard and a cross-namespace check both passed while a SECOND document carried an
+  arbitrary object elsewhere. Each was then pinned for one element, then 0-1, then 0-3 (a hardcoded
+  ceiling is a constant a mutation can match), and a skip keyed on byte length or on `spec:` was STILL
+  green because every fixture was a hand-written stub — build fixtures from the real renderers. And
+  `Converge`'s deleting branch returns before the renderer, so a guard in `Render` covered create only:
+  `"../../../api/v1/namespaces/kube-system"` was refused on create and ACCEPTED on teardown. One owner,
+  called from the accessor both paths use.
+- **A driver reading a key the API's closed schema forbids is silent contract drift.** T3.4c:
+  `cnpg.storageForShape` sized the PVC from `shape["storage"]`, which `estimates.shapeSchema` rejects,
+  so the priced `storage_gb` was never read — a customer billed for 78 GB got the size default, and
+  invoice and audit trail both said they got what they paid for. Bind the driver to the catalog with a
+  test that READS `pricing.json`; check every path the refusal sits on (the same call served TEARDOWN,
+  making the service undeletable); and **prove the wire** — deleting the key en route to the driver
+  left the whole agent suite green.
+- **A floor HIDES a wrong sign.** `max(declared, included)` is the coherent way to default
+  `storage_gb` (resolving only on ABSENCE made `{size:standard}` and `{…,storage_gb:0}` two
+  identities), but it made the negative-value check unreachable. Reject out-of-range BEFORE defaulting.

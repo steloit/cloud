@@ -1,0 +1,11 @@
+-- Deliberately NOT reversible.
+--
+-- The up migration raises `storage_gb` to the volume a service already has, and
+-- a PersistentVolumeClaim cannot shrink. Writing a smaller number back would
+-- make the row describe a volume the cluster cannot produce, and the next
+-- converge would ask for a shrink the CSI driver rejects — turning a rollback
+-- of a price-neutral data fix into a stuck service.
+--
+-- There is nothing to undo: the change is price-neutral at rest, and the values
+-- it writes are the ones the resolver would compute for the same row today.
+SELECT 1;

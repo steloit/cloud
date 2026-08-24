@@ -8,6 +8,7 @@ package cnpg
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -30,21 +31,122 @@ func New() *Driver { return &Driver{} }
 
 func (d *Driver) Product() string { return "postgres" }
 
-// storageForShape maps priced grammar (size) to a PD volume size. The dev size
-// is the 10Gi the T1.0 spike measured (ADR-0007 §2). An explicit shape.storage
-// wins. Unknown sizes fall back to dev rather than guessing large.
-func storageForShape(shape map[string]any) string {
-	if s, ok := shape["storage"].(string); ok && s != "" {
-		return s
+// includedFloorGB is the storage each priced size includes, in GB. It MIRRORS
+// docs' catalog (`services/api/internal/estimates/pricing.json` → postgres.sizes
+// [*].included_gb) and must not drift from it:
+// `TestEveryCatalogSizeRendersExactlyItsIncludedStorage` reads that file and
+// fails if a size is missing here
+// or floored below what its base price includes. The cell-agent is a separate
+// module and must not import the API's pricing table, so the binding is a test
+// rather than a shared constant.
+//
+// `dev` includes 0 GB, but a 0Gi PVC is not a thing: minVolumeGB is the 10Gi the
+// T1.0 spike measured (ADR-0007 §2).
+var includedFloorGB = map[string]int{
+	"dev":         0,
+	"standard":    50,
+	"performance": 50,
+}
+
+const minVolumeGB = 10
+
+// storageForShape sizes the PVC from the PRICED storage_gb.
+//
+// It previously read `shape["storage"]`, a key that is not in the API's closed
+// shape schema (`estimates.shapeSchema` allows `storage_gb`), so the API
+// rejected it and the driver never saw it — the priced value was never read and
+// a customer billed for 78 GB got the size-derived default. `pro` was dead code
+// (no such size) and `performance`, the most expensive size, had no case at all
+// and fell through to the smallest volume.
+//
+// The floor is belt-and-braces on top of the API resolving an unset storage_gb
+// to included_gb: whatever arrives, a size never renders below what its own base
+// price includes.
+func storageForShape(shape map[string]any) (string, error) {
+	// ABSENT is not UNKNOWN. The API's closed schema defaults size to "dev"
+	// (estimates.shapeSchema), so a shape that never names one is contractually
+	// dev — matching that is following the contract, not guessing. A size that
+	// IS named and is not in the catalog is drift, and must be loud.
+	size := "dev"
+	if v, ok := shape["size"].(string); ok && v != "" {
+		size = v
+	} else if raw, present := shape["size"]; present && raw != nil {
+		size = fmt.Sprint(raw)
 	}
-	switch fmt.Sprint(shape["size"]) {
-	case "standard":
-		return "32Gi"
-	case "pro":
-		return "128Gi"
-	default: // dev / unknown
-		return "10Gi"
+	floor, known := includedFloorGB[size]
+	if !known {
+		return "", fmt.Errorf("cnpg: unknown postgres size %q — add it to includedFloorGB "+
+			"alongside the catalog entry; falling through to a default silently "+
+			"under-provisions the size that was actually sold", size)
 	}
+	gb := floor
+	if v, ok := asGB(shape["storage_gb"]); ok && v > gb {
+		gb = v
+	}
+	if gb < minVolumeGB {
+		gb = minVolumeGB
+	}
+	return fmt.Sprintf("%dGi", gb), nil
+}
+
+// asGB accepts the numeric shapes a JSON round-trip can produce. The desired doc
+// reaches the agent as JSON, so an int written by the control plane arrives as a
+// float64 — reading only int would silently ignore every storage_gb on the wire,
+// which is the defect class this task exists to close.
+func asGB(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n != float64(int(n)) {
+			return 0, false
+		}
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	}
+	return 0, false
+}
+
+// Objects is the kind+name set a service owns, WITHOUT rendering it.
+//
+// Teardown needs names, not volumes, and it must not be able to fail for a
+// sizing reason: T3.4c made storageForShape refuse an uncatalogued size, which
+// through Render also made such a service UNDELETABLE — its cluster kept running
+// and UpdateService refuses a row that is already `deleting`. That is reachable
+// by ordinary deploy skew: the API accepts a size the moment it is in
+// pricing.json, while a cell still on the previous agent binary has no
+// includedFloorGB entry for it.
+//
+// One owner for naming: this returns exactly the Kind/Name pairs Render does, so
+// teardown addresses what create applied.
+// IT CARRIES RENDER'S ENTRY GUARDS. Replacing Render with Objects on the
+// teardown path dropped both of them, and that was measured: a `valkey` service
+// in `deleting` converged to "gone" and issued Delete for `Cluster/svc-cache01`
+// and `ScheduledBackup/svc-cache01-nightly` — postgres-shaped objects for a
+// product this driver does not own — where before it returned an error and
+// refused to report gone. There is ONE renderer for all four products
+// (cmd/cell-agent has no dispatch), so `[postgres, valkey, web, worker]` all
+// route here, and "a teardown that cannot enumerate its objects must NOT report
+// gone" was made unreachable for the reason it was written.
+func (d *Driver) Objects(s driver.Spec) (driver.Manifests, error) {
+	if s.Product != "postgres" {
+		return nil, fmt.Errorf("cnpg: not a postgres product: %q", s.Product)
+	}
+	if err := requireName(s.Name, s.Namespace); err != nil {
+		return nil, err
+	}
+	name := dnsName(s.Name)
+	return driver.Manifests{
+		{Kind: "Cluster", Name: name},
+		{Kind: "ScheduledBackup", Name: name + "-nightly"},
+	}, nil
 }
 
 type clusterData struct {
@@ -65,9 +167,13 @@ func (d *Driver) Render(s driver.Spec) (driver.Manifests, error) {
 		instances = 1
 	}
 	name := dnsName(s.Name)
+	storageSize, err := storageForShape(s.Shape)
+	if err != nil {
+		return nil, err
+	}
 	cluster, err := render("cluster.yaml.tmpl", clusterData{
 		Name: name, Namespace: s.Namespace, Cell: s.Cell, GSAEmail: s.GSAEmail,
-		WALBucket: s.WALBucket, StorageSize: storageForShape(s.Shape), Instances: instances,
+		WALBucket: s.WALBucket, StorageSize: storageSize, Instances: instances,
 	})
 	if err != nil {
 		return nil, err

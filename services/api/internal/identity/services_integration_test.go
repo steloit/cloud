@@ -6,6 +6,7 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/estimates"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/platform/money"
+	"github.com/steloit/cloud/services/api/internal/platform/problem"
 )
 
 func TestServices(t *testing.T) {
@@ -2854,6 +2856,451 @@ func TestTheBackfillGivesEveryExistingServiceItsOrgsEnvelope(t *testing.T) {
 	for _, r := range rows {
 		if g := gen(r.id); g != before[r.id]+1 {
 			t.Errorf("%s service: a second run bumped generation to %d", r.plan, g)
+		}
+	}
+}
+
+// A SIZE CHANGE MUST PRICE THE SAME WHENEVER THE ROW WAS CREATED.
+//
+// T3.4c made an unset postgres storage_gb resolve to the size's included_gb, so
+// a `standard` created after it persists 50. On a later downgrade to `dev` the
+// merge carries that 50, and dev includes 0, so the row prices
+// 1900 + 50GB*50c = 4400. A row created BEFORE T3.4c stores 0 and the identical
+// PATCH priced 1900 — two customers, one resulting configuration, two prices,
+// decided by signup date.
+//
+// 4400 is TODAY'S ARITHMETIC, and this test pins it as such — not as a ruling.
+// What the customer should PAY for a size downgrade while storage is retained is
+// recorded as ❓ NEEDS FOUNDER INPUT in docs/founder-config.md §5, with three
+// live options, one of which (refuse the downgrade) would make this test fail.
+// That is the correct outcome if it is ruled: the test would be updated with the
+// ruling. Stated here because an earlier revision called 4400 "the right
+// answer", which frames an open pricing question as settled — the one thing
+// implementation must never do (founder, 2026-07-27).
+//
+// What is NOT open is the arithmetic below, which is the catalog's own rather
+// than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
+// expansion only, and a request below .status.capacity is rejected), so the
+// customer keeps the 50Gi volume and pays for the 50 GB beyond dev's zero
+// included. Billing 1900 would be giving away storage the cluster is still
+// carrying — the same declared-vs-provisioned split T3.4c exists to close.
+//
+// The legacy rows are reconciled by migration 20260823120000, which is
+// price-neutral at rest (raising a stored 0 to included_gb adds exactly zero,
+// since Price charges only the positive part of storage_gb - included_gb).
+// This test drives BOTH provenances through the real HTTP surface and requires
+// one answer.
+func TestASizeDowngradePricesTheSameWhicheverProvenanceTheRowHas(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "ratchet@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newStandard := func(name string) string {
+		t.Helper()
+		resp, body := w.post(t, "/v1/estimates",
+			`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"`+name+`","shape":{"size":"standard"}}]}`, ownerCk)
+		if resp.StatusCode != 200 {
+			t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+		}
+		var est struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &est)
+		resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+			`{"name":"`+name+`","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard"}}`, ownerCk)
+		if resp.StatusCode != 201 {
+			t.Fatalf("create: %d %s", resp.StatusCode, body)
+		}
+		var svc struct{ Id string }
+		_ = json.Unmarshal([]byte(body), &svc)
+		return svc.Id
+	}
+
+	// (a) A row created today. The gate resolves the included storage explicitly.
+	fresh := newStandard("fresh")
+	var freshShape map[string]any
+	if err := w.pool.QueryRow(ctx, `SELECT shape FROM services WHERE id = $1`, fresh).Scan(&freshShape); err != nil {
+		t.Fatal(err)
+	}
+	if got := freshShape["storage_gb"]; got != float64(50) {
+		t.Fatalf("a standard created today stored storage_gb=%v, want the included 50", got)
+	}
+
+	// (b) A row with the PRE-T3.4c shape, written straight to the column — the
+	// state the migration exists to reconcile.
+	legacy := newStandard("legacy")
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET shape = jsonb_set(shape, '{storage_gb}', '0', true) WHERE id = $1`, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	// EXECUTE THE SHIPPED MIGRATION, not a paraphrase of it.
+	//
+	// An earlier version of this test hand-copied a DIFFERENT statement —
+	// `COALESCE((shape ->> 'storage_gb')::int, 0)`, the unguarded cast the branch
+	// had already replaced — under a comment claiming it "reproduces its
+	// statement". So the real SQL had zero coverage, and two defects in it were
+	// invisible: an unguarded cast on the JSON-number arm (a fractional or
+	// out-of-int-range legacy value aborts the whole migration and leaves
+	// schema_migrations dirty), and a floor-only WHERE that skipped the string
+	// `"78"` — the very class the migration was written for.
+	//
+	// The migration runs at startup against an EMPTY database, where an UPDATE
+	// that matches nothing is indistinguishable from a correct one. This runs it
+	// again, against rows that exist.
+	migration, err := os.ReadFile(
+		"../platform/db/migrations/20260823120000_postgres_storage_ratchet.up.sql")
+	if err != nil {
+		t.Fatalf("the ratchet migration is missing: %v", err)
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("the shipped migration did not execute against seeded rows: %v", err)
+	}
+
+	priceAfterDowngrade := func(id string) int64 {
+		t.Helper()
+		row, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, id), org.Id, ownerID,
+			map[string]any{"size": "dev"}, nil, nil)
+		if err != nil {
+			t.Fatalf("downgrade %s: %v", id, err)
+		}
+		return row.MonthlyEstimateCents
+	}
+
+	gotFresh, gotLegacy := priceAfterDowngrade(fresh), priceAfterDowngrade(legacy)
+	if gotFresh != gotLegacy {
+		t.Fatalf("the same downgrade prices %d for a row created today and %d for a pre-T3.4c row — "+
+			"two customers with one resulting configuration, billed differently by signup date",
+			gotFresh, gotLegacy)
+	}
+	// 1900 (dev base) + 50 GB beyond dev's 0 included, at 50c/GB.
+	const want = 1900 + 50*50
+	if gotFresh != want {
+		t.Fatalf("a dev keeping its 50Gi volume priced %d, want %d — the volume cannot shrink, "+
+			"so billing dev's base alone gives away storage the cluster still carries", gotFresh, want)
+	}
+}
+
+// A PVC CANNOT SHRINK, so a PATCH that lowers storage_gb must be refused.
+//
+// The T3.4c ratchet only floored at included_gb; ABOVE that a PATCH silently
+// lowered both the stored value and the bill — measured at dev 200GB → 20
+// dropping 11900c to 2900c — for storage the cluster is still carrying. Worse,
+// the driver then renders the smaller PVC and the CSI driver rejects the shrink,
+// so the row sits outstanding forever with nothing written back. Same defect
+// class as the one the ratchet exists to close, in the opposite direction.
+//
+// Refused, not silently floored: a customer who asks for 20 and gets 200 with no
+// error has been ignored. This is not a pricing decision — nobody's bill moves.
+func TestStorageCannotBeReducedBecauseAVolumeCannotShrink(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "shrink@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"shrinkco"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"standard","storage_gb":200}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard","storage_gb":200}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+	before := mustGetSvc(t, w, svc.Id)
+
+	// The reduction is refused, and says what to do instead.
+	_, err = w.prov.UpdateService(ctx, before, org.Id, ownerID,
+		map[string]any{"storage_gb": 20}, nil, nil)
+	if err == nil {
+		t.Fatal("a storage reduction was accepted — the bill drops for a volume that " +
+			"cannot shrink, and the next converge asks the CSI driver for a smaller PVC")
+	}
+	// A FIELD ERROR the customer can act on, not a 500. err.Error() is only
+	// "Validation failed"; the remediation lives in the problem document, which
+	// is what actually reaches the client.
+	var carrier problem.Carrier
+	if !errors.As(err, &carrier) {
+		t.Fatalf("the refusal is not a problem+json field error — a client typo class becomes "+
+			"a 500 with an event id: %v", err)
+	}
+	doc, _ := json.Marshal(carrier.Problem())
+	for _, want := range []string{"shape.storage_gb", "cannot shrink"} {
+		if !strings.Contains(string(doc), want) {
+			t.Fatalf("the problem document does not carry %q — the customer is told no with no "+
+				"reason and no way forward: %s", want, doc)
+		}
+	}
+
+	// Nothing moved: not the stored shape, not the bill.
+	after := mustGetSvc(t, w, svc.Id)
+	if string(after.Shape) != string(before.Shape) {
+		t.Fatalf("the refused PATCH still rewrote the shape:\n before %s\n after  %s", before.Shape, after.Shape)
+	}
+	if after.MonthlyEstimateCents != before.MonthlyEstimateCents {
+		t.Fatalf("the refused PATCH moved the bill %d → %d",
+			before.MonthlyEstimateCents, after.MonthlyEstimateCents)
+	}
+
+	// GROWING is still allowed — a volume can expand, and the bill follows.
+	grown, err := w.prov.UpdateService(ctx, before, org.Id, ownerID,
+		map[string]any{"storage_gb": 300}, nil, nil)
+	if err != nil {
+		t.Fatalf("a storage INCREASE was refused: %v", err)
+	}
+	if grown.MonthlyEstimateCents <= before.MonthlyEstimateCents {
+		t.Fatalf("growing to 300 GB did not raise the bill (%d → %d)",
+			before.MonthlyEstimateCents, grown.MonthlyEstimateCents)
+	}
+	// And an unrelated PATCH is unaffected by the guard.
+	if _, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svc.Id), org.Id, ownerID,
+		map[string]any{"ha": true}, nil, nil); err != nil {
+		t.Fatalf("an unrelated shape PATCH was refused: %v", err)
+	}
+}
+
+// THE PRICED STORAGE MUST SURVIVE EVERY DESIRED-DOC REWRITE, not just create.
+//
+// Measured: `UpdateService`'s desired doc shipping `storage_gb: 0`, and
+// `expireOverride`'s doing the same, BOTH survived the full container-backed
+// suite — only the create path was pinned. Downstream that is not a cosmetic
+// drift: the driver floors a 0 to the size's included GB, so a 200 GB service
+// re-renders as 50Gi, the CSI driver REFUSES the shrink, and the row stays
+// outstanding forever with nothing written back. A PATCH that does not mention
+// storage would silently do that.
+func TestEveryDesiredDocRewriteKeepsThePricedStorage(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ck, uid := w.signupUser(t, "storage-doc@example.com")
+
+	resp, body := w.post(t, "/v1/orgs", `{"name":"storageco"}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const shape = `{"size":"standard","storage_gb":200}`
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":`+shape+`}]}`, ck)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":`+shape+`}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var svcRow struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svcRow)
+
+	storageOf := func(t *testing.T, label string) {
+		t.Helper()
+		var shapeDoc, desired map[string]any
+		if err := w.pool.QueryRow(ctx, `SELECT shape, desired FROM services WHERE id = $1`,
+			svcRow.Id).Scan(&shapeDoc, &desired); err != nil {
+			t.Fatal(err)
+		}
+		if got := shapeDoc["storage_gb"]; got != float64(200) {
+			t.Errorf("%s: stored shape storage_gb = %v, want 200", label, got)
+		}
+		ds, _ := desired["shape"].(map[string]any)
+		if ds == nil {
+			t.Fatalf("%s: the desired doc has no shape", label)
+		}
+		if got := ds["storage_gb"]; got != float64(200) {
+			t.Errorf("%s: DESIRED doc storage_gb = %v, want 200 — the driver floors a 0 to the "+
+				"size's included GB, the CSI driver refuses the shrink, and the row stays "+
+				"outstanding forever", label, got)
+		}
+	}
+	storageOf(t, "after create")
+
+	// A PATCH that does not mention storage at all.
+	if _, err := w.prov.UpdateService(ctx, mustGetSvc(t, w, svcRow.Id), org.Id, uid,
+		map[string]any{"size": "standard", "ha": true}, nil, nil); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	storageOf(t, "after a PATCH that never mentions storage")
+
+	// ...and the override-expiry sweep, which rebuilds the doc from the stored shape.
+	if _, err := w.pool.Exec(ctx,
+		`UPDATE services SET override = $2::jsonb WHERE id = $1`, svcRow.Id,
+		`{"instances":3,"reason":"test","expires_at":"2020-01-01T00:00:00Z"}`); err != nil {
+		t.Fatal(err)
+	}
+	// RunOverrideExpiry sweeps once at startup and then on a ticker, so it is
+	// driven as the production code runs it and polled until the pin clears.
+	sweepCtx, stop := context.WithCancel(ctx)
+	go w.prov.RunOverrideExpiry(sweepCtx, time.Hour, slog.New(slog.DiscardHandler))
+	t.Cleanup(stop)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var override []byte
+		if err := w.pool.QueryRow(ctx, `SELECT override FROM services WHERE id = $1`,
+			svcRow.Id).Scan(&override); err != nil {
+			t.Fatal(err)
+		}
+		if len(override) == 0 || string(override) == "null" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the expired pin was never cleared")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	storageOf(t, "after the override-expiry sweep")
+}
+
+// THE SHIPPED RATCHET MIGRATION, ROW BY ROW.
+//
+// The sibling test executes the same file, but asserts through a PRICE
+// comparison — so a migration that is uniformly wrong (every legacy row raised
+// to ten times the included GB, say) prices both sides identically and passes.
+// Measured against the pre-round-4 file: six behavioural mutations of this SQL
+// survived the whole suite, including `included_gb * 10`, `GREATEST` → `LEAST`,
+// dropping the `desired` half, and neutering the UPDATE entirely.
+//
+// One row per representation, each asserted by VALUE and by whether its
+// generation moved.
+func TestTheShippedRatchetMigrationRowByRow(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ck, uid := w.signupUser(t, "ratchet-rows@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetco"}`, ck)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prj, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type row struct {
+		id, shape string
+		wantGB    any // nil = the key must be absent
+		wantMoved bool
+	}
+	rows := []row{
+		{"svc_r_absent", `{"size":"standard"}`, float64(50), true},
+		{"svc_r_zero", `{"size":"standard","storage_gb":0}`, float64(50), true},
+		{"svc_r_str78", `{"size":"standard","storage_gb":"78"}`, float64(78), true},
+		{"svc_r_50gi", `{"size":"standard","storage_gb":"50Gi"}`, float64(50), true},
+		{"svc_r_frac", `{"size":"standard","storage_gb":32.5}`, float64(50), true},
+		{"svc_r_huge", `{"size":"standard","storage_gb":3000000000}`, float64(3000000000), false},
+		{"svc_r_ok200", `{"size":"standard","storage_gb":200}`, float64(200), false},
+		{"svc_r_dev4", `{"size":"dev","storage_gb":4}`, float64(4), false},
+		{"svc_r_valkey", `{"size":"standard","storage_gb":0}`, float64(0), false}, // not postgres
+	}
+	before := map[string]int64{}
+	for _, r := range rows {
+		product := "postgres"
+		if r.id == "svc_r_valkey" {
+			product = "valkey"
+		}
+		if _, err := w.pool.Exec(ctx,
+			`INSERT INTO services (id, env_id, name, product, status, shape, desired, cell_id, generation, observed_generation)
+			 VALUES ($1, $2, $3, $4::text, 'ready', $5::jsonb,
+			         jsonb_build_object('product', $4::text, 'shape', $5::jsonb), 'cell-0', 7, 7)`,
+			r.id, env.ID, r.id, product, r.shape); err != nil {
+			t.Fatalf("seed %s: %v", r.id, err)
+		}
+		before[r.id] = 7
+	}
+	_ = prj
+
+	migration, err := os.ReadFile("../platform/db/migrations/20260823120000_postgres_storage_ratchet.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatalf("the shipped migration aborted on legacy rows: %v", err)
+	}
+
+	for _, r := range rows {
+		var shape, desired map[string]any
+		var gen int64
+		if err := w.pool.QueryRow(ctx,
+			`SELECT shape, desired, generation FROM services WHERE id = $1`, r.id).
+			Scan(&shape, &desired, &gen); err != nil {
+			t.Fatalf("%s: %v", r.id, err)
+		}
+		if got := shape["storage_gb"]; got != r.wantGB {
+			t.Errorf("%s: shape.storage_gb = %v (%T), want %v", r.id, got, got, r.wantGB)
+		}
+		ds, _ := desired["shape"].(map[string]any)
+		if ds == nil {
+			t.Errorf("%s: the desired doc lost its shape", r.id)
+		} else if got := ds["storage_gb"]; got != r.wantGB {
+			t.Errorf("%s: DESIRED shape.storage_gb = %v, want %v — the cell renders from this "+
+				"document, not from `shape`", r.id, got, r.wantGB)
+		}
+		if moved := gen > before[r.id]; moved != r.wantMoved {
+			t.Errorf("%s: generation moved=%v (%d → %d), want moved=%v. The agent polls "+
+				"observed_generation < generation, so a row corrected without a bump is fixed "+
+				"in the database and NOT on the cell.", r.id, moved, before[r.id], gen, r.wantMoved)
+		}
+	}
+
+	// Idempotent: a re-run must not bump anything a second time.
+	after := map[string]int64{}
+	for _, r := range rows {
+		var g int64
+		_ = w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id = $1`, r.id).Scan(&g)
+		after[r.id] = g
+	}
+	if _, err := w.pool.Exec(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		var g int64
+		_ = w.pool.QueryRow(ctx, `SELECT generation FROM services WHERE id = $1`, r.id).Scan(&g)
+		if g != after[r.id] {
+			t.Errorf("%s: a second run bumped generation %d → %d", r.id, after[r.id], g)
 		}
 	}
 }

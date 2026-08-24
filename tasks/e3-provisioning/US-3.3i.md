@@ -10,7 +10,7 @@ issue: 0
 labels: [Platform, Backend]
 module: M4 Provisioning
 contexts: [provisioning, billing]
-deps: [T3.4c]
+deps: []
 files:
   - services/api/internal/provisioning/**
   - services/api/internal/estimates/**
@@ -58,13 +58,19 @@ in the first place.
 
 ## What has to be true first
 
-1. **T3.4c** — `storage_gb` actually sizes the PVC, so the priced number and the
-   provisioned number are one number. (`deps`.)
-2. **The minimum is catalog-owned.** Even with T3.4c, `dev` resolves to
-   `storage_gb: 0` while the driver applies `minVolumeGB = 10`. That floor must
-   come from the catalog both planes read, not from a constant in the driver —
-   T3.4c's own mistake-bank entry says exactly this ("bind the driver to the
-   catalog with a test that READS `pricing.json`").
+1. ~~**T3.4c** — `storage_gb` actually sizes the PVC.~~ **DONE.** Measured after
+   the merge: `standard` and `performance` resolve to 50 in the control plane and
+   the driver renders `%dGi` from that same number. Two of three sizes are now
+   predictable.
+2. **The minimum is catalog-owned** — the whole remainder. `dev` includes 0 GB,
+   the API resolves `storage_gb: 0`, and the driver applies its OWN
+   `minVolumeGB = 10`. So for one catalog size the control plane still cannot say
+   what volume will exist, and a gate built on today's numbers would be wrong by
+   10 GiB per dev service. The floor must come from the catalog both planes read,
+   not a constant in the driver — T3.4c's own mistake-bank entry says exactly
+   this ("bind the driver to the catalog with a test that READS `pricing.json`").
+   `TestOnlyDevsFloorStillHidesThePVCSizeFromTheControlPlane` is the tripwire: it
+   fails the moment `dev` stops resolving to 0.
 
 ## Acceptance criteria
 

@@ -895,28 +895,82 @@ func TestThePostgresHASurchargeIsBoundedToo(t *testing.T) {
 	}
 }
 
-// THE PREMISE BEHIND WITHHOLDING requests.storage (US-3.3e / US-3.3i).
+// WHAT STILL STOPS requests.storage COMING BACK (US-3.3e / US-3.3i).
 //
-// The storage half of the founder's envelope is not rendered, because the API
-// cannot predict the PVC the cell will create and therefore cannot refuse an
-// order that will not fit. This pins the half of that premise which lives here:
-// the control plane resolves NO storage figure for any catalog size, so there is
-// nothing to compare an envelope against.
+// US-3.3e withheld the storage half of the founder's envelope because the API
+// could not predict the PVC the cell would create: every size resolved to
+// `storage_gb: 0` while the driver rendered 10/32/128 Gi from a table it owned.
+// T3.4c closed most of that — `standard` and `performance` now resolve to the
+// included GB and the driver renders `%dGi` from that same number.
 //
-// It is written to FAIL the day that changes — T3.4c makes storage_gb size the
-// PVC — because that is exactly when US-3.3i becomes possible and the withheld
-// quota should come back.
-func TestTheControlPlaneStillCannotPredictThePVCSize(t *testing.T) {
-	for _, size := range []string{"dev", "standard", "performance"} {
+// `dev` is the remainder, and it is the reason US-3.3i is still not free:
+// `dev` includes 0 GB, the API resolves 0, and the driver applies its OWN
+// `minVolumeGB = 10` floor. So for one catalog size the control plane still
+// cannot say what volume will exist, and an envelope gate would be wrong by
+// 10 GiB per dev service.
+//
+// This test is the tripwire for that last step. When the floor becomes
+// catalog-owned, `dev` resolves to 10, this fails, and requests.storage plus
+// the API-layer gate can land together.
+func TestOnlyDevsFloorStillHidesThePVCSizeFromTheControlPlane(t *testing.T) {
+	for size, want := range map[string]int{"standard": 50, "performance": 50} {
 		out, _, err := resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": size}})
 		if err != nil {
 			t.Fatalf("%s: %v", size, err)
 		}
-		gb, _ := out["storage_gb"].(int)
-		if gb != 0 {
-			t.Fatalf("%s now resolves storage_gb=%d. If that is the size the driver renders, the "+
-				"control plane CAN predict the PVC — turn requests.storage back on and add the "+
-				"API-layer gate (US-3.3i), and delete this test.", size, gb)
+		if got, _ := out["storage_gb"].(int); got != want {
+			t.Errorf("%s resolves storage_gb=%d, want %d — the control plane's number and the "+
+				"driver's rendered PVC must be the same number", size, got, want)
 		}
+	}
+	out, _, err := resolve(ShapeInput{Product: "postgres", Shape: map[string]any{"size": "dev"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := out["storage_gb"].(int); got != 0 {
+		t.Fatalf("dev now resolves storage_gb=%d rather than 0. If the driver's minVolumeGB floor "+
+			"has become catalog-owned, the control plane can finally predict every PVC: land "+
+			"US-3.3i (requests.storage + the API-layer gate) and delete this test.", got)
+	}
+}
+
+// A NEGATIVE storage_gb IS A FIELD ERROR, NOT A FLOOR.
+//
+// The included-GB floor (`max(declared, included)`) made Price's own
+// `storage_gb < 0` arm unreachable for every known size: measured, -100 and -1
+// resolved to 50/50/0 and priced normally on create AND on POST /v1/estimates,
+// where they had been 422s. A wrong TYPE is rejected rather than defaulted —
+// engine.go says so and calls it load-bearing — and a wrong SIGN had quietly
+// stopped being. On PATCH it errored only by accident of the shrink check, with
+// the wrong message.
+func TestANegativeStorageIsRefusedAtEverySize(t *testing.T) {
+	for _, size := range []string{"dev", "standard", "performance"} {
+		for _, gb := range []int{-1, -100} {
+			_, _, err := resolve(ShapeInput{
+				Product: "postgres",
+				Shape:   map[string]any{"size": size, "storage_gb": gb},
+			})
+			if err == nil {
+				t.Errorf("%s with storage_gb=%d was accepted — the floor coerced a negative into "+
+					"a positive instead of refusing it", size, gb)
+				continue
+			}
+			var se ShapeError
+			if !errors.As(err, &se) || se.Field != "shape.storage_gb" {
+				t.Errorf("%s/%d: err = %v, want a shape.storage_gb field error", size, gb, err)
+			}
+		}
+	}
+	// ...and zero is still accepted, resolving to the included floor: it is a
+	// legal way to spell "give me what the plan includes".
+	out, _, err := resolve(ShapeInput{
+		Product: "postgres",
+		Shape:   map[string]any{"size": "standard", "storage_gb": 0},
+	})
+	if err != nil {
+		t.Fatalf("storage_gb=0 was refused: %v", err)
+	}
+	if out["storage_gb"] != 50 {
+		t.Fatalf("storage_gb=0 resolved to %v, want the included 50", out["storage_gb"])
 	}
 }

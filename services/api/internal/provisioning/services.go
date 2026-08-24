@@ -211,6 +211,57 @@ func desiredDoc(product, intent, namespace string, quota billing.Quota, shape, s
 	return b
 }
 
+// refuseStorageShrink rejects a PATCH that lowers postgres storage below what
+// the service already has provisioned.
+//
+// Both sides are RESOLVED. The stored shape already is (create persists the
+// resolved form), so the merged one must be too — comparing a raw merged value
+// against a resolved stored one refused PATCHes where nothing shrinks, e.g.
+// `{"storage_gb":30}` on a `standard`, which CREATE accepts and resolves to 50.
+// Resolving only raises values BELOW the floor, so a genuine reduction above it
+// (200 -> 100) is still visible to this check.
+func refuseStorageShrink(storedShape []byte, merged map[string]any) error {
+	var stored map[string]any
+	if json.Unmarshal(storedShape, &stored) != nil || stored == nil {
+		return nil
+	}
+	prior, hadPrior := shapeGB(stored["storage_gb"])
+	next, hasNext := shapeGB(merged["storage_gb"])
+	if !hadPrior || !hasNext || next >= prior {
+		return nil
+	}
+	// The remediation goes in the PROBLEM, not in the field Detail.
+	// ValidationFailed's top-level remediation is "Fix the listed fields and
+	// retry the request" — advice that cannot succeed here, because no value of
+	// this field makes the request work. api-conventions requires each failure to
+	// name a next action, and the next action is not a retry.
+	p := problem.ValidationFailed([]problem.FieldError{{
+		Field: "shape.storage_gb",
+		Detail: fmt.Sprintf("cannot be reduced from %d to %d — a volume cannot shrink. "+
+			"Kubernetes supports expansion only, so the %d GB is still provisioned and still "+
+			"billed.", prior, next, prior),
+	}})
+	p.Remediation = "Create a new service at the smaller size and migrate the data; " +
+		"retrying this request cannot succeed."
+	return problemError{p: p}
+}
+
+// shapeGB reads a storage_gb that may have arrived as any JSON number shape.
+func shapeGB(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), n == float64(int(n))
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	}
+	return 0, false
+}
+
 // envelopeFor resolves an org's per-environment resource quota.
 //
 // Deny-by-default all the way down: an org whose plan is not in the table is a
@@ -769,6 +820,26 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 				return store.Service{}, problemError{p: problem.ValidationFailed(
 					[]problem.FieldError{{Field: se.Field, Detail: se.Detail}})}
 			}
+			return store.Service{}, err
+		}
+		// AFTER resolve, and against the RESOLVED merged shape. Comparing the raw
+		// merged value was wrong in one direction: the STORED shape is already
+		// resolved (create persists the resolved form), so `PATCH
+		// {"storage_gb":30}` on a `standard` compared 30 against 50 and 422'd —
+		// while the identical body on CREATE resolves to 50 and is accepted. That
+		// is exactly the invariant this branch names as load-bearing: "the same
+		// configuration spelled with its defaults written out must not be
+		// refused". Resolving only RAISES values below the floor, so a real
+		// reduction above it (200 -> 100) is still visible on both sides.
+		//
+		// A PVC CANNOT SHRINK: Kubernetes supports expansion only and rejects a
+		// request below `.status.capacity`. Without this, `PATCH
+		// {"storage_gb":20}` on a 200 GB service drops the bill for storage the
+		// cluster is still carrying AND makes the driver render a 20Gi PVC the CSI
+		// driver refuses, leaving the row outstanding forever with nothing written
+		// back. Refused rather than silently floored — this is NOT a pricing
+		// decision; nobody's bill moves.
+		if err := refuseStorageShrink(svc.Shape, resolvedMerged); err != nil {
 			return store.Service{}, err
 		}
 		merged, err := json.Marshal(resolvedMerged)

@@ -729,3 +729,81 @@ func TestATeardownFlagInDesiredIsHonouredWithoutTheStatus(t *testing.T) {
 		t.Error("nothing was deleted for a service flagged deleting in its desired doc")
 	}
 }
+
+// TEARDOWN MUST NOT DELETE OBJECTS FOR A PRODUCT THIS DRIVER DOES NOT OWN.
+//
+// There is ONE renderer for all four products (cmd/cell-agent has no dispatch),
+// so `[postgres, valkey, web, worker]` all reach this code. Replacing Render with
+// Objects on the teardown path dropped Render's two entry guards, and measured:
+// a `valkey` service in `deleting` converged to "gone" and issued Delete for
+// `Cluster/svc-...` and `ScheduledBackup/svc-...-nightly` — postgres shapes for a
+// product that has none. Reporting "gone" then marks the service deleted and
+// stops its metering while whatever actually runs it keeps running.
+func TestTeardownRefusesAProductThisDriverDoesNotOwn(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+	s.Product = "valkey"
+	s.Desired["product"] = "valkey"
+
+	status, err := newRenderer(a).Converge(context.Background(), s)
+	if err == nil {
+		t.Fatalf("a valkey teardown was accepted and converged to %q", status)
+	}
+	if status == "gone" {
+		t.Error("reported gone for a product this driver does not own — the service is marked " +
+			"deleted and its metering stops while the real resource keeps running")
+	}
+	if len(a.deleted) != 0 {
+		t.Errorf("deleted postgres-shaped objects for a valkey service: %v", a.deleted)
+	}
+}
+
+// THE PRICED storage_gb MUST REACH THE APPLIED MANIFEST — asserted here, at the
+// renderer, and read out of the YAML rather than the spec struct.
+//
+// T3.4c proved the DRIVER sizes the PVC from `storage_gb`. Nothing proved its
+// only production caller hands it one: measured, `storage_gb` appeared ZERO times
+// anywhere in this package, and deleting the key on the way from the desired doc
+// to the driver left the entire cell-agent suite green. That is exactly the shape
+// of the original defect — the driver read `shape["storage"]`, which the API's
+// schema forbids, so the priced value was never read and every customer got the
+// size default. Proving the driver right while leaving the wire between them
+// unpinned is how that survived.
+//
+// float64, not int: this value arrives from JSON, so the production type is what
+// the test must use.
+func TestTheDesiredDocsStorageSizesTheAppliedCluster(t *testing.T) {
+	for _, tc := range []struct {
+		storage any
+		want    string
+	}{
+		{float64(200), "200Gi"},
+		{float64(78), "78Gi"},
+		{float64(50), "50Gi"},
+	} {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+		// Keep the fixture's own namespace and envelope — US-3.3a made the
+		// namespace env-derived and US-3.3e made a doc with no `quota` a REFUSAL,
+		// so replacing the whole Desired map here would fail for reasons that
+		// have nothing to do with storage.
+		s.Desired["shape"] = map[string]any{"size": "standard", "storage_gb": tc.storage}
+
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatalf("storage_gb=%v: %v", tc.storage, err)
+		}
+		var cluster string
+		for _, doc := range a.applied[s.Desired["namespace"].(string)] {
+			if strings.Contains(string(doc), "kind: Cluster") {
+				cluster = string(doc)
+			}
+		}
+		if cluster == "" {
+			t.Fatalf("storage_gb=%v: no Cluster was applied", tc.storage)
+		}
+		if !strings.Contains(cluster, tc.want) {
+			t.Errorf("storage_gb=%v: the applied Cluster does not carry %s — the priced storage "+
+				"never reached the manifest:\n%s", tc.storage, tc.want, cluster)
+		}
+	}
+}

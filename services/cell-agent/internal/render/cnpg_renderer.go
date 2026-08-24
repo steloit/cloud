@@ -34,6 +34,9 @@ type CNPGRenderer struct {
 // so the renderer is testable and the driver is swappable per product later).
 type cnpgDriver interface {
 	Render(driver.Spec) (driver.Manifests, error)
+	// Objects names what a service owns without rendering it, so teardown cannot
+	// fail for a reason that only applies to creating a volume (T3.4c).
+	Objects(driver.Spec) (driver.Manifests, error)
 }
 
 // NewCNPGRenderer — cell, gsaEmail, walBucket are the agent's own placement
@@ -133,7 +136,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	// contains characters k8s rejects, and addressing the wrong name makes Delete
 	// 404 → "already gone" → report gone while a real cluster keeps running.
 	if svc.Status == "deleting" || asBool(svc.Desired["deleting"]) {
-		objs, err := r.renderedObjects(svc, namespace)
+		objs, err := r.teardownObjects(svc, namespace)
 		if err != nil {
 			// A teardown that cannot enumerate its objects must NOT report gone —
 			// that would mark the service deleted while its cluster keeps running.
@@ -230,13 +233,20 @@ func terminal(status string) bool {
 	return false
 }
 
-// renderedObjects returns the driver-canonical kind+name for a service's
-// objects, so Observe/Delete address exactly what Apply created. It renders with
-// the REAL namespace and product (a fabricated placeholder would be sound only
-// by accident — nothing in the Driver contract promises namespace-independent
-// names) and propagates errors rather than silently returning nothing.
-func (r *CNPGRenderer) renderedObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
-	return r.pg.Render(driver.Spec{
+// teardownObjects returns the driver-canonical kind+name for a service's
+// objects, so Delete addresses exactly what Apply created. It uses the REAL
+// namespace and product — a fabricated placeholder would be sound only by
+// accident, since nothing in the Driver contract promises namespace-independent
+// names.
+//
+// The error return is REACHABLE, and an earlier revision of this comment said it
+// was not. Objects carries Driver.Render's two entry guards — the product check
+// and requireName — because dropping them here is what let a `valkey` service in
+// `deleting` converge to "gone" while deleting postgres-shaped objects. There is
+// one renderer for all four products, so the caller's "a teardown that cannot
+// enumerate its objects must NOT report gone" arm is live, not aspirational.
+func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace string) (driver.Manifests, error) {
+	return r.pg.Objects(driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
 		Instances: instancesOf(svc.Desired), Cell: r.cell,

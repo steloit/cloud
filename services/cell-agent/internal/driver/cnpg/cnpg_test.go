@@ -1,9 +1,12 @@
 package cnpg
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -63,26 +66,162 @@ func TestArchiveTimeoutIsMeasuredRPO(t *testing.T) {
 	}
 }
 
-func TestRenderFromShapeSizes(t *testing.T) {
-	cases := map[string]string{"dev": "10Gi", "standard": "32Gi", "pro": "128Gi", "unknown": "10Gi"}
-	for size, want := range cases {
-		s := devSpec()
-		s.Shape = map[string]any{"size": size}
-		m, err := New().Render(s)
+// THE CATALOG IS THE SOURCE. Read from pricing.json rather than retyped, because
+// a hand-maintained list is exactly what let two defects ship: `standard`
+// rendered 32Gi while its base price includes 50 GB, and `performance` — the
+// most expensive size — had no case at all and fell through to the smallest
+// volume. A list can be wrong in the same direction as the code it checks.
+//
+// The cell-agent is a separate Go module and must not IMPORT the API's pricing
+// table; the test reads the file from the repo root, the precedent parity_test.go
+// already sets.
+func TestEveryCatalogSizeRendersExactlyItsIncludedStorage(t *testing.T) {
+	catalog := catalogSizes(t)
+
+	// EQUALITY, not `>=`. An inequality binds only one direction, and two
+	// mutations survived it: lowering `performance.included_gb` in the catalog
+	// (green in BOTH modules, re-pricing every performance customer by 50c/GB),
+	// and raising the driver's floor to 500 (green everywhere — an 11200c service
+	// silently getting a 500Gi PVC). The same number lives in two files; the test
+	// has to pin them together, not merely order them.
+	for size, includedGB := range catalog {
+		spec := devSpec()
+		spec.Shape = map[string]any{"size": size}
+		m, err := New().Render(spec)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("size %q is in the catalog and the driver refuses it: %v", size, err)
 		}
-		if !strings.Contains(string(m[0].YAML), "size: "+want) {
-			t.Fatalf("size %q → want storage %q, manifest:\n%s", size, want, m[0].YAML)
+		want := includedGB
+		if want < minVolumeGB {
+			want = minVolumeGB // dev includes 0 GB, and a 0Gi PVC is not a volume
+		}
+		if got := renderedStorageGB(t, m[0].YAML); got != want {
+			t.Errorf("size %q includes %d GB and renders a %dGi PVC, want exactly %dGi. "+
+				"Under-rendering bills for storage the volume does not have; over-rendering "+
+				"provisions storage nobody sold.", size, includedGB, got, want)
 		}
 	}
-	// explicit shape.storage wins over the size mapping
-	s := devSpec()
-	s.Shape = map[string]any{"size": "dev", "storage": "64Gi"}
-	m, _ := New().Render(s)
-	if !strings.Contains(string(m[0].YAML), "size: 64Gi") {
-		t.Fatal("explicit shape.storage must override the size mapping")
+
+	// The two maps must name the SAME sizes. A catalog size missing from the
+	// driver is refused at converge; a driver size missing from the catalog is a
+	// floor for something nobody can buy, and neither is visible from the loop
+	// above.
+	for size := range catalog {
+		if _, ok := includedFloorGB[size]; !ok {
+			t.Errorf("the catalog sells %q and includedFloorGB has no entry — every converge "+
+				"for that size fails", size)
+		}
 	}
+	for size := range includedFloorGB {
+		if _, ok := catalog[size]; !ok {
+			t.Errorf("includedFloorGB has %q, which the catalog does not sell", size)
+		}
+	}
+}
+
+// The priced storage_gb must reach the PVC. This is the filed defect: the driver
+// read `shape["storage"]`, a key the API's closed schema rejects, so the priced
+// value was never read and a customer billed for 78 GB got the size default.
+func TestThePricedStorageGBSizesTheVolume(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		val  any
+		want int
+	}{
+		{"int", 78, 78},
+		{"float64 as it arrives over JSON", float64(78), 78},
+		{"int64", int64(78), 78},
+		{"below the size floor is raised to it", 1, 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := devSpec()
+			spec.Shape = map[string]any{"size": "standard", "storage_gb": tc.val}
+			m, err := New().Render(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := renderedStorageGB(t, m[0].YAML); got != tc.want {
+				t.Fatalf("storage_gb %v (%T) → %dGi, want %dGi", tc.val, tc.val, got, tc.want)
+			}
+		})
+	}
+
+	// The legacy `storage` key is REMOVED, not dual-read. It was never in the
+	// API's schema, so nothing can legitimately send it; continuing to honour it
+	// would keep a second, unpriced way to size a volume.
+	spec := devSpec()
+	spec.Shape = map[string]any{"size": "dev", "storage": "64Gi"}
+	m, err := New().Render(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := renderedStorageGB(t, m[0].YAML); got != 10 {
+		t.Fatalf("the legacy `storage` key still sizes the volume (%dGi) — it is not in "+
+			"estimates.shapeSchema and must not be a second, unpriced input", got)
+	}
+}
+
+// A size the catalog does not know must be REFUSED, not silently sized. The old
+// `default:` arm is how `performance` shipped with the smallest volume.
+func TestAnUncatalogedSizeIsRefusedRatherThanGuessed(t *testing.T) {
+	for _, size := range []string{"pro", "xl", "Standard", "performance-2"} {
+		spec := devSpec()
+		spec.Shape = map[string]any{"size": size}
+		if _, err := New().Render(spec); err == nil {
+			t.Errorf("size %q was silently sized instead of refused", size)
+		}
+	}
+	// Positive control: every catalog size must still render, or the above would
+	// be satisfied by a driver that refuses everything.
+	for size := range catalogSizes(t) {
+		spec := devSpec()
+		spec.Shape = map[string]any{"size": size}
+		if _, err := New().Render(spec); err != nil {
+			t.Errorf("catalog size %q was refused: %v", size, err)
+		}
+	}
+}
+
+// catalogSizes reads postgres.sizes[*].included_gb from the API's pricing table.
+func catalogSizes(t *testing.T) map[string]int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "services/api/internal/estimates/pricing.json"))
+	if err != nil {
+		t.Fatalf("read the catalog: %v", err)
+	}
+	var doc struct {
+		Postgres struct {
+			Sizes map[string]struct {
+				IncludedGB int `json:"included_gb"`
+			} `json:"sizes"`
+		} `json:"postgres"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse the catalog: %v", err)
+	}
+	if len(doc.Postgres.Sizes) == 0 {
+		t.Fatal("the catalog lists no postgres sizes — this test would prove nothing")
+	}
+	out := map[string]int{}
+	for k, v := range doc.Postgres.Sizes {
+		out[k] = v.IncludedGB
+	}
+	return out
+}
+
+var storageRe = regexp.MustCompile(`(?m)^\s*size:\s*(\d+)Gi\s*$`)
+
+func renderedStorageGB(t *testing.T, yaml []byte) int {
+	t.Helper()
+	m := storageRe.FindSubmatch(yaml)
+	if m == nil {
+		t.Fatalf("no storage size in the rendered manifest:\n%s", yaml)
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 func TestSnapshotBranchManifest(t *testing.T) {
@@ -194,15 +333,20 @@ func TestRenderErrorPaths(t *testing.T) {
 	if _, err := d.Render(driver.Spec{Product: "postgres", Name: "x"}); err == nil {
 		t.Fatal("empty namespace must error")
 	}
-	// nil shape must not panic (falls to dev)
+	// An ABSENT size is contractually dev — that is the API's closed-schema
+	// default (estimates.shapeSchema), so matching it is following the contract
+	// rather than guessing.
 	m, err := d.Render(driver.Spec{Product: "postgres", Name: "x", Namespace: "ns", Shape: nil})
 	if err != nil || !strings.Contains(string(m[0].YAML), "size: 10Gi") {
 		t.Fatalf("nil shape should default to dev 10Gi: %v", err)
 	}
-	// non-string size must not panic
-	m2, err := d.Render(driver.Spec{Product: "postgres", Name: "x", Namespace: "ns", Shape: map[string]any{"size": 42}})
-	if err != nil || !strings.Contains(string(m2[0].YAML), "size: 10Gi") {
-		t.Fatalf("non-string size should default to dev: %v", err)
+	// A non-string size must ERROR, not default. This test previously asserted it
+	// silently became dev — the smallest volume — which is precisely the
+	// under-provisioning T3.4c exists to close: `size: 42` reaching the driver
+	// means the API's string schema was bypassed, and answering that with the
+	// cheapest PVC is a guess about a contract we cannot read.
+	if _, err := d.Render(driver.Spec{Product: "postgres", Name: "x", Namespace: "ns", Shape: map[string]any{"size": 42}}); err == nil {
+		t.Fatal("a non-string size must be refused, not silently sized as dev")
 	}
 }
 
