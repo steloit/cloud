@@ -173,6 +173,7 @@ func TestBranchMatchesSpikeGroundTruth(t *testing.T) {
 	m, err := New().SnapshotBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0",
 		SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch",
+		Shape: map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +217,7 @@ func TestPITRMatchesSpikeGroundTruth(t *testing.T) {
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", Target: "svc_db01-pitr",
 		WALBucket: "steloit-dev-wal-customer", GSAEmail: "g@x", HasArchivedWAL: true,
 		TargetTime: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC),
+		Shape:      map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)

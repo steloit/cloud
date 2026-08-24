@@ -3,6 +3,7 @@ package cnpg
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
+	"gopkg.in/yaml.v3"
 )
 
 var update = flag.Bool("update", false, "regenerate golden manifests")
@@ -209,15 +211,33 @@ func catalogSizes(t *testing.T) map[string]int {
 	return out
 }
 
-var storageRe = regexp.MustCompile(`(?m)^\s*size:\s*(\d+)Gi\s*$`)
+var storageRe = regexp.MustCompile(`^(\d+)Gi$`)
 
-func renderedStorageGB(t *testing.T, yaml []byte) int {
+// renderedStorageGB reads `spec.storage.size` BY PATH, not by taking the first
+// `size:` in the document.
+//
+// The regex form was positional and correct only by accident of field order.
+// Measured: adding a `spec.walStorage` block (a real CNPG field, and ordinary
+// practice) above `spec.storage` and regressing `spec.storage.size` back to a
+// literal `10Gi` left the ENTIRE module green — every size assertion silently
+// measured the WAL volume while the data volume was the old constant. Goldens
+// did not object either, because `-update` regenerates them.
+func renderedStorageGB(t *testing.T, manifest []byte) int {
 	t.Helper()
-	m := storageRe.FindSubmatch(yaml)
-	if m == nil {
-		t.Fatalf("no storage size in the rendered manifest:\n%s", yaml)
+	var doc map[string]any
+	if err := yaml.Unmarshal(manifest, &doc); err != nil {
+		t.Fatalf("parse the rendered manifest: %v\n%s", err, manifest)
 	}
-	n, err := strconv.Atoi(string(m[1]))
+	v := dig(doc, "spec.storage.size")
+	if v == nil {
+		t.Fatalf("no spec.storage.size in the rendered manifest:\n%s", manifest)
+	}
+	m := storageRe.FindStringSubmatch(fmt.Sprint(v))
+	if m == nil {
+		t.Fatalf("spec.storage.size is %v — the driver must render whole Gi, and a unit change "+
+			"would otherwise be read as a number change", v)
+	}
+	n, err := strconv.Atoi(m[1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +247,7 @@ func renderedStorageGB(t *testing.T, yaml []byte) int {
 func TestSnapshotBranchManifest(t *testing.T) {
 	m, err := New().SnapshotBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch",
+		Shape: map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -245,6 +266,7 @@ func TestSnapshotBranchManifest(t *testing.T) {
 func TestBranchRecoveryFromSnapshot(t *testing.T) {
 	m, _ := New().SnapshotBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch",
+		Shape: map[string]any{"size": "dev"},
 	})
 	if !strings.Contains(string(m[1].YAML), "svc-db01-snap-1") {
 		t.Fatal("branch cluster must recover from the named snapshot")
@@ -256,7 +278,7 @@ func TestPITRBranchManifest(t *testing.T) {
 	m, err := New().PITRBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Target: "svc_db01-pitr", Cell: "cell-0",
 		WALBucket: "steloit-dev-wal-customer", GSAEmail: "ci-image-push@steloit-dev.iam.gserviceaccount.com",
-		HasArchivedWAL: true, TargetTime: ts,
+		HasArchivedWAL: true, TargetTime: ts, Shape: map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +387,7 @@ func TestInstancesClampAndFlowThrough(t *testing.T) {
 }
 
 func TestPITRRequiresTargetTimeAndPlacement(t *testing.T) {
-	base := driver.BranchSource{Name: "s", Namespace: "ns", Target: "t", HasArchivedWAL: true,
+	base := driver.BranchSource{Name: "s", Namespace: "ns", Target: "t", HasArchivedWAL: true, Shape: map[string]any{},
 		WALBucket: "b", GSAEmail: "g@x"}
 	// zero target time refused
 	if _, err := New().PITRBranch(base); err == nil {
@@ -382,10 +404,20 @@ func TestPITRRequiresTargetTimeAndPlacement(t *testing.T) {
 
 func TestBranchAndPITRErrorPaths(t *testing.T) {
 	d := New()
-	if _, err := d.SnapshotBranch(driver.BranchSource{Namespace: "ns", Target: "t", SnapshotName: "s"}); err == nil {
+	// Shape is supplied on BOTH so each case has exactly ONE reason to fail, and
+	// the message is checked. Left nil, each had two, and neither assertion could
+	// tell which fired — so the guard ORDER (branchStorage last) was silently
+	// load-bearing for a test that never mentioned it.
+	if _, err := d.SnapshotBranch(driver.BranchSource{
+		Namespace: "ns", Target: "t", SnapshotName: "s", Shape: map[string]any{},
+	}); err == nil {
 		t.Fatal("snapshot branch with empty source name must error")
+	} else if !strings.Contains(err.Error(), "name") {
+		t.Fatalf("the refusal must name the missing field, got: %v", err)
 	}
-	if _, err := d.SnapshotBranch(driver.BranchSource{Name: "s", Namespace: "ns"}); err == nil {
+	if _, err := d.SnapshotBranch(driver.BranchSource{
+		Name: "s", Namespace: "ns", Shape: map[string]any{},
+	}); err == nil {
 		t.Fatal("snapshot branch without Target/SnapshotName must error")
 	}
 	if _, err := d.Hibernate("", "ns"); err == nil {
@@ -398,5 +430,150 @@ func TestRenderRejectsNonPostgres(t *testing.T) {
 	s.Product = "valkey"
 	if _, err := New().Render(s); err == nil {
 		t.Fatal("the CNPG driver must reject a non-postgres product")
+	}
+}
+
+// A BRANCH IS SIZED FROM THE SOURCE — EVERY CATALOG SIZE, EVERY STORAGE SHAPE,
+// BOTH ENTRY POINTS.
+//
+// The two dimensions are the point. A one-dimensional version of this (catalog
+// size only, on the snapshot path only) is what let the first cut of this task
+// ship a hole: "the priced storage reaches the branch" has TWO representations,
+// snapshot and PITR, and a mutation stripping `storage_gb` from the PITR path
+// alone stayed green — `{size: performance, storage_gb: 2000}` rendered
+// create=2000Gi, snapshot=2000Gi, **pitr=50Gi**. That is the path with no
+// restoreSize refusal in front of it, so the volume comes up and fills
+// mid-restore. Same class as the branch it was fixed on, other representation.
+//
+// The storage dimension matters for the same reason: shapes of the form
+// `{"size": X}` with no `storage_gb` are shapes the API never emits (per the
+// founder decision of 2026-08-23 an unset storage_gb resolves to `included_gb`
+// before the driver sees it), so a size-only sweep tests the one shape that does
+// not occur and misses the ones that do.
+//
+// Everything is asserted against what `Render` produces for the SAME shape, by
+// EQUALITY — the T3.4c rule: an inequality binds one direction only, and
+// mutations survive it. Equality satisfies "at least as large as the source"
+// a fortiori. Binding to Render rather than to a table of expected numbers is
+// what stops create, branch and PITR drifting; a table would be a fourth copy of
+// the catalog.
+func TestEveryCatalogSizeAndStorageShapeBranchesAtTheSourceSize(t *testing.T) {
+	entryPoints := []struct {
+		name string
+		size func(t *testing.T, shape map[string]any) int
+	}{
+		{"snapshot branch", func(t *testing.T, shape map[string]any) int {
+			m, err := New().SnapshotBranch(driver.BranchSource{
+				Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0",
+				SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch", Shape: shape,
+			})
+			if err != nil {
+				t.Fatalf("snapshot branch: %v", err)
+			}
+			return renderedStorageGB(t, m[1].YAML) // m[0] is the VolumeSnapshot
+		}},
+		{"PITR restore", func(t *testing.T, shape map[string]any) int {
+			m, err := New().PITRBranch(driver.BranchSource{
+				Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", Target: "svc_db01-pitr",
+				WALBucket: "b", GSAEmail: "g@x", HasArchivedWAL: true,
+				TargetTime: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC), Shape: shape,
+			})
+			if err != nil {
+				t.Fatalf("PITR: %v", err)
+			}
+			return renderedStorageGB(t, m[0].YAML)
+		}},
+	}
+
+	checked := 0
+	for size, includedGB := range catalogSizes(t) {
+		// storage_gb as JSON delivers it (float64), across the interesting
+		// relations to the size's included floor.
+		variants := map[string]any{
+			"unset":              nil,
+			"zero":               float64(0),
+			"exactly included":   float64(includedGB),
+			"well above":         float64(includedGB + 350),
+			"one below included": float64(includedGB - 1),
+		}
+		if includedGB == 0 {
+			delete(variants, "one below included") // -1 GB is not a shape
+		}
+		for label, storageGB := range variants {
+			shape := map[string]any{"size": size}
+			if storageGB != nil {
+				shape["storage_gb"] = storageGB
+			}
+			spec := devSpec()
+			spec.Shape = shape
+			created, err := New().Render(spec)
+			if err != nil {
+				t.Fatalf("size %q / %s: Render: %v", size, label, err)
+			}
+			want := renderedStorageGB(t, created[0].YAML)
+
+			for _, ep := range entryPoints {
+				checked++
+				if got := ep.size(t, shape); got != want {
+					t.Errorf("size %q, storage_gb %s: the source volume is %dGi and the %s asks "+
+						"for %dGi.\n"+
+						"  snapshot: external-provisioner refuses a request below the snapshot's "+
+						"restoreSize outright (#727, closed NOT PLANNED) — the branch does not come "+
+						"up at all.\n"+
+						"  PITR: nothing refuses it. The volume is created and the base backup + "+
+						"WAL replay fills it, mid-restore.",
+						size, label, want, ep.name, got)
+				}
+			}
+		}
+	}
+	// Both entry points, every catalog size, every storage relation. Asserted as
+	// the product rather than as a floor: a floor cannot see a dimension that
+	// silently stopped being swept.
+	if want := len(catalogSizes(t))*len(entryPoints)*5 - len(entryPoints); checked != want {
+		t.Fatalf("swept %d combinations, want %d (sizes x %d entry points x 5 storage variants, "+
+			"less the one `dev` cannot have)", checked, want, len(entryPoints))
+	}
+}
+
+// A MISSING SHAPE IS REFUSED, NOT DEFAULTED.
+//
+// storageForShape reads an absent size as `dev` (the API's closed schema defaults
+// it), which is correct for a create and would silently re-render exactly the
+// 10Gi this task exists to remove. So nil — "the caller never plumbed it" — has
+// to be an error, while an empty-but-present shape stays legal (a dev postgres
+// names no size).
+func TestABranchWithNoSourceShapeIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(driver.BranchSource) (driver.Manifests, error)
+		base driver.BranchSource
+	}{
+		{"snapshot", New().SnapshotBranch, driver.BranchSource{
+			Name: "s", Namespace: "ns", SnapshotName: "snap", Target: "t"}},
+		{"pitr", New().PITRBranch, driver.BranchSource{
+			Name: "s", Namespace: "ns", Target: "t", WALBucket: "b", GSAEmail: "g@x",
+			HasArchivedWAL: true, TargetTime: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)}},
+	} {
+		if _, err := tc.call(tc.base); err == nil {
+			t.Errorf("%s: a branch with no source Shape was rendered — it would ask for a "+
+				"defaulted 10Gi volume", tc.name)
+		} else if !strings.Contains(err.Error(), "Shape") {
+			t.Errorf("%s: the refusal must name the missing field, got: %v", tc.name, err)
+		}
+
+		// An empty-but-present shape is a legitimate dev postgres.
+		withEmpty := tc.base
+		withEmpty.Shape = map[string]any{}
+		if _, err := tc.call(withEmpty); err != nil {
+			t.Errorf("%s: an empty shape is a dev postgres and must render: %v", tc.name, err)
+		}
+
+		// And an unknown size is loud, exactly as it is on the create path.
+		withUnknown := tc.base
+		withUnknown.Shape = map[string]any{"size": "enormous"}
+		if _, err := tc.call(withUnknown); err == nil {
+			t.Errorf("%s: an unknown size branched silently", tc.name)
+		}
 	}
 }

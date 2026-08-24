@@ -13,7 +13,10 @@
 // forbids substrate names in CUSTOMER surfaces, not in this internal plane.
 package driver
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Spec is the rendering input: product grammar plus the placement the control
 // plane resolved (namespace, cell, workload-identity SA, WAL bucket). Grammar
@@ -72,6 +75,41 @@ type BranchSource struct {
 	GSAEmail       string    // workload-identity SA (PITR pod must read GCS WAL)
 	HasArchivedWAL bool      // PITR requires a real archived-WAL basis (ADR-0007 F4)
 	TargetTime     time.Time // PITR recovery target (derived from WAL, never wall-clock)
+
+	// Shape is the SOURCE service's shape, and it is REQUIRED — a branch's
+	// volume is sized from it by the same function that sizes a create, so the
+	// two cannot drift.
+	//
+	// It is the shape rather than a pre-resolved size string on purpose: a
+	// `StorageSize string` here would let each caller compute its own answer,
+	// which is how SnapshotBranch and PITRBranch came to hardcode "10Gi" while
+	// Render was reading the catalog (T3.4c/T3.4d).
+	//
+	// It is the SOURCE's shape, not the target's: a branch inherits the volume it
+	// is restoring into, and the target does not have one yet.
+	//
+	// nil means "the caller did not plumb it" and is REFUSED by RequireShape. An
+	// empty-but-non-nil shape is legitimate — a legacy dev postgres genuinely has
+	// `shape = '{}'` (the column is NOT NULL DEFAULT '{}'), and 10Gi is genuinely
+	// its right size — but nil would resolve to dev too, silently reproducing
+	// exactly the 10Gi bug this field exists to remove.
+	Shape map[string]any
+}
+
+// RequireShape refuses a BranchSource whose Shape was never plumbed.
+//
+// It lives HERE, next to the field, rather than in each driver: the contract is
+// declared in this package, so a second BranchingDriver must not have to
+// re-derive the nil check to be safe (ADR-0014 — one owner for an invariant that
+// holds at more than one site). It cannot be a compile-time guarantee while
+// BranchSource is a struct literal, so it fails closed at render instead.
+func (b BranchSource) RequireShape() error {
+	if b.Shape == nil {
+		return fmt.Errorf("driver: branch of %q requires the source service's Shape — a branch "+
+			"volume is sized from the source, and defaulting it renders a 10Gi PVC that a "+
+			"snapshot restore refuses outright and a PITR restore fills up", b.Name)
+	}
+	return nil
 }
 
 // BranchingDriver is the Postgres-specific extension — the D2 branch primitive

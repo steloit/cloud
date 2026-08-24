@@ -196,6 +196,39 @@ type branchData struct {
 	Target, Source, Namespace, Cell, SnapshotName, StorageSize, WALBucket, GSAEmail, TargetTime string
 }
 
+// branchStorage sizes a branch's volume from the SOURCE service's shape, using
+// the same storageForShape that sizes a create. Both branch entry points call
+// it, so the three paths cannot drift.
+//
+// WHY A CONSTANT WAS NOT MERELY WRONG BUT UNBOOTABLE. Both entry points used to
+// hardcode "10Gi" with the note "CoW clone; sizing follows the source PVC". It
+// does not: `.spec.resources.requests.storage` is what the PVC asks for, and the
+// two recovery paths fail differently when it is short.
+//
+//   - A SNAPSHOT restore is REFUSED outright, above the CSI driver, by
+//     external-provisioner: "requested volume size %d is less than the size %d
+//     for the source snapshot %s". kubernetes-csi/external-provisioner#727 asked
+//     for the request to be treated as a minimum and was closed NOT PLANNED, so
+//     this is durable behaviour and not GKE-specific. A branch of a `standard`
+//     (50Gi) asking for 10Gi does not come up small — it does not come up.
+//   - A PITR restore is NOT refused, and that is worse. There is no snapshot
+//     data source, so there is no restoreSize to compare against, and CNPG
+//     passes storage.size straight through. The 10Gi volume is created happily
+//     and the base backup + WAL replay fills it until it is full — a failure
+//     that lands mid-restore and only when the source actually holds more than
+//     10Gi, so a large-but-empty source hides it indefinitely. Here the rendered
+//     manifest is the ONLY line of defence.
+//
+// A missing shape is an error rather than a default: storageForShape reads an
+// absent size as `dev` (the API's closed schema defaults it), which is right for
+// a create and would silently re-render 10Gi here.
+func branchStorage(b driver.BranchSource) (string, error) {
+	if err := b.RequireShape(); err != nil {
+		return "", err
+	}
+	return storageForShape(b.Shape)
+}
+
 // SnapshotBranch renders the VolumeSnapshot of the source and a Cluster that
 // recovers from it (measured 52.4s branch e2e, data-identical — ADR-0007 §2).
 // Apply order: snapshot first, then the cluster that recovers from it.
@@ -206,6 +239,10 @@ func (d *Driver) SnapshotBranch(b driver.BranchSource) (driver.Manifests, error)
 	if b.Target == "" || b.SnapshotName == "" {
 		return nil, fmt.Errorf("cnpg: snapshot branch requires Target and SnapshotName")
 	}
+	storageSize, err := branchStorage(b)
+	if err != nil {
+		return nil, err
+	}
 	snap, err := render("snapshot.yaml.tmpl", struct{ SnapshotName, Namespace, Source string }{
 		dnsName(b.SnapshotName), b.Namespace, dnsName(b.Name),
 	})
@@ -214,7 +251,7 @@ func (d *Driver) SnapshotBranch(b driver.BranchSource) (driver.Manifests, error)
 	}
 	clu, err := render("branch-cluster.yaml.tmpl", branchData{
 		Target: dnsName(b.Target), Source: dnsName(b.Name), Namespace: b.Namespace, Cell: b.Cell,
-		SnapshotName: dnsName(b.SnapshotName), StorageSize: "10Gi", // CoW clone; sizing follows the source PVC
+		SnapshotName: dnsName(b.SnapshotName), StorageSize: storageSize,
 	})
 	if err != nil {
 		return nil, err
@@ -244,9 +281,13 @@ func (d *Driver) PITRBranch(b driver.BranchSource) (driver.Manifests, error) {
 	if b.WALBucket == "" || b.GSAEmail == "" {
 		return nil, fmt.Errorf("cnpg: PITR requires the source WAL bucket and GSA — the recovering pod reads the source's archive via workload identity")
 	}
+	storageSize, err := branchStorage(b)
+	if err != nil {
+		return nil, err
+	}
 	clu, err := render("pitr-cluster.yaml.tmpl", branchData{
 		Target: dnsName(b.Target), Source: dnsName(b.Name), Namespace: b.Namespace, Cell: b.Cell,
-		StorageSize: "10Gi", WALBucket: b.WALBucket, GSAEmail: b.GSAEmail,
+		StorageSize: storageSize, WALBucket: b.WALBucket, GSAEmail: b.GSAEmail,
 		TargetTime: b.TargetTime.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
