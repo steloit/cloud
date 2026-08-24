@@ -96,7 +96,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   `cp -R` is red on arrival wherever tests reach outside the module, and the list keeps growing —
   find it by RUNNING the copy, never by recall. So far: `services/api` needs
   `docs/dev/money-range-audit.md` + `docs/product/08-api/openapi.yaml`; `services/cell-agent` needs
-  `AGENTS.md` + `infra/{k8s,spike}` + `pricing.json` + `billing/plans.json`. US-3.3a shipped a
+  `AGENTS.md` + `infra/{k8s,spike}` + `pricing.json` + `plans.json` + `08-api/openapi.yaml`. US-3.3a shipped a
   25-row table on a RED baseline — every row unfalsifiable. Assert the mutation APPLIED (two false
   SURVIVEDs came from a match string that silently missed) and that the clean copy passes BOTH sides.
 - **If the same invariant must hold at more than one site, give it one owner — prefer one the compiler

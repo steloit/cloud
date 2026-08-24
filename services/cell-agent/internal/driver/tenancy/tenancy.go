@@ -61,6 +61,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -131,6 +132,34 @@ type Spec struct {
 	Namespace string // env-<environment_id> (ADR-0012)
 	Cell      string
 	Quota     Quota // the plan's per-environment envelope, resolved by the control plane
+
+	// APIServerCIDR is the cluster's PRIVATE control-plane endpoint, as an
+	// ipBlock CIDR — on GKE, `privateClusterConfig.privateEndpoint` (e.g.
+	// 10.30.0.2/32).
+	//
+	// CNPG's instance manager and its bootstrap job both watch the Cluster CR,
+	// so they must reach the kube-apiserver. Under default-deny egress a
+	// selector-only peer never matches it, because the API server's backing
+	// address is not a pod IP.
+	//
+	// IT IS NOT THE `kubernetes` SERVICE ClusterIP, and that distinction cost a
+	// live debugging session. Pods dial 34.118.224.1:443 (the ClusterIP), so
+	// naming that as the ipBlock LOOKS obviously right — and does not work:
+	// Dataplane V2 evaluates egress against the post-translation destination, so
+	// an ipBlock matching a virtual service IP matches nothing. Measured on
+	// cell-verify: with the ClusterIP the initdb pod logged
+	//   dial tcp 34.118.224.1:443: i/o timeout
+	// and the Cluster sat in "Setting up primary" indefinitely; with the private
+	// endpoint alone it reached "Cluster in healthy state" in 45s. The public
+	// endpoint is not needed.
+	//
+	// (The same translation rule is why the DNS peer names node-local-dns pods
+	// rather than the kube-dns ClusterIP — one mechanism, two symptoms.)
+	//
+	// REQUIRED for the same reason the quota is: rendering the set without it
+	// produces a boundary that fences the first Postgres pod, which is exactly
+	// the outage US-3.3a's review predicted.
+	APIServerCIDR string
 }
 
 // Quota is the per-environment resource envelope, as Kubernetes quantity
@@ -145,6 +174,66 @@ type Quota struct {
 
 // Set reports whether an envelope was supplied at all.
 func (q Quota) Set() bool { return q.CPU != "" || q.Memory != "" || q.Storage != "" }
+
+// RefuseEndPort rejects any NetworkPolicy carrying a port RANGE.
+//
+// EXPORTED SO IT CAN BE TESTED AGAINST A POLICY THAT ACTUALLY CARRIES ONE.
+// Inline, it was unreachable: Render validates the namespace first, so the only
+// input that could smuggle `endPort` into the bytes was already refused, and
+// deleting the whole guard left the suite green. A guard whose test cannot reach
+// it is not a guard — it is a comment that compiles.
+//
+// Dataplane V2 silently does not enforce port ranges on affected versions: the
+// API server accepts the policy and drops nothing, which is the same defect
+// class as shipping NetworkPolicies to a cluster with no provider (ADR-0015).
+func RefuseEndPort(ms []Manifest) error {
+	for _, m := range ms {
+		if m.Kind != "NetworkPolicy" {
+			continue
+		}
+		if bytes.Contains(m.YAML, []byte("endPort")) {
+			return fmt.Errorf("tenancy: %s/%s carries endPort — Dataplane V2 does not "+
+				"enforce port ranges on affected versions, so this policy would be stored and "+
+				"ignored (ADR-0015). Enumerate single ports instead", m.Kind, m.Name)
+		}
+	}
+	return nil
+}
+
+// ValidateCIDR refuses anything that is not a plain IPv4 CIDR.
+//
+// It is interpolated into an ipBlock, so the same injection rule as the
+// namespace applies: a newline here adds a key to the policy. It is also the
+// one field whose WRONGNESS is silent — a malformed CIDR makes the API server
+// reject the whole policy, and a *valid but wrong* one produces a boundary that
+// looks right and fences the instance manager.
+func ValidateCIDR(c string) error {
+	if c == "" {
+		return fmt.Errorf("no API server CIDR: CNPG's instance manager must reach the " +
+			"kube-apiserver, and under default-deny egress a selector-only peer never matches it")
+	}
+	pfx, err := netip.ParsePrefix(c)
+	if err != nil {
+		// A shape check (a regexp over digits and dots) accepted
+		// 999.999.999.999/99, which the API server then refuses — so EVERY apply
+		// on the cell fails, from a value that looked fine at boot.
+		return fmt.Errorf("API server CIDR %q is not a valid CIDR: %w", c, err)
+	}
+	if !pfx.Addr().Is4() {
+		return fmt.Errorf("API server CIDR %q is not IPv4", c)
+	}
+	// A wide prefix is the dangerous case, not the malformed one: 0.0.0.0/0
+	// silently turns the apiserver allowance into unrestricted TCP/443 egress
+	// for every CNPG pod — including into the private ranges the sibling rule's
+	// `except` list exists to exclude. A control-plane endpoint is a host or a
+	// small block; /24 is already generous.
+	if pfx.Bits() < 24 {
+		return fmt.Errorf("API server CIDR %q is a /%d — a control plane endpoint is a host or a "+
+			"small block, and a wide prefix here grants CNPG pods egress far beyond it",
+			c, pfx.Bits())
+	}
+	return nil
+}
 
 // Manifest is one rendered object.
 type Manifest struct {
@@ -171,6 +260,9 @@ func Render(s Spec) ([]Manifest, error) {
 	// a bug there — rendering the namespace without a quota would silently give
 	// that environment no ceiling, so it is refused. Partially-set is refused for
 	// the same reason: a ResourceQuota missing a dimension bounds nothing on it.
+	if err := ValidateCIDR(s.APIServerCIDR); err != nil {
+		return nil, fmt.Errorf("tenancy: %s: %w", s.Namespace, err)
+	}
 	if !s.Quota.Set() {
 		return nil, fmt.Errorf("tenancy: no quota envelope for %s — the control plane resolves "+
 			"it from the org's plan; rendering without one leaves the environment unbounded", s.Namespace)
@@ -193,7 +285,14 @@ func Render(s Spec) ([]Manifest, error) {
 	// something that exists nowhere. The namespace NAME already identifies the
 	// environment (it is env-<id>); a label restating a lossy re-derivation of
 	// the name is not a second source, it is a second chance to be wrong.
-	return []Manifest{
+	// endPort IS REFUSED, NEVER WRITTEN (ADR-0015, US-3.3c AC 8). Dataplane V2
+	// silently does not enforce port RANGES on affected versions — a policy the
+	// API server accepts and does not apply, which is the exact defect class
+	// ADR-0015 exists to close. The refusal lives HERE, where policies are
+	// produced, so no caller can forget it; it is checked against the rendered
+	// bytes at the end of this function rather than trusted to review.
+
+	out := []Manifest{
 		{Kind: "Namespace", Name: s.Namespace, YAML: []byte(fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
@@ -276,7 +375,204 @@ spec:
         cpu: 100m
         memory: 128Mi
 `, s.Namespace))},
-	}, nil
+
+		// ---- D7: THE ENVIRONMENT IS A NETWORK BOUNDARY --------------------
+		//
+		// These are enforced ONLY because the cell runs Dataplane V2
+		// (US-3.3f/ADR-0015). On GKE Standard without it the API server stores
+		// every one of these and drops nothing — US-3.3a shipped them into
+		// exactly that and the boundary was nominal. The module now sets
+		// datapath_provider = ADVANCED_DATAPATH and a terraform test asserts it.
+
+		{Kind: "NetworkPolicy", Name: "default-deny-all", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: %s
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+`, s.Namespace))},
+
+		// DNS. TWO peers, because TWO different pods can serve it, and each peer
+		// keeps namespaceSelector and podSelector in the SAME list element — an
+		// AND. As two separate elements it becomes an OR over kube-system, which
+		// allows egress to EVERY pod there; US-3.3a's tests could not tell the
+		// difference and widening it stayed green.
+		//
+		// node-local-dns IS REQUIRED, and this was measured live, not reasoned
+		// about (US-3.3c). On a stock GKE cell with NodeLocal DNSCache — which is
+		// on by default and is NOT pinned by our terraform — `/etc/resolv.conf`
+		// still names the kube-dns ClusterIP, so the rule LOOKS right; but the
+		// node-local cache answers the query, policy is evaluated against that
+		// pod, and a rule naming only `k8s-app: kube-dns` matches nothing.
+		// Measured on cell-verify: with only the kube-dns peer, `nslookup
+		// kubernetes.default` returned "connection timed out; no servers could be
+		// reached"; adding this peer resolved it. AC 5 predicted this failure and
+		// predicted hostNetwork as the reason — on this version node-local-dns
+		// has ordinary pod IPs, so a podSelector CAN match it, which is why the
+		// fix is a peer rather than an ipBlock.
+		//
+		// Both peers stay: which one serves depends on whether NodeLocal DNSCache
+		// is enabled, and a cell without it must still resolve.
+		{Kind: "NetworkPolicy", Name: "allow-dns-egress", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: %s
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: node-local-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+`, s.Namespace))},
+
+		// Intra-environment traffic. THIS is what makes env A unreachable from
+		// env B: a bare `podSelector: {}` peer means "pods in THIS namespace",
+		// not "all pods" — the namespace scoping is implicit and is the boundary.
+		{Kind: "NetworkPolicy", Name: "allow-same-namespace", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: %s
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+`, s.Namespace))},
+
+		// ---- THE FOUR CNPG ALLOWANCES ------------------------------------
+		//
+		// Without these, default-deny egress fences the first Postgres pod and it
+		// never reaches ready. A `to:` peer carrying only pod/namespace selectors
+		// never matches a non-pod IP, so each of these needs an ipBlock.
+		//
+		// SCOPED TO CNPG PODS, and that scoping IS AC 9. Customer code runs in
+		// the same namespace under gVisor and must NOT reach the metadata server
+		// (GKE Sandbox's own docs name NetworkPolicy as the control for that),
+		// while CNPG REQUIRES it for Workload Identity. The asymmetry is
+		// structural rather than a second rule: only CNPG-managed pods match, so
+		// everything else is still covered by default-deny. Widening this to
+		// `podSelector: {}` silently grants customer code the metadata server.
+		//
+		// `cnpg.io/cluster` EXISTS, not `cnpg.io/podRole: instance` — and this is
+		// the fifth allowance, which US-3.3a's review did not name and only a
+		// live run found. CNPG bootstraps through a JOB whose pod carries
+		// `cnpg.io/jobRole: initdb` and `cnpg.io/cluster`, but NOT
+		// `cnpg.io/podRole: instance`: that label appears only once an instance
+		// exists. Selecting on podRole therefore matches NOTHING during
+		// bootstrap, so the initdb pod is fenced by default-deny and the cluster
+		// never starts. Measured on cell-verify: the initdb pod logged
+		//   dial tcp 34.118.224.1:443: i/o timeout
+		// against the apiserver and the Cluster sat in "Setting up primary" until
+		// the job backed off. `cnpg.io/cluster` is present at EVERY stage —
+		// bootstrap, join and steady state — and is carried only by
+		// operator-managed pods, so it is both sufficient and still narrow.
+		{Kind: "NetworkPolicy", Name: "allow-cnpg-egress", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg-egress
+  namespace: %s
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 80
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - ipBlock:
+            cidr: %s
+      ports:
+        - protocol: TCP
+          port: 443
+`, s.Namespace, s.APIServerCIDR))},
+
+		// The operator reaches the instance manager on 8000 (status, lifecycle).
+		// Without this the Cluster is created and never becomes ready.
+		{Kind: "NetworkPolicy", Name: "allow-cnpg-operator-ingress", YAML: []byte(fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg-operator-ingress
+  namespace: %s
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 8000
+`, s.Namespace))},
+	}
+
+	// endPort IS REFUSED ON THE RENDERED BYTES, not on the inputs.
+	//
+	// ADR-0015 states in the present tense that "US-3.3c carries an AC that
+	// tenancy.Render must refuse a policy carrying endPort". Checking the bytes
+	// rather than a parameter is what makes that true of anything this function
+	// can ever emit: a future policy that gains a port RANGE is refused by the
+	// same line, with no new place to remember.
+	//
+	// Dataplane V2 silently does not enforce port ranges on affected versions —
+	// the API server accepts the policy and drops nothing, which is the same
+	// class of defect as shipping NetworkPolicies to a cluster with no provider.
+	if err := RefuseEndPort(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // TeardownObjects is what removing an environment must delete EXPLICITLY.
@@ -300,9 +596,10 @@ spec:
 // TestTeardownCoversEveryObjectTenancyRenders exists to catch.
 func TeardownObjects(namespace string) ([]Manifest, error) {
 	all, err := Render(Spec{
-		Namespace: namespace,
-		Cell:      "teardown",
-		Quota:     Quota{CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+		Namespace:     namespace,
+		Cell:          "teardown",
+		Quota:         Quota{CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+		APIServerCIDR: "10.0.0.0/28", // placeholder: teardown deletes, it enforces nothing
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tenancy: enumerate teardown objects for %q: %w", namespace, err)

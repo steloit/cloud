@@ -137,7 +137,7 @@ const testNamespace = "env-0123456789abcdef0123456789abcdef"
 // than it claims.
 func envObjectKeys(t *testing.T) map[string]bool {
 	t.Helper()
-	ms, err := tenancy.Render(tenancy.Spec{Namespace: testNamespace, Cell: "cell-0",
+	ms, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: testNamespace, Cell: "cell-0",
 		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +300,7 @@ func TestAServiceWithAnUncatalogedSizeIsStillDeletable(t *testing.T) {
 // covering it, which is the same defect envObjectKeys exists to avoid.
 func TestTeardownCoversEveryObjectTenancyRenders(t *testing.T) {
 	const ns = testNamespace
-	all, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+	all, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: "cell-0",
 		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
@@ -367,7 +367,7 @@ func TestEnvironmentTeardownRemovesOnlyItsOwnNamespace(t *testing.T) {
 
 	// Both environments exist, each with its own namespace-scoped objects.
 	for _, ns := range []string{nsA, nsB} {
-		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+		objs, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: "cell-0",
 			Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 		if err != nil {
 			t.Fatal(err)
@@ -407,7 +407,7 @@ func TestEnvironmentTeardownRemovesOnlyItsOwnNamespace(t *testing.T) {
 
 func mustRenderEnvObjects(t *testing.T, ns string) []tenancy.Manifest {
 	t.Helper()
-	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+	objs, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: "cell-0",
 		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
@@ -508,3 +508,5 @@ func TestATeardownWhoseDeleteIsRefusedIsNotReportedDone(t *testing.T) {
 			"would stamp torn_down_at and never ask again")
 	}
 }
+
+const testAPIServerCIDR = "10.0.0.0/28"

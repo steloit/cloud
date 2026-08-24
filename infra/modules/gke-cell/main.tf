@@ -100,6 +100,22 @@ resource "google_container_cluster" "cell" {
   # affect the D7 policy set, which uses single ports and no hostPort.
   datapath_provider = "ADVANCED_DATAPATH"
 
+  # DNS IS PINNED TO kube-dns, and this is a D7 dependency, not a preference.
+  #
+  # US-3.3c's allow-dns-egress names the kube-dns and node-local-dns PODS. With
+  # Cloud DNS for GKE there are no such pods at all: resolution goes to
+  # 169.254.169.254:53 — the metadata server, which the same policy set
+  # deliberately DENIES to customer pods (AC 9). Enabling Cloud DNS would
+  # therefore leave customer workloads with no DNS, with every unit test green,
+  # and the live evidence unable to see it (the verification cell ran kube-dns +
+  # NodeLocal DNSCache).
+  #
+  # Stating it makes the coupling reviewable instead of accidental. Changing it
+  # is a D7 change: the policy set has to gain an allowance first.
+  dns_config {
+    cluster_dns = "PROVIDER_UNSPECIFIED" # kube-dns; NOT CLOUD_DNS — see above
+  }
+
   # VPC-NATIVE, STATED RATHER THAN INHERITED — and this is the same class of
   # decision as the line above: create-time only, silently defaulted, expensive
   # to discover later.

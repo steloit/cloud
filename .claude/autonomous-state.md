@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 · `main` @ `9700569` · **five PRs merged, queue clear**
+**Updated:** 2026-08-25 · `main` @ `9700569` · **US-3.3c (#333) in flight, round 2** · 5 PRs merged
 
 ---
 
@@ -16,9 +16,45 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 ## In flight
 
-**Nothing.** #328 (US-3.3h), #329 (T3.4d), #330 (T3.4a), #331 (US-3.12) and
-#332 (US-3.3b) all merged. Only `task/O2` remains as a worktree, still waiting
-on the founder's revised spec.
+**US-3.3c — PR #333**, branch `task/US-3.3c`. Round 2 pushed. `validate` and
+`infra` green (infra is the job that was RED — that is what confirms the provider
+blocker is really fixed); `go` still running. Both reviewers ran once and both
+found blockers, so a third pass is a judgement call under ADR-0016 — round 2 was
+fixes to named findings.
+
+### GCP: NOTHING IS RUNNING. Verified, not assumed.
+
+A real GKE cell (`cell-verify`, us-central1-a) was provisioned for the live ACs
+and **destroyed**: `Destroy complete! Resources: 16 destroyed`, then checked
+directly — 0 clusters / 0 instances / 0 disks, only the pre-existing `default`
+network and default compute SA. One resource Terraform did NOT own survived and
+was deleted by hand: the CNPG PVC's PD. **The remote state bucket was never
+written** (local state, discarded); `gs://steloit-dev-tfstate/dev/default.tfstate`
+is dated 2026-07-26 and is not ours.
+
+**Only `steloit-dev`, never `humane-dev-493708`** (the machine's active gcloud
+config points at the latter). Scope every call with
+`CLOUDSDK_CORE_PROJECT=steloit-dev`; do not mutate global config. ADC is EXPIRED —
+Terraform runs on `GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)`.
+
+### What the live run proved, and what it cost to learn
+
+Three defects only a live cell could find, all "the policy looks right and does
+not do what it claims":
+1. **DNS resolved nothing** — NodeLocal DNSCache answers, so a rule naming
+   `kube-dns` matches nothing. AC 5 confirmed; its hostNetwork premise was wrong
+   (node-local-dns has ordinary pod IPs here).
+2. **The CNPG allowances missed the bootstrap Job** (`cnpg.io/jobRole`, not
+   `podRole`) — a FIFTH allowance the review did not name.
+3. **The apiserver ipBlock must be the PRIVATE ENDPOINT**, not the `kubernetes`
+   Service ClusterIP — Dataplane V2 evaluates egress post-translation.
+
+Then the reviewers found my own first cut shipped **three guards that could not
+fire** (endPort unreachable behind ValidateNamespace; ValidateCIDR never called;
+`assert_boundary` defined and never invoked) and **a provider that bound a second
+unconfigured client** (gavinbunney vs alekc — ADR-0017). And QA's M4: flipping
+the CNPG selector `Exists → DoesNotExist` selects exactly the CUSTOMER pods and
+inverts AC 9, green. Tests now PARSE policies instead of grepping them.
 
 ## Recently merged — the parts easiest to re-break
 
@@ -50,15 +86,18 @@ separate gate from `make gen-go`; running only one is how the first push failed.
 
 ## Next task
 
-Ready queue is 24. Highest-value unclaimed: **US-3.3g** (a plan change does not
-reach the cell until each service is next touched), **US-3.10**, **US-3.11**,
-**US-3.13** (a row whose `observed_generation` never advances has no owner),
-**US-3.14** (the agent's emit-set is not bound to the request enum — filed from
-US-3.12's QA).
+Ready queue after US-3.3c lands: **US-3.3g**, **US-3.10**, **US-3.11**,
+**US-3.13**, **US-3.14**, plus the four this task filed —
+**US-3.3j** (narrow the operator-ingress peer; needs a LIVE cell to verify),
+**US-3.3k** (high: the agent has no deployment artifact, so no RBAC, and this PR
+widened the gap), **US-3.3l** (`cnpg.io/cluster` is a capability label with no
+owner), and **US-3.12/US-3.13** from earlier.
 
-**US-3.3c is priority `critical` but two of its ACs need a live GKE cell**, and
-there are still zero clusters in `steloit-dev`. Do not claim it expecting to
-finish it.
+**Provisioning a cell is now a known, cheap procedure** (~$0.36/hr, ~25 min up,
+~10 min down) — `docs/dev/us33c-live-evidence.md` records exactly how, including
+why `infra/envs/dev` must NOT be applied wholesale (project_base creates a KMS
+key ring, which can NEVER be deleted, and a WI pool with a 30-day soft delete).
+US-3.3j and US-3.3k both need one.
 
 ## Blocked on a human## Blocked on a human
 

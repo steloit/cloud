@@ -197,3 +197,27 @@ run "the_cell_enforces_network_policy" {
     error_message = "Workload Identity is off, so the D7 egress allowance for the metadata server protects nothing and WAL archiving has no credential path."
   }
 }
+
+# DNS PROVIDER IS PART OF THE D7 BOUNDARY (US-3.3c AC 5).
+#
+# allow-dns-egress names the kube-dns and node-local-dns PODS. Cloud DNS for GKE
+# has no such pods — resolution goes to 169.254.169.254:53, which the same policy
+# set denies to customer pods (AC 9). Flipping this to CLOUD_DNS leaves customer
+# workloads with no DNS at all, and every Go test stays green because the policy
+# text does not change.
+run "dns_stays_on_kube_dns_because_the_policy_set_names_its_pods" {
+  command = plan
+
+  variables {
+    project_id = "test-project"
+    zone       = "us-central1-a"
+    cell_id    = "cell-test"
+    network_id = "projects/test-project/global/networks/n"
+    subnet_id  = "projects/test-project/regions/us-central1/subnetworks/s"
+  }
+
+  assert {
+    condition     = google_container_cluster.cell.dns_config[0].cluster_dns != "CLOUD_DNS"
+    error_message = "cluster_dns is CLOUD_DNS: there are no kube-dns pods for allow-dns-egress to name, and customer pods are denied the metadata server, so they would have NO DNS. Changing this requires a D7 allowance first."
+  }
+}

@@ -356,6 +356,13 @@ func TestDeleteRoutesEveryKindToItsOwnAPIGroup(t *testing.T) {
 		"Secret":          "/api/v1/namespaces/env-x/secrets/obj",
 		"StatefulSet":     "/apis/apps/v1/namespaces/env-x/statefulsets/obj",
 		"Namespace":       "/api/v1/namespaces/obj",
+		// US-3.3c/e. The two MAPS were bound to each other, but their VALUES
+		// were not: "networkpolicies" -> "networkpolicys" and v1 -> v1beta1 both
+		// survived, and per this file's own rule a 404 from a wrong path reads as
+		// "already gone" — a policy the agent believes it deleted and did not.
+		"NetworkPolicy": "/apis/networking.k8s.io/v1/namespaces/env-x/networkpolicies/obj",
+		"ResourceQuota": "/api/v1/namespaces/env-x/resourcequotas/obj",
+		"LimitRange":    "/api/v1/namespaces/env-x/limitranges/obj",
 	} {
 		var seen string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -385,10 +392,11 @@ func TestDeleteRefusesAKindItCannotAddress(t *testing.T) {
 	c := NewClientForTest(srv.URL, "tok", srv.Client())
 
 	// Kinds genuinely absent from BOTH maps. ResourceQuota and LimitRange used to
-	// be here and are not any more — US-3.3e renders them, so they are addressable
-	// now. A stale entry would make this test assert the refusal of something the
-	// agent legitimately deletes.
-	for _, kind := range []string{"NetworkPolicy", "Ingress", "ConfigMap", "Deployment"} {
+	// be here and are not any more — US-3.3e renders them; NetworkPolicy left for
+	// the same reason in US-3.3c. A stale entry would make this test assert the
+	// refusal of something the agent legitimately deletes, which is the opposite
+	// of what it is for.
+	for _, kind := range []string{"Ingress", "ConfigMap", "Deployment", "Role"} {
 		err := c.Delete(context.Background(), "env-x", kind, "obj")
 		if err == nil {
 			t.Errorf("Delete accepted %s — a 404 from a wrong path reads as 'already gone'", kind)
@@ -628,7 +636,7 @@ const testNS = "env-0123456789abcdef0123456789abcdef"
 func productionManifests(t *testing.T) [][]byte {
 	t.Helper()
 	out := [][]byte{}
-	tm, err := tenancy.Render(tenancy.Spec{Namespace: testNS, Cell: "cell-0",
+	tm, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: testNS, Cell: "cell-0",
 		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
 	if err != nil {
 		t.Fatal(err)
@@ -962,3 +970,5 @@ func TestOnly404IsBenignForDeleteAndObserve(t *testing.T) {
 		t.Errorf("Observe on a 404 must be (\"\", nil): %q %v", phase, err)
 	}
 }
+
+const testAPIServerCIDR = "10.0.0.0/28"

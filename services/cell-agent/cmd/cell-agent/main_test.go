@@ -355,6 +355,9 @@ func TestRunTakesTheInClusterBranchAndRequiresGSAandWAL(t *testing.T) {
 	for _, missing := range []map[string]string{
 		{"CELL_WAL_BUCKET": "b"},                           // no GSA
 		{"CELL_GSA_EMAIL": "sa@p.iam.gserviceaccount.com"}, // no bucket
+		// US-3.3c: the D7 egress policy needs the control plane's endpoint
+		// range, so an absent CELL_APISERVER_CIDR is the same class of refusal.
+		{"CELL_GSA_EMAIL": "sa@p.iam.gserviceaccount.com", "CELL_WAL_BUCKET": "b"},
 		{}, // neither
 	} {
 		err := run(ctx, getenv(missing), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -371,8 +374,9 @@ func TestRunTakesTheInClusterBranchAndRequiresGSAandWAL(t *testing.T) {
 	// must NOT appear, or this test would pass on the fallback path.
 	var buf bytes.Buffer
 	err := run(ctx, getenv(map[string]string{
-		"CELL_GSA_EMAIL":  "sa@p.iam.gserviceaccount.com",
-		"CELL_WAL_BUCKET": "steloit-dev-wal-customer",
+		"CELL_GSA_EMAIL":      "sa@p.iam.gserviceaccount.com",
+		"CELL_WAL_BUCKET":     "steloit-dev-wal-customer",
+		"CELL_APISERVER_CIDR": "10.0.0.0/28",
 	}), slog.New(slog.NewTextHandler(&buf, nil)))
 	if err != nil {
 		t.Fatalf("in-cluster boot failed with credentials present: %v", err)
@@ -408,7 +412,9 @@ func TestTheInClusterRendererIsWiredNotJustAnnounced(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 
 	const gsa, wal, cell = "sa@p.iam.gserviceaccount.com", "steloit-dev-wal-customer", "cell-7"
-	env := map[string]string{"CELL_GSA_EMAIL": gsa, "CELL_WAL_BUCKET": wal}
+	const apiCIDR = "10.0.0.0/28"
+	env := map[string]string{"CELL_GSA_EMAIL": gsa, "CELL_WAL_BUCKET": wal,
+		"CELL_APISERVER_CIDR": apiCIDR}
 	r, err := selectRenderer(func(k string) string { return env[k] }, cell,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

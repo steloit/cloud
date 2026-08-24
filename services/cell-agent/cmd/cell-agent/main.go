@@ -96,12 +96,25 @@ func selectRenderer(getenv func(string) string, cell string, log *slog.Logger) (
 		return agent.NewAckRenderer(log), nil
 	}
 	gsa, wal := getenv("CELL_GSA_EMAIL"), getenv("CELL_WAL_BUCKET")
-	if gsa == "" || wal == "" {
-		return nil, fmt.Errorf("CELL_GSA_EMAIL and CELL_WAL_BUCKET are required in-cluster " +
-			"(customer DB pods need workload identity + a WAL bucket)")
+	apiCIDR := getenv("CELL_APISERVER_CIDR")
+	if gsa == "" || wal == "" || apiCIDR == "" {
+		// CELL_APISERVER_CIDR joins the same gate rather than defaulting: without
+		// it the D7 egress policy cannot let CNPG's instance manager reach the
+		// kube-apiserver, and the first Postgres pod on the cell never reaches
+		// ready. A silent default would be a per-cluster value guessed wrong.
+		return nil, fmt.Errorf("CELL_GSA_EMAIL, CELL_WAL_BUCKET and CELL_APISERVER_CIDR are " +
+			"required in-cluster (customer DB pods need workload identity + a WAL bucket, and " +
+			"the D7 egress policy needs the control plane's endpoint range)")
+	}
+	// VALIDATED AT BOOT, not at first converge — the same rule ValidateCell
+	// already follows here. A malformed CIDR is accepted by the emptiness check
+	// above, then fails EVERY converge for EVERY service on the cell, with no
+	// writeback and nothing customer-visible. Failing the boot is loud.
+	if err := tenancy.ValidateCIDR(apiCIDR); err != nil {
+		return nil, fmt.Errorf("CELL_APISERVER_CIDR: %w", err)
 	}
 	log.Info("renderer: CNPG (in-cluster, real apply)", "cell", cell, "wal_bucket", wal, "gsa", gsa)
-	return render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, log), nil
+	return render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, apiCIDR, log), nil
 }
 
 func run(parent context.Context, getenv func(string) string, log *slog.Logger) error {

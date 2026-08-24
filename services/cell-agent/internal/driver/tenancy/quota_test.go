@@ -60,7 +60,8 @@ func TestEveryPlanRendersItsAuthoritativeEnvelope(t *testing.T) {
 	for plan, want := range plans {
 		t.Run(plan, func(t *testing.T) {
 			objs, err := tenancy.Render(tenancy.Spec{
-				Namespace: ns, Cell: cell,
+				APIServerCIDR: testAPIServerCIDR,
+				Namespace:     ns, Cell: cell,
 				Quota: tenancy.Quota{CPU: want.CPU, Memory: want.Memory, Storage: want.Storage},
 			})
 			if err != nil {
@@ -126,7 +127,7 @@ func TestOnePlansEnvelopeIsNotAnothers(t *testing.T) {
 	plans := authoritativePlans(t)
 	free, pro := plans["free"], plans["pro"]
 
-	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell,
+	objs, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell,
 		Quota: tenancy.Quota{CPU: free.CPU, Memory: free.Memory, Storage: free.Storage}})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +168,7 @@ func TestAMalformedOrMissingEnvelopeIsRefused(t *testing.T) {
 		"plus sign":           {CPU: "+8", Memory: "16Gi", Storage: "100Gi"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell, Quota: q}); err == nil {
+			if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell, Quota: q}); err == nil {
 				t.Fatalf("Render accepted %+v", q)
 			}
 		})
@@ -178,7 +179,7 @@ func TestAMalformedOrMissingEnvelopeIsRefused(t *testing.T) {
 	// check, so deleting the absence check changes nothing a test could see —
 	// while turning a clear "no envelope was resolved" into a confusing
 	// "cpu quota \"\" is not a whole number of cores".
-	_, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell})
+	_, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell})
 	if err == nil {
 		t.Fatal("Render accepted a spec with no envelope at all — the environment would have " +
 			"no ceiling")
@@ -190,14 +191,14 @@ func TestAMalformedOrMissingEnvelopeIsRefused(t *testing.T) {
 	// An absurdly large but WELL-FORMED quantity is accepted: it is a founder
 	// configuration error, not a malformed one, and the closed grammar's job is
 	// shape rather than judgement. Recorded so the omission is deliberate.
-	if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell,
+	if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell,
 		Quota: tenancy.Quota{CPU: "999999999", Memory: "999999999Ti", Storage: "999999999Ti"}}); err != nil {
 		t.Fatalf("a well-formed but enormous envelope was refused: %v", err)
 	}
 
 	// Positive control: the good one still renders, or every case above is
 	// satisfied by a Render that refuses everything.
-	if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell, Quota: good}); err != nil {
+	if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell, Quota: good}); err != nil {
 		t.Fatalf("a legitimate envelope was refused: %v", err)
 	}
 }
