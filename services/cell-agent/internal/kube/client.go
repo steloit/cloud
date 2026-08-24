@@ -334,11 +334,12 @@ var plurals = map[string]string{
 	"Backup":          "backups",
 	"Secret":          "secrets",
 	"StatefulSet":     "statefulsets",
-	// US-3.3a — the env namespace. The D7 policy kinds are deliberately NOT here:
-	// nothing renders them (they were withdrawn to US-3.3c), and an entry in this
-	// map is not inert — it is what lets Delete build a path for a kind, so an
-	// unrendered kind here converts Delete's loud refusal into a silent 404.
-	"Namespace": "namespaces",
+	// US-3.3a — the env namespace. US-3.3c adds NetworkPolicy: tenancy.Render
+	// now produces the D7 set, and an entry here is NOT inert — it is what lets
+	// Delete build a path for a kind, so a kind nothing renders converts Delete's
+	// loud refusal into a silent 404. Both halves moved together.
+	"Namespace":     "namespaces",
+	"NetworkPolicy": "networkpolicies",
 	// US-3.3e — the per-environment ceiling. Removed in US-3.3a when the D7
 	// objects were withdrawn and nothing rendered them; back now that tenancy
 	// does. TestPluralsAndAPIVersionsNameTheSameKinds keeps the two maps moving
@@ -367,6 +368,7 @@ var apiVersions = map[string]string{
 	"Namespace":       "v1",
 	"ResourceQuota":   "v1",
 	"LimitRange":      "v1",
+	"NetworkPolicy":   "networking.k8s.io/v1",
 }
 
 // exactlyOneDocument refuses a multi-document YAML stream. Callers pass one

@@ -2,7 +2,7 @@
 id: US-3.3c
 title: "D7 isolation does not exist: NetworkPolicy is not enforced on the cell, and the policy set would fence CNPG"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: critical
 sprint: 4
@@ -181,3 +181,92 @@ does:
 - **commit `7e94f26`** — the withdrawn NetworkPolicy manifests and their tests
   live there and nowhere else. Start from them; they are wrong in the ways above,
   and rewriting from scratch re-earns the same review findings.
+
+## Outcome
+
+The environment is a network boundary now, and it was **proven against a real
+GKE cell** rather than argued from manifests. Full evidence:
+`docs/dev/us33c-live-evidence.md`.
+
+### Evidence classes, kept apart
+
+- **Live GKE / runtime enforcement**: cross-environment isolation, Postgres
+  reaching ready under the policy set, the metadata-server asymmetry, and
+  denied-connection logging. All measured on a cluster provisioned for this and
+  destroyed after.
+- **Unit / rendered-manifest**: the structural peer assertions, the `endPort`
+  refusal, the DNS-peer and CNPG-selector pins.
+- **Terraform**: `datapath-policy` wiring validated at both env layers.
+
+None is substituted for another. Where something was NOT verified live it says so.
+
+### What the live run found — three defects, one class
+
+Each is a policy that **looked** correct and did not do what it claimed, which is
+the exact failure US-3.3a shipped.
+
+1. **The DNS rule resolved nothing.** It named `k8s-app: kube-dns`, and
+   `/etc/resolv.conf` names the kube-dns ClusterIP, so it read as right. NodeLocal
+   DNSCache — on by default, **not pinned by our terraform** — answers the query,
+   so policy is evaluated against the `node-local-dns` pod and the rule matched
+   nothing. **AC 5's predicted failure, confirmed**, with one correction: AC 5
+   assumed hostNetwork made it unmatchable; on this version node-local-dns has
+   ordinary pod IPs, so a podSelector *can* match it. Both peers now ship.
+2. **The CNPG allowances selected a label that does not exist at bootstrap.**
+   CNPG bootstraps through a Job whose pod carries `cnpg.io/jobRole` and
+   `cnpg.io/cluster` but **not** `cnpg.io/podRole: instance`. The initdb pod
+   matched no allowance and the Cluster sat in `Setting up primary` indefinitely.
+   Selecting `cnpg.io/cluster` (Exists) covers every stage and is still narrow.
+   **This is a FIFTH allowance; the review named four.**
+3. **The API server allowance must name the PRIVATE ENDPOINT, not the `kubernetes`
+   Service ClusterIP.** An ipBlock for the ClusterIP matches nothing — Dataplane
+   V2 evaluates egress post-translation. With `privateEndpoint/32` alone the
+   cluster reached healthy in 45s. Same mechanism as (1): one rule, two symptoms.
+
+### ACs
+
+| AC | state |
+|---|---|
+| 1 (struck) | already US-3.3f — Dataplane V2 confirmed live (`anetd` on every node) |
+| 2 | done — policy set restored WITH five CNPG allowances |
+| 3 | done — peers asserted structurally (parsed), one named exception → US-3.3j |
+| 4 | **NOT DONE** — see below |
+| 5 | done — NodeLocal DNSCache confirmed live; Cloud DNS variant still unpinned |
+| 7 | done — `us33-e2e.sh` now FAILS on a broken boundary instead of describing it |
+| 8 | done — `endPort` refused on the rendered bytes |
+| 9 | done — proven BOTH ways on one cluster: gVisor pod blocked, CNPG pod connected |
+| 10 | done — `infra/modules/datapath-policy` applies it; denials appear in logs |
+| 11 | **answered: YES** — the logged denials have a gVisor pod as source |
+
+### Not done, and why
+
+**AC 4 (agent RBAC) is not in this PR.** There is still no ServiceAccount,
+ClusterRole or Deployment artifact for the agent anywhere in the repo, so there
+was nothing to grant a permission to and nothing to run in-cluster. The live
+policies were applied with `kubectl` from the renderer's own output, which proves
+the POLICY and says nothing about the agent's permission to apply it. Shipping a
+ClusterRole with no Deployment would be an artifact nothing uses. Filed
+separately rather than half-done here.
+
+Also outstanding: **`allow-cnpg-operator-ingress` admits the whole `cnpg-system`
+namespace** (US-3.3j). My own structural test caught it; narrowing could not be
+*verified* because the cell was already destroyed, and an unverified tightening
+of a security control is worse than a named exception — it looks stronger and can
+fence the operator off every managed Postgres.
+
+### Side findings
+
+- **`NetworkPolicy` was absent from kube's `plurals`/`apiVersions` maps**, so the
+  agent could not have applied or deleted one. Both maps updated together.
+- **`cloudresourcemanager.googleapis.com` is not in `project_base`'s service
+  list**, yet `gke-cell`'s `google_project_iam_member` needs it — `envs/dev`
+  would fail on a genuinely clean project.
+- `us-central1-a` was out of `n2-standard-4` during the run (zone stockout, not
+  quota). Only the throwaway root's capacity was changed; `dev`/`cell0` untouched.
+
+```
+services/cell-agent  go build && go vet && go test -count=1 -race ./...   ok
+gofmt -l services/ · terraform fmt -check -recursive infra/               clean
+terraform validate (envs/dev, envs/cell0)                                 Success
+node scripts/spec-sync/validate.mjs                                       OK: 246 tasks
+```

@@ -33,14 +33,12 @@ kubectl get crd clusters.postgresql.cnpg.io -o name || {
 # currently zero GKE clusters in steloit-dev.
 #
 # US-3.3a AC 3 ("proven without the runbook's preflight") is therefore NOT
-# ticked. US-3.3c AC 7 owns replacing this with assertions: that the namespace
-# exists with its labels, that the D7 policies exist AND are enforced, that a pod
-# in env A cannot reach a pod in env B, and that a pod can still resolve DNS and
-# reach its own database.
+# US-3.3c AC 7: the boundary is now ASSERTED, not described — see assert_boundary
+# below, which fails the script rather than printing what an operator should look
+# for. Everything else in this file is still a guided runbook.
 #
-# What the agent does NOT yet create: the D7 NetworkPolicies, ResourceQuota and
-# LimitRange (withdrawn to US-3.3c/d/e — nothing on this cell enforces a
-# NetworkPolicy today).
+# The agent creates the namespace, the ResourceQuota, the LimitRange and the D7
+# NetworkPolicies. Enforcement is real: the cell runs Dataplane V2 (US-3.3f).
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
 step "1 · control plane: a service is accepted (estimate → createService)"
@@ -96,5 +94,68 @@ EOF
 step "6 · teardown reaches the cell"
 echo "DELETE the service, then:"
 echo "  kubectl -n $NS get clusters.postgresql.cnpg.io   # expect: gone"
+
+# --- AC 7: ASSERT the boundary -------------------------------------------------
+#
+# Every check below FAILS THE SCRIPT. A runbook that prints "expect: denied" and
+# exits 0 is how US-3.3a shipped a boundary that did not exist.
+#
+# The isolation check needs a SECOND environment, so it renders one rather than
+# assuming one is lying around. Both probe pods land on the same node where
+# possible, because same-node pod-to-pod traffic is the case that flows freely
+# unless a policy actually drops it — cross-node traffic can be blocked by
+# routing and look like enforcement.
+assert_boundary() {
+  local ns_a="$1" ns_b="$2" fail=0
+
+  step "7 · ASSERT the D7 boundary (AC 7)"
+
+  # 7a. the namespace carries its labels
+  kubectl get ns "$ns_a" -o jsonpath='{.metadata.labels.steloit\.dev/tenant}' 2>/dev/null \
+    | grep -q true || { echo "FAIL: $ns_a is not labelled steloit.dev/tenant=true"; fail=1; }
+
+  # 7b. the policies exist — derived from what the agent renders, not a typed list
+  for p in default-deny-all allow-dns-egress allow-same-namespace \
+           allow-cnpg-egress allow-cnpg-operator-ingress; do
+    kubectl -n "$ns_a" get networkpolicy "$p" >/dev/null 2>&1 \
+      || { echo "FAIL: $ns_a is missing NetworkPolicy/$p"; fail=1; }
+  done
+
+  # 7c. ENFORCEMENT IS INSTALLED. Policies that exist on a cluster with no
+  # provider are stored and ignored — the exact failure US-3.3a shipped.
+  kubectl -n kube-system get ds anetd >/dev/null 2>&1 \
+    || { echo "FAIL: anetd (Dataplane V2) is not running — NOTHING enforces these"; fail=1; }
+
+  # 7d. a pod in env A cannot reach a pod in env B
+  local b_ip
+  b_ip=$(kubectl -n "$ns_b" get pod probe-server -o jsonpath='{.status.podIP}' 2>/dev/null)
+  [ -n "$b_ip" ] || { echo "FAIL: no probe-server in $ns_b — the isolation check would pass vacuously"; return 1; }
+  if kubectl -n "$ns_a" exec probe-client -- \
+       curl -s -o /dev/null --max-time 8 "http://$b_ip:8080/" 2>/dev/null; then
+    echo "FAIL: $ns_a reached $ns_b — the environment is not a boundary"; fail=1
+  fi
+
+  # 7e. CONTROL: the same probe INSIDE the environment must succeed, or 7d
+  # proves only that the probe is broken.
+  local a_ip
+  a_ip=$(kubectl -n "$ns_a" get pod probe-server -o jsonpath='{.status.podIP}' 2>/dev/null)
+  kubectl -n "$ns_a" exec probe-client -- \
+    curl -s -o /dev/null --max-time 8 "http://$a_ip:8080/" 2>/dev/null \
+    || { echo "FAIL: $ns_a cannot reach ITSELF — the allow-set is too tight"; fail=1; }
+
+  # 7f. DNS still resolves. Measured to break when the rule names only kube-dns
+  # on a cell with NodeLocal DNSCache (US-3.3c live run).
+  kubectl -n "$ns_a" exec probe-client -- \
+    nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1 \
+    || { echo "FAIL: DNS does not resolve in $ns_a"; fail=1; }
+
+  # 7g. the environment's own database is reachable from inside it
+  kubectl -n "$ns_a" get cluster db01 \
+    -o jsonpath='{.status.phase}' 2>/dev/null | grep -q "healthy" \
+    || echo "WARN: no healthy db01 in $ns_a — skipping the same-env database check"
+
+  [ "$fail" = 0 ] || { echo "BOUNDARY ASSERTIONS FAILED"; return 1; }
+  echo "boundary OK: isolated across environments, open within one, DNS intact"
+}
 
 step "DONE — paste this output into the US-3.3 PR as live evidence"

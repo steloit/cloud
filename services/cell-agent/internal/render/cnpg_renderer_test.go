@@ -123,7 +123,7 @@ func svc(id, status string) agent.DesiredService {
 }
 
 func newRenderer(applier *fakeApplier) *CNPGRenderer {
-	return NewCNPGRenderer(cnpg.New(), applier, "cell-0", "sa@steloit-dev.iam.gserviceaccount.com", "steloit-dev-wal-customer", quiet())
+	return NewCNPGRenderer(cnpg.New(), applier, "cell-0", "sa@steloit-dev.iam.gserviceaccount.com", "steloit-dev-wal-customer", testAPIServerCIDR, quiet())
 }
 
 func TestCNPGRendererAppliesRenderedManifests(t *testing.T) {
@@ -300,7 +300,8 @@ func TestApplyIsIdempotent(t *testing.T) {
 func mustRender(t *testing.T) [][]byte {
 	t.Helper()
 	tm, err := tenancy.Render(tenancy.Spec{
-		Namespace: "env-0123456789abcdef0123456789abcdef", Cell: "cell-0",
+		APIServerCIDR: testAPIServerCIDR,
+		Namespace:     "env-0123456789abcdef0123456789abcdef", Cell: "cell-0",
 		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"},
 	})
 	if err != nil {

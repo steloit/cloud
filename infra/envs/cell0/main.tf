@@ -106,6 +106,13 @@ module "cost_guardrails" {
   alert_emails         = var.alert_emails
 }
 
+# ADR-0015's first reason for Dataplane V2 is denied-connection logging; this is
+# what installs it. Without it that rationale rests on a file nothing applies.
+module "datapath_policy" {
+  source  = "../../modules/datapath-policy"
+  cell_id = var.cell_id
+}
+
 module "observability" {
   source     = "../../modules/observability"
   project_id = var.project_id

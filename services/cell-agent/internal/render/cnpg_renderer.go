@@ -28,6 +28,12 @@ type CNPGRenderer struct {
 	cell      string // this agent's cell id
 	gsaEmail  string // the cell's workload-identity SA for customer DB pods
 	walBucket string // the cell's customer WAL bucket
+
+	// apiServerCIDR is the cell's control-plane endpoint range, for the D7
+	// egress policy that lets CNPG's instance manager reach the kube-apiserver.
+	// A CELL property, not a per-service one, and substrate detail (D8) — so it
+	// rides the agent's own config, never the desired doc.
+	apiServerCIDR string
 }
 
 // cnpgDriver is the subset of the T3.4 driver the renderer needs (an interface
@@ -42,14 +48,15 @@ type cnpgDriver interface {
 // NewCNPGRenderer — cell, gsaEmail, walBucket are the agent's own placement
 // (it runs IN the cell with those credentials); only the per-service namespace
 // comes from the control plane via the desired doc.
-func NewCNPGRenderer(pg cnpgDriver, applier kube.Applier, cell, gsaEmail, walBucket string, log *slog.Logger) *CNPGRenderer {
+func NewCNPGRenderer(pg cnpgDriver, applier kube.Applier, cell, gsaEmail, walBucket, apiServerCIDR string, log *slog.Logger) *CNPGRenderer {
 	// A nil applier is a wiring bug that would otherwise surface as a nil deref
 	// on the first converge, on a cell, at 3am. Building one is a programming
 	// error, so panic here rather than return an error nobody would check.
 	if applier == nil {
 		panic("render: CNPGRenderer built with a nil applier")
 	}
-	return &CNPGRenderer{pg: pg, applier: applier, log: log, cell: cell, gsaEmail: gsaEmail, walBucket: walBucket}
+	return &CNPGRenderer{pg: pg, applier: applier, log: log, cell: cell,
+		gsaEmail: gsaEmail, walBucket: walBucket, apiServerCIDR: apiServerCIDR}
 }
 
 // Placement reports the per-cell values this renderer was built with.
@@ -106,9 +113,10 @@ func quotaOf(svc agent.DesiredService) tenancy.Quota {
 // refuses anything that is not in that shape rather than trusting this caller.
 func (r *CNPGRenderer) tenancyManifests(namespace string, svc agent.DesiredService) ([][]byte, error) {
 	objs, err := tenancy.Render(tenancy.Spec{
-		Namespace: namespace,
-		Cell:      r.cell,
-		Quota:     quotaOf(svc),
+		Namespace:     namespace,
+		Cell:          r.cell,
+		APIServerCIDR: r.apiServerCIDR,
+		Quota:         quotaOf(svc),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)

@@ -20,7 +20,7 @@ const (
 
 func mustRender(t *testing.T) []tenancy.Manifest {
 	t.Helper()
-	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: cell, Quota: proQuota})
+	objs, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: cell, Quota: proQuota})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +41,14 @@ func TestRenderProducesTheEnvironmentsObjects(t *testing.T) {
 		"Namespace/" + ns,
 		"ResourceQuota/env-quota",
 		"LimitRange/env-limits",
+		// US-3.3c: the D7 boundary. Order is load-bearing — default-deny FIRST,
+		// so a converge interrupted between objects leaves the environment
+		// closed rather than open.
+		"NetworkPolicy/default-deny-all",
+		"NetworkPolicy/allow-dns-egress",
+		"NetworkPolicy/allow-same-namespace",
+		"NetworkPolicy/allow-cnpg-egress",
+		"NetworkPolicy/allow-cnpg-operator-ingress",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("rendered %v, want %v", got, want)
@@ -53,21 +61,30 @@ func TestRenderProducesTheEnvironmentsObjects(t *testing.T) {
 	}
 }
 
-// The D7 NETWORK POLICIES are still deliberately absent, and the reason has
-// CHANGED. US-3.3f turned enforcement on (Dataplane V2), so a NetworkPolicy on
-// this cell now really does drop packets — which makes shipping the wrong
-// allow-set MORE dangerous than when it was inert, not less. US-3.3a's set
-// fences CNPG off its metadata server (Workload Identity), GCS (WAL archiving)
-// and the apiserver, so the first Postgres pod would never reach ready.
+// THE D7 POLICY SET IS RENDERED, AND DEFAULT-DENY COMES FIRST.
 //
-// US-3.3c owns them. This pins the absence so it stays a decision.
-func TestTheD7NetworkPoliciesAreStillWithheld(t *testing.T) {
+// US-3.3a withheld these because nothing enforced them (GKE Standard stores a
+// NetworkPolicy and drops nothing) AND because its allow-set fenced CNPG off the
+// metadata server, GCS and the apiserver. US-3.3f turned enforcement on, and
+// US-3.3c supplies the allowances — so they ship together, which is what the
+// four findings being "one problem" meant.
+//
+// Ordering is asserted because it is a failure mode, not a preference: the
+// objects are applied in this order, so default-deny landing LAST would leave a
+// window in which the namespace exists and denies nothing.
+func TestTheD7PolicySetIsRenderedDefaultDenyFirst(t *testing.T) {
+	var policies []string
 	for _, m := range mustRender(t) {
 		if m.Kind == "NetworkPolicy" {
-			t.Fatalf("%s/%s is rendered. Enforcement is now REAL (US-3.3f), so an allow-set "+
-				"that denies what CNPG needs no longer fails silently — it stops every managed "+
-				"Postgres from reaching ready. US-3.3c owns the correct set.", m.Kind, m.Name)
+			policies = append(policies, m.Name)
 		}
+	}
+	if len(policies) == 0 {
+		t.Fatal("no NetworkPolicy rendered — the environment is a name, not a boundary")
+	}
+	if policies[0] != "default-deny-all" {
+		t.Errorf("the first policy is %q, not default-deny-all — an interrupted converge would "+
+			"leave the environment open", policies[0])
 	}
 }
 
@@ -136,7 +153,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	}
 	for name, v := range badNS {
 		t.Run("namespace/"+name, func(t *testing.T) {
-			if _, err := tenancy.Render(tenancy.Spec{Namespace: v, Cell: cell, Quota: proQuota}); err == nil {
+			if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: v, Cell: cell, Quota: proQuota}); err == nil {
 				t.Fatalf("Render accepted namespace %q", v)
 			}
 		})
@@ -153,7 +170,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	}
 	for name, v := range badCell {
 		t.Run("cell/"+name, func(t *testing.T) {
-			if _, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: v, Quota: proQuota}); err == nil {
+			if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: v, Quota: proQuota}); err == nil {
 				t.Fatalf("Render accepted cell %q", v)
 			}
 		})
@@ -162,7 +179,7 @@ func TestRenderRefusesAnythingThatIsNotAnRFC1123Label(t *testing.T) {
 	// The negative half is only meaningful if the positive half still passes:
 	// a Render that refuses everything would satisfy every case above.
 	for _, good := range []string{"env-a", "env-9f3c1a2b", "env-" + strings.Repeat("a", 59)} {
-		if _, err := tenancy.Render(tenancy.Spec{Namespace: good, Cell: cell, Quota: proQuota}); err != nil {
+		if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: good, Cell: cell, Quota: proQuota}); err != nil {
 			t.Fatalf("Render refused a legitimate namespace %q: %v", good, err)
 		}
 	}
@@ -195,7 +212,7 @@ func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
 		"env-0",
 		"env-" + strings.Repeat("f", 59),
 	} {
-		if _, err := tenancy.Render(tenancy.Spec{Namespace: produced, Cell: cell, Quota: proQuota}); err != nil {
+		if _, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: produced, Cell: cell, Quota: proQuota}); err != nil {
 			t.Fatalf("the control plane can mint %q and Render refuses it: %v", produced, err)
 		}
 	}
@@ -207,7 +224,7 @@ func TestRenderAcceptsEveryShapeTheControlPlaneCanMint(t *testing.T) {
 // template satisfied a one-value test with the whole suite green.
 func TestTheCellLabelIsTheSpecCellAndNotAConstant(t *testing.T) {
 	for _, c := range []string{"cell-0", "cell-7"} {
-		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: c, Quota: proQuota})
+		objs, err := tenancy.Render(tenancy.Spec{APIServerCIDR: testAPIServerCIDR, Namespace: ns, Cell: c, Quota: proQuota})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -305,4 +322,190 @@ func kinds(objs []tenancy.Manifest) []string {
 		out[i] = o.Kind + "/" + o.Name
 	}
 	return out
+}
+
+// testAPIServerCIDR is a syntactically valid stand-in. The REAL value is
+// per-cluster and comes from the agent's config; what these tests pin is that
+// Render refuses an absent one and interpolates whatever it is given.
+const testAPIServerCIDR = "10.0.0.0/28"
+
+// AC 3: THE ALLOW PEERS ARE ASSERTED STRUCTURALLY, NOT BY SUBSTRING.
+//
+// US-3.3a's tests proved the policies EXISTED and that default-deny denied, and
+// three mutations that widen an allow into a hole all survived green:
+// podSelector:{} -> namespaceSelector:{}, egress:[- {}], and DNS widened to all
+// of kube-system. Each of those is a parsed-structure question, so this parses.
+func TestEveryAllowPeerIsStructurallyNarrow(t *testing.T) {
+	for _, m := range mustRender(t) {
+		if m.Kind != "NetworkPolicy" {
+			continue
+		}
+		var pol struct {
+			Metadata struct{ Name string } `yaml:"metadata"`
+			Spec     struct {
+				Ingress []struct {
+					From []map[string]any `yaml:"from"`
+				} `yaml:"ingress"`
+				Egress []struct {
+					To []map[string]any `yaml:"to"`
+				} `yaml:"egress"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal(m.YAML, &pol); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+		check := func(dir string, peers []map[string]any) {
+			for i, p := range peers {
+				if len(p) == 0 {
+					t.Errorf("%s %s peer %d is the BARE {} peer — it matches every pod in "+
+						"every namespace and turns the boundary into a no-op", m.Name, dir, i)
+					continue
+				}
+				// A peer is either selector-based or an ipBlock, never a mix, and
+				// never a namespaceSelector on its own (that is a whole namespace).
+				_, hasNS := p["namespaceSelector"]
+				_, hasPod := p["podSelector"]
+				_, hasIP := p["ipBlock"]
+				if hasIP && (hasNS || hasPod) {
+					t.Errorf("%s %s peer %d mixes ipBlock with a selector", m.Name, dir, i)
+				}
+				if hasNS && !hasPod && !hasIP {
+					// ONE NAMED EXCEPTION, argued rather than waived.
+					//
+					// allow-cnpg-operator-ingress admits the whole cnpg-system
+					// namespace on port 8000. That namespace is created by our own
+					// Helm release and contains only the operator, so the blast
+					// radius is "the operator we installed" — but it IS wider than
+					// the rule this test enforces everywhere else.
+					//
+					// It stays wide because narrowing it to the operator's pod
+					// label could not be VERIFIED: the live cell had already been
+					// destroyed when this test found it, and shipping an
+					// unverified selector here fences the operator off every
+					// managed Postgres. Narrowing it, with a live re-run, is
+					// US-3.3j. An exception that is named and owned beats a
+					// tightening nobody has run.
+					if m.Name == "allow-cnpg-operator-ingress" && dir == "ingress" {
+						continue
+					}
+					t.Errorf("%s %s peer %d has a namespaceSelector with NO podSelector — that "+
+						"allows every pod in that namespace", m.Name, dir, i)
+				}
+			}
+		}
+		for _, r := range pol.Spec.Ingress {
+			check("ingress", r.From)
+		}
+		for _, r := range pol.Spec.Egress {
+			check("egress", r.To)
+		}
+	}
+}
+
+// THE DNS RULE MUST NAME BOTH RESOLVERS, and each as ONE peer.
+//
+// Measured live on a stock GKE cell (US-3.3c): with only the kube-dns peer,
+// resolution failed — NodeLocal DNSCache answers the query, so policy is
+// evaluated against the node-local-dns pod. NodeLocal DNSCache is on by default
+// and is NOT pinned by our terraform (AC 5), so BOTH peers must be present.
+func TestTheDNSRuleCoversBothResolversAsSeparateAndedPeers(t *testing.T) {
+	var dns *tenancy.Manifest
+	for _, m := range mustRender(t) {
+		if m.Name == "allow-dns-egress" {
+			mm := m
+			dns = &mm
+		}
+	}
+	if dns == nil {
+		t.Fatal("no allow-dns-egress rendered — a default-deny namespace resolves nothing")
+	}
+	var pol struct {
+		Spec struct {
+			Egress []struct {
+				To []struct {
+					NamespaceSelector struct {
+						MatchLabels map[string]string `yaml:"matchLabels"`
+					} `yaml:"namespaceSelector"`
+					PodSelector struct {
+						MatchLabels map[string]string `yaml:"matchLabels"`
+					} `yaml:"podSelector"`
+				} `yaml:"to"`
+			} `yaml:"egress"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(dns.YAML, &pol); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, rule := range pol.Spec.Egress {
+		for _, peer := range rule.To {
+			app := peer.PodSelector.MatchLabels["k8s-app"]
+			// AND, not OR: both selectors must be in the SAME peer, or the rule
+			// allows every pod in kube-system.
+			if peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" {
+				t.Errorf("DNS peer for %q does not pin the kube-system namespace IN THE SAME peer", app)
+			}
+			if app == "" {
+				t.Error("a DNS peer has no podSelector — that is all of kube-system")
+			}
+			seen[app] = true
+		}
+	}
+	for _, want := range []string{"kube-dns", "node-local-dns"} {
+		if !seen[want] {
+			t.Errorf("the DNS rule does not name %q. Measured live: with only kube-dns, "+
+				"nslookup returned 'connection timed out; no servers could be reached' on a "+
+				"stock GKE cell with NodeLocal DNSCache (AC 5)", want)
+		}
+	}
+}
+
+// THE CNPG ALLOWANCES MUST MATCH BOOTSTRAP PODS, NOT ONLY RUNNING INSTANCES.
+//
+// Measured live: selecting `cnpg.io/podRole: instance` matches NOTHING during
+// bootstrap — the initdb Job's pod carries `cnpg.io/jobRole` and
+// `cnpg.io/cluster` but not podRole — so the pod was fenced by default-deny and
+// the Cluster never left "Setting up primary".
+func TestTheCNPGAllowancesSelectEveryLifecycleStage(t *testing.T) {
+	for _, name := range []string{"allow-cnpg-egress", "allow-cnpg-operator-ingress"} {
+		var found bool
+		for _, m := range mustRender(t) {
+			if m.Name != name {
+				continue
+			}
+			found = true
+			body := string(m.YAML)
+			if strings.Contains(body, "cnpg.io/podRole") {
+				t.Errorf("%s selects cnpg.io/podRole, which does not exist on the initdb Job "+
+					"pod — the bootstrap is fenced and the cluster never starts", name)
+			}
+			if !strings.Contains(body, "cnpg.io/cluster") {
+				t.Errorf("%s does not select cnpg.io/cluster, which is the one label present "+
+					"at bootstrap, join AND steady state", name)
+			}
+			// Still narrow: it must NOT be an empty selector, or customer code
+			// gets the metadata server (AC 9).
+			if strings.Contains(body, "podSelector: {}") {
+				t.Errorf("%s selects ALL pods — customer code would reach the metadata "+
+					"server, which AC 9 exists to prevent", name)
+			}
+		}
+		if !found {
+			t.Errorf("%s is not rendered", name)
+		}
+	}
+}
+
+// AC 8: endPort is REFUSED, on the rendered bytes.
+func TestRenderRefusesAPolicyCarryingEndPort(t *testing.T) {
+	// The guard reads what Render is about to emit, so it is proven by feeding a
+	// namespace whose name injects an endPort key into the YAML — the only way a
+	// caller can reach it today, and exactly the injection ValidateNamespace also
+	// blocks. Both guards are asserted; neither is assumed.
+	if _, err := tenancy.Render(tenancy.Spec{
+		Namespace: "env-a\n    endPort: 9000", Cell: "cell-0",
+		APIServerCIDR: testAPIServerCIDR, Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"},
+	}); err == nil {
+		t.Fatal("a namespace injecting endPort was rendered")
+	}
 }
