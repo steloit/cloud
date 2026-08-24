@@ -89,6 +89,9 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   `ELSE`). *Corrected 2026-07-27:* this first blamed query-plan reordering; it was deterministic duplication.
   Postgres does not promise WHERE evaluation order (so `CASE` is still right), but that was not the mechanism
   — **naming the wrong cause teaches the wrong reflex** (O11).
+- **"The delete was ACCEPTED" is not "the workload is GONE".** k8s answers 2xx the moment it accepts
+  one, finalizers pending, and `kube.Delete` maps any 2xx to nil — so US-3.3b's namespace-teardown
+  gate meant acceptance while calling itself absence. Observe absence before reporting it.
 - **Verify the no-mutation baseline is GREEN before AND after any mutation sweep.** A module-only
   `cp -R` is red on arrival wherever tests reach outside the module, and the list keeps growing —
   find it by RUNNING the copy, never by recall. So far: `services/api` needs
@@ -112,48 +115,45 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   rendering another, the invoice charging a third rate no reprice could detect (both sides of the
   comparison come from the same stale read). Fence on the generation read, 409 "re-read and retry" —
   a silent overwrite of money is not recoverable.
-- **Never hand-append to a committed raw evidence log.** If an ad-hoc command produced the number, commit
-  the producing command as a script/manifest and record line-by-line provenance (results/PROVENANCE.md):
-  an unattributed append defeats the point of committing evidence, and reviewers WILL catch the
-  timestamp/format seams (T1.0).
+- **Never hand-append to a committed raw evidence log.** Commit the producing command as a
+  script/manifest with line-by-line provenance (results/PROVENANCE.md); reviewers WILL catch the
+  timestamp/format seams of an unattributed append (T1.0).
 - **A findings ADR that changes frozen text is a formal delta, not a reinterpretation.** If
-  architecture.md/00-sources literally name what you're replacing, propose the amendment text (the
-  ADR-0003→A4 precedent) — never "no delta because the semantic contract is unchanged"; the
-  catalog-plane "execution models are replaceable" language does not cover founder-ratified
-  infrastructure decisions (T1.0 review C1).
-- **Spike kits need a committed idempotent teardown with evidence.** "I deleted it in the console" is not
-  teardown: commit a re-runnable script (waits for PVC reclaim before cluster delete, removes bucket-IAM
-  tombstones of deleted SAs, ends with an orphan sweep) and its output as the $0-state proof (T1.0 QA).
+  architecture.md/00-sources literally name what you're replacing, propose the amendment text
+  (the ADR-0003→A4 precedent) — never "no delta because the semantic contract is unchanged"
+  (T1.0 review C1).
+- **Spike kits need a committed idempotent teardown with evidence.** "I deleted it in the console" is
+  not teardown: commit a re-runnable script (waits for PVC reclaim, clears bucket-IAM tombstones of
+  deleted SAs, ends with an orphan sweep) and its output as the $0-state proof (T1.0 QA).
 - **Shipping a constraint without finding what enforces it.** US-3.3a rendered D7's default-deny
   NetworkPolicies and proved every manifest correct, but `infra/modules/gke-cell` is GKE Standard with
-  no `network_policy`/`ADVANCED_DATAPATH`: the API server stores them, nothing drops a packet. Rendered,
-  stored and enforced are three representations; the suite covered one. Inert-but-wrong is no no-op
-  either: the allow-set as written denies what CNPG requires (metadata server → Workload Identity, GCS
-  → WAL archiving, apiserver → instance manager), so enabling enforcement WOULD have fenced the first
-  Postgres pod. It never did — the objects were withdrawn before merge — but the trigger would have sat
-  in another directory, in another task.
+  no `network_policy`/`ADVANCED_DATAPATH`: the API server stores them, nothing drops a packet.
+  Rendered, stored and enforced are three representations; the suite covered one. Inert-but-wrong is
+  no no-op either — the allow-set denied what CNPG needs, so enabling enforcement WOULD have fenced
+  the first Postgres pod, from another directory in another task.
 - **Widening a lookup table without widening its consumer turns a loud error into a silent success.**
   Four kinds added to `kube`'s `plurals` were not inert: `Delete` hardcoded the CNPG apiVersion, so they
   built plausible paths under the wrong group, 404'd, and 404 maps to "already gone" — US-3.3b's exact
   call would report success while the namespace lived. A kind absent from the consumer must be REFUSED,
   and the two key sets asserted EQUAL: the first fix's own test could not fail, because every kind it
   tried was missing from BOTH maps, so the refusal came from the path builder, not the guard it named.
-- **Guard every document, element and path — not the first of each.** Four green survivors in one
-  branch; the index fix alone needed four attempts. `yaml.Unmarshal` returns only document 1, so a
-  kind-based absence guard and a cross-namespace check both passed while a SECOND document carried an
-  arbitrary object elsewhere. Each was then pinned for one element, then 0-1, then 0-3 (a hardcoded
-  ceiling is a constant a mutation can match), and a skip keyed on byte length or on `spec:` was STILL
-  green because every fixture was a hand-written stub — build fixtures from the real renderers. And
-  `Converge`'s deleting branch returns before the renderer, so a guard in `Render` covered create only:
-  `"../../../api/v1/namespaces/kube-system"` was refused on create and ACCEPTED on teardown. One owner,
-  called from the accessor both paths use.
+- **Guard every document, element and path — not the first of each.** `yaml.Unmarshal` returns only
+  document 1 and a nil error, which has now bitten three times: a kind-based absence guard and a
+  cross-namespace check both passed while a SECOND document carried an arbitrary object, and
+  US-3.3b's teardown classified an object's SCOPE from doc 1 (a cluster-scoped doc 2 would never be
+  deleted). Refuse multi-doc, as `kube.applyOne` does. Pinning for one element, then 0-1, then 0-3 is
+  a constant a mutation can match; a skip keyed on byte length or `spec:` stayed green because every
+  fixture was a hand-written stub — build fixtures from the real renderers. And `Converge`'s deleting
+  branch returns before the renderer, so a guard in `Render` covered create only:
+  `"../../../api/v1/namespaces/kube-system"` was refused on create and ACCEPTED on teardown.
 - **A driver reading a key the API's closed schema forbids is silent contract drift.** T3.4c:
-  `cnpg.storageForShape` sized the PVC from `shape["storage"]`, which `estimates.shapeSchema` rejects,
-  so the priced `storage_gb` was never read — a customer billed for 78 GB got the size default, and
-  invoice and audit trail both said they got what they paid for. Bind the driver to the catalog with a
-  test that READS `pricing.json`; check every path the refusal sits on (the same call served TEARDOWN,
-  making the service undeletable); and **prove the wire** — deleting the key en route to the driver
-  left the whole agent suite green.
+  `cnpg.storageForShape` sized the PVC from `shape["storage"]`, which `estimates.shapeSchema`
+  rejects, so the priced `storage_gb` was never read — a customer billed for 78 GB got the size
+  default, with invoice and audit trail both agreeing. Bind the driver to the catalog with a test
+  that READS `pricing.json`; check every path the refusal sits on (the same call served TEARDOWN,
+  making the service undeletable); and **prove the wire** — deleting the key en route left the
+  agent suite green — US-3.3b hit it twice more, pinning the poll's `environments` key and the
+  teardown's whole HTTP path on ONE side of a two-module wire.
 - **A floor HIDES a wrong sign.** `max(declared, included)` is the coherent way to default
-  `storage_gb` (resolving only on ABSENCE made `{size:standard}` and `{…,storage_gb:0}` two
-  identities), but it made the negative-value check unreachable. Reject out-of-range BEFORE defaulting.
+  `storage_gb`, but it made the negative-value check unreachable. Reject out-of-range BEFORE
+  defaulting.

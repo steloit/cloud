@@ -66,6 +66,11 @@ never hand-written · demo data from `19-canon` only.
    introduce. And cite only what the committed history supports: three O11 entries narrated
    incidents that did not happen as described, one of them a counterfactual from the author's
    own code comment. A mistake bank entry without a verifiable incident is a style guide.
+   **A CITATION TO A TASK IS A CLAIM ABOUT THAT TASK.** US-3.3h justified a design by US-3.11,
+   whose ACs are about something else entirely; US-3.3b justified a namespace-deletion gate by
+   "US-3.5's final-backup contract" when US-3.5 is `status: blocked` and no such contract exists.
+   Both read as authority in a code comment and neither was. Read the `## Acceptance criteria`
+   of anything you cite — it takes ten seconds and both of these were caught by a reviewer.
 
 ## Hard rules
 

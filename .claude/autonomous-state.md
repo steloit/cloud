@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 · `main` @ `779f9ea` · **US-3.3h MERGED (#328)** · T3.4d (#329) in flight
+**Updated:** 2026-08-24 · `main` @ `9700569` · **five PRs merged, queue clear**
 
 ---
 
@@ -16,51 +16,45 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 ## In flight
 
-**T3.4d — PR #329**, branch `task/T3.4d`, worktree `.../442530ba-.../scratchpad/wt-t34d`.
-Round 2 pushed, main merged in and the merged tree verified. Both reviewers have
-run once (reviewer: APPROVE-WITH-NOTES; QA: one blocking, now fixed and
-mutation-verified). **Waiting on CI, then merge.** No third pass — round 2 was
-fixes to named findings (ADR-0016).
+**Nothing.** #328 (US-3.3h), #329 (T3.4d), #330 (T3.4a), #331 (US-3.12) and
+#332 (US-3.3b) all merged. Only `task/O2` remains as a worktree, still waiting
+on the founder's revised spec.
 
-## Recently merged
+## Recently merged — the parts easiest to re-break
 
-**US-3.3h (#328)** — four rounds. The control plane maps a cell's report onto a
-status legal from the current one, and convergence is **derived from the
-destination** rather than written per hop:
-`converged = settledStatuses[to] && (to == observed || observed == "")`, where
-`settledStatuses` = {ready, failed}. That one rule subsumed four hand-written
-flags and closed a class both reviewers kept finding one instance of at a time.
+**US-3.3b (#332)** — an environment's namespace is torn down. Three rounds; the
+first two premises were wrong.
 
-Three things from it that are easy to re-break:
+1. **`gone` from a cell means the workload was observed ABSENT.** It used to mean
+   "the delete was accepted" — k8s answers 2xx immediately, finalizers pending —
+   and the namespace-teardown gate was built on that. The renderer now Observes
+   the Cluster gone before reporting; anything else is `ErrNotConverged`. **If
+   that check is removed the gate silently weakens to "accepted" and a database
+   is deleted mid-termination.**
+2. **The teardown poll AND the confirmation both carry the same `NOT EXISTS`
+   fence.** `torn_down_at` is a one-way latch: confirming an environment that
+   became ineligible strands it forever. `CreateService` also refuses a
+   scheduled environment — the two guards fail independently.
+3. **Scope is read from the rendered bytes, and multi-doc is refused.**
+   `yaml.Unmarshal` returns doc 1 with a nil error — third time that has bitten.
 
-1. **A cell may not decide a lifecycle hold, in EITHER position.** `deleting`/
-   `suspended` as an *observation* are refused (`ReportableByCell`, plus a 422 at
-   the route). And a *held row* converges only on `gone` — because
-   `DeleteService` bumps the generation and only then transitions, so a deleting
-   row is outstanding by construction, and one `ready` report used to finish the
-   generation and abandon the teardown forever.
-2. **`gone` and `""` are different** and the handler no longer collapses them.
-   `gone` from a live row means the workload vanished while desired still wants
-   it — the row stays outstanding so the agent re-creates it.
-3. **`provisioning.StatusVocabulary` is the one ADR-024 definition.** It was
-   retyped in four places; reconcile's wire gate and the sweeps derive from it.
+**US-3.3h (#328)** — convergence is derived from the destination:
+`settledStatuses[to] && (to == observed || observed == "")`. A cell may not
+decide a lifecycle hold in EITHER position (as an observation, or as the row's
+`from`). `gone` and `""` are different. `provisioning.StatusVocabulary` is the
+one ADR-024 definition.
 
-## Next task after T3.4d
+**US-3.12 (#331)** — the reconcile request enum ships in FOUR artifacts
+(openapi, api gen, contracts/go, and the TS clients). `make gen-ts` is a
+separate gate from `make gen-go`; running only one is how the first push failed.
 
-Ready queue (`grep -l "^status: ready" tasks/**/*.md`): **US-3.3b** (env teardown
-— nothing removes a namespace), **US-3.3g**, **US-3.10**, **US-3.11**, plus the
-two US-3.3h filed:
+## Next task
 
-- **US-3.12** (high) — the reconcile status contract advertises `suspended`/
-  `deleting`, which the API now **422s**, and an "omit for a heartbeat" clause
-  that no longer holds. Real contract drift; needs `openapi.yaml` + regenerated
-  types, which is why it was not done inline.
-- **US-3.13** (medium) — a row whose `observed_generation` never advances has no
-  owner. A steadily `degraded` service 409s forever (measured: 25 ticks, no
-  convergence). **US-3.11 does NOT cover this** — its ACs are about the *agent's*
-  render errors. Not reachable today (no CNPG phase maps to `degraded`) but
-  `render.terminal()` already accepts it, so one phase-mapping change makes it
-  live.
+Ready queue is 24. Highest-value unclaimed: **US-3.3g** (a plan change does not
+reach the cell until each service is next touched), **US-3.10**, **US-3.11**,
+**US-3.13** (a row whose `observed_generation` never advances has no owner),
+**US-3.14** (the agent's emit-set is not bound to the request enum — filed from
+US-3.12's QA).
 
 **US-3.3c is priority `critical` but two of its ACs need a live GKE cell**, and
 there are still zero clusters in `steloit-dev`. Do not claim it expecting to
