@@ -974,3 +974,34 @@ func TestANegativeStorageIsRefusedAtEverySize(t *testing.T) {
 		t.Fatalf("storage_gb=0 resolved to %v, want the included 50", out["storage_gb"])
 	}
 }
+
+// WHAT BLOCKS US-3.3d, PINNED SO IT UNBLOCKS ITSELF.
+//
+// The rendered CNPG Cluster declares no `resources:`, so a customer buying
+// `performance` gets the same pod as one buying `dev`, and the plan's cpu/memory
+// envelope binds as a pod-count proxy rather than as compute. It cannot be fixed
+// by implementation: the postgres shape carries NO cpu and NO memory, and the
+// catalog prices the sizes without saying what they are. Choosing those numbers
+// is a product decision (founder-config §5).
+//
+// This fails the day the shape gains them — which is exactly when US-3.3d
+// becomes possible — rather than leaving a blocked task to be rediscovered.
+func TestThePostgresShapeStillCarriesNoComputeSizing(t *testing.T) {
+	pg, ok := shapeSchema["postgres"]
+	if !ok {
+		t.Fatal("no postgres entry in shapeSchema")
+	}
+	for _, field := range []string{"cpu", "vcpu", "memory_mb", "memory_gb", "memory"} {
+		if _, present := pg[field]; present {
+			t.Fatalf("the postgres shape now carries %q. If the catalog says what a size means in "+
+				"compute, US-3.3d is unblocked: make the rendered Cluster declare "+
+				"resources.requests == resources.limits from it (Guaranteed QoS, CNPG's own "+
+				"recommendation) and delete this test.", field)
+		}
+	}
+	// ...and the sibling that DOES sell memory stays that way, so this test
+	// cannot pass merely because shapeSchema was restructured.
+	if _, ok := shapeSchema["valkey"]["memory_mb"]; !ok {
+		t.Fatal("valkey no longer carries memory_mb — this test's premise has moved")
+	}
+}

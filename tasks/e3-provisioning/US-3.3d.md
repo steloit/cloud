@@ -2,7 +2,7 @@
 id: US-3.3d
 title: "A managed Postgres declares no resources, so any LimitRange default silently becomes its hard cap"
 epic: E3
-status: ready
+status: blocked
 phase: MVP
 priority: high
 sprint: 4
@@ -13,6 +13,8 @@ contexts: [provisioning]
 files:
   - services/cell-agent/internal/driver/cnpg/**
   - services/cell-agent/internal/render/**
+  - services/api/internal/estimates/**
+  - docs/founder-config.md
   - tasks/e3-provisioning/US-3.3d.md
 verify:
   - "for every shape the catalog sells, the rendered Cluster declares resources matching the sold shape"
@@ -30,10 +32,15 @@ The Cluster we render must declare the resources the customer paid for.
 `resources:`, no `memory` and no `cpu` at all. Two consequences, and the second is
 the one that bit:
 
-1. **A customer buying a larger shape gets a pod with no resource floor.** The
-   estimate resolves `memory_mb` (`services/api/internal/estimates/engine.go:167`
-   — default 1024) and prices it; nothing carries it to the pod. Scheduling and
-   eviction therefore ignore what was sold.
+1. **A customer buying a larger shape gets a pod with no resource floor.**
+   Scheduling and eviction ignore what was sold.
+
+   *(This task originally said the estimate "resolves `memory_mb`
+   (engine.go:167 — default 1024) and prices it". That line is **valkey's**.
+   Verified: the postgres shape is `{size, storage_gb, ha, connections, pgmq,
+   version}` — no cpu, no memory — and `memory_cents_per_gb` in `pricing.json`
+   is valkey's knob. Nothing carries cpu or memory to a postgres pod because
+   nothing produces them. See the block below.)*
 2. **Any LimitRange in the namespace silently becomes the hard cap.** US-3.3a
    tried to ship `default: {cpu: 500m, memory: 512Mi}` as part of D7. With no
    `resources:` on the Cluster that default is applied at pod admission to every
@@ -45,6 +52,76 @@ This is why the LimitRange was withdrawn from US-3.3a rather than shipped. It is
 **not** blocked on NetworkPolicy enforcement (US-3.3c) — a LimitRange is enforced
 by the API server at admission, needs no CNI, and the fix belongs with the CNPG
 driver rather than with an isolation task.
+
+## BLOCKED: the catalog does not say what a postgres size IS
+
+AC 1 asks for resources "derived from the sold shape". **The sold shape does not
+contain them, and neither does the catalog.** Verified three ways:
+
+- `shapeSchema["postgres"]` is `{size, storage_gb, ha, connections, pgmq,
+  version}` — no cpu, no memory.
+- `pricing.json`'s postgres sizes carry `base_cents` and `included_gb` only;
+  the single `memory_cents_per_gb` in that file is valkey's.
+- No document in `docs/` states what `dev` / `standard` / `performance` mean in
+  vCPU or RAM.
+
+So implementing AC 1 means **inventing** the numbers — deciding that `standard`
+is, say, 2 vCPU / 4 GiB. That is a product and pricing decision (the sizes are
+priced at $19 / $58 / $112 a month and must correspond to something), and the
+founder ruling of 2026-07-27 is that implementation code never makes those.
+
+This is the same shape as US-3.3e's storage envelope: the mechanism is ready,
+the numbers are not mine to choose.
+
+## A researched proposal, so the decision is not a blank page
+
+Market anchors for what a dollar buys in managed Postgres today:
+
+| provider | price/mo | vCPU / RAM |
+|---|---|---|
+| DigitalOcean Basic | **$15** | 1 shared vCPU / 1 GiB |
+| DigitalOcean Growth | **$61** | 2 vCPU / 4 GiB |
+| DigitalOcean General Purpose | ~$120-130 | dedicated vCPU / 8 GiB |
+| Aiven entry | $19 | ~2 vCPU |
+| Aiven mid | ~$110 | 4 vCPU |
+| Supabase Pro | $25 | (bundled, not compute-tiered) |
+
+Against our own prices — `dev` $19, `standard` $58, `performance` $112 — a
+defensible starting point that lands us at or slightly above market:
+
+| size | proposed | sits against |
+|---|---|---|
+| `dev` | **0.5 vCPU / 1 GiB** | DO Basic $15 = 1 shared vCPU / 1 GiB |
+| `standard` | **2 vCPU / 4 GiB** | DO Growth $61 = 2 / 4 GiB, and we are $58 |
+| `performance` | **4 vCPU / 8 GiB** | DO GP ~$120 = 8 GiB, and we are $112 |
+
+Two constraints the numbers must satisfy, both already ruled:
+
+- **They must fit the plan envelope** (founder 2026-08-23), which is per
+  ENVIRONMENT: `free` 1 vCPU / 2 GiB. A `dev` at 0.5/1 fits with room for a
+  second; `standard` at 2 vCPU does NOT fit a free environment at all, which is
+  consistent — `standard` is not a free-tier shape.
+- **`ha: true` multiplies them by the instance count**, so `performance` + HA is
+  12 vCPU / 24 GiB against `business`'s 12 / 24 — exactly at the ceiling. Worth
+  seeing before ruling.
+
+## How they should be applied — this part IS decided by evidence
+
+**Guaranteed QoS: `requests == limits` for both cpu and memory.** CloudNativePG
+recommends it explicitly — *"For a PostgreSQL workload it is recommended to set a
+'Guaranteed' QoS"* — and it is what enables their OOM protection: the postmaster
+keeps its `-997` OOM score while children run at `0`, so the kernel kills a
+backend before the postmaster.
+
+The counter-argument is real and was weighed: a CPU **limit** means CFS quota
+throttling, and for latency-sensitive workloads the usual advice is to omit it.
+It loses here for a specific reason — this is a MULTI-TENANT managed product that
+sells a bounded shape. Without a limit, one tenant's database bursts into
+another's CPU on a shared node, and the plan envelope (a quota on `requests.*`)
+stops describing what actually runs. A customer who bought 2 vCPU should get 2
+vCPU, predictably, and not be a noisy neighbour. CNPG also suggests sizing
+`shared_buffers` at ~25% of pod memory, which is a follow-up once the numbers
+exist.
 
 ## Acceptance criteria
 
