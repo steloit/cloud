@@ -44,6 +44,14 @@ type fakeQ struct {
 	// instead of luck-dependent. Must run outside the lock — blocking while
 	// holding q.mu would deadlock on the first caller.
 	afterRead func()
+
+	// The ENVIRONMENT half (US-3.3b). `envs` is what the teardown poll returns;
+	// `tornDown` records confirmations. `envCell` maps env id -> cell so
+	// GetEnvironmentForCell can enforce the not-your-cell 404.
+	envs     []store.ListEnvironmentTeardownsForCellRow
+	envCell  map[string]string
+	envState map[string]struct{ scheduled, torn bool }
+	tornDown []string
 }
 
 func (f *fakeQ) GetCell(_ context.Context, id string) (store.Cell, error) {
@@ -116,6 +124,54 @@ func (f *fakeQ) OrgForService(context.Context, string) (string, error) { return 
 // q.mu). Everything fakeTrans mutates — calls, edges, and q.services — is
 // therefore guarded by q.mu. No fakeQ *method* is called from here, so taking
 // q.mu directly cannot deadlock against one that also takes it.
+func (f *fakeQ) ListEnvironmentTeardownsForCell(_ context.Context, arg store.ListEnvironmentTeardownsForCellParams) ([]store.ListEnvironmentTeardownsForCellRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []store.ListEnvironmentTeardownsForCellRow
+	for _, e := range f.envs {
+		if f.envCell[e.ID] == arg.CellID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeQ) GetEnvironmentForCell(_ context.Context, arg store.GetEnvironmentForCellParams) (store.GetEnvironmentForCellRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Not-in-this-cell is indistinguishable from does-not-exist, which is the
+	// point: a reconciler token must not learn that an environment exists
+	// elsewhere.
+	if c, ok := f.envCell[arg.ID]; !ok || c != arg.CellID {
+		return store.GetEnvironmentForCellRow{}, pgx.ErrNoRows
+	}
+	return store.GetEnvironmentForCellRow{ID: arg.ID}, nil
+}
+
+func (f *fakeQ) MarkEnvironmentTornDown(_ context.Context, id string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Mirrors the SQL guard exactly: scheduled and not already torn down. The
+	// fake must not be more permissive than the store on the guard that makes a
+	// replay a no-op.
+	st, ok := f.envState[id]
+	if !ok || !st.scheduled || st.torn {
+		return 0, nil
+	}
+	st.torn = true
+	f.envState[id] = st
+	f.tornDown = append(f.tornDown, id)
+	// A torn-down environment stops being advertised.
+	kept := f.envs[:0]
+	for _, e := range f.envs {
+		if e.ID != id {
+			kept = append(kept, e)
+		}
+	}
+	f.envs = kept
+	return 1, nil
+}
+
 type fakeTrans struct {
 	calls  int
 	edges  []string
@@ -180,13 +236,13 @@ func TestDesiredScopedToCell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range got {
+	for _, d := range got.Services {
 		if d.CellID != "cell-0" {
 			t.Fatalf("leaked a foreign cell's service: %s in %s", d.ID, d.CellID)
 		}
 	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 services in cell-0, got %d", len(got))
+	if len(got.Services) != 2 {
+		t.Fatalf("want 2 services in cell-0, got %d", len(got.Services))
 	}
 }
 
@@ -196,8 +252,8 @@ func TestSinceGenerationFiltersRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ID != "svc_b" {
-		t.Fatalf("since_generation=3 should return only svc_b (gen 7); got %+v", got)
+	if len(got.Services) != 1 || got.Services[0].ID != "svc_b" {
+		t.Fatalf("since_generation=3 should return only svc_b (gen 7); got %+v", got.Services)
 	}
 }
 
@@ -470,7 +526,7 @@ func TestDesiredLimitIsClamped(t *testing.T) {
 func TestDesiredCarriesFullDocumentForLevelTriggeredConverge(t *testing.T) {
 	s, _, _ := newFixture()
 	got, _ := s.Desired(context.Background(), "cell-0", 0, 100)
-	for _, d := range got {
+	for _, d := range got.Services {
 		if len(d.Desired) == 0 || !json.Valid(d.Desired) {
 			t.Fatalf("%s carries no valid desired doc — the agent would have to diff by memory", d.ID)
 		}

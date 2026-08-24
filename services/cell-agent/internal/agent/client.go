@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -30,29 +31,58 @@ func NewHTTPControlPlane(base, token string) *HTTPControlPlane {
 	}
 }
 
-func (c *HTTPControlPlane) Desired(ctx context.Context, cell string, since int64) ([]DesiredService, error) {
+func (c *HTTPControlPlane) Desired(ctx context.Context, cell string, since int64) (DesiredState, error) {
 	u := fmt.Sprintf("%s/v1/reconcile/%s/desired?since_generation=%s",
-		c.base, cell, strconv.FormatInt(since, 10))
+		c.base, url.PathEscape(cell), strconv.FormatInt(since, 10))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return DesiredState{}, err
 	}
 	c.auth(req)
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, err
+		return DesiredState{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, statusErr("desired", resp)
+		return DesiredState{}, statusErr("desired", resp)
 	}
-	var body struct {
-		Services []DesiredService `json:"services"`
-	}
+	var body DesiredState
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("desired: decode: %w", err)
+		return DesiredState{}, fmt.Errorf("desired: decode: %w", err)
 	}
-	return body.Services, nil
+	return body, nil
+}
+
+// ConfirmEnvironmentTeardown reports that an environment's namespace is gone.
+//
+// A 409 here means the environment is NOT awaiting a teardown — never scheduled,
+// or already confirmed — and unlike the status route's 409s it is not a
+// "re-poll". The loop logs and moves on; the environment has already stopped
+// being advertised, so there is nothing to retry.
+func (c *HTTPControlPlane) ConfirmEnvironmentTeardown(ctx context.Context, cell, envID string) error {
+	buf, err := json.Marshal(map[string]string{"observed": "gone"})
+	if err != nil {
+		return err
+	}
+	u := fmt.Sprintf("%s/v1/reconcile/%s/environments/%s/teardown",
+		c.base, url.PathEscape(cell), url.PathEscape(envID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.auth(req)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return statusErr("environment teardown", resp)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
 }
 
 func (c *HTTPControlPlane) Report(ctx context.Context, cell string, r Report) error {

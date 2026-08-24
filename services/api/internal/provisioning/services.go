@@ -590,12 +590,19 @@ func (s *Service) resolveNamespace(ctx context.Context, envID string) (string, e
 	if envID == "" {
 		return "", fmt.Errorf("provisioning: cannot resolve a namespace without an environment id")
 	}
-	return namespaceForEnv(envID), nil
+	return NamespaceForEnv(envID), nil
 }
 
-// namespaceForEnv maps an environment id to its RFC1123 namespace. Deterministic,
+// NamespaceForEnv maps an environment id to its RFC1123 namespace. Deterministic,
 // immutable, and ≤63 chars by construction (env ids are short).
-func namespaceForEnv(envID string) string {
+//
+// EXPORTED SO THERE IS ONE DERIVATION. US-3.3b needs the namespace on the
+// reconciler's poll, and US-3.3a already shipped a SECOND derivation of it
+// agent-side — a label set to TrimPrefix(namespace, "env-"), which yielded
+// `9f3c1a2b` for the id `env_9f3c1a2b` and named nothing the control plane knew.
+// It was removed. Anything that needs this answer calls this function; nothing
+// re-derives it, and the agent is told the namespace rather than computing it.
+func NamespaceForEnv(envID string) string {
 	ns := k8sNamespace(envID)
 	if len(ns) > 63 {
 		ns = strings.Trim(ns[:63], "-")
@@ -795,7 +802,7 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 	if err != nil {
 		return store.Service{}, fmt.Errorf("provisioning: marshal shape: %w", err)
 	}
-	namespace := namespaceForEnv(env.ID)
+	namespace := NamespaceForEnv(env.ID)
 	row, err := s.q.InsertService(ctx, store.InsertServiceParams{
 		ID: ids.New("svc"), EnvID: env.ID, Name: in.Name, Product: in.Product,
 		Intent:               pgtype.Text{String: line.Intent, Valid: true},

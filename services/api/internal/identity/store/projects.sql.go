@@ -36,7 +36,7 @@ func (q *Queries) CountProjects(ctx context.Context, orgID string) (int64, error
 const createEnvironment = `-- name: CreateEnvironment :one
 INSERT INTO environments (id, project_id, name, region_override, kind, implicit)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at
+RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at, torn_down_at
 `
 
 type CreateEnvironmentParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		&i.CreatedAt,
 		&i.Implicit,
 		&i.DeletionScheduledAt,
+		&i.TornDownAt,
 	)
 	return i, err
 }
@@ -102,7 +103,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const getEnvironment = `-- name: GetEnvironment :one
-SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at FROM environments WHERE id = $1
+SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at, torn_down_at FROM environments WHERE id = $1
 `
 
 func (q *Queries) GetEnvironment(ctx context.Context, id string) (Environment, error) {
@@ -119,6 +120,7 @@ func (q *Queries) GetEnvironment(ctx context.Context, id string) (Environment, e
 		&i.CreatedAt,
 		&i.Implicit,
 		&i.DeletionScheduledAt,
+		&i.TornDownAt,
 	)
 	return i, err
 }
@@ -142,7 +144,7 @@ func (q *Queries) GetProject(ctx context.Context, id string) (Project, error) {
 }
 
 const listEnvironments = `-- name: ListEnvironments :many
-SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at FROM environments WHERE project_id = $1 ORDER BY created_at
+SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at, torn_down_at FROM environments WHERE project_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListEnvironments(ctx context.Context, projectID string) ([]Environment, error) {
@@ -165,6 +167,7 @@ func (q *Queries) ListEnvironments(ctx context.Context, projectID string) ([]Env
 			&i.CreatedAt,
 			&i.Implicit,
 			&i.DeletionScheduledAt,
+			&i.TornDownAt,
 		); err != nil {
 			return nil, err
 		}
@@ -237,7 +240,7 @@ func (q *Queries) OrgForEnvironment(ctx context.Context, id string) (string, err
 }
 
 const renameEnvironment = `-- name: RenameEnvironment :one
-UPDATE environments SET name = $2 WHERE id = $1 RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at
+UPDATE environments SET name = $2 WHERE id = $1 RETURNING id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at, torn_down_at
 `
 
 type RenameEnvironmentParams struct {
@@ -259,6 +262,7 @@ func (q *Queries) RenameEnvironment(ctx context.Context, arg RenameEnvironmentPa
 		&i.CreatedAt,
 		&i.Implicit,
 		&i.DeletionScheduledAt,
+		&i.TornDownAt,
 	)
 	return i, err
 }

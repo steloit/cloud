@@ -50,12 +50,34 @@ type Report struct {
 // is testable without a live server and so the transport (HTTP now, long-poll
 // or SSE later) is a swappable detail, exactly as §2 anticipates.
 type ControlPlane interface {
-	// Desired returns services whose generation exceeds sinceGeneration.
-	Desired(ctx context.Context, cell string, sinceGeneration int64) ([]DesiredService, error)
+	// Desired returns the cell's outstanding work: services whose generation
+	// exceeds sinceGeneration, and environments whose namespace must be removed.
+	Desired(ctx context.Context, cell string, sinceGeneration int64) (DesiredState, error)
 	// Report writes back observed status; a stale report is rejected by the
 	// control plane, which the agent treats as "re-poll", never as an error to
 	// act on locally.
 	Report(ctx context.Context, cell string, r Report) error
+	// ConfirmEnvironmentTeardown reports that an environment's namespace is
+	// gone. Separate from Report because a namespace belongs to no service —
+	// Report requires a service id and writes a per-service row.
+	ConfirmEnvironmentTeardown(ctx context.Context, cell, envID string) error
+}
+
+// DesiredState is the whole poll answer: per-service work, and the environments
+// whose namespace must be removed.
+type DesiredState struct {
+	Services     []DesiredService             `json:"services"`
+	Environments []DesiredEnvironmentTeardown `json:"environments"`
+}
+
+// DesiredEnvironmentTeardown is one environment whose namespace must go.
+//
+// The namespace is GIVEN, never derived here. The control plane resolved it
+// (ADR-0012) and is the only place that knows it exactly; US-3.3a shipped a
+// second, agent-side derivation and it named nothing the control plane knew.
+type DesiredEnvironmentTeardown struct {
+	ID        string `json:"id"`
+	Namespace string `json:"namespace"`
 }
 
 // Renderer converges one service toward its desired state and returns the
@@ -76,6 +98,22 @@ type ControlPlane interface {
 // statuses, so this constraint is not yet load-bearing but the seam must honor it.
 type Renderer interface {
 	Converge(ctx context.Context, svc DesiredService) (observedStatus string, err error)
+}
+
+// EnvironmentTeardowner removes an environment's cluster-scoped objects — today
+// its namespace, which takes everything inside it with it.
+//
+// A SEPARATE interface, not a method on Renderer, for the reason valkey is not a
+// BranchingDriver: not every renderer owns environment-scoped objects, and the
+// alpha AckRenderer owns none. The loop skips the environment half entirely when
+// its renderer does not implement this, rather than requiring every renderer to
+// carry a no-op.
+//
+// MUST be idempotent: a namespace already gone is success, not an error. The
+// loop may call it repeatedly, because a confirmation that fails to reach the
+// control plane leaves the environment outstanding for the next tick.
+type EnvironmentTeardowner interface {
+	TeardownEnvironment(ctx context.Context, namespace string) error
 }
 
 // Agent is the poll→converge→writeback loop for one cell.
@@ -127,14 +165,14 @@ func (a *Agent) Tick(ctx context.Context) {
 	// filters on observed_generation < generation, so there is no cursor to
 	// advance and nothing to starve — a service converged last tick simply
 	// stops appearing once its report lands.
-	services, err := a.cp.Desired(ctx, a.cell, 0)
+	state, err := a.cp.Desired(ctx, a.cell, 0)
 	if err != nil {
 		// Cannot make changes. Do NOT touch actual state — degrade to read-only.
 		a.log.Warn("desired poll failed; skipping convergence (control plane unreachable)",
 			"cell", a.cell, "err", err)
 		return
 	}
-	for _, svc := range services {
+	for _, svc := range state.Services {
 		observed, err := a.render.Converge(ctx, svc)
 		if err != nil {
 			// ErrNotConverged is NOT a failure: the apply landed and the
@@ -159,5 +197,53 @@ func (a *Agent) Tick(ctx context.Context) {
 			a.log.Warn("status writeback failed; will retry", "service", svc.ID, "err", err)
 			continue
 		}
+	}
+	a.tearDownEnvironments(ctx, state.Environments)
+}
+
+// tearDownEnvironments removes the namespace of each environment the control
+// plane says is finished with.
+//
+// IT RUNS AFTER THE SERVICES, and that ordering is belt-and-braces rather than
+// the guarantee: deleting a namespace deletes everything in it, so the real
+// protection is server-side — an environment is not advertised until every
+// service in it is actually gone (status `deleting` AND observed caught up), so
+// a still-terminating database can never be inside one of these. Running last
+// costs nothing and means a service teardown that lands this same tick is
+// already done.
+func (a *Agent) tearDownEnvironments(ctx context.Context, envs []DesiredEnvironmentTeardown) {
+	if len(envs) == 0 {
+		return
+	}
+	td, ok := a.render.(EnvironmentTeardowner)
+	if !ok {
+		// A renderer that owns no environment-scoped objects (the alpha
+		// AckRenderer) cannot tear one down. Loud rather than silent: the
+		// control plane is asking for something this agent cannot do, and the
+		// environment will stay outstanding forever until someone notices.
+		a.log.Error("control plane asked for an environment teardown and this renderer cannot "+
+			"perform one; the namespaces will leak",
+			"cell", a.cell, "environments", len(envs))
+		return
+	}
+	for _, env := range envs {
+		if err := td.TeardownEnvironment(ctx, env.Namespace); err != nil {
+			// Stays outstanding server-side: the confirmation is what stops it
+			// being advertised, and we are not sending one.
+			a.log.Error("environment teardown failed; will retry",
+				"environment", env.ID, "namespace", env.Namespace, "err", err)
+			continue
+		}
+		if err := a.cp.ConfirmEnvironmentTeardown(ctx, a.cell, env.ID); err != nil {
+			// The namespace IS gone; only the confirmation failed. Next tick
+			// re-advertises it, the teardown is idempotent, and the confirmation
+			// is retried — which is why TeardownEnvironment must treat an absent
+			// namespace as success.
+			a.log.Warn("environment teardown confirmation failed; will retry",
+				"environment", env.ID, "err", err)
+			continue
+		}
+		a.log.Info("environment namespace removed",
+			"environment", env.ID, "namespace", env.Namespace)
 	}
 }

@@ -1572,6 +1572,21 @@ func (e CreateEnvironmentJSONBodyData) Valid() bool {
 	}
 }
 
+// Defines values for PostEnvironmentTeardownJSONBodyObserved.
+const (
+	PostEnvironmentTeardownJSONBodyObservedGone PostEnvironmentTeardownJSONBodyObserved = "gone"
+)
+
+// Valid indicates whether the value is a known member of the PostEnvironmentTeardownJSONBodyObserved enum.
+func (e PostEnvironmentTeardownJSONBodyObserved) Valid() bool {
+	switch e {
+	case PostEnvironmentTeardownJSONBodyObservedGone:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostReconcileStatusJSONBodyConditionsStatus.
 const (
 	PostReconcileStatusJSONBodyConditionsStatusFalse   PostReconcileStatusJSONBodyConditionsStatus = "False"
@@ -1958,6 +1973,15 @@ type DeploymentState string
 type DeploymentList struct {
 	Data       *[]Deployment `json:"data,omitempty"`
 	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// DesiredEnvironmentTeardown An environment whose namespace still has to be removed. The NAMESPACE is sent, not derived agent-side: the control plane resolved it (ADR-0012, sanitize(env id)) and is therefore the one place that knows it exactly. US-3.3a shipped a second derivation agent-side and it named nothing the control plane knew.
+type DesiredEnvironmentTeardown struct {
+	// Id environment id, e.g. env_9f3c1a2b — what the teardown is confirmed against
+	Id string `json:"id"`
+
+	// Namespace the Kubernetes namespace to remove, e.g. env-9f3c1a2b
+	Namespace string `json:"namespace"`
 }
 
 // DesiredService One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
@@ -3413,6 +3437,15 @@ type GetDesiredStateParams struct {
 	LimitParam           *int   `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostEnvironmentTeardownJSONBody defines parameters for PostEnvironmentTeardown.
+type PostEnvironmentTeardownJSONBody struct {
+	// Observed the only thing a cell can report about a namespace it was asked to remove. An enum of one, deliberately: a teardown that did not finish is reported by NOT calling this, so the environment stays outstanding and the next tick retries.
+	Observed PostEnvironmentTeardownJSONBodyObserved `json:"observed"`
+}
+
+// PostEnvironmentTeardownJSONBodyObserved defines parameters for PostEnvironmentTeardown.
+type PostEnvironmentTeardownJSONBodyObserved string
+
 // PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
 type PostReconcileStatusJSONBody struct {
 	// Conditions reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
@@ -3610,6 +3643,9 @@ type CreateAlertRuleJSONRequestBody = AlertRuleInput
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody CreateEnvironmentJSONBody
+
+// PostEnvironmentTeardownJSONRequestBody defines body for PostEnvironmentTeardown for application/json ContentType.
+type PostEnvironmentTeardownJSONRequestBody PostEnvironmentTeardownJSONBody
 
 // PostReconcileStatusJSONRequestBody defines body for PostReconcileStatus for application/json ContentType.
 type PostReconcileStatusJSONRequestBody PostReconcileStatusJSONBody

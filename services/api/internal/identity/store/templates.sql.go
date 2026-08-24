@@ -52,7 +52,7 @@ func (q *Queries) DeleteTemplate(ctx context.Context, arg DeleteTemplateParams) 
 }
 
 const envByName = `-- name: EnvByName :one
-SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at FROM environments WHERE project_id = $1 AND name = $2
+SELECT id, project_id, name, region_override, kind, policy_flags, expires_at, created_at, implicit, deletion_scheduled_at, torn_down_at FROM environments WHERE project_id = $1 AND name = $2
 `
 
 type EnvByNameParams struct {
@@ -74,6 +74,7 @@ func (q *Queries) EnvByName(ctx context.Context, arg EnvByNameParams) (Environme
 		&i.CreatedAt,
 		&i.Implicit,
 		&i.DeletionScheduledAt,
+		&i.TornDownAt,
 	)
 	return i, err
 }

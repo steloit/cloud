@@ -22,17 +22,28 @@ type fakeCP struct {
 	reports    []Report
 	reportErr  error
 	polls      int
+
+	// The ENVIRONMENT half. `envs` is what the control plane advertises;
+	// `confirmed` is what the agent reported back, in order.
+	envs       []DesiredEnvironmentTeardown
+	confirmed  []string
+	confirmErr error
+
+	// envCellIgnored exists only so a test literal can say out loud that this
+	// fake does not model cell ownership — that rule is the control plane's and
+	// is tested there, against real Postgres.
+	envCellIgnored bool
 }
 
 // Desired models the real server: it returns OUTSTANDING work — services whose
 // observed_generation trails generation. The agent passes since=0; the fake
 // ignores it, exactly as the outstanding-work query makes the cursor moot.
-func (f *fakeCP) Desired(_ context.Context, _ string, _ int64) ([]DesiredService, error) {
+func (f *fakeCP) Desired(_ context.Context, _ string, _ int64) (DesiredState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.polls++
 	if f.desiredErr != nil {
-		return nil, f.desiredErr
+		return DesiredState{}, f.desiredErr
 	}
 	var out []DesiredService
 	for _, s := range f.services {
@@ -40,7 +51,7 @@ func (f *fakeCP) Desired(_ context.Context, _ string, _ int64) ([]DesiredService
 			out = append(out, s)
 		}
 	}
-	return out, nil
+	return DesiredState{Services: out, Environments: append([]DesiredEnvironmentTeardown(nil), f.envs...)}, nil
 }
 
 // Report advances observed_generation for the reported generation ONLY if it
@@ -52,6 +63,26 @@ func (f *fakeCP) applyReport(r Report) {
 	}
 	s.ObservedGeneration = r.ObservedGeneration
 	f.services[r.ServiceID] = s
+}
+
+// The fake stops advertising a confirmed environment, exactly as the real
+// control plane does (torn_down_at is what removes it from the poll). Without
+// that, a test could not tell "confirmed once" from "confirmed every tick".
+func (f *fakeCP) ConfirmEnvironmentTeardown(_ context.Context, _, envID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.confirmErr != nil {
+		return f.confirmErr
+	}
+	f.confirmed = append(f.confirmed, envID)
+	kept := f.envs[:0]
+	for _, e := range f.envs {
+		if e.ID != envID {
+			kept = append(kept, e)
+		}
+	}
+	f.envs = kept
+	return nil
 }
 
 func (f *fakeCP) Report(_ context.Context, _ string, r Report) error {
@@ -319,5 +350,205 @@ func TestAckRendererDeletingStatusConvergesToGone(t *testing.T) {
 	}
 	if got != "gone" {
 		t.Fatalf("a deleting service must converge to gone, got %q", got)
+	}
+}
+
+// A renderer that CAN tear environments down. Separate from fakeRenderer so the
+// "renderer does not implement it" case stays reachable — if every fake had the
+// method, nothing would exercise the skip.
+type envRenderer struct {
+	fakeRenderer
+	mu       sync.Mutex
+	tornDown []string
+	failFor  string
+}
+
+func (r *envRenderer) TeardownEnvironment(_ context.Context, ns string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failFor == ns {
+		return errors.New("boom")
+	}
+	r.tornDown = append(r.tornDown, ns)
+	return nil
+}
+
+// THE TICK TEARS DOWN THE ENVIRONMENTS THE CONTROL PLANE ADVERTISES, and
+// confirms each one so it stops being advertised.
+func TestTickTearsDownAdvertisedEnvironments(t *testing.T) {
+	cp := &fakeCP{
+		services: map[string]DesiredService{},
+		envs: []DesiredEnvironmentTeardown{
+			{ID: "env_a", Namespace: "env-a"},
+			{ID: "env_b", Namespace: "env-b"},
+		},
+		envCellIgnored: true,
+	}
+	r := &envRenderer{}
+	a := New("cell-0", cp, r, quietLog())
+
+	a.Tick(context.Background())
+
+	r.mu.Lock()
+	torn := append([]string(nil), r.tornDown...)
+	r.mu.Unlock()
+	if len(torn) != 2 {
+		t.Fatalf("tore down %v, want both namespaces", torn)
+	}
+	cp.mu.Lock()
+	confirmed := append([]string(nil), cp.confirmed...)
+	remaining := len(cp.envs)
+	cp.mu.Unlock()
+	if len(confirmed) != 2 {
+		t.Fatalf("confirmed %v, want both environments", confirmed)
+	}
+	if remaining != 0 {
+		t.Fatalf("%d environments still advertised after confirmation", remaining)
+	}
+
+	// A second tick must do nothing — the confirmation is what makes the work
+	// stop, and re-tearing down a namespace every tick would be a hot loop.
+	a.Tick(context.Background())
+	r.mu.Lock()
+	again := len(r.tornDown)
+	r.mu.Unlock()
+	if again != 2 {
+		t.Fatalf("the second tick tore down %d more environments — a confirmed teardown must "+
+			"stop being advertised", again-2)
+	}
+}
+
+// A TEARDOWN THAT FAILS IS NOT CONFIRMED, so the environment stays outstanding
+// and the next tick retries it. Confirming a teardown that did not happen is the
+// one thing that loses the namespace forever.
+func TestAFailedEnvironmentTeardownIsNotConfirmed(t *testing.T) {
+	cp := &fakeCP{
+		services: map[string]DesiredService{},
+		envs: []DesiredEnvironmentTeardown{
+			{ID: "env_bad", Namespace: "env-bad"},
+			{ID: "env_ok", Namespace: "env-ok"},
+		},
+		envCellIgnored: true,
+	}
+	r := &envRenderer{failFor: "env-bad"}
+	a := New("cell-0", cp, r, quietLog())
+
+	a.Tick(context.Background())
+
+	cp.mu.Lock()
+	confirmed := append([]string(nil), cp.confirmed...)
+	cp.mu.Unlock()
+	if len(confirmed) != 1 || confirmed[0] != "env_ok" {
+		t.Fatalf("confirmed %v — a failed teardown must not be confirmed, and one failure must "+
+			"not stop the others", confirmed)
+	}
+}
+
+// A CONFIRMATION THAT FAILS LEAVES THE NAMESPACE GONE AND THE ROW OUTSTANDING.
+// The next tick re-advertises it, so TeardownEnvironment must be idempotent —
+// this is the case that makes that requirement real rather than decorative.
+func TestAFailedConfirmationRetriesTheWholeTeardown(t *testing.T) {
+	cp := &fakeCP{
+		services:       map[string]DesiredService{},
+		envs:           []DesiredEnvironmentTeardown{{ID: "env_x", Namespace: "env-x"}},
+		confirmErr:     errors.New("control plane down"),
+		envCellIgnored: true,
+	}
+	r := &envRenderer{}
+	a := New("cell-0", cp, r, quietLog())
+
+	a.Tick(context.Background())
+	cp.mu.Lock()
+	confirmedFirst := len(cp.confirmed)
+	stillAdvertised := len(cp.envs)
+	cp.mu.Unlock()
+	if confirmedFirst != 0 {
+		t.Fatal("a failed confirmation was recorded as one")
+	}
+	if stillAdvertised != 1 {
+		t.Fatal("the environment stopped being advertised despite an unconfirmed teardown")
+	}
+
+	// The control plane comes back; the next tick re-runs the teardown and
+	// confirms it.
+	cp.mu.Lock()
+	cp.confirmErr = nil
+	cp.mu.Unlock()
+	a.Tick(context.Background())
+
+	r.mu.Lock()
+	torn := len(r.tornDown)
+	r.mu.Unlock()
+	if torn != 2 {
+		t.Fatalf("the namespace was torn down %d times; the retry must re-run it (idempotently), "+
+			"because the agent cannot know the first delete landed", torn)
+	}
+	cp.mu.Lock()
+	confirmed := append([]string(nil), cp.confirmed...)
+	cp.mu.Unlock()
+	if len(confirmed) != 1 || confirmed[0] != "env_x" {
+		t.Fatalf("confirmed %v after the retry, want [env_x]", confirmed)
+	}
+}
+
+// A RENDERER THAT CANNOT TEAR ENVIRONMENTS DOWN DOES NOT SILENTLY DROP THE WORK.
+// The alpha AckRenderer owns no environment-scoped objects; the loop must not
+// confirm a teardown it never performed, or the namespace leaks with the control
+// plane believing it is gone.
+func TestARendererThatCannotTearDownNeverConfirms(t *testing.T) {
+	cp := &fakeCP{
+		services:       map[string]DesiredService{},
+		envs:           []DesiredEnvironmentTeardown{{ID: "env_y", Namespace: "env-y"}},
+		envCellIgnored: true,
+	}
+	a := New("cell-0", cp, &fakeRenderer{}, quietLog()) // no TeardownEnvironment
+
+	a.Tick(context.Background())
+
+	cp.mu.Lock()
+	confirmed := len(cp.confirmed)
+	advertised := len(cp.envs)
+	cp.mu.Unlock()
+	if confirmed != 0 {
+		t.Fatal("a renderer that cannot tear down confirmed a teardown — the namespace leaks " +
+			"and the control plane stops asking")
+	}
+	if advertised != 1 {
+		t.Fatal("the environment stopped being advertised")
+	}
+}
+
+// SERVICES ARE CONVERGED BEFORE ENVIRONMENTS ARE TORN DOWN. The real protection
+// is server-side (an environment is not advertised until its services are gone),
+// but a tick that removed a namespace before converging the services in it would
+// be deleting a workload it was in the middle of managing.
+func TestEnvironmentsAreTornDownAfterServicesConverge(t *testing.T) {
+	cp := &fakeCP{
+		services: map[string]DesiredService{
+			"svc_1": {ID: "svc_1", Generation: 1, ObservedGeneration: 0, Desired: map[string]any{}},
+		},
+		envs:           []DesiredEnvironmentTeardown{{ID: "env_z", Namespace: "env-z"}},
+		envCellIgnored: true,
+	}
+	r := &envRenderer{}
+	a := New("cell-0", cp, r, quietLog())
+
+	a.Tick(context.Background())
+
+	r.mu.Lock()
+	converged := len(r.fakeRenderer.converged)
+	torn := len(r.tornDown)
+	r.mu.Unlock()
+	if converged != 1 {
+		t.Fatalf("the service was not converged (%d)", converged)
+	}
+	if torn != 1 {
+		t.Fatalf("the environment was not torn down (%d)", torn)
+	}
+	cp.mu.Lock()
+	order := len(cp.reports) > 0 && len(cp.confirmed) > 0
+	cp.mu.Unlock()
+	if !order {
+		t.Fatal("expected both a service report and an environment confirmation in one tick")
 	}
 }

@@ -60,6 +60,8 @@ package tenancy
 import (
 	"fmt"
 	"regexp"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The closed grammar the control plane emits (billing.validQuantity). Re-checked
@@ -273,4 +275,62 @@ spec:
         memory: 128Mi
 `, s.Namespace))},
 	}, nil
+}
+
+// TeardownObjects is what removing an environment must delete EXPLICITLY.
+//
+// Deleting a Namespace deletes everything inside it, so the namespaced objects
+// Render produces — the ResourceQuota, the LimitRange, and whatever US-3.3c adds
+// beside them — need no delete of their own. Only the CLUSTER-SCOPED ones do,
+// and today that is the Namespace itself.
+//
+// SCOPE IS READ FROM THE RENDERED BYTES, not from a list. An object that
+// declares `metadata.namespace` is namespaced and dies with the namespace;
+// one that does not is cluster-scoped and must be deleted by name. That is the
+// same fact kube.Apply enforces from the other side (it refuses a cluster-scoped
+// kind that declares a namespace), so the two cannot disagree — and there is no
+// second table to forget to update when US-3.3c adds an object.
+//
+// The quota is irrelevant to a teardown (nothing is being enforced, only
+// removed) so it takes a placeholder that satisfies Render's validation. That is
+// the one seam: if Render ever varies its OBJECT SET by quota rather than only
+// its contents, this stops being complete, which is what
+// TestTeardownCoversEveryObjectTenancyRenders exists to catch.
+func TeardownObjects(namespace string) ([]Manifest, error) {
+	all, err := Render(Spec{
+		Namespace: namespace,
+		Cell:      "teardown",
+		Quota:     Quota{CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("tenancy: enumerate teardown objects for %q: %w", namespace, err)
+	}
+	out := make([]Manifest, 0, 1)
+	for _, m := range all {
+		scoped, err := declaresNamespace(m.YAML)
+		if err != nil {
+			return nil, fmt.Errorf("tenancy: %s/%s: %w", m.Kind, m.Name, err)
+		}
+		if !scoped {
+			out = append(out, m)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("tenancy: teardown for %q would delete NOTHING — Render produced "+
+			"no cluster-scoped object, so the namespace would be left behind", namespace)
+	}
+	return out, nil
+}
+
+// declaresNamespace reports whether a rendered object sets metadata.namespace.
+func declaresNamespace(manifest []byte) (bool, error) {
+	var doc struct {
+		Metadata struct {
+			Namespace string `yaml:"namespace"`
+		} `yaml:"metadata"`
+	}
+	if err := yaml.Unmarshal(manifest, &doc); err != nil {
+		return false, fmt.Errorf("parse rendered manifest: %w", err)
+	}
+	return doc.Metadata.Namespace != "", nil
 }

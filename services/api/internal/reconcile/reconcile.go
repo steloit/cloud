@@ -22,6 +22,12 @@ type Querier interface {
 	TouchCellHeartbeat(ctx context.Context, id string) error
 	GetService(ctx context.Context, id string) (store.Service, error)
 	OrgForService(ctx context.Context, id string) (string, error)
+
+	// The ENVIRONMENT half (US-3.3b). An environment's namespace belongs to no
+	// service, so it cannot ride the service queries.
+	ListEnvironmentTeardownsForCell(ctx context.Context, arg store.ListEnvironmentTeardownsForCellParams) ([]store.ListEnvironmentTeardownsForCellRow, error)
+	GetEnvironmentForCell(ctx context.Context, arg store.GetEnvironmentForCellParams) (store.GetEnvironmentForCellRow, error)
+	MarkEnvironmentTornDown(ctx context.Context, id string) (int64, error)
 }
 
 // Transitioner is the EXISTING guarded status machine
@@ -76,6 +82,17 @@ var ErrNotConverged = errors.New("reconcile: report does not finish this generat
 // renders 404 for each, so a reconciler token cannot enumerate cells.
 var ErrUnknownCell = errors.New("reconcile: unknown cell")
 
+// ErrUnknownEnvironment covers "no such environment" and "not in your cell" for
+// the same reason ErrUnknownCell does: a reconciler token must not be able to
+// enumerate environments it does not own, so both render 404.
+var ErrUnknownEnvironment = errors.New("reconcile: unknown environment")
+
+// ErrTeardownNotOutstanding is a confirmation for an environment that is not
+// awaiting one — never scheduled, or already confirmed. Deliberately NOT an
+// error the agent should retry: the row is not outstanding, so re-reporting it
+// would loop forever. Rendered 409.
+var ErrTeardownNotOutstanding = errors.New("reconcile: environment teardown is not outstanding")
+
 // DesiredService is one row of the agent's poll.
 type DesiredService struct {
 	ID                 string          `json:"id"`
@@ -92,18 +109,35 @@ type DesiredService struct {
 	Scaling            json.RawMessage `json:"scaling,omitempty"`
 }
 
+// DesiredEnvironmentTeardown is one environment whose namespace still has to be
+// removed. The NAMESPACE is carried rather than derived agent-side — see
+// provisioning.NamespaceForEnv for why there is exactly one derivation.
+type DesiredEnvironmentTeardown struct {
+	ID        string `json:"id"`
+	Namespace string `json:"namespace"`
+}
+
+// DesiredState is the whole poll answer. It is a struct rather than two calls
+// because both halves must be answered from ONE GetCell/heartbeat: a cell that
+// asked once has been seen once, and splitting it would double the heartbeat
+// and let the two halves disagree about whether the cell exists.
+type DesiredState struct {
+	Services     []DesiredService             `json:"services"`
+	Environments []DesiredEnvironmentTeardown `json:"environments"`
+}
+
 const maxLimit = 500
 
 // Desired returns every service in the cell whose generation exceeds
 // sinceGeneration. Level-triggered by design (§2 step 2): the FULL desired
 // document goes back every time, so the agent renders from it and never diffs
 // by memory. A dropped poll therefore costs nothing but latency.
-func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int64, limit int32) ([]DesiredService, error) {
+func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int64, limit int32) (DesiredState, error) {
 	if _, err := s.q.GetCell(ctx, cell); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrUnknownCell
+			return DesiredState{}, ErrUnknownCell
 		}
-		return nil, err
+		return DesiredState{}, err
 	}
 	// The poll is the liveness signal for a QUIESCENT cell: a fully-converged
 	// cell has no outstanding work, so it never writes back, so the status-call
@@ -111,7 +145,7 @@ func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int6
 	// dead. The agent polls every tick regardless of work, so touch the
 	// heartbeat here — the cell is "seen" whenever it asks for desired state.
 	if err := s.q.TouchCellHeartbeat(ctx, cell); err != nil {
-		return nil, err
+		return DesiredState{}, err
 	}
 	if limit <= 0 {
 		limit = 100
@@ -126,7 +160,7 @@ func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int6
 		CellID: cell, Generation: sinceGeneration, Limit: limit,
 	})
 	if err != nil {
-		return nil, err
+		return DesiredState{}, err
 	}
 	out := make([]DesiredService, 0, len(rows))
 	for _, r := range rows {
@@ -144,7 +178,65 @@ func (s *Service) Desired(ctx context.Context, cell string, sinceGeneration int6
 		}
 		out = append(out, d)
 	}
-	return out, nil
+
+	// The ENVIRONMENT half. Its limit is the same one, which is right: both are
+	// per-tick work for the same cell and an agent that asked for a small page
+	// meant it. Environments are cheap and almost always zero.
+	envRows, err := s.q.ListEnvironmentTeardownsForCell(ctx, store.ListEnvironmentTeardownsForCellParams{
+		CellID: cell, Limit: limit,
+	})
+	if err != nil {
+		return DesiredState{}, err
+	}
+	envs := make([]DesiredEnvironmentTeardown, 0, len(envRows))
+	for _, r := range envRows {
+		envs = append(envs, DesiredEnvironmentTeardown{
+			ID: r.ID, Namespace: provisioning.NamespaceForEnv(r.ID),
+		})
+	}
+	return DesiredState{Services: out, Environments: envs}, nil
+}
+
+// ConfirmEnvironmentTeardown records that the cell removed an environment's
+// namespace, so it stops being advertised.
+//
+// The two refusals are deliberately different. An environment on a cell this
+// token does not own is 404 — the same non-enumeration rule the service path
+// follows, so a reconciler token cannot probe for environments elsewhere. An
+// environment that is not awaiting a teardown is 409 and is NOT retryable: the
+// row is not outstanding, so an agent that retried would loop forever.
+func (s *Service) ConfirmEnvironmentTeardown(ctx context.Context, cell, envID string) error {
+	if _, err := s.q.GetCell(ctx, cell); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUnknownCell
+		}
+		return err
+	}
+	// Heartbeat first, for the reason Writeback does: an agent that is alive but
+	// reporting something the control plane will refuse is still alive.
+	if err := s.q.TouchCellHeartbeat(ctx, cell); err != nil {
+		return err
+	}
+	env, err := s.q.GetEnvironmentForCell(ctx, store.GetEnvironmentForCellParams{
+		ID: envID, CellID: cell,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUnknownEnvironment
+		}
+		return err
+	}
+	n, err := s.q.MarkEnvironmentTornDown(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		// The SQL guard is the authority, not a pre-read: `WHERE
+		// deletion_scheduled_at IS NOT NULL AND torn_down_at IS NULL` decides
+		// atomically, so two agents confirming the same teardown cannot both win.
+		return fmt.Errorf("%w: %s", ErrTeardownNotOutstanding, envID)
+	}
+	return nil
 }
 
 // Report is one status writeback from the agent.

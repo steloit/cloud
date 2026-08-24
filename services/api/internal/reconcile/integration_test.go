@@ -136,8 +136,8 @@ func TestOutstandingWorkPollAgainstRealPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ID != "svc_ow" {
-		t.Fatalf("a fresh service (observed 0 < gen 1) must be outstanding, got %+v", got)
+	if len(got.Services) != 1 || got.Services[0].ID != "svc_ow" {
+		t.Fatalf("a fresh service (observed 0 < gen 1) must be outstanding, got %+v", got.Services)
 	}
 	// Report it converged; observed advances to 1; it must drop out.
 	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_ow", ObservedGeneration: 1, Status: "ready"}); err != nil {
@@ -147,8 +147,8 @@ func TestOutstandingWorkPollAgainstRealPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("a reported service must drop out of the outstanding set, got %+v", got)
+	if len(got.Services) != 0 {
+		t.Fatalf("a reported service must drop out of the outstanding set, got %+v", got.Services)
 	}
 }
 
@@ -244,16 +244,16 @@ func TestDesiredPollFiltersAgainstRealPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("since_generation=2 should exclude a gen-2 row (strict >), got %d", len(got))
+	if len(got.Services) != 0 {
+		t.Fatalf("since_generation=2 should exclude a gen-2 row (strict >), got %d", len(got.Services))
 	}
 	// since_generation=1 → the row (gen 2 > 1)
 	got, err = svc.Desired(ctx, "cell-0", 1, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].ID != "svc_poll" {
-		t.Fatalf("since_generation=1 should return svc_poll, got %+v", got)
+	if len(got.Services) != 1 || got.Services[0].ID != "svc_poll" {
+		t.Fatalf("since_generation=1 should return svc_poll, got %+v", got.Services)
 	}
 }
 
@@ -519,5 +519,215 @@ func TestEveryMappedDestinationSatisfiesTheRealCheckConstraint(t *testing.T) {
 	if tried != 8 {
 		t.Fatalf("exercised %d edges, want exactly 8 — if the mapping gained or lost an edge, "+
 			"this test must be updated deliberately, not silently", tried)
+	}
+}
+
+// seedEnv creates an environment in the integration project, optionally with a
+// service in a given state. Returns the environment id.
+func seedEnv(t *testing.T, pool *pgxpool.Pool, envID string) {
+	t.Helper()
+	ctx := context.Background()
+	ex := func(sql string, args ...any) {
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+	}
+	ex(`INSERT INTO orgs (id, name, slug) VALUES ('org_it', 'itco', 'itco') ON CONFLICT DO NOTHING`)
+	ex(`INSERT INTO projects (id, org_id, name, cell_id) VALUES ('prj_it', 'org_it', 'p', 'cell-0') ON CONFLICT DO NOTHING`)
+	ex(`INSERT INTO environments (id, project_id, name) VALUES ($1, 'prj_it', $1) ON CONFLICT DO NOTHING`, envID)
+}
+
+func seedEnvService(t *testing.T, pool *pgxpool.Pool, envID, svcID, status string, gen, observed int64) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO services (id, env_id, name, product, status, cell_id, desired, generation, observed_generation)
+		 VALUES ($1, $2, $1, 'postgres', $3, 'cell-0', '{"product":"postgres"}', $4, $5)`,
+		svcID, envID, status, gen, observed); err != nil {
+		t.Fatalf("seed service: %v", err)
+	}
+}
+
+func scheduleEnvDeletion(t *testing.T, pool *pgxpool.Pool, envID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE environments SET deletion_scheduled_at = now() WHERE id = $1`, envID); err != nil {
+		t.Fatalf("schedule deletion: %v", err)
+	}
+}
+
+func advertisedEnvs(t *testing.T, svc *reconcile.Service) []string {
+	t.Helper()
+	st, err := svc.Desired(context.Background(), "cell-0", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range st.Environments {
+		out = append(out, e.ID)
+	}
+	return out
+}
+
+// AN ENVIRONMENT IS NOT ADVERTISED UNTIL ITS SERVICES ARE ACTUALLY GONE.
+//
+// THIS IS THE SAFETY GATE, and it is the reason the whole feature is not a
+// data-loss bug. Deleting a namespace deletes everything in it, so advertising
+// an environment while a CNPG cluster is still terminating would destroy the
+// database before US-3.5's final backup.
+//
+// `DeleteEnvironment` only requires every service to have REACHED `deleting`,
+// which is NOT the same as torn down — so the gate lives in the query, and it
+// asserts the stronger condition: status `deleting` AND observed_generation
+// caught up (the cell converged the teardown and reported it).
+func TestAnEnvironmentIsNotAdvertisedWhileAServiceSurvivesAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	seedEnv(t, pool, "env_gate")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A live service. Scheduling deletion must not make the environment eligible.
+	seedEnvService(t, pool, "env_gate", "svc_live", "ready", 1, 1)
+	scheduleEnvDeletion(t, pool, "env_gate")
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("advertised %v while a READY service is still in the environment — the "+
+			"namespace teardown would delete a running database", got)
+	}
+
+	// `deleting` but NOT yet converged: the cell has been told, and has not
+	// finished. This is precisely the window DeleteEnvironment's own check
+	// cannot see, and the one that would destroy a terminating cluster.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE services SET status = 'deleting', generation = 2, observed_generation = 1
+		 WHERE id = 'svc_live'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("advertised %v while a service is mid-teardown (observed 1 < generation 2) — "+
+			"the final backup has not been taken yet", got)
+	}
+
+	// Converged: the teardown is confirmed, so the environment is eligible.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE services SET observed_generation = 2 WHERE id = 'svc_live'`); err != nil {
+		t.Fatal(err)
+	}
+	got := advertisedEnvs(t, svc)
+	if len(got) != 1 || got[0] != "env_gate" {
+		t.Fatalf("advertised %v, want [env_gate] once every service is torn down", got)
+	}
+}
+
+// An environment with NO services is eligible as soon as it is scheduled — the
+// gate is "nothing survives", not "something was torn down".
+func TestAnEmptyEnvironmentIsAdvertisedImmediatelyAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	seedEnv(t, pool, "env_empty")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("advertised %v before any deletion was scheduled", got)
+	}
+	scheduleEnvDeletion(t, pool, "env_empty")
+	got := advertisedEnvs(t, svc)
+	if len(got) != 1 || got[0] != "env_empty" {
+		t.Fatalf("advertised %v, want [env_empty]", got)
+	}
+}
+
+// THE NAMESPACE ON THE WIRE IS THE ONE THE CONTROL PLANE RESOLVED — the same
+// derivation the service path uses, not a second one. US-3.3a shipped a second
+// derivation and it named nothing the control plane knew.
+func TestTheAdvertisedNamespaceMatchesTheResolvedOneAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	seedEnv(t, pool, "env_9f3c1a2b")
+	scheduleEnvDeletion(t, pool, "env_9f3c1a2b")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := svc.Desired(context.Background(), "cell-0", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Environments) != 1 {
+		t.Fatalf("want one environment, got %d", len(st.Environments))
+	}
+	if got, want := st.Environments[0].Namespace, provisioning.NamespaceForEnv("env_9f3c1a2b"); got != want {
+		t.Fatalf("advertised namespace %q, want %q — the agent would delete the wrong thing "+
+			"or nothing at all", got, want)
+	}
+	if st.Environments[0].Namespace != "env-9f3c1a2b" {
+		t.Fatalf("namespace = %q, want env-9f3c1a2b (ADR-0012: sanitize(env id))",
+			st.Environments[0].Namespace)
+	}
+}
+
+// A CONFIRMED TEARDOWN STOPS BEING ADVERTISED, and confirming twice is a
+// refusal rather than a second teardown.
+func TestConfirmingAnEnvironmentTeardownIsIdempotentAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	seedEnv(t, pool, "env_conf")
+	scheduleEnvDeletion(t, pool, "env_conf")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if got := advertisedEnvs(t, svc); len(got) != 1 {
+		t.Fatalf("precondition: advertised %v", got)
+	}
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_conf"); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("still advertised %v after confirmation — the agent would delete it every tick", got)
+	}
+	var tornDown bool
+	if err := pool.QueryRow(ctx,
+		`SELECT torn_down_at IS NOT NULL FROM environments WHERE id = 'env_conf'`).Scan(&tornDown); err != nil {
+		t.Fatal(err)
+	}
+	if !tornDown {
+		t.Fatal("torn_down_at was not stamped")
+	}
+	// A replay is refused, not a silent success: the row is not outstanding.
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_conf"); !errors.Is(err, reconcile.ErrTeardownNotOutstanding) {
+		t.Fatalf("replay: err = %v, want ErrTeardownNotOutstanding", err)
+	}
+	// And so is an environment nobody scheduled — a confirmation must not be
+	// able to invent a teardown.
+	seedEnv(t, pool, "env_unsched")
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_unsched"); !errors.Is(err, reconcile.ErrTeardownNotOutstanding) {
+		t.Fatalf("unscheduled: err = %v, want ErrTeardownNotOutstanding", err)
+	}
+}
+
+// A RECONCILER TOKEN CANNOT CONFIRM A TEARDOWN ON A CELL IT DOES NOT OWN, and
+// the refusal does not leak that the environment exists.
+func TestAnEnvironmentOnAnotherCellIs404AgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedEnv(t, pool, "env_far")
+	scheduleEnvDeletion(t, pool, "env_far")
+	// Move the project to a different cell.
+	if _, err := pool.Exec(ctx, `INSERT INTO cells (id, region, status) VALUES ('cell-9', 'eu', 'active') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE projects SET cell_id = 'cell-9' WHERE id = 'prj_it'`); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("cell-0's poll returned %v from cell-9 — a cell must not see another's work", got)
+	}
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_far"); !errors.Is(err, reconcile.ErrUnknownEnvironment) {
+		t.Fatalf("err = %v, want ErrUnknownEnvironment (404, never 403 — existence is not leaked)", err)
 	}
 }

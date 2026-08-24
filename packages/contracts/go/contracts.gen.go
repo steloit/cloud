@@ -1581,6 +1581,21 @@ func (e CreateEnvironmentJSONBodyData) Valid() bool {
 	}
 }
 
+// Defines values for PostEnvironmentTeardownJSONBodyObserved.
+const (
+	PostEnvironmentTeardownJSONBodyObservedGone PostEnvironmentTeardownJSONBodyObserved = "gone"
+)
+
+// Valid indicates whether the value is a known member of the PostEnvironmentTeardownJSONBodyObserved enum.
+func (e PostEnvironmentTeardownJSONBodyObserved) Valid() bool {
+	switch e {
+	case PostEnvironmentTeardownJSONBodyObservedGone:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostReconcileStatusJSONBodyConditionsStatus.
 const (
 	PostReconcileStatusJSONBodyConditionsStatusFalse   PostReconcileStatusJSONBodyConditionsStatus = "False"
@@ -1967,6 +1982,15 @@ type DeploymentState string
 type DeploymentList struct {
 	Data       *[]Deployment `json:"data,omitempty"`
 	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// DesiredEnvironmentTeardown An environment whose namespace still has to be removed. The NAMESPACE is sent, not derived agent-side: the control plane resolved it (ADR-0012, sanitize(env id)) and is therefore the one place that knows it exactly. US-3.3a shipped a second derivation agent-side and it named nothing the control plane knew.
+type DesiredEnvironmentTeardown struct {
+	// Id environment id, e.g. env_9f3c1a2b — what the teardown is confirmed against
+	Id string `json:"id"`
+
+	// Namespace the Kubernetes namespace to remove, e.g. env-9f3c1a2b
+	Namespace string `json:"namespace"`
 }
 
 // DesiredService One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
@@ -3422,6 +3446,15 @@ type GetDesiredStateParams struct {
 	LimitParam           *int   `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// PostEnvironmentTeardownJSONBody defines parameters for PostEnvironmentTeardown.
+type PostEnvironmentTeardownJSONBody struct {
+	// Observed the only thing a cell can report about a namespace it was asked to remove. An enum of one, deliberately: a teardown that did not finish is reported by NOT calling this, so the environment stays outstanding and the next tick retries.
+	Observed PostEnvironmentTeardownJSONBodyObserved `json:"observed"`
+}
+
+// PostEnvironmentTeardownJSONBodyObserved defines parameters for PostEnvironmentTeardown.
+type PostEnvironmentTeardownJSONBodyObserved string
+
 // PostReconcileStatusJSONBody defines parameters for PostReconcileStatus.
 type PostReconcileStatusJSONBody struct {
 	// Conditions reserved (US-1.3): accepted and acknowledged, not yet persisted — the field exists so the agent's wire format is stable before condition storage lands
@@ -3619,6 +3652,9 @@ type CreateAlertRuleJSONRequestBody = AlertRuleInput
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody CreateEnvironmentJSONBody
+
+// PostEnvironmentTeardownJSONRequestBody defines body for PostEnvironmentTeardown for application/json ContentType.
+type PostEnvironmentTeardownJSONRequestBody PostEnvironmentTeardownJSONBody
 
 // PostReconcileStatusJSONRequestBody defines body for PostReconcileStatus for application/json ContentType.
 type PostReconcileStatusJSONRequestBody PostReconcileStatusJSONBody
@@ -4551,10 +4587,28 @@ type ClientInterface interface {
 
 	// GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 	//
-	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. It also returns the environments whose namespace still has to be removed; those are independent of any service and are confirmed on their own endpoint. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 	//
 	// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
 	GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostEnvironmentTeardownWithBody The cell confirms an environment's namespace is gone
+	//
+	// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+	PostEnvironmentTeardownWithBody(ctx context.Context, cellPathParam string, envPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostEnvironmentTeardown The cell confirms an environment's namespace is gone
+	//
+	// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+	PostEnvironmentTeardown(ctx context.Context, cellPathParam string, envPathParam string, body PostEnvironmentTeardownJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PostReconcileStatusWithBody Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
@@ -7040,11 +7094,49 @@ func (c *Client) CreateEnvironment(ctx context.Context, projectPathParam Project
 
 // GetDesiredState Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 //
-// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. It also returns the environments whose namespace still has to be removed; those are independent of any service and are confirmed on their own endpoint. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 //
 // Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
 func (c *Client) GetDesiredState(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetDesiredStateRequest(c.Server, cellPathParam, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostEnvironmentTeardownWithBody The cell confirms an environment's namespace is gone
+//
+// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+func (c *Client) PostEnvironmentTeardownWithBody(ctx context.Context, cellPathParam string, envPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostEnvironmentTeardownRequestWithBody(c.Server, cellPathParam, envPathParam, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostEnvironmentTeardown The cell confirms an environment's namespace is gone
+//
+// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+func (c *Client) PostEnvironmentTeardown(ctx context.Context, cellPathParam string, envPathParam string, body PostEnvironmentTeardownJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostEnvironmentTeardownRequest(c.Server, cellPathParam, envPathParam, body)
 	if err != nil {
 		return nil, err
 	}
@@ -12125,6 +12217,60 @@ func NewGetDesiredStateRequest(server string, cellPathParam string, params *GetD
 	return req, nil
 }
 
+// NewPostEnvironmentTeardownRequest calls the generic PostEnvironmentTeardown builder with application/json body
+func NewPostEnvironmentTeardownRequest(server string, cellPathParam string, envPathParam string, body PostEnvironmentTeardownJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostEnvironmentTeardownRequestWithBody(server, cellPathParam, envPathParam, "application/json", bodyReader)
+}
+
+// NewPostEnvironmentTeardownRequestWithBody constructs an http.Request for the PostEnvironmentTeardown method, with any body, and a specified content type
+func NewPostEnvironmentTeardownRequestWithBody(server string, cellPathParam string, envPathParam string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "cell", cellPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "env", envPathParam, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/reconcile/%s/environments/%s/teardown", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewPostReconcileStatusRequest calls the generic PostReconcileStatus builder with application/json body
 func NewPostReconcileStatusRequest(server string, cellPathParam string, body PostReconcileStatusJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -14141,12 +14287,30 @@ type ClientWithResponsesInterface interface {
 
 	// GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 	//
-	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+	// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. It also returns the environments whose namespace still has to be removed; those are independent of any service and are confirmed on their own endpoint. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /reconcile/{cell}/desired (the `GetDesiredState` operationId).
 	GetDesiredStateWithResponse(ctx context.Context, cellPathParam string, params *GetDesiredStateParams, reqEditors ...RequestEditorFn) (*GetDesiredStateResponse, error)
+
+	// PostEnvironmentTeardownWithBodyWithResponse The cell confirms an environment's namespace is gone
+	//
+	// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+	PostEnvironmentTeardownWithBodyWithResponse(ctx context.Context, cellPathParam string, envPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostEnvironmentTeardownResponse, error)
+
+	// PostEnvironmentTeardownWithResponse The cell confirms an environment's namespace is gone
+	//
+	// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+	PostEnvironmentTeardownWithResponse(ctx context.Context, cellPathParam string, envPathParam string, body PostEnvironmentTeardownJSONRequestBody, reqEditors ...RequestEditorFn) (*PostEnvironmentTeardownResponse, error)
 
 	// PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
 	//
@@ -18790,7 +18954,9 @@ type GetDesiredStateResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *struct {
-		Services []DesiredService `json:"services"`
+		// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+		Environments []DesiredEnvironmentTeardown `json:"environments"`
+		Services     []DesiredService             `json:"services"`
 	}
 	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
 	ApplicationproblemJSON401 *Problem
@@ -18804,7 +18970,9 @@ type GetDesiredStateResponse struct {
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r GetDesiredStateResponse) GetJSON200() *struct {
-	Services []DesiredService `json:"services"`
+	// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+	Environments []DesiredEnvironmentTeardown `json:"environments"`
+	Services     []DesiredService             `json:"services"`
 } {
 	return r.JSON200
 }
@@ -18852,6 +19020,81 @@ func (r GetDesiredStateResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetDesiredStateResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostEnvironmentTeardownResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		EnvironmentId string `json:"environment_id"`
+		TornDown      bool   `json:"torn_down"`
+	}
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *Problem
+	// ApplicationproblemJSON409 the response for an HTTP 409 `application/problem+json` response
+	ApplicationproblemJSON409 *Conflict
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Validation
+	// ApplicationproblemJSON503 the response for an HTTP 503 `application/problem+json` response
+	ApplicationproblemJSON503 *Problem
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostEnvironmentTeardownResponse) GetJSON200() *struct {
+	EnvironmentId string `json:"environment_id"`
+	TornDown      bool   `json:"torn_down"`
+} {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r PostEnvironmentTeardownResponse) GetApplicationproblemJSON404() *Problem {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON409 returns the response for an HTTP 409 `application/problem+json` response
+func (r PostEnvironmentTeardownResponse) GetApplicationproblemJSON409() *Conflict {
+	return r.ApplicationproblemJSON409
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r PostEnvironmentTeardownResponse) GetApplicationproblemJSON422() *Validation {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON503 returns the response for an HTTP 503 `application/problem+json` response
+func (r PostEnvironmentTeardownResponse) GetApplicationproblemJSON503() *Problem {
+	return r.ApplicationproblemJSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r PostEnvironmentTeardownResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostEnvironmentTeardownResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostEnvironmentTeardownResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostEnvironmentTeardownResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -21753,7 +21996,7 @@ func (c *ClientWithResponses) CreateEnvironmentWithResponse(ctx context.Context,
 
 // GetDesiredStateWithResponse Desired state for a cell (D9/A2.5) — level-triggered; the full desired doc every time
 //
-// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
+// The cell-agent's poll. Returns every service in this cell with OUTSTANDING work — observed_generation < generation — so the agent renders from the full desired doc and never diffs by memory. It also returns the environments whose namespace still has to be removed; those are independent of any service and are confirmed on their own endpoint. since_generation is an optional additional lower bound (0 = all outstanding work). Reconciler-scoped token only; a cell the token does not own is 404, never 403. Polling also refreshes the cell heartbeat.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -21764,6 +22007,36 @@ func (c *ClientWithResponses) GetDesiredStateWithResponse(ctx context.Context, c
 		return nil, err
 	}
 	return ParseGetDesiredStateResponse(rsp)
+}
+
+// PostEnvironmentTeardownWithBodyWithResponse The cell confirms an environment's namespace is gone
+//
+// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+func (c *ClientWithResponses) PostEnvironmentTeardownWithBodyWithResponse(ctx context.Context, cellPathParam string, envPathParam string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostEnvironmentTeardownResponse, error) {
+	rsp, err := c.PostEnvironmentTeardownWithBody(ctx, cellPathParam, envPathParam, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostEnvironmentTeardownResponse(rsp)
+}
+
+// PostEnvironmentTeardownWithResponse The cell confirms an environment's namespace is gone
+//
+// The environment half of the writeback. An environment's namespace is not owned by any service, so it cannot be confirmed through the service status route — that one requires a service_id and writes a per-service row. Idempotent: a replay for an environment already confirmed is 409, not a second teardown, and an environment nobody scheduled is 409 rather than an invented one. Reconciler-scoped token only; an environment on a cell this token does not own is 404, never 403.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /reconcile/{cell}/environments/{env}/teardown (the `PostEnvironmentTeardown` operationId).
+func (c *ClientWithResponses) PostEnvironmentTeardownWithResponse(ctx context.Context, cellPathParam string, envPathParam string, body PostEnvironmentTeardownJSONRequestBody, reqEditors ...RequestEditorFn) (*PostEnvironmentTeardownResponse, error) {
+	rsp, err := c.PostEnvironmentTeardown(ctx, cellPathParam, envPathParam, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostEnvironmentTeardownResponse(rsp)
 }
 
 // PostReconcileStatusWithBodyWithResponse Status writeback + heartbeat (D9/A2.5 §2 steps 3-4)
@@ -24963,7 +25236,9 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			Services []DesiredService `json:"services"`
+			// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+			Environments []DesiredEnvironmentTeardown `json:"environments"`
+			Services     []DesiredService             `json:"services"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
@@ -24983,6 +25258,66 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 			return nil, err
 		}
 		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Validation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostEnvironmentTeardownResponse parses an HTTP response from a PostEnvironmentTeardownWithResponse call
+func ParsePostEnvironmentTeardownResponse(rsp *http.Response) (*PostEnvironmentTeardownResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostEnvironmentTeardownResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			EnvironmentId string `json:"environment_id"`
+			TornDown      bool   `json:"torn_down"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Problem
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest Validation

@@ -279,14 +279,14 @@ func TestCKM3EstimateGatedProvisioningEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var found *reconcile.DesiredService
-	for i := range outstanding {
-		if outstanding[i].ID == svc.ID {
-			found = &outstanding[i]
+	for i := range outstanding.Services {
+		if outstanding.Services[i].ID == svc.ID {
+			found = &outstanding.Services[i]
 			break
 		}
 	}
 	if found == nil {
-		t.Fatalf("the CLI-created service is not in the cell's outstanding work (%d others) — no cell would ever provision it", len(outstanding))
+		t.Fatalf("the CLI-created service is not in the cell's outstanding work (%d others) — no cell would ever provision it", len(outstanding.Services))
 	}
 	if found.Product != "postgres" {
 		t.Fatalf("the desired doc names product %q", found.Product)

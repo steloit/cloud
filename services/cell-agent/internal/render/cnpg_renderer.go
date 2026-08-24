@@ -325,3 +325,47 @@ func instancesOf(desired map[string]any) int {
 	}
 	return 1
 }
+
+// TeardownEnvironment removes an environment's cluster-scoped objects — today
+// the namespace, which takes the ResourceQuota, the LimitRange and every
+// workload inside it along with it.
+//
+// SAFE ONLY BECAUSE THE CONTROL PLANE GATES IT. Deleting a namespace deletes
+// everything in it, including a database. What makes that acceptable is
+// server-side: ListEnvironmentTeardownsForCell does not advertise an environment
+// until every service in it is `deleting` AND has caught up its observed
+// generation, so a still-terminating CNPG cluster can never be inside one of
+// these. This function deliberately does NOT re-check that — it has no view of
+// the control plane's intent and a second, weaker copy of the rule would be
+// worse than none. It removes what it is told to remove.
+//
+// IDEMPOTENT: kube.Delete maps a 404 to success, so a namespace already gone is
+// not an error. That matters because the confirmation can fail after the delete
+// succeeded, and the next tick will re-run this.
+func (r *CNPGRenderer) TeardownEnvironment(ctx context.Context, namespace string) error {
+	// The namespace arrives over the wire and is interpolated into a request
+	// path, so it MUST be validated before anything is deleted — a teardown is
+	// the one operation where a wrong-but-plausible value is unrecoverable.
+	//
+	// That validation is TeardownObjects', not a second one here: it renders the
+	// real object set, and Render refuses an invalid namespace before producing
+	// anything. An explicit ValidateNamespace call above this line was measured
+	// to be an equivalent mutant — removing it failed no test, because nothing
+	// can reach a Delete without going through Render first. A guard nothing can
+	// distinguish is not a guard.
+	objs, err := tenancy.TeardownObjects(namespace)
+	if err != nil {
+		return err
+	}
+	for _, o := range objs {
+		// The namespace is passed as the SCOPE, which resourcePath ignores for a
+		// cluster-scoped kind — it is the object's own name that addresses it.
+		if err := r.applier.Delete(ctx, namespace, o.Kind, o.Name); err != nil {
+			return fmt.Errorf("render: delete %s/%s for environment teardown: %w",
+				o.Kind, o.Name, err)
+		}
+		r.log.Info("environment object deleted", "kind", o.Kind, "name", o.Name,
+			"namespace", namespace)
+	}
+	return nil
+}

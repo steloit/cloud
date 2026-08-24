@@ -55,3 +55,52 @@ UPDATE services
 SET desired = $2, generation = generation + 1
 WHERE id = $1
 RETURNING *;
+
+-- name: ListEnvironmentTeardownsForCell :many
+-- The environment half of the agent's poll: environments in this cell whose
+-- namespace still has to be removed.
+--
+-- THE `NOT EXISTS` IS A SAFETY GATE, NOT AN OPTIMISATION. Deleting a namespace
+-- deletes everything in it, so advertising an environment before its services
+-- are actually gone would tear down a still-terminating CNPG cluster out from
+-- under US-3.5's final-backup contract. DeleteEnvironment only requires every
+-- service to have REACHED `deleting`; that is not the same as torn down, so the
+-- gate is here rather than there.
+--
+-- "Actually gone" is `status = 'deleting' AND observed_generation >= generation`
+-- — the cell converged the teardown and reported it (US-3.3h: `deleting` + `gone`
+-- converges). It is NOT row absence: nothing in the tree deletes a service row.
+--
+-- cell_id lives on PROJECTS, not on environments, hence the join.
+SELECT e.id, e.project_id, p.org_id
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE p.cell_id = $1
+  AND e.deletion_scheduled_at IS NOT NULL
+  AND e.torn_down_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM services s
+      WHERE s.env_id = e.id
+        AND (s.status <> 'deleting' OR s.observed_generation < s.generation)
+  )
+ORDER BY e.deletion_scheduled_at, e.id
+LIMIT $2;
+
+-- name: MarkEnvironmentTornDown :execrows
+-- The cell confirming the namespace is gone. Guarded on both halves so a replay
+-- is a no-op and a report for an environment nobody scheduled cannot invent a
+-- teardown: 0 rows means "not eligible", which the caller renders as a refusal
+-- rather than a success.
+UPDATE environments
+SET torn_down_at = now()
+WHERE id = $1 AND deletion_scheduled_at IS NOT NULL AND torn_down_at IS NULL;
+
+-- name: GetEnvironmentForCell :one
+-- Resolves an environment WITHIN a cell, so a reconciler token cannot confirm a
+-- teardown for an environment on a cell it does not own. Existence is not leaked
+-- (the caller renders 404 for both "no such environment" and "not your cell"),
+-- the same rule the service path follows.
+SELECT e.id, e.project_id, p.org_id, e.deletion_scheduled_at, e.torn_down_at
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE e.id = $1 AND p.cell_id = $2;

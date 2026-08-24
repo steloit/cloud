@@ -130,6 +130,7 @@ type Environment struct {
 	CreatedAt           pgtype.Timestamptz
 	Implicit            bool
 	DeletionScheduledAt pgtype.Timestamptz
+	TornDownAt          pgtype.Timestamptz
 }
 
 type Estimate struct {
