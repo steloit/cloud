@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 // Querier is the store surface this package needs. Narrow on purpose: the
@@ -30,7 +31,24 @@ type Querier interface {
 // from the first. This package only decides *when* to call it.
 type Transitioner interface {
 	Transition(ctx context.Context, svc store.Service, to, via, actor, orgID string) (store.Service, error)
+
+	// ObservedStatus maps a cell's report onto a status legal from the service's
+	// CURRENT one. It is on this interface for the same reason Transition is:
+	// the machine lives in provisioning, and reconcile decides only WHEN to
+	// consult it. Returning provisioning.Observation would make reconcile import
+	// provisioning, so the shape is mirrored here — see Observation below.
+	ObservedStatus(from, observed string) provisioning.Observation
 }
+
+// The status machine's Observation type lives in `provisioning`, next to the
+// machine itself, and is named in the Transitioner interface above.
+//
+// Importing that VALUE type is not the coupling the interface exists to avoid:
+// the interface is here so this package never reimplements the legal edges, the
+// spine events or the metering rule, and so it can be faked in tests. Go has no
+// covariant returns, so a mirrored struct here cannot satisfy a method that
+// returns the real one — and making `provisioning` import `reconcile` instead
+// would point the domain at its own caller.
 
 // Service is the control-plane half of the reconciler protocol.
 type Service struct {
@@ -47,6 +65,11 @@ func New(q Querier, trans Transitioner) *Service { return &Service{q: q, trans: 
 // desired as done or drive its status. The agent re-polls (the row is still
 // outstanding) and converges the current generation.
 var ErrStaleGeneration = errors.New("reconcile: generation mismatch")
+
+// ErrNotConverged is a report the status machine accepted but could not finish
+// in one hop — today only `failed` + a healthy cluster, which ADR-024 routes
+// through `provisioning`. The row deliberately stays outstanding.
+var ErrNotConverged = errors.New("reconcile: report needs another converge")
 
 // ErrUnknownCell covers both "no such cell" and "not your cell" — the caller
 // renders 404 for each, so a reconciler token cannot enumerate cells.
@@ -190,15 +213,33 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 	// so the row stays outstanding and the next tick retries it — the whole
 	// retry story depends on this. The reverse order stranded the row: observed
 	// advanced, the row left the outstanding set, and a failed edge was lost.
-	if rep.Status != "" && rep.Status != svc.Status {
+	//
+	// THE REPORT IS MAPPED, NOT USED RAW. The agent reads only the CNPG phase, so
+	// it answers identically whatever state the row is in — while this edge asks
+	// "is that legal from svc.Status". ADR-024 has no `ready → failed`, so a
+	// cluster that breaks while READY made the agent report `failed`, Transition
+	// rejected it every tick, observed_generation never advanced, and the service
+	// was retried forever with nothing visible to the customer. US-3.3h.
+	obs := s.trans.ObservedStatus(svc.Status, rep.Status)
+	if to, ok := obs.Edge(); ok {
 		orgID, err := s.q.OrgForService(ctx, rep.ServiceID)
 		if err != nil {
 			return store.Service{}, err
 		}
 		// via=system: this edge came from the cell converging, not a person.
-		if _, err := s.trans.Transition(ctx, svc, rep.Status, "system", "system", orgID); err != nil {
+		if _, err := s.trans.Transition(ctx, svc, to, "system", "system", orgID); err != nil {
 			return store.Service{}, err // observed NOT advanced — row stays outstanding
 		}
+	}
+	// An UNSETTLED hop must not advance observation. `failed` + a healthy cluster
+	// moves to `provisioning` and needs one more tick to reach `ready`; marking
+	// it converged here would strand the row at `provisioning` forever, because
+	// ListDesiredForCell selects on observed_generation < generation. Returning
+	// an error keeps the row outstanding and is the same shape as the failed
+	// -Transition path above.
+	if !obs.Converged() {
+		return store.Service{}, fmt.Errorf("%w: %s needs another hop from %s",
+			ErrNotConverged, rep.ServiceID, svc.Status)
 	}
 
 	// The transition (if any) is durable; now record that the cell converged this

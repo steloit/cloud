@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 // fakeQ is an in-memory Querier. The reconciler's load-bearing rules —
@@ -117,6 +118,13 @@ type fakeTrans struct {
 	edges  []string
 	q      *fakeQ
 	failTo string // if set, Transition to this status returns an error (illegal edge)
+}
+
+// The fake delegates to the REAL mapping rather than reimplementing it. A fake
+// status machine here would be a second copy of ADR-024 that drifts from the
+// first — the exact thing the Transitioner interface exists to prevent.
+func (t *fakeTrans) ObservedStatus(from, observed string) provisioning.Observation {
+	return provisioning.ObservedStatus(from, observed)
 }
 
 func (t *fakeTrans) Transition(_ context.Context, svc store.Service, to, via, _, _ string) (store.Service, error) {
@@ -487,5 +495,88 @@ func TestPollTouchesHeartbeat(t *testing.T) {
 	}
 	if q.heartbeat != before+1 {
 		t.Fatalf("the poll must touch the heartbeat (quiescent-cell liveness); count %d→%d", before, q.heartbeat)
+	}
+}
+
+// THE WRITEBACK MUST CONSULT THE MACHINE, AND MUST HONOUR "not converged".
+//
+// The type stops the convergence signal being DISCARDED (there is no second
+// return value to drop with `_`), but nothing in the compiler forces a caller to
+// ASK. This pins the call site: it is the representation that decides, and the
+// one US-3.3a round 12 got wrong.
+func TestWritebackMapsTheReportThroughTheStatusMachine(t *testing.T) {
+	// A cluster that broke while READY. The agent reports `failed`; ADR-024 has
+	// no ready→failed, so the raw report would 409 every tick. The mapped answer
+	// is `degraded`.
+	s, q, tr := newFixture()
+	q.services["svc_r"] = store.Service{
+		ID: "svc_r", CellID: "cell-0", Status: "ready", Generation: 5, ObservedGeneration: 4,
+	}
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_r", ObservedGeneration: 5, Status: "failed",
+	}); err != nil {
+		t.Fatalf("writeback: %v", err)
+	}
+	if got := q.services["svc_r"].Status; got != "degraded" {
+		t.Errorf("a READY service reported failed ended as %q, want degraded — the raw report was "+
+			"used instead of the mapped one", got)
+	}
+	if got := q.services["svc_r"].ObservedGeneration; got != 5 {
+		t.Errorf("observed_generation = %d, want 5 — a settled hop must advance it", got)
+	}
+	_ = tr
+}
+
+// AND AN UNSETTLED HOP MUST NOT ADVANCE OBSERVATION. `failed` + a healthy
+// cluster routes through `provisioning` and needs a second tick; advancing here
+// strands the row at `provisioning` forever, because ListDesiredForCell selects
+// on observed_generation < generation.
+func TestWritebackLeavesAnUnconvergedRowOutstanding(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_f"] = store.Service{
+		ID: "svc_f", CellID: "cell-0", Status: "failed", Generation: 9, ObservedGeneration: 8,
+	}
+	_, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_f", ObservedGeneration: 9, Status: "ready",
+	})
+	if !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged — the hop is not finished", err)
+	}
+	if got := q.services["svc_f"].Status; got != "provisioning" {
+		t.Errorf("status = %q, want provisioning — the legal edge should still have been taken", got)
+	}
+	if got := q.services["svc_f"].ObservedGeneration; got == 9 {
+		t.Fatal("observed_generation ADVANCED on an unconverged hop: the row leaves the " +
+			"outstanding set at `provisioning` and never reaches ready")
+	}
+
+	// The next tick finishes it, which is what makes leaving it outstanding correct.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_f", ObservedGeneration: 9, Status: "ready",
+	}); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := q.services["svc_f"].Status; got != "ready" {
+		t.Errorf("after the second tick status = %q, want ready", got)
+	}
+	if got := q.services["svc_f"].ObservedGeneration; got != 9 {
+		t.Errorf("observed_generation = %d, want 9 once converged", got)
+	}
+}
+
+// A suspended service is not resumed by a converging agent, at the writeback.
+func TestWritebackNeverResumesASuspendedService(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_s"] = store.Service{
+		ID: "svc_s", CellID: "cell-0", Status: "suspended", Generation: 2, ObservedGeneration: 1,
+	}
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_s", ObservedGeneration: 2, Status: "ready",
+	}); err != nil {
+		t.Fatalf("writeback: %v", err)
+	}
+	if got := q.services["svc_s"].Status; got != "suspended" {
+		t.Errorf("a suspended service was moved to %q by an observation — its metering span "+
+			"restarts and nothing asked for that", got)
 	}
 }

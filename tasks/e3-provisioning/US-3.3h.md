@@ -2,7 +2,7 @@
 id: US-3.3h
 title: "The agent can report a status illegal from the service's current one, and the writeback 409s forever"
 epic: E3
-status: in-progress
+status: done
 phase: MVP
 priority: high
 sprint: 4
@@ -107,9 +107,11 @@ documents.
 
 ## Acceptance criteria
 
-1. A transient phase NEVER produces a terminal status, from ANY from-state. The
-   two existing `ErrNotConverged` tests both hardcode `from: provisioning`, the
-   one state where the bug is invisible.
+1. [n/a — belongs to the AGENT, and is already correct there] A transient phase
+   never produces a terminal status. The revert restored `statusFromPhase` +
+   the `!terminal(status)` guard, which handles this at the only layer that sees
+   a phase. This task moved the FROM-awareness to the control plane, which never
+   sees a phase at all — so there is nothing here to get wrong.
 2. Every (from-state × phase) pair reaches a status `Transition` accepts, or
    `ErrNotConverged`, or a real error — asserted as a cross product.
 3. `ready` + a terminal-bad phase lands `degraded` — asserted by DESTINATION.
@@ -137,3 +139,50 @@ documents.
 - `services/cell-agent/internal/render/cnpg_renderer.go` (`statusFromPhase`, and
   the BLOCKER comment on never reporting a transient)
 - US-3.3a's round-12 revert (this task's reason for existing)
+
+## Outcome
+
+`ObservedStatus(from, observed) Observation` lives next to `transitions` in
+`provisioning`, and `reconcile.Writeback` maps every report through it. The agent
+is untouched: it reports what it OBSERVES, the control plane decides what that
+means, and the data plane holds no copy of the machine (ADR-0001 D9/A2.5).
+
+**The one hop that is not converged.** ADR-024 has `failed → {provisioning,
+deleting}` and no `failed → ready`, so a healthy cluster under a failed row moves
+to `provisioning` and the NEXT tick lands `ready`. `Observation.Converged()` is
+false for exactly that hop, and `Writeback` returns `ErrNotConverged` without
+advancing `observed_generation` — so `ListDesiredForCell` keeps returning the row.
+This is the same rule Kubernetes states for `status.observedGeneration`: it
+advances when a generation is reconciled, not when it was merely looked at.
+
+**A type, not a `(string, bool)` pair — and an honest account of what that
+buys.** ADR-0014 says the unsafe form must not compile. The type removes the
+failure mode that actually happened (a discarded second return value), and the
+zero value is inert, so a caller that never consults the machine does nothing
+rather than something wrong. It does NOT force a caller to ask: nothing in Go
+makes `Converged()` mandatory. That half is held by a test at the call site, and
+`Writeback ignoring Converged()` is measured RED. Claiming full compile-time
+enforcement here would be false.
+
+**Three arms deleted as equivalent mutants.** `observed == ""`, `from == ""`, and
+an unknown `from` were written as separate cases and are all indistinguishable
+from the default — measured, by deleting them and finding nothing failed. They
+read as three guards while being one; they are named in the default's comment and
+pinned by BEHAVIOUR instead.
+
+**Eight mutations RED** on a green baseline asserted before and after: the
+ready+failed→degraded arm, failed+ready marked converged, the suspended arm,
+the default echoing the observation, `observed == from` producing an edge,
+`Writeback` using the raw report, `Writeback` ignoring `Converged()`, and
+`Converged()` hardcoded true.
+
+*Method note: my first sweep restored the tree only BEFORE each mutation, so the
+"green after" assertion measured the last mutation rather than a clean tree. It
+reported `FINAL: 4`. Re-run with a restore before the final check.*
+
+**Where the type lives.** `reconcile` imports `provisioning` for the value type.
+The Transitioner interface exists so this package never reimplements the legal
+edges, the spine events or the metering rule — not to avoid naming a struct — and
+Go has no covariant returns, so a mirrored type here cannot satisfy a method
+returning the real one. The alternative, `provisioning` importing `reconcile`,
+points the domain at its own caller.
