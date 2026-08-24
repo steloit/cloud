@@ -147,13 +147,33 @@ documents.
 is untouched: it reports what it OBSERVES, the control plane decides what that
 means, and the data plane holds no copy of the machine (ADR-0001 D9/A2.5).
 
-**The one hop that is not converged.** ADR-024 has `failed → {provisioning,
+**TWO hops are not converged, and the second one was a billing bug I shipped.**
+Review caught it: `ready` + `failed` → `degraded` was marked CONVERGED, so
+`observed_generation` advanced, the row left the outstanding set, and a cluster
+CNPG reports as "unrecoverable and needs manual intervention" would rest at
+`degraded` — which BILLS — with nothing ever observing it again. Measured:
+`degraded → failed` is the ONLY edge that emits a metering `close`, and
+`IsBilling("degraded")` is true. The justification in my own test was
+measurably false, too: it said marking the hop unconverged "would keep the row
+outstanding forever", when `ObservedStatus("degraded","failed")` is converged and
+terminates in two hops — exactly the shape of the path below. The asymmetry was
+a defect, not a design.
+
+**The other hop that is not converged.** ADR-024 has `failed → {provisioning,
 deleting}` and no `failed → ready`, so a healthy cluster under a failed row moves
 to `provisioning` and the NEXT tick lands `ready`. `Observation.Converged()` is
 false for exactly that hop, and `Writeback` returns `ErrNotConverged` without
 advancing `observed_generation` — so `ListDesiredForCell` keeps returning the row.
 This is the same rule Kubernetes states for `status.observedGeneration`: it
 advances when a generation is reconciled, not when it was merely looked at.
+
+**An unconverged hop is a 409, not a 500.** `ErrNotConverged` had no arm in
+`writeErr`, so it fell to `problem.Internal`: an HTTP 500 the OpenAPI contract
+does not declare for that route, an ERROR boundary log, and a remediation telling
+the operator to "contact support with the event id" — an id that is never minted.
+Every failed-service recovery in the fleet would have emitted a control-plane
+5xx. 409 is already in the contract and is already what the agent's own client
+doc calls "just another re-poll".
 
 **A type, not a `(string, bool)` pair — and an honest account of what that
 buys.** ADR-0014 says the unsafe form must not compile. The type removes the

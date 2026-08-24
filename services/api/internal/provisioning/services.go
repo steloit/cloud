@@ -216,13 +216,27 @@ func ObservedStatus(from, observed string) Observation {
 	case from == "failed" && observed == "ready":
 		return Observation{to: "provisioning", edge: true, converged: false}
 
-	// A cluster that broke while READY is `degraded`: both the legal edge and the
+	// A cluster that broke while READY goes to `degraded` — the legal edge and the
 	// semantically right answer. Without it the answer would be "no change", and
 	// a broken database reported `ready` forever is worse than the 409 loop this
-	// function exists to remove — no writeback, no alert, indistinguishable from
+	// function exists to remove: no writeback, no alert, indistinguishable from
 	// healthy.
+	//
+	// NOT CONVERGED, and this is a BILLING property, not a tidiness one.
+	// `degraded` still bills (metering.IsBilling), and `degraded → failed` is the
+	// ONLY edge that emits a `close`. If this hop were marked converged,
+	// observed_generation would advance, the row would leave the outstanding set,
+	// and a cluster CNPG reports as "unrecoverable and needs manual intervention"
+	// would rest at `degraded` and bill INDEFINITELY, because nothing would ever
+	// observe it again.
+	//
+	// Unconverged, the next tick decides: a transient blip that recovered reports
+	// `ready` and takes degraded → ready; a genuine failure reports `failed`
+	// again and takes degraded → failed, which closes the span. Two hops either
+	// way — exactly the shape of the failed → provisioning → ready path below,
+	// and the asymmetry between them was a defect, not a design.
 	case from == "ready" && observed == "failed":
-		return settled("degraded", true)
+		return Observation{to: "degraded", edge: true, converged: false}
 
 	case CanTransition(from, observed):
 		return settled(observed, true)
@@ -252,9 +266,8 @@ func ObservedStatus(from, observed string) Observation {
 // reconcile.Transitioner. The mapping is the package-level function above; this
 // exists only because the reconciler holds a *Service, not a package.
 //
-// It returns the concrete Observation. reconcile's Transitioner declares the
-// return as its own single-method interface, which this satisfies structurally —
-// so neither package imports the other.
+// It returns the concrete Observation, which is the type reconcile.Transitioner
+// names — see that interface for why the import points this way.
 func (s *Service) ObservedStatus(from, observed string) Observation {
 	return ObservedStatus(from, observed)
 }

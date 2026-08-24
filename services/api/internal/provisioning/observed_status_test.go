@@ -50,9 +50,30 @@ func TestABrokenReadyClusterBecomesDegradedNotUnchanged(t *testing.T) {
 	if !ok || to != "degraded" {
 		t.Fatalf("ready + failed = (%q, %v), want (degraded, true)", to, ok)
 	}
-	if !o.Converged() {
-		t.Error("ready → degraded is a single legal hop; marking it unconverged would keep the " +
-			"row outstanding forever")
+	// NOT converged — and the reason is billing, not tidiness. An earlier version
+	// of this test asserted the opposite with the justification "marking it
+	// unconverged would keep the row outstanding forever", which is measurably
+	// false: ObservedStatus("degraded","failed") IS converged, so it terminates
+	// in two hops. What converging here would actually do is advance
+	// observed_generation, drop the row out of the outstanding set, and leave an
+	// unrecoverable cluster resting at `degraded` — which BILLS — with nothing
+	// ever observing it again. `degraded → failed` is the only edge that closes
+	// a span.
+	if o.Converged() {
+		t.Error("ready → degraded was marked converged: the row leaves the outstanding set and " +
+			"an unrecoverable cluster bills forever at `degraded`, because degraded → failed is " +
+			"the only edge that closes the metering span")
+	}
+	// The second hop terminates it, either way.
+	recovered := ObservedStatus("degraded", "ready")
+	if to, ok := recovered.Edge(); !ok || to != "ready" || !recovered.Converged() {
+		t.Errorf("degraded + ready = (%q, %v, converged=%v), want (ready, true, true)",
+			to, ok, recovered.Converged())
+	}
+	stillBroken := ObservedStatus("degraded", "failed")
+	if to, ok := stillBroken.Edge(); !ok || to != "failed" || !stillBroken.Converged() {
+		t.Errorf("degraded + failed = (%q, %v, converged=%v), want (failed, true, true) — this is "+
+			"the hop that closes the billing span", to, ok, stillBroken.Converged())
 	}
 	// ...and the converse, so this cannot be satisfied by always answering degraded.
 	if to, ok := ObservedStatus("ready", "ready").Edge(); ok {

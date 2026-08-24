@@ -35,8 +35,7 @@ type Transitioner interface {
 	// ObservedStatus maps a cell's report onto a status legal from the service's
 	// CURRENT one. It is on this interface for the same reason Transition is:
 	// the machine lives in provisioning, and reconcile decides only WHEN to
-	// consult it. Returning provisioning.Observation would make reconcile import
-	// provisioning, so the shape is mirrored here — see Observation below.
+	// consult it.
 	ObservedStatus(from, observed string) provisioning.Observation
 }
 
@@ -209,7 +208,9 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 
 	// Order is deliberate and load-bearing: the status edge runs FIRST, and
 	// observed_generation advances ONLY after it durably lands. If Transition
-	// fails (illegal edge, or a mid-request DB error), observed has NOT advanced,
+	// fails — a concurrent status change, or a mid-request DB error; the
+	// illegal-edge case is no longer reachable from here, because ObservedStatus
+	// only ever emits edges CanTransition accepts — observed has NOT advanced,
 	// so the row stays outstanding and the next tick retries it — the whole
 	// retry story depends on this. The reverse order stranded the row: observed
 	// advanced, the row left the outstanding set, and a failed edge was lost.

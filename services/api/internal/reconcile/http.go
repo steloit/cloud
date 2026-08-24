@@ -170,6 +170,22 @@ func (h *Handlers) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		problem.Write(w, r, problem.Conflict(
 			[]string{"the reported generation is not the one desired currently holds"},
 			"Re-poll /desired and report on the current generation."))
+	// 409, NOT 500. An unconverged hop is a NORMAL, expected event — the status
+	// machine took a legal edge and needs one more converge to finish (today only
+	// `failed` + a healthy cluster, which ADR-024 routes through `provisioning`).
+	// Without this arm it fell to `default:` and became `problem.Internal`: an
+	// HTTP 500 the OpenAPI contract does not declare for this route, an ERROR
+	// boundary log, and a remediation telling the operator to "contact support
+	// with the event id" — an id that is never minted. Every failed-service
+	// recovery in the fleet would emit a control-plane 5xx.
+	//
+	// 409 is already in the contract and is already the right shape for the
+	// agent: its own client doc says a 409 is "just another re-poll — the row
+	// stays outstanding server-side, so the next tick re-converges it".
+	case errors.Is(err, ErrNotConverged):
+		problem.Write(w, r, problem.Conflict(
+			[]string{"the service needs one more converge to finish this generation"},
+			"Re-poll /desired and report again — the edge was taken and the row is still outstanding."))
 	default:
 		if c, ok := errors.AsType[problem.Carrier](err); ok {
 			problem.Write(w, r, c.Problem()) // e.g. Transition's illegal-edge 409

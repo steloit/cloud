@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -504,27 +507,69 @@ func TestPollTouchesHeartbeat(t *testing.T) {
 // return value to drop with `_`), but nothing in the compiler forces a caller to
 // ASK. This pins the call site: it is the representation that decides, and the
 // one US-3.3a round 12 got wrong.
+//
+// A cluster that broke while READY: the agent reports `failed`, which ADR-024
+// does not allow from `ready`, so the raw report would 409 every tick. The
+// mapped answer is `degraded` — and it is NOT converged, because `degraded`
+// still bills and `degraded → failed` is the only edge that closes the span.
 func TestWritebackMapsTheReportThroughTheStatusMachine(t *testing.T) {
-	// A cluster that broke while READY. The agent reports `failed`; ADR-024 has
-	// no ready→failed, so the raw report would 409 every tick. The mapped answer
-	// is `degraded`.
-	s, q, tr := newFixture()
+	s, q, _ := newFixture()
 	q.services["svc_r"] = store.Service{
 		ID: "svc_r", CellID: "cell-0", Status: "ready", Generation: 5, ObservedGeneration: 4,
 	}
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+	_, err := s.Writeback(context.Background(), "cell-0", Report{
 		ServiceID: "svc_r", ObservedGeneration: 5, Status: "failed",
-	}); err != nil {
-		t.Fatalf("writeback: %v", err)
+	})
+	if !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged", err)
 	}
 	if got := q.services["svc_r"].Status; got != "degraded" {
 		t.Errorf("a READY service reported failed ended as %q, want degraded — the raw report was "+
 			"used instead of the mapped one", got)
 	}
-	if got := q.services["svc_r"].ObservedGeneration; got != 5 {
-		t.Errorf("observed_generation = %d, want 5 — a settled hop must advance it", got)
+	if got := q.services["svc_r"].ObservedGeneration; got == 5 {
+		t.Fatal("observed_generation advanced: the row leaves the outstanding set at `degraded`, " +
+			"which BILLS, and nothing observes the cluster again")
 	}
-	_ = tr
+
+	// Still broken on the next tick -> `failed`, which is the hop that closes the
+	// metering span. This is the leg that was unreachable when the first hop was
+	// marked converged.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_r", ObservedGeneration: 5, Status: "failed",
+	}); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := q.services["svc_r"].Status; got != "failed" {
+		t.Errorf("after the second tick status = %q, want failed — the span never closes", got)
+	}
+	if got := q.services["svc_r"].ObservedGeneration; got != 5 {
+		t.Errorf("observed_generation = %d, want 5 once converged", got)
+	}
+}
+
+// ...and a transient blip takes the other branch of the same two-hop path.
+func TestARecoveredBlipReturnsToReadyWithoutPassingThroughFailed(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_t"] = store.Service{
+		ID: "svc_t", CellID: "cell-0", Status: "ready", Generation: 2, ObservedGeneration: 1,
+	}
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_t", ObservedGeneration: 2, Status: "failed",
+	}); !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("first tick err = %v, want ErrNotConverged", err)
+	}
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_t", ObservedGeneration: 2, Status: "ready",
+	}); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := q.services["svc_t"].Status; got != "ready" {
+		t.Errorf("a recovered blip ended at %q, want ready", got)
+	}
+	if got := q.services["svc_t"].ObservedGeneration; got != 2 {
+		t.Errorf("observed_generation = %d, want 2", got)
+	}
 }
 
 // AND AN UNSETTLED HOP MUST NOT ADVANCE OBSERVATION. `failed` + a healthy
@@ -578,5 +623,39 @@ func TestWritebackNeverResumesASuspendedService(t *testing.T) {
 	if got := q.services["svc_s"].Status; got != "suspended" {
 		t.Errorf("a suspended service was moved to %q by an observation — its metering span "+
 			"restarts and nothing asked for that", got)
+	}
+}
+
+// AN UNCONVERGED HOP IS A 409, NOT A 500.
+//
+// It is a NORMAL event — the machine took a legal edge and needs one more
+// converge. Without an arm in writeErr it fell to problem.Internal: a 500 the
+// OpenAPI contract does not declare for this route, an ERROR boundary log, and a
+// remediation telling the operator to "contact support with the event id" — an
+// id that is never minted. Every failed-service recovery in the fleet would emit
+// a control-plane 5xx.
+func TestAnUnconvergedHopIsAConflictNotAnInternalError(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_w"] = store.Service{
+		ID: "svc_w", CellID: "cell-0", Status: "failed", Generation: 4, ObservedGeneration: 3,
+	}
+	h := &Handlers{svc: s}
+	rec := httptest.NewRecorder()
+	h.writeErr(rec, httptest.NewRequest(http.MethodPost, "/v1/reconcile/cell-0/status", nil),
+		fmt.Errorf("%w: svc_w needs another hop from failed", ErrNotConverged))
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409. A 500 here is an undeclared response, an ERROR log and a "+
+			"remediation naming an event id that is never minted — for an expected event.", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "problem+json") {
+		t.Errorf("content-type = %q, want application/problem+json", ct)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "contact support") {
+		t.Errorf("the remediation still tells the operator to contact support: %s", body)
+	}
+	if !strings.Contains(body, "remediation") || strings.Contains(body, `"remediation":""`) {
+		t.Errorf("no remediation on the refusal: %s", body)
 	}
 }
