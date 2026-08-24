@@ -262,8 +262,10 @@ func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace strin
 // unrecoverable and needs manual intervention", "Invalid cluster definition",
 // "Unable to create required cluster objects" contain none of those words, so a
 // permanently broken cluster read as `provisioning` and retried forever with no
-// signal. Unknown phases fail CLOSED to `degraded` (visible, actionable) rather
-// than to `provisioning` (invisible, retried forever).
+// signal. Unknown phases fail CLOSED to `failed` (visible, actionable) rather
+// than to `provisioning` (invisible, retried forever) — see statusFromPhase
+// below, which explains why `failed` and not `degraded`. This comment said
+// `degraded` and contradicted both the code and that explanation.
 var phaseStatus = map[string]string{
 	// terminal-good
 	"Cluster in healthy state": "ready",

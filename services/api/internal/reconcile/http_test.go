@@ -2,10 +2,13 @@ package reconcile
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/steloit/cloud/services/api/internal/identity/store"
 )
 
 func mount(t *testing.T) (*httptest.Server, *fakeQ, *fakeTrans) {
@@ -148,18 +151,137 @@ func TestHTTPValidation(t *testing.T) {
 	}
 }
 
-func TestHTTPGoneIsObservationOnly(t *testing.T) {
+// `gone` NEVER DRIVES THE STATUS MACHINE — and on a live service it does not
+// finish the generation either.
+//
+// svc_a is `provisioning`: a live, non-deleting service. An agent reporting
+// `gone` for it means the workload VANISHED while desired still wants it alive.
+// The status must not move (row removal is the deletion pipeline's job, US-3.5),
+// but the row must STAY OUTSTANDING so the next converge re-creates it.
+//
+// This used to answer 200 and advance observed_generation, which dropped the row
+// out of ListDesiredForCell permanently: the customer kept seeing `provisioning`
+// for a service that did not exist, and nothing would ever put it back.
+func TestHTTPGoneOnALiveServiceIs409AndLeavesTheRowOutstanding(t *testing.T) {
 	ts, q, tr := mount(t)
+	before := q.services["svc_a"].ObservedGeneration
+	r, m := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_a","observed_generation":3,"status":"gone"}`)
+	if r.StatusCode != 409 {
+		t.Fatalf("want 409, got %d", r.StatusCode)
+	}
+	if tr.calls != 0 {
+		t.Fatal("gone must never drive the status machine — row removal is the deletion pipeline's job")
+	}
+	if got := q.services["svc_a"].Status; got != "provisioning" {
+		t.Fatalf("gone on a live service changed status to %q", got)
+	}
+	if got := q.services["svc_a"].ObservedGeneration; got != before {
+		t.Fatalf("observed_generation advanced %d→%d: the row left the outstanding set and "+
+			"nothing will ever re-create the vanished workload", before, got)
+	}
+	if rem, _ := m["remediation"].(string); !strings.Contains(rem, "Re-poll") {
+		t.Fatalf("no actionable remediation on the refusal: %v", m)
+	}
+}
+
+// ...but the teardown we ASKED for does finish, or a deleting row would stay
+// outstanding forever and the agent would re-issue Delete every tick.
+func TestHTTPGoneOnADeletingServiceConverges(t *testing.T) {
+	ts, q, tr := mount(t)
+	q.services["svc_a"] = store.Service{
+		ID: "svc_a", CellID: "cell-0", Status: "deleting", Generation: 3, ObservedGeneration: 2,
+	}
 	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
 		`{"service_id":"svc_a","observed_generation":3,"status":"gone"}`)
 	if r.StatusCode != 200 {
 		t.Fatalf("want 200, got %d", r.StatusCode)
 	}
 	if tr.calls != 0 {
-		t.Fatal("gone must not drive the status machine — row removal is the deletion pipeline's job")
+		t.Fatal("gone must never drive the status machine")
 	}
-	if q.services["svc_a"].ObservedGeneration != 3 {
-		t.Fatal("gone must still record observation")
+	if got := q.services["svc_a"].Status; got != "deleting" {
+		t.Fatalf("status moved to %q — `deleting` is terminal", got)
+	}
+	if got := q.services["svc_a"].ObservedGeneration; got != 3 {
+		t.Fatalf("observed_generation = %d, want 3 — a completed teardown must finish the generation", got)
+	}
+}
+
+// AN UNCONVERGED HOP IS A 409 ON THE ROUTE, not just in writeErr.
+//
+// The unit test below calls writeErr directly with a hand-built error, which
+// cannot see routing, the auth gate, or the error Writeback actually produces —
+// a handler that answered 200 for ErrNotConverged would leave it green. This
+// drives the real path: a `failed` service reporting a healthy cluster routes
+// through `provisioning` (ADR-024 has no failed → ready) and needs a second tick.
+func TestHTTPUnconvergedHopIs409AndLeavesTheRowOutstanding(t *testing.T) {
+	ts, q, _ := mount(t)
+	q.services["svc_f"] = store.Service{
+		ID: "svc_f", CellID: "cell-0", Status: "failed", Generation: 4, ObservedGeneration: 3,
+	}
+	r, m := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_f","observed_generation":4,"status":"ready"}`)
+	if r.StatusCode != 409 {
+		t.Fatalf("want 409, got %d — a 500 here is an undeclared response for an expected event", r.StatusCode)
+	}
+	if got := q.services["svc_f"].Status; got != "provisioning" {
+		t.Fatalf("status = %q, want provisioning — the legal edge should still have been taken", got)
+	}
+	if got := q.services["svc_f"].ObservedGeneration; got == 4 {
+		t.Fatal("observed_generation advanced on an unconverged hop: the row leaves the " +
+			"outstanding set at `provisioning` and never reaches ready")
+	}
+	if rem, _ := m["remediation"].(string); !strings.Contains(rem, "Re-poll") || strings.Contains(rem, "contact support") {
+		t.Fatalf("remediation is not the re-poll the agent needs: %v", m)
+	}
+
+	// The second tick finishes it, which is what makes leaving it outstanding correct.
+	if r2, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+		`{"service_id":"svc_f","observed_generation":4,"status":"ready"}`); r2.StatusCode != 200 {
+		t.Fatalf("second tick: want 200, got %d", r2.StatusCode)
+	}
+	if got := q.services["svc_f"].Status; got != "ready" {
+		t.Fatalf("after the second tick status = %q, want ready", got)
+	}
+}
+
+// A CELL CANNOT SUSPEND OR DELETE A SERVICE — enforced on the ROUTE the
+// reconciler token actually reaches, not only in the mapping.
+//
+// `statusVocab` admits both because it mirrors the customer-facing ServiceStatus
+// enum. Left ungated, CanTransition accepts both straight from `ready` and one
+// POST bricks the service permanently: the edge lands, but no `deleting:true`
+// desired doc is produced and no teardown runs, `deleting` has no outgoing edge,
+// and DeleteService then answers "deletion already in progress" forever — with
+// the metering span closed and the workload still running. The reconciler secret
+// is one shared value across a configured cell list.
+func TestHTTPACellCannotSuspendOrDeleteAService(t *testing.T) {
+	for _, status := range []string{"deleting", "suspended"} {
+		ts, q, tr := mount(t)
+		q.services["svc_r"] = store.Service{
+			ID: "svc_r", CellID: "cell-0", Status: "ready", Generation: 2, ObservedGeneration: 1,
+		}
+		r, m := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
+			`{"service_id":"svc_r","observed_generation":2,"status":"`+status+`"}`)
+		if r.StatusCode != 422 {
+			t.Errorf("%s: want 422, got %d — a cell reports what it observes, it does not "+
+				"issue lifecycle commands", status, r.StatusCode)
+		}
+		if tr.calls != 0 {
+			t.Errorf("%s: the report reached the status machine", status)
+		}
+		if got := q.services["svc_r"].Status; got != "ready" {
+			t.Errorf("%s: a cell moved a ready service to %q", status, got)
+		}
+		// And the quieter attack: it must not advance observation either, or the
+		// row silently stops being reconciled.
+		if got := q.services["svc_r"].ObservedGeneration; got != 1 {
+			t.Errorf("%s: observed_generation advanced to %d on a refused report", status, got)
+		}
+		if !strings.Contains(fmt.Sprint(m), "status") {
+			t.Errorf("%s: the refusal does not name the offending field: %v", status, m)
+		}
 	}
 }
 
@@ -169,24 +291,6 @@ func TestHTTPForeignServiceIs404(t *testing.T) {
 		`{"service_id":"svc_far","observed_generation":1,"status":"ready"}`)
 	if r.StatusCode != 404 {
 		t.Fatalf("foreign-cell service must be 404 (no probing), got %d", r.StatusCode)
-	}
-}
-
-func TestHTTPGoneOnLiveServiceLeavesStatusUnchanged(t *testing.T) {
-	ts, q, tr := mount(t)
-	// svc_a is provisioning (a live, non-deleting service). An agent reporting
-	// "gone" for it is a bug; the control plane must not mutate customer-visible
-	// status off it (gone → observation-only).
-	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/status", "s3cret",
-		`{"service_id":"svc_a","observed_generation":3,"status":"gone"}`)
-	if r.StatusCode != 200 {
-		t.Fatalf("want 200, got %d", r.StatusCode)
-	}
-	if tr.calls != 0 {
-		t.Fatal("gone must never drive the status machine")
-	}
-	if q.services["svc_a"].Status != "provisioning" {
-		t.Fatalf("gone on a live service changed status to %q", q.services["svc_a"].Status)
 	}
 }
 

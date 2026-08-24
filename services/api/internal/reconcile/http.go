@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/steloit/cloud/services/api/internal/platform/problem"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 // Handlers mounts the two internal-plane endpoints PRE-STRICT, the same
@@ -108,10 +109,20 @@ type statusBody struct {
 	Event              string          `json:"event"`
 }
 
-var statusVocab = map[string]bool{
-	"provisioning": true, "ready": true, "degraded": true, "failed": true,
-	"suspended": true, "deleting": true, "gone": true, "": true,
-}
+// statusVocab is what the WIRE accepts, derived from the one ADR-024 definition
+// so the two cannot drift — plus the two values that are not statuses at all:
+// `gone` (the workload is absent) and "" (nothing reported).
+//
+// It is deliberately WIDER than what a cell may assert: it mirrors the
+// customer-facing ServiceStatus enum in the contract. provisioning.ReportableByCell
+// is the narrower authority check, applied just below.
+var statusVocab = func() map[string]bool {
+	v := map[string]bool{"gone": true, "": true}
+	for _, st := range provisioning.StatusVocabulary() {
+		v[st] = true
+	}
+	return v
+}()
 
 func (h *Handlers) status(w http.ResponseWriter, r *http.Request) {
 	cell, ok := h.gate(w, r)
@@ -137,21 +148,34 @@ func (h *Handlers) status(w http.ResponseWriter, r *http.Request) {
 	}
 	if !statusVocab[b.Status] {
 		fields = append(fields, problem.FieldError{Field: "status", Detail: "not in the ADR-024 vocabulary"})
+	} else if b.Status != "" && b.Status != "gone" && !provisioning.ReportableByCell(b.Status) {
+		// "" (nothing to report) and `gone` (the workload is absent) are not
+		// workload observations and are not refused here — the machine answers
+		// both, and differently. See ObservedStatus step 1b.
+		// A cell reports what it OBSERVES. `deleting` and `suspended` are
+		// lifecycle decisions the control plane makes; they are in statusVocab
+		// because that is the customer-facing ServiceStatus enum, not because a
+		// cell may assert them. Refused HERE as well as in ObservedStatus: this
+		// is the boundary the reconciler token actually reaches, and a 422 names
+		// the offending field instead of looking like a transient conflict.
+		fields = append(fields, problem.FieldError{Field: "status", Detail: b.Status +
+			" is a lifecycle state the control plane sets, not something a cell can observe; " +
+			"report what the workload looks like (provisioning, ready, degraded, failed) or `gone`"})
 	}
 	if len(fields) > 0 {
 		problem.Write(w, r, problem.ValidationFailed(fields))
 		return
 	}
-	// "gone" reports a completed teardown; the row's terminal state is
-	// `deleting` (ADR-024) and row removal is the deletion pipeline's job
-	// (US-3.5's final-backup contract), so it maps to observation-only here.
-	st := b.Status
-	if st == "gone" {
-		st = ""
-	}
+	// `gone` is passed through UNCHANGED. It used to be normalised to "" here,
+	// which destroyed the difference between "the workload does not exist" and
+	// "I have no status to report" — the machine then answered both the same way
+	// and silently stopped reconciling a service that had vanished. Neither is a
+	// status edge (row removal stays the deletion pipeline's job, US-3.5), but
+	// only one of them finishes a generation. provisioning.ObservedStatus owns
+	// that call now; this handler does not pre-chew the vocabulary.
 	svc, err := h.svc.Writeback(r.Context(), cell, Report{
 		ServiceID: b.ServiceID, ObservedGeneration: *b.ObservedGeneration,
-		Status: st, Conditions: b.Conditions, Event: b.Event,
+		Status: b.Status, Conditions: b.Conditions, Event: b.Event,
 	})
 	if err != nil {
 		h.writeErr(w, r, err)
@@ -170,6 +194,22 @@ func (h *Handlers) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		problem.Write(w, r, problem.Conflict(
 			[]string{"the reported generation is not the one desired currently holds"},
 			"Re-poll /desired and report on the current generation."))
+	// 409, NOT 500. An unconverged hop is a NORMAL, expected event — the status
+	// machine took a legal edge and needs one more converge to finish (today only
+	// `failed` + a healthy cluster, which ADR-024 routes through `provisioning`).
+	// Without this arm it fell to `default:` and became `problem.Internal`: an
+	// HTTP 500 the OpenAPI contract does not declare for this route, an ERROR
+	// boundary log, and a remediation telling the operator to "contact support
+	// with the event id" — an id that is never minted. Every failed-service
+	// recovery in the fleet would emit a control-plane 5xx.
+	//
+	// 409 is already in the contract and is already the right shape for the
+	// agent: its own client doc says a 409 is "just another re-poll — the row
+	// stays outstanding server-side, so the next tick re-converges it".
+	case errors.Is(err, ErrNotConverged):
+		problem.Write(w, r, problem.Conflict(
+			[]string{"this report does not finish the generation; the row stays outstanding"},
+			"Re-poll /desired and report again — the service is still converging, and the row is still outstanding."))
 	default:
 		if c, ok := errors.AsType[problem.Carrier](err); ok {
 			problem.Write(w, r, c.Problem()) // e.g. Transition's illegal-edge 409
