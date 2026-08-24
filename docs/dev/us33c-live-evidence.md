@@ -123,3 +123,19 @@ one object, `dev/default.tfstate`, dated 2026-07-26 — a month before this work
 The temporary root used LOCAL state, which was discarded. (An earlier note in
 this session called the bucket empty; that reading came from a shell glob error,
 not from the bucket.)
+
+## An availability note the live run did not cover
+
+`Render` returns Namespace → quota → limits → `default-deny-all` → the allows,
+`Client.Apply` iterates in order and aborts on the first error, and the CNPG
+manifests ride the same single `Apply` — so on a NEW environment no pod can exist
+in the window where the namespace denies nothing. Fail-closed, correctly.
+
+The **upgrade** path is different and was not exercised: on an environment that
+already has a RUNNING Postgres, an apply that lands `default-deny-all` and then
+fails before `allow-cnpg-egress` fences the live instance manager off the
+apiserver until the next tick succeeds. Fail-closed is still the right default —
+the alternative is a window with no boundary — but it is an availability event on
+upgrade, not only a create-time property. Stated here rather than fixed, because
+the fix (ordering the allows before the deny) trades a security window for an
+availability one and is a decision, not a bug fix.
