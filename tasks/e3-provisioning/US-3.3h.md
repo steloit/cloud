@@ -2,7 +2,7 @@
 id: US-3.3h
 title: "The agent can report a status illegal from the service's current one, and the writeback 409s forever"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
