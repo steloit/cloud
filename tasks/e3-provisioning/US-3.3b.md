@@ -2,7 +2,7 @@
 id: US-3.3b
 title: "Deleting an environment does not remove its namespace — there is no env-teardown path at all"
 epic: E3
-status: ready
+status: in-progress
 phase: MVP
 priority: high
 sprint: 4
