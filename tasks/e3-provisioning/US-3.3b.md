@@ -204,6 +204,51 @@ here" at *schedule* time and nothing preserved it afterwards.
 - `kube.IsClusterScoped` was **dead code** whose comment described a design I
   replaced with YAML-derived scope. Deleted.
 
+### Review round 3: ten survivors, and the wire was never tested
+
+QA's mutation sweep found twelve survivors (three were already fixed in round 2).
+The theme is that **every layer was tested and the seams between them were not.**
+
+- **The confirmation's whole wire path was untested.** Three independent
+  survivors, each of which is "the feature silently does not work while CI is
+  green": the URL, the request body, and the non-200 check. The worst is the
+  body — `{"observed":"ready"}` would 422 on *every* confirmation in production,
+  so `torn_down_at` is never stamped, the environment is re-advertised every tick
+  and the namespace is re-deleted forever. The two tests that drive the real HTTP
+  client mounted only `/desired` and `/status`.
+- **The poll's `environments` key was pinned on the producer side only.**
+  Renaming the agent's struct tag left the whole module green: the fakes return
+  Go structs, so no agent test ever crossed JSON, and the two ends are separate
+  modules with nothing between them. **Both ends now bind to the spec**, which is
+  the authority they share — the agent reads `openapi.yaml` the way US-3.12's
+  contract test does.
+- **The gate was only ever exercised against `ready` and `deleting`.**
+  `NOT IN ('deleting','failed')` and `NOT IN ('deleting','provisioning')` both
+  survived — and a `failed` service still owns a PVC with customer data. It is
+  swept over the whole vocabulary now, derived from `StatusVocabulary()` so a new
+  status joins automatically, each with a positive control.
+- **An applier `Delete` that the API server refuses was swallowed** on the
+  environment path. The failure had been injected at the fake *renderer*; the
+  *applier* representation (a 403/409 from the API server) was uncovered, and the
+  seam for it already existed unused.
+- **`TeardownObjects`' "derived, never a list" property was unfalsifiable** —
+  replacing the classifier with `Kind == "Namespace"`, the exact hardcoded table
+  the comment forbids, passed, because `Render` emits one cluster-scoped object.
+  The classifier is now tested directly on inputs `Render` does not yet produce.
+- **The classifier and its test oracle disagreed** on realistic future objects: a
+  quoted namespace, and a `ClusterRoleBinding` whose `subjects[].namespace` is
+  not its own scope. The oracle was `strings.Contains`; it is `kube.IsClusterScoped`
+  now — kube's own routing table, an independent authority rather than a
+  re-implementation. (That function was dead code in round 2 and is reinstated
+  with a comment that is true.)
+- **A multi-document manifest was classified from its first document.**
+  `yaml.Unmarshal` decodes only the first and returns nil error, so a second,
+  cluster-scoped object would never be torn down. Refused now, matching
+  `kube.applyOne`'s `exactlyOneDocument`.
+- The new route and its enum-of-one were **not bound to the contract**, and
+  `LIMIT`, `ORDER BY` and the confirmation's heartbeat were unasserted. All
+  closed.
+
 ### Evidence
 
 Eight mutations RED, baseline asserted green **before and after**:
@@ -224,6 +269,16 @@ Round 2 added five more, each on a green baseline:
 | the `CreateService` guard removed | RED |
 | the `env.torn_down` spine event removed | RED |
 | environments torn down BEFORE services converge | RED |
+
+Round 3 added ten more, all RED on green baselines:
+
+| mutation | | mutation | |
+|---|---|---|---|
+| confirmation posts the wrong URL | RED | a FAILED service no longer blocks | RED |
+| confirmation ignores a non-200 | RED | a PROVISIONING service no longer blocks | RED |
+| confirmation sends `observed: ready` | RED | the poll's `LIMIT` ignored | RED |
+| the poll's json tag renamed | RED | the confirmation's heartbeat removed | RED |
+| env-teardown `Delete` error swallowed | RED | scope from a hardcoded Kind list | RED |
 
 The gate mutations are only catchable against **real Postgres** (the condition is
 SQL), so those run there: a `ready` service, then one mid-teardown

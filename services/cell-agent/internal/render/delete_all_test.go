@@ -9,6 +9,7 @@ import (
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
+	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 )
 
 func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
@@ -318,7 +319,13 @@ func TestTeardownCoversEveryObjectTenancyRenders(t *testing.T) {
 
 	sawClusterScoped := 0
 	for _, m := range all {
-		declared := strings.Contains(string(m.YAML), "namespace: "+ns)
+		// The oracle is kube's OWN scope table, not a re-implementation of the
+		// production classifier and not a string match. `strings.Contains(YAML,
+		// "namespace: "+ns)` agreed with the parser on today's objects and
+		// disagrees on realistic future ones — a quoted namespace, or a
+		// ClusterRoleBinding whose `subjects[].namespace` is not its own scope —
+		// so it would have failed with a message naming the wrong cause.
+		declared := !kube.IsClusterScoped(m.Kind)
 		if declared {
 			// Namespaced: removed by the namespace. It must NOT also be in the
 			// teardown set — deleting it by name is redundant, and doing so
@@ -481,5 +488,23 @@ func TestATeardownReportsGoneOnceTheClusterIsAbsent(t *testing.T) {
 	}
 	if status != "gone" {
 		t.Fatalf("status = %q, want gone once the Cluster is actually absent", status)
+	}
+}
+
+// A DELETE THE API SERVER REFUSES IS NOT A TEARDOWN.
+//
+// The failure was injected at the fake RENDERER (TestAFailedEnvironmentTeardownIsNotConfirmed);
+// the APPLIER representation — a 403/409/500 from the API server — was uncovered,
+// and swallowing that error left the whole module green. The renderer would
+// return nil, the loop would confirm, the control plane would stamp
+// torn_down_at and stop advertising, and the namespace would leak forever with
+// the control plane believing it gone.
+func TestATeardownWhoseDeleteIsRefusedIsNotReportedDone(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	a.deleteErr = errors.New("403 forbidden")
+	r := newRenderer(a)
+	if err := r.TeardownEnvironment(context.Background(), testNamespace); err == nil {
+		t.Fatal("a refused Delete was reported as a successful teardown — the control plane " +
+			"would stamp torn_down_at and never ask again")
 	}
 }

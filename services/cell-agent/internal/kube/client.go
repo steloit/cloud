@@ -305,6 +305,19 @@ func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
 	return fmt.Sprintf("%s/namespaces/%s/%s/%s", prefix, namespace, plural, name), nil
 }
 
+// IsClusterScoped reports whether a kind lives outside any namespace.
+//
+// Exported as an INDEPENDENT ORACLE for teardown tests. tenancy decides scope by
+// parsing the rendered bytes (an object that declares metadata.namespace is
+// namespaced); this is the routing table Apply and Delete actually use. A test
+// that asserted one against a re-implementation of the other would be checking
+// its own arithmetic — asserting against this checks the two authorities agree.
+//
+// It is deliberately NOT what tenancy calls: tenancy classifies bytes it just
+// rendered, which is the stronger question (this table is keyed by Kind, and a
+// Kind it has never heard of would answer "namespaced" by default).
+func IsClusterScoped(kind string) bool { return clusterScoped[kind] }
+
 // clusterScoped is explicit for the same reason plurals is: guessing scope from
 // the kind name is how a manifest silently applies to the wrong path.
 var clusterScoped = map[string]bool{

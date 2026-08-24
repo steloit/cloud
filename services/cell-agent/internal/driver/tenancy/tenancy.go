@@ -58,7 +58,9 @@
 package tenancy
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -323,14 +325,39 @@ func TeardownObjects(namespace string) ([]Manifest, error) {
 }
 
 // declaresNamespace reports whether a rendered object sets metadata.namespace.
+//
+// It REFUSES a multi-document stream rather than answering for the first one.
+// yaml.Unmarshal decodes only the first document and returns a nil error, so a
+// stream whose SECOND object is cluster-scoped would be classified from the
+// first and silently never torn down. kube.applyOne refuses multi-doc for the
+// same reason (exactlyOneDocument): one object per []byte, or the metadata we
+// read does not describe all of the bytes.
 func declaresNamespace(manifest []byte) (bool, error) {
-	var doc struct {
+	type object struct {
 		Metadata struct {
 			Namespace string `yaml:"namespace"`
 		} `yaml:"metadata"`
 	}
-	if err := yaml.Unmarshal(manifest, &doc); err != nil {
-		return false, fmt.Errorf("parse rendered manifest: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(manifest))
+	var docs []object
+	for {
+		var o object
+		err := dec.Decode(&o)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, fmt.Errorf("parse rendered manifest: %w", err)
+		}
+		docs = append(docs, o)
 	}
-	return doc.Metadata.Namespace != "", nil
+	switch len(docs) {
+	case 0:
+		return false, fmt.Errorf("rendered manifest carries no object")
+	case 1:
+		return docs[0].Metadata.Namespace != "", nil
+	default:
+		return false, fmt.Errorf("rendered manifest carries %d documents; scope is per-object "+
+			"and reading only the first would silently mis-scope the rest", len(docs))
+	}
 }

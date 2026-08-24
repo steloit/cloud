@@ -871,3 +871,109 @@ func TestCreateServiceRefusesAScheduledEnvironmentAgainstRealPostgres(t *testing
 		t.Fatalf("the refusal is a 409 for some OTHER reason: %+v", p.Reasons)
 	}
 }
+
+// EVERY NON-`deleting` STATUS BLOCKS THE TEARDOWN — swept over the whole
+// vocabulary, not the two statuses that happened to be convenient.
+//
+// The gate was only ever exercised against `ready` and `deleting`, and two
+// mutations survived that: `NOT IN ('deleting','failed')` and
+// `NOT IN ('deleting','provisioning')`. Both are real harm — a `failed` service
+// still owns a PVC with customer data, and a `provisioning` one is mid-create —
+// and a sibling mutation dying says nothing about the other members of the set.
+//
+// The list is DERIVED from the status vocabulary, so a status added to the
+// machine joins this sweep automatically.
+func TestEveryNonDeletingStatusBlocksTheEnvironmentTeardownAgainstRealPostgres(t *testing.T) {
+	for _, status := range provisioning.StatusVocabulary() {
+		if status == "deleting" {
+			continue
+		}
+		t.Run(status, func(t *testing.T) {
+			pool, q := realDB(t)
+			seedEnv(t, pool, "env_sweep")
+			// observed == generation: fully converged, so the ONLY thing that can
+			// block the teardown is the status itself.
+			seedEnvService(t, pool, "env_sweep", "svc_"+status, status, 1, 1)
+			scheduleEnvDeletion(t, pool, "env_sweep")
+			svc, err := newReconciler(pool, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := advertisedEnvs(t, svc); len(got) != 0 {
+				t.Fatalf("a %q service did not block the teardown (advertised %v) — its "+
+					"namespace would be deleted with its PVC still in it", status, got)
+			}
+			// POSITIVE CONTROL: the same row, moved to a converged `deleting`,
+			// must release it. Without this the test would pass for a gate that
+			// blocks everything.
+			if _, err := pool.Exec(context.Background(),
+				`UPDATE services SET status = 'deleting' WHERE id = $1`, "svc_"+status); err != nil {
+				t.Fatal(err)
+			}
+			if got := advertisedEnvs(t, svc); len(got) != 1 {
+				t.Fatalf("a converged `deleting` service still blocks the teardown (advertised %v)", got)
+			}
+		})
+	}
+}
+
+// THE ENVIRONMENT POLL RESPECTS ITS LIMIT AND ITS ORDER, and touches the
+// heartbeat on a confirmation.
+//
+// All three were unasserted: `LIMIT $2` → `GREATEST($2,100000)`, `ORDER BY
+// deletion_scheduled_at, id` → `ORDER BY id DESC`, and deleting
+// TouchCellHeartbeat from ConfirmEnvironmentTeardown all survived.
+func TestTheEnvironmentPollPagesAndOrdersAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	for _, id := range []string{"env_c", "env_a", "env_b"} {
+		seedEnv(t, pool, id)
+		scheduleEnvDeletion(t, pool, id)
+		// Distinct schedule times, so the ORDER BY has something to order by.
+		if _, err := pool.Exec(ctx,
+			`UPDATE environments SET deletion_scheduled_at = now() WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int32{1, 2, 100} {
+		st, err := svc.Desired(ctx, "cell-0", 0, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := int(limit)
+		if want > 3 {
+			want = 3
+		}
+		if len(st.Environments) != want {
+			t.Fatalf("limit %d returned %d environments, want %d", limit, len(st.Environments), want)
+		}
+	}
+	// Oldest scheduled first: the environment waiting longest is served first.
+	st, err := svc.Desired(ctx, "cell-0", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Environments[0].ID != "env_c" {
+		t.Errorf("first environment = %q, want env_c (scheduled first) — the poll is not "+
+			"ordered by how long each has been waiting", st.Environments[0].ID)
+	}
+
+	// The heartbeat rides the confirmation, as it rides the writeback.
+	var before, after time.Time
+	if err := pool.QueryRow(ctx, `SELECT agent_last_seen_at FROM cells WHERE id='cell-0'`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_c"); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT agent_last_seen_at FROM cells WHERE id='cell-0'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if !after.After(before) {
+		t.Error("a confirmation did not touch the cell heartbeat")
+	}
+}
