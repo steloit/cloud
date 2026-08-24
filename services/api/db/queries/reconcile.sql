@@ -55,3 +55,79 @@ UPDATE services
 SET desired = $2, generation = generation + 1
 WHERE id = $1
 RETURNING *;
+
+-- name: ListEnvironmentTeardownsForCell :many
+-- The environment half of the agent's poll: environments in this cell whose
+-- namespace still has to be removed.
+--
+-- THE `NOT EXISTS` IS A SAFETY GATE, NOT AN OPTIMISATION. Deleting a namespace
+-- deletes everything in it, so advertising an environment before its services
+-- are actually gone would tear down a still-terminating CNPG cluster.
+-- DeleteEnvironment only requires every service to have REACHED `deleting`; that
+-- is not the same as torn down, so the gate is here rather than there.
+--
+-- "Actually gone" is `status = 'deleting' AND observed_generation >= generation`.
+-- That is only as strong as what `gone` MEANS, and the first cut of this got it
+-- wrong: the renderer used to issue its deletes and report `gone` on the next
+-- line, while Kubernetes answers 2xx the moment it ACCEPTS a delete — finalizers
+-- and graceful termination still pending. The renderer now observes the Cluster
+-- absent before reporting `gone`, which is what makes this predicate mean what
+-- it says. If that check is ever removed, this gate silently weakens to "the
+-- delete was accepted" and a database gets deleted mid-termination.
+--
+-- It is NOT row absence: nothing in the tree deletes a service row.
+--
+-- NOT a final-backup guarantee. US-3.5 (the final backup) is `status: blocked`,
+-- so there is no such contract to honour yet — an earlier version of this
+-- comment claimed one. What is guaranteed is only that the workload is gone
+-- before its namespace is.
+--
+-- cell_id lives on PROJECTS, not on environments, hence the join.
+SELECT e.id, e.project_id, p.org_id
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE p.cell_id = $1
+  AND e.deletion_scheduled_at IS NOT NULL
+  AND e.torn_down_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM services s
+      WHERE s.env_id = e.id
+        AND (s.status <> 'deleting' OR s.observed_generation < s.generation)
+  )
+ORDER BY e.deletion_scheduled_at, e.id
+LIMIT $2;
+
+-- name: MarkEnvironmentTornDown :execrows
+-- The cell confirming the namespace is gone.
+--
+-- IT CARRIES THE SAME `NOT EXISTS` FENCE AS THE POLL, and that is not
+-- belt-and-braces — `torn_down_at` is a ONE-WAY LATCH with no reset. The agent
+-- polls, then deletes, then confirms; if a service is created in that
+-- environment in between, confirming without the fence latches an environment
+-- that is no longer eligible. It is never advertised again, so when that service
+-- is later deleted its namespace leaks FOREVER — exactly the leak this task
+-- exists to close, reintroduced through the back door.
+--
+-- 0 rows means "not eligible", which the caller renders as a refusal (409)
+-- rather than a success. That covers all three ways to be ineligible: never
+-- scheduled, already confirmed, or something is alive in there again.
+UPDATE environments e
+SET torn_down_at = now()
+WHERE e.id = $1
+  AND e.deletion_scheduled_at IS NOT NULL
+  AND e.torn_down_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM services s
+      WHERE s.env_id = e.id
+        AND (s.status <> 'deleting' OR s.observed_generation < s.generation)
+  );
+
+-- name: GetEnvironmentForCell :one
+-- Resolves an environment WITHIN a cell, so a reconciler token cannot confirm a
+-- teardown for an environment on a cell it does not own. Existence is not leaked
+-- (the caller renders 404 for both "no such environment" and "not your cell"),
+-- the same rule the service path follows.
+SELECT e.id, e.project_id, p.org_id, e.deletion_scheduled_at, e.torn_down_at
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE e.id = $1 AND p.cell_id = $2;

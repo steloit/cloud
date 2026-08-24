@@ -147,7 +147,41 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 				return "", fmt.Errorf("render: delete %s/%s: %w", o.Kind, o.Name, err)
 			}
 		}
-		r.log.Info("converged: teardown applied", "service", svc.ID, "namespace", namespace)
+		// A DELETE THAT WAS ACCEPTED IS NOT A WORKLOAD THAT IS GONE.
+		//
+		// Kubernetes answers 2xx the MOMENT it accepts a delete, with finalizers
+		// and graceful termination still pending — and a CNPG Cluster has both.
+		// Reporting `gone` on the strength of that 2xx reports acceptance as
+		// completion, and everything downstream reads `gone` as absence:
+		// US-3.3h converges `deleting` + `gone`, and US-3.3b then advertises the
+		// environment's NAMESPACE for deletion, which would remove a database
+		// whose pods are still terminating and whose WAL is still archiving.
+		//
+		// So observe it. "" is a real 404 — the Cluster is actually gone — and
+		// anything else means still terminating, which is ErrNotConverged: the
+		// apply landed, the row stays outstanding, and the next tick re-checks.
+		// That is the same shape the provisioning path already uses, arrived at
+		// from the other end.
+		// The name is taken from the objects we just deleted, NOT re-derived:
+		// they are dnsName-sanitized by the driver, and observing a name the
+		// driver did not use would 404 and read as "gone" — the same
+		// wrong-name-reads-as-absent trap the comment above this block names.
+		var cluster string
+		for _, o := range objs {
+			if o.Kind == "Cluster" {
+				cluster = o.Name
+			}
+		}
+		if cluster == "" {
+			return "", fmt.Errorf("render: teardown of %s enumerated no Cluster to observe — "+
+				"reporting gone would be reporting a delete nobody confirmed", svc.ID)
+		}
+		if phase, err := r.applier.Observe(ctx, namespace, cluster); err != nil {
+			return "", fmt.Errorf("render: observe %s during teardown: %w", svc.ID, err)
+		} else if phase != "" {
+			return "", fmt.Errorf("%w: %s is still terminating (%s)", agent.ErrNotConverged, svc.ID, phase)
+		}
+		r.log.Info("converged: teardown complete", "service", svc.ID, "namespace", namespace)
 		return "gone", nil
 	}
 
@@ -324,4 +358,48 @@ func instancesOf(desired map[string]any) int {
 		}
 	}
 	return 1
+}
+
+// TeardownEnvironment removes an environment's cluster-scoped objects — today
+// the namespace, which takes the ResourceQuota, the LimitRange and every
+// workload inside it along with it.
+//
+// SAFE ONLY BECAUSE THE CONTROL PLANE GATES IT. Deleting a namespace deletes
+// everything in it, including a database. What makes that acceptable is
+// server-side: ListEnvironmentTeardownsForCell does not advertise an environment
+// until every service in it is `deleting` AND has caught up its observed
+// generation, so a still-terminating CNPG cluster can never be inside one of
+// these. This function deliberately does NOT re-check that — it has no view of
+// the control plane's intent and a second, weaker copy of the rule would be
+// worse than none. It removes what it is told to remove.
+//
+// IDEMPOTENT: kube.Delete maps a 404 to success, so a namespace already gone is
+// not an error. That matters because the confirmation can fail after the delete
+// succeeded, and the next tick will re-run this.
+func (r *CNPGRenderer) TeardownEnvironment(ctx context.Context, namespace string) error {
+	// The namespace arrives over the wire and is interpolated into a request
+	// path, so it MUST be validated before anything is deleted — a teardown is
+	// the one operation where a wrong-but-plausible value is unrecoverable.
+	//
+	// That validation is TeardownObjects', not a second one here: it renders the
+	// real object set, and Render refuses an invalid namespace before producing
+	// anything. An explicit ValidateNamespace call above this line was measured
+	// to be an equivalent mutant — removing it failed no test, because nothing
+	// can reach a Delete without going through Render first. A guard nothing can
+	// distinguish is not a guard.
+	objs, err := tenancy.TeardownObjects(namespace)
+	if err != nil {
+		return err
+	}
+	for _, o := range objs {
+		// The namespace is passed as the SCOPE, which resourcePath ignores for a
+		// cluster-scoped kind — it is the object's own name that addresses it.
+		if err := r.applier.Delete(ctx, namespace, o.Kind, o.Name); err != nil {
+			return fmt.Errorf("render: delete %s/%s for environment teardown: %w",
+				o.Kind, o.Name, err)
+		}
+		r.log.Info("environment object deleted", "kind", o.Kind, "name", o.Name,
+			"namespace", namespace)
+	}
+	return nil
 }

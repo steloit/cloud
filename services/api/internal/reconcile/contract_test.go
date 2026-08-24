@@ -136,3 +136,90 @@ func TestTheWireGateAcceptsEverythingTheContractAdvertises(t *testing.T) {
 		}
 	}
 }
+
+// THE TEARDOWN ROUTE AND ITS ENUM-OF-ONE ARE BOUND TO THE CONTRACT TOO.
+//
+// US-3.12 bound the /status enum in both directions; US-3.3b added a route and a
+// second enum and extended neither. The route is hand-mounted on a ServeMux, so
+// no generated server pins the path — which is exactly how a client posting to
+// the wrong path stays green.
+func TestTheTeardownRouteMatchesTheContract(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile),
+		"..", "..", "..", "..", "docs", "product", "08-api", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]struct {
+			Post struct {
+				RequestBody struct {
+					Content map[string]struct {
+						Schema struct {
+							Properties struct {
+								Observed struct {
+									Enum []string `yaml:"enum"`
+								} `yaml:"observed"`
+							} `yaml:"properties"`
+						} `yaml:"schema"`
+					} `yaml:"content"`
+				} `yaml:"requestBody"`
+			} `yaml:"post"`
+			Get struct {
+				Responses map[string]struct {
+					Content map[string]struct {
+						Schema struct {
+							Required []string `yaml:"required"`
+						} `yaml:"schema"`
+					} `yaml:"content"`
+				} `yaml:"responses"`
+			} `yaml:"get"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	const route = "/reconcile/{cell}/environments/{env}/teardown"
+	p, ok := doc.Paths[route]
+	if !ok {
+		t.Fatalf("the contract declares no %q — the handler mounts a path nothing describes", route)
+	}
+	enum := p.Post.RequestBody.Content["application/json"].Schema.Properties.Observed.Enum
+	if len(enum) != 1 || enum[0] != "gone" {
+		t.Fatalf("`observed` enum = %v, want exactly [gone] — a teardown that did not finish "+
+			"is reported by NOT calling this", enum)
+	}
+
+	// `environments` must be REQUIRED on the poll, or a client may treat its
+	// absence as "this server does not do teardowns".
+	req := doc.Paths["/reconcile/{cell}/desired"].Get.Responses["200"].
+		Content["application/json"].Schema.Required
+	var hasEnvs, hasSvcs bool
+	for _, r := range req {
+		hasEnvs = hasEnvs || r == "environments"
+		hasSvcs = hasSvcs || r == "services"
+	}
+	if !hasEnvs || !hasSvcs {
+		t.Fatalf("the /desired 200 requires %v, want both services and environments", req)
+	}
+
+	// And the handler must refuse everything the enum excludes — asserted here
+	// against the CONTRACT's list rather than a retyped one.
+	ts, q := mountEnv(t)
+	for _, bad := range []string{"ready", "failed", "provisioning", "degraded", "deleting", "suspended"} {
+		r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "s3cret",
+			`{"observed":"`+bad+`"}`)
+		if r.StatusCode != 422 {
+			t.Errorf("observed=%q: want 422, got %d", bad, r.StatusCode)
+		}
+	}
+	if len(q.tornDown) != 0 {
+		t.Fatalf("a refused `observed` still tore an environment down: %v", q.tornDown)
+	}
+	// Positive control: the one value the enum admits is accepted.
+	if r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "s3cret",
+		`{"observed":"`+enum[0]+`"}`); r.StatusCode != 200 {
+		t.Fatalf("the contract's own enum value %q was refused with %d", enum[0], r.StatusCode)
+	}
+}

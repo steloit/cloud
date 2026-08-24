@@ -35,6 +35,11 @@ type fakeApplier struct {
 	deleteErrAt  int   // fail on the Nth Delete (0 = the first)
 	applies      int
 	observedName string
+
+	// onDelete runs after a Delete is applied, so a test can model an object
+	// that OUTLIVES an accepted delete (a finalizer, graceful termination) —
+	// which is what a real API server does and what the fake otherwise hides.
+	onDelete func()
 }
 
 func newFakeApplier(phase string) *fakeApplier {
@@ -98,6 +103,9 @@ func (f *fakeApplier) Delete(_ context.Context, ns, kind, name string) error {
 	}
 	f.deleted = append(f.deleted, ns+"/"+kind+"/"+name)
 	delete(f.live, ns+"/"+name)
+	if f.onDelete != nil {
+		f.onDelete()
+	}
 	return nil
 }
 

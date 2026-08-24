@@ -3,10 +3,13 @@ package render
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
+	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 )
 
 func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
@@ -282,5 +285,226 @@ func TestAServiceWithAnUncatalogedSizeIsStillDeletable(t *testing.T) {
 	create.Desired["shape"] = map[string]any{"size": "performance-2"}
 	if _, err := r.Converge(ctx, create); err == nil {
 		t.Fatal("create accepted an uncatalogued size — the refusal was removed, not relocated")
+	}
+}
+
+// THE TEARDOWN COVERS EVERY OBJECT tenancy.Render PRODUCES.
+//
+// Not by listing them — by rendering the real set and checking each one is
+// removed by SOMETHING. A namespaced object dies with the namespace; a
+// cluster-scoped one must appear in TeardownObjects and be deleted by name.
+//
+// This is the invariant that survives US-3.3c widening the object set: whatever
+// it adds is covered automatically if it is namespaced, and fails here loudly if
+// it is cluster-scoped and not torn down. A hardcoded list would silently stop
+// covering it, which is the same defect envObjectKeys exists to avoid.
+func TestTeardownCoversEveryObjectTenancyRenders(t *testing.T) {
+	const ns = testNamespace
+	all, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) < 2 {
+		t.Fatalf("tenancy.Render produced %d objects — this test would prove almost nothing", len(all))
+	}
+	torn, err := tenancy.TeardownObjects(ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tornByKind := map[string]string{}
+	for _, m := range torn {
+		tornByKind[m.Kind] = m.Name
+	}
+
+	sawClusterScoped := 0
+	for _, m := range all {
+		// The oracle is kube's OWN scope table, not a re-implementation of the
+		// production classifier and not a string match. `strings.Contains(YAML,
+		// "namespace: "+ns)` agreed with the parser on today's objects and
+		// disagrees on realistic future ones — a quoted namespace, or a
+		// ClusterRoleBinding whose `subjects[].namespace` is not its own scope —
+		// so it would have failed with a message naming the wrong cause.
+		declared := !kube.IsClusterScoped(m.Kind)
+		if declared {
+			// Namespaced: removed by the namespace. It must NOT also be in the
+			// teardown set — deleting it by name is redundant, and doing so
+			// would mean the teardown depends on enumerating them correctly.
+			if _, ok := tornByKind[m.Kind]; ok {
+				t.Errorf("%s/%s is namespaced and is ALSO deleted explicitly — the namespace "+
+					"already removes it, and an explicit list is what goes stale", m.Kind, m.Name)
+			}
+			continue
+		}
+		sawClusterScoped++
+		name, ok := tornByKind[m.Kind]
+		if !ok {
+			t.Errorf("%s/%s is CLUSTER-SCOPED and nothing tears it down — it outlives the "+
+				"environment, which is exactly the leak US-3.3b closes", m.Kind, m.Name)
+			continue
+		}
+		if name != m.Name {
+			t.Errorf("%s: teardown deletes %q but Render creates %q", m.Kind, name, m.Name)
+		}
+	}
+	if sawClusterScoped == 0 {
+		t.Fatal("no cluster-scoped object in tenancy.Render's output — the namespace itself " +
+			"should be one, so this test is not measuring what it claims")
+	}
+	if len(torn) != sawClusterScoped {
+		t.Errorf("teardown deletes %d objects but only %d of Render's are cluster-scoped",
+			len(torn), sawClusterScoped)
+	}
+}
+
+// A TEARDOWN REMOVES ONE ENVIRONMENT'S NAMESPACE AND NO OTHER — the AC's
+// "proven with two environments present, not one".
+func TestEnvironmentTeardownRemovesOnlyItsOwnNamespace(t *testing.T) {
+	const nsA = "env-0123456789abcdef0123456789abcdef"
+	const nsB = "env-fedcba9876543210fedcba9876543210"
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+
+	// Both environments exist, each with its own namespace-scoped objects.
+	for _, ns := range []string{nsA, nsB} {
+		objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+			Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw [][]byte
+		for _, o := range objs {
+			raw = append(raw, o.YAML)
+		}
+		if err := a.Apply(context.Background(), ns, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(a.live)
+
+	if err := r.TeardownEnvironment(context.Background(), nsA); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+
+	// A's namespace object is gone...
+	if a.live[nsA+"/"+nsA] {
+		t.Error("the environment's own Namespace survived its teardown")
+	}
+	// ...and B is untouched, every object of it. (A's namespaced objects are
+	// still in the fake: an API server cascades them with the namespace, this
+	// fake does not, and simulating that would be testing Kubernetes rather than
+	// the teardown. What is asserted here is which object we DELETE.)
+	for _, o := range mustRenderEnvObjects(t, nsB) {
+		if !a.live[nsB+"/"+o.Name] {
+			t.Errorf("tearing down %s removed %s/%s from the OTHER environment",
+				nsA, nsB, o.Name)
+		}
+	}
+	if len(a.live) >= before {
+		t.Error("the teardown deleted nothing at all")
+	}
+}
+
+func mustRenderEnvObjects(t *testing.T, ns string) []tenancy.Manifest {
+	t.Helper()
+	objs, err := tenancy.Render(tenancy.Spec{Namespace: ns, Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return objs
+}
+
+// A NAMESPACE THE CONTROL PLANE DID NOT RESOLVE IS REFUSED, NOT DELETED.
+//
+// The namespace arrives over the wire and is interpolated into a request path. A
+// teardown is the one operation where a wrong-but-plausible value is
+// unrecoverable, so it is validated before anything is deleted.
+func TestEnvironmentTeardownRefusesAnInvalidNamespace(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	for _, ns := range []string{"", "Env-Upper", "kube-system/../default", "a b", strings.Repeat("x", 300)} {
+		if err := r.TeardownEnvironment(context.Background(), ns); err == nil {
+			t.Errorf("teardown accepted the namespace %q", ns)
+		}
+		if len(a.deleted) != 0 {
+			t.Fatalf("teardown of %q deleted %v before validating", ns, a.deleted)
+		}
+	}
+}
+
+// A DELETE THAT WAS ACCEPTED IS NOT A WORKLOAD THAT IS GONE.
+//
+// Kubernetes answers 2xx the MOMENT it accepts a delete — finalizers and
+// graceful termination still pending, and a CNPG Cluster has both. The teardown
+// used to report `gone` on the strength of that 2xx, which reports acceptance as
+// completion. Everything downstream reads `gone` as absence: US-3.3h converges
+// `deleting` + `gone`, and US-3.3b then advertises the environment's NAMESPACE
+// for deletion — removing a database whose pods are still terminating.
+//
+// So the teardown observes the Cluster absent first. Here the object survives
+// the delete (a finalizer, modelled by re-adding it), and the converge must NOT
+// report gone.
+func TestATeardownDoesNotReportGoneWhileTheClusterSurvives(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	if _, err := r.Converge(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	// The delete is accepted, but a finalizer keeps the object alive: whatever
+	// Delete removes, it is still there when we look.
+	a.mu.Lock()
+	live := map[string]bool{}
+	for k, v := range a.live {
+		live[k] = v
+	}
+	// onDelete runs INSIDE Delete, which already holds f.mu — so it must not
+	// take the lock again.
+	a.onDelete = func() { a.live = live }
+	a.mu.Unlock()
+
+	status, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
+	if status == "gone" {
+		t.Fatal("reported `gone` while the Cluster is still present — the control plane would " +
+			"converge the service and then delete the whole namespace out from under a " +
+			"terminating database")
+	}
+	if !errors.Is(err, agent.ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged — the teardown landed and is not finished", err)
+	}
+}
+
+// ...and once it IS absent, the same converge reports gone.
+func TestATeardownReportsGoneOnceTheClusterIsAbsent(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
+	if err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+	if status != "gone" {
+		t.Fatalf("status = %q, want gone once the Cluster is actually absent", status)
+	}
+}
+
+// A DELETE THE API SERVER REFUSES IS NOT A TEARDOWN.
+//
+// The failure was injected at the fake RENDERER (TestAFailedEnvironmentTeardownIsNotConfirmed);
+// the APPLIER representation — a 403/409/500 from the API server — was uncovered,
+// and swallowing that error left the whole module green. The renderer would
+// return nil, the loop would confirm, the control plane would stamp
+// torn_down_at and stop advertising, and the namespace would leak forever with
+// the control plane believing it gone.
+func TestATeardownWhoseDeleteIsRefusedIsNotReportedDone(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	a.deleteErr = errors.New("403 forbidden")
+	r := newRenderer(a)
+	if err := r.TeardownEnvironment(context.Background(), testNamespace); err == nil {
+		t.Fatal("a refused Delete was reported as a successful teardown — the control plane " +
+			"would stamp torn_down_at and never ask again")
 	}
 }

@@ -32,6 +32,7 @@ func NewHandlers(svc *Service, auth *Auth) *Handlers { return &Handlers{svc: svc
 func (h *Handlers) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/reconcile/{cell}/desired", h.desired)
 	mux.HandleFunc("POST /v1/reconcile/{cell}/status", h.status)
+	mux.HandleFunc("POST /v1/reconcile/{cell}/environments/{env}/teardown", h.envTeardown)
 }
 
 // gate runs the auth ladder shared by both endpoints:
@@ -86,12 +87,60 @@ func (h *Handlers) desired(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = v
 	}
-	services, err := h.svc.Desired(r.Context(), cell, since, int32(limit))
+	state, err := h.svc.Desired(r.Context(), cell, since, int32(limit))
 	if err != nil {
 		h.writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"services": services})
+	// Both keys are ALWAYS present, and both are non-nil slices, because the
+	// contract marks them required. A nil slice marshals to `null`, which a
+	// generated client decodes as absent — indistinguishable from "this control
+	// plane is too old to send it", which is exactly the ambiguity a required
+	// field exists to remove.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"services": state.Services, "environments": state.Environments,
+	})
+}
+
+// envTeardownBody mirrors the contract. `observed` is an enum of ONE: the only
+// thing a cell can say about a namespace it was asked to remove is that it is
+// gone. A teardown that did not finish is reported by NOT calling this, which
+// leaves the environment outstanding for the next tick.
+type envTeardownBody struct {
+	Observed string `json:"observed"`
+}
+
+func (h *Handlers) envTeardown(w http.ResponseWriter, r *http.Request) {
+	cell, ok := h.gate(w, r)
+	if !ok {
+		return
+	}
+	env := r.PathValue("env")
+	if env == "" {
+		problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{
+			{Field: "env", Detail: "required"}}))
+		return
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	var b envTeardownBody
+	if err := dec.Decode(&b); err != nil {
+		problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{
+			{Field: "body", Detail: "invalid JSON: " + err.Error()}}))
+		return
+	}
+	if b.Observed != "gone" {
+		problem.Write(w, r, problem.ValidationFailed([]problem.FieldError{
+			{Field: "observed", Detail: "must be `gone` — the only thing a cell can observe " +
+				"about a namespace it was asked to remove; a teardown that did not finish is " +
+				"reported by not calling this at all"}}))
+		return
+	}
+	if err := h.svc.ConfirmEnvironmentTeardown(r.Context(), cell, env); err != nil {
+		h.writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"environment_id": env, "torn_down": true})
 }
 
 // statusBody mirrors the contract's request schema. Decoded strictly: an
@@ -190,6 +239,18 @@ func (h *Handlers) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrUnknownCell):
 		problem.Write(w, r, problem.NotFound("cell or service"))
+	// 404, never 403, and never a distinct "exists but not yours": a reconciler
+	// token must not be able to enumerate environments on cells it does not own.
+	case errors.Is(err, ErrUnknownEnvironment):
+		problem.Write(w, r, problem.NotFound("cell or environment"))
+	// 409 and NOT retryable — the row is not outstanding, so an agent that
+	// retried would loop forever. Distinct from the writeback's 409s, which all
+	// mean "come back next tick".
+	case errors.Is(err, ErrTeardownNotOutstanding):
+		problem.Write(w, r, problem.Conflict(
+			[]string{"this environment is not awaiting a namespace teardown"},
+			"Stop reporting it: either no teardown was scheduled, or one was already confirmed. "+
+				"The environment will not appear in /desired again."))
 	case errors.Is(err, ErrStaleGeneration):
 		problem.Write(w, r, problem.Conflict(
 			[]string{"the reported generation is not the one desired currently holds"},

@@ -5,6 +5,20 @@ export type ClientOptions = {
 };
 
 /**
+ * An environment whose namespace still has to be removed. The NAMESPACE is sent, not derived agent-side: the control plane resolved it (ADR-0012, sanitize(env id)) and is therefore the one place that knows it exactly. US-3.3a shipped a second derivation agent-side and it named nothing the control plane knew.
+ */
+export type DesiredEnvironmentTeardown = {
+    /**
+     * environment id, e.g. env_9f3c1a2b — what the teardown is confirmed against
+     */
+    id: string;
+    /**
+     * the Kubernetes namespace to remove, e.g. env-9f3c1a2b
+     */
+    namespace: string;
+};
+
+/**
  * One service's desired state as the cell-agent sees it (US-1.3). Product/shape/intent only — substrate names never appear here (D8).
  */
 export type DesiredService = {
@@ -4279,10 +4293,72 @@ export type GetDesiredStateResponses = {
      */
     200: {
         services: Array<DesiredService>;
+        /**
+         * Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case.
+         */
+        environments: Array<DesiredEnvironmentTeardown>;
     };
 };
 
 export type GetDesiredStateResponse = GetDesiredStateResponses[keyof GetDesiredStateResponses];
+
+export type PostEnvironmentTeardownData = {
+    body: {
+        /**
+         * the only thing a cell can report about a namespace it was asked to remove. An enum of one, deliberately: a teardown that did not finish is reported by NOT calling this, so the environment stays outstanding and the next tick retries.
+         */
+        observed: 'gone';
+    };
+    path: {
+        /**
+         * cell id, e.g. cell-0
+         */
+        cell: string;
+        /**
+         * environment id, e.g. env_9f3c1a2b
+         */
+        env: string;
+    };
+    query?: never;
+    url: '/reconcile/{cell}/environments/{env}/teardown';
+};
+
+export type PostEnvironmentTeardownErrors = {
+    /**
+     * auth_failed — not a reconciler-scoped token
+     */
+    401: unknown;
+    /**
+     * Unknown environment, or one on a cell this token does not own — existence is not leaked (404, never 403)
+     */
+    404: Problem;
+    /**
+     * Conflict with blocking reasons
+     */
+    409: Problem;
+    /**
+     * Field validation errors (inline under field)
+     */
+    422: Problem;
+    /**
+     * No reconciler secret configured — the plane is visibly closed, never silently open
+     */
+    503: Problem;
+};
+
+export type PostEnvironmentTeardownError = PostEnvironmentTeardownErrors[keyof PostEnvironmentTeardownErrors];
+
+export type PostEnvironmentTeardownResponses = {
+    /**
+     * The namespace is confirmed gone; the environment will not be advertised again
+     */
+    200: {
+        environment_id: string;
+        torn_down: boolean;
+    };
+};
+
+export type PostEnvironmentTeardownResponse = PostEnvironmentTeardownResponses[keyof PostEnvironmentTeardownResponses];
 
 export type PostReconcileStatusData = {
     body: {

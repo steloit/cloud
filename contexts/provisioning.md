@@ -90,12 +90,12 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   Postgres does not promise WHERE evaluation order (so `CASE` is still right), but that was not the mechanism
   — **naming the wrong cause teaches the wrong reflex** (O11).
 - **Verify the no-mutation baseline is GREEN before AND after any mutation sweep.** A module-only
-  `cp -R` is red on arrival wherever tests reach outside the module, and the list grows — find it by
-  running the copy, never by recall: `services/api` needs `docs/dev/money-range-audit.md`;
-  `services/cell-agent` needs `AGENTS.md` + `infra/{k8s,spike}` + `pricing.json` **and**
-  `billing/plans.json` (T3.4d hit that one after the first four looked sufficient). US-3.3a shipped a
-  25-row table on a RED baseline — every row unfalsifiable — and US-3.3h restored only BEFORE each
-  mutation, so its "green after" measured the last one. Assert the mutation applied, and both sides.
+  `cp -R` is red on arrival wherever tests reach outside the module, and the list keeps growing —
+  find it by RUNNING the copy, never by recall. So far: `services/api` needs
+  `docs/dev/money-range-audit.md` + `docs/product/08-api/openapi.yaml`; `services/cell-agent` needs
+  `AGENTS.md` + `infra/{k8s,spike}` + `pricing.json` + `billing/plans.json`. US-3.3a shipped a
+  25-row table on a RED baseline — every row unfalsifiable. Assert the mutation APPLIED (two false
+  SURVIVEDs came from a match string that silently missed) and that the clean copy passes BOTH sides.
 - **If the same invariant must hold at more than one site, give it one owner — prefer one the compiler
   enforces (ADR-0014).** US-3.8 spent six review rounds on ONE repeated error: a guard applied per-site
   instead of made unrepresentable. An overflow bound went into one arm of a three-arm pricing switch

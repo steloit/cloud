@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -385,5 +386,149 @@ func TestHTTPAnOmittedStatusIsNotGone(t *testing.T) {
 	}
 	if got := q2.services["svc_s"].ObservedGeneration; got == 5 {
 		t.Error("`gone` on a live service advanced observed_generation")
+	}
+}
+
+// mountEnv is mount(t) with an environment awaiting teardown in cell-0.
+func mountEnv(t *testing.T) (*httptest.Server, *fakeQ) {
+	t.Helper()
+	ts, q, _ := mount(t)
+	q.envCell = map[string]string{"env_a": "cell-0", "env_far": "cell-9", "env_unsched": "cell-0"}
+	q.envState = map[string]struct{ scheduled, torn bool }{
+		"env_a":       {scheduled: true},
+		"env_unsched": {},
+	}
+	q.envs = []store.ListEnvironmentTeardownsForCellRow{{ID: "env_a"}}
+	return ts, q
+}
+
+// THE POLL CARRIES ENVIRONMENTS, and both keys are always present.
+//
+// A nil slice marshals to `null`, which a generated client decodes as absent —
+// indistinguishable from "this control plane is too old to send it". The
+// contract marks both required precisely to remove that ambiguity.
+func TestHTTPDesiredCarriesEnvironmentsAlways(t *testing.T) {
+	ts, _ := mountEnv(t)
+	_, m := call(t, ts, "GET", "/v1/reconcile/cell-0/desired", "s3cret", "")
+	envs, ok := m["environments"].([]any)
+	if !ok {
+		t.Fatalf("no `environments` key in the poll (or it is null): %v", m)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("want one environment awaiting teardown, got %v", envs)
+	}
+	e, _ := envs[0].(map[string]any)
+	if e["id"] != "env_a" {
+		t.Errorf("environment id = %v", e["id"])
+	}
+	if e["namespace"] != "env-a" {
+		t.Errorf("namespace = %v, want env-a (the control plane resolves it, ADR-0012)", e["namespace"])
+	}
+
+	// And when there is nothing to tear down, the key is an empty ARRAY, not null.
+	ts2, q2 := mountEnv(t)
+	q2.envs = nil
+	_, m2 := call(t, ts2, "GET", "/v1/reconcile/cell-0/desired", "s3cret", "")
+	raw, err := json.Marshal(m2["environments"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "[]" {
+		t.Errorf("`environments` with no work marshalled as %s, want [] — null reads as "+
+			"'this server does not support teardowns'", raw)
+	}
+}
+
+func TestHTTPEnvironmentTeardownConfirms(t *testing.T) {
+	ts, q := mountEnv(t)
+	r, m := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	if r.StatusCode != 200 {
+		t.Fatalf("want 200, got %d: %v", r.StatusCode, m)
+	}
+	if len(q.tornDown) != 1 || q.tornDown[0] != "env_a" {
+		t.Fatalf("torn down %v, want [env_a]", q.tornDown)
+	}
+	// A replay is a 409, not a second teardown.
+	r2, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	if r2.StatusCode != 409 {
+		t.Fatalf("replay: want 409, got %d", r2.StatusCode)
+	}
+	if len(q.tornDown) != 1 {
+		t.Fatalf("the replay tore down again: %v", q.tornDown)
+	}
+}
+
+// AN ENVIRONMENT ON ANOTHER CELL IS 404 — never 403, and never a distinct
+// "exists but not yours", or a reconciler token could enumerate them.
+func TestHTTPEnvironmentTeardownDoesNotLeakOtherCells(t *testing.T) {
+	ts, q := mountEnv(t)
+	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_far/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	if r.StatusCode != 404 {
+		t.Fatalf("want 404 for an environment on cell-9, got %d", r.StatusCode)
+	}
+	// Byte-identical to a genuinely unknown environment: the two must not be
+	// distinguishable from the outside.
+	_, mFar := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_far/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	_, mNope := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_nope/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	if fmt.Sprint(mFar) != fmt.Sprint(mNope) {
+		t.Errorf("a foreign environment and a nonexistent one answer differently:\n far: %v\n none: %v",
+			mFar, mNope)
+	}
+	if len(q.tornDown) != 0 {
+		t.Fatalf("a foreign environment was torn down: %v", q.tornDown)
+	}
+}
+
+// AN ENVIRONMENT NOBODY SCHEDULED CANNOT BE TORN DOWN by a report. The
+// confirmation records a teardown; it must not be able to invent one.
+func TestHTTPAnUnscheduledEnvironmentCannotBeConfirmed(t *testing.T) {
+	ts, q := mountEnv(t)
+	r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_unsched/teardown", "s3cret",
+		`{"observed":"gone"}`)
+	if r.StatusCode != 409 {
+		t.Fatalf("want 409 for an environment with no scheduled deletion, got %d", r.StatusCode)
+	}
+	if len(q.tornDown) != 0 {
+		t.Fatalf("an unscheduled environment was marked torn down: %v", q.tornDown)
+	}
+}
+
+// `observed` IS AN ENUM OF ONE. A teardown that did not finish is reported by
+// NOT calling this, so anything other than `gone` is a malformed report — and
+// must not be read as a confirmation.
+func TestHTTPEnvironmentTeardownRefusesAnythingButGone(t *testing.T) {
+	for _, body := range []string{
+		`{"observed":"ready"}`, `{"observed":""}`, `{}`, `{"observed":"gone","extra":1}`, `not json`,
+	} {
+		ts, q := mountEnv(t)
+		r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "s3cret", body)
+		if r.StatusCode != 422 {
+			t.Errorf("body %s: want 422, got %d", body, r.StatusCode)
+		}
+		if len(q.tornDown) != 0 {
+			t.Errorf("body %s: marked torn down anyway: %v", body, q.tornDown)
+		}
+	}
+}
+
+// The teardown route sits behind the SAME auth ladder as the rest of the plane.
+func TestHTTPEnvironmentTeardownAuthLadder(t *testing.T) {
+	ts, _ := mountEnv(t)
+	if r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "",
+		`{"observed":"gone"}`); r.StatusCode != 401 {
+		t.Errorf("no token: want 401, got %d", r.StatusCode)
+	}
+	if r, _ := call(t, ts, "POST", "/v1/reconcile/cell-0/environments/env_a/teardown", "wrong",
+		`{"observed":"gone"}`); r.StatusCode != 401 {
+		t.Errorf("bad token: want 401, got %d", r.StatusCode)
+	}
+	if r, _ := call(t, ts, "POST", "/v1/reconcile/cell-9/environments/env_a/teardown", "s3cret",
+		`{"observed":"gone"}`); r.StatusCode != 404 {
+		t.Errorf("a cell this token does not own: want 404, got %d", r.StatusCode)
 	}
 }

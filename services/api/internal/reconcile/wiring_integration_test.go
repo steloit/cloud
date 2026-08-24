@@ -118,7 +118,7 @@ func outstanding(t *testing.T, rec *reconcile.Service, id string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range out {
+	for _, s := range out.Services {
 		if s.ID == id {
 			return true
 		}
