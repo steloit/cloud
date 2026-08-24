@@ -129,3 +129,17 @@ never hand-written · demo data from `19-canon` only.
 - The frame gallery HTML end-to-end — search your frame id instead.
 - `docs/product/19-canon/fixtures.json` raw — import via `packages/canon`.
 - `tasks/_archive/` — only when investigating a past decision in that exact area.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues (`steloit/cloud`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
