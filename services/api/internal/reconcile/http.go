@@ -109,10 +109,20 @@ type statusBody struct {
 	Event              string          `json:"event"`
 }
 
-var statusVocab = map[string]bool{
-	"provisioning": true, "ready": true, "degraded": true, "failed": true,
-	"suspended": true, "deleting": true, "gone": true, "": true,
-}
+// statusVocab is what the WIRE accepts, derived from the one ADR-024 definition
+// so the two cannot drift — plus the two values that are not statuses at all:
+// `gone` (the workload is absent) and "" (nothing reported).
+//
+// It is deliberately WIDER than what a cell may assert: it mirrors the
+// customer-facing ServiceStatus enum in the contract. provisioning.ReportableByCell
+// is the narrower authority check, applied just below.
+var statusVocab = func() map[string]bool {
+	v := map[string]bool{"gone": true, "": true}
+	for _, st := range provisioning.StatusVocabulary() {
+		v[st] = true
+	}
+	return v
+}()
 
 func (h *Handlers) status(w http.ResponseWriter, r *http.Request) {
 	cell, ok := h.gate(w, r)

@@ -39,12 +39,15 @@ func TestEveryObservationLandsOnALegalEdgeOrNoChange(t *testing.T) {
 	}
 }
 
-// The ADR-024 vocabulary as the DATABASE defines it
-// (platform/db/migrations/20260718203138_services.up.sql).
-var statusCheckVocab = map[string]bool{
-	"provisioning": true, "ready": true, "degraded": true,
-	"failed": true, "suspended": true, "deleting": true,
-}
+// The ADR-024 vocabulary, from the ONE definition rather than a fourth retyping.
+// The integration suite pins StatusVocabulary against the real CHECK constraint.
+var statusCheckVocab = func() map[string]bool {
+	v := map[string]bool{}
+	for _, st := range StatusVocabulary() {
+		v[st] = true
+	}
+	return v
+}()
 
 type pair struct{ from, observed string }
 
@@ -53,13 +56,18 @@ type pair struct{ from, observed string }
 // passed at 36 while an entire column of the vocabulary (`suspended`) was
 // missing from the report list — a self-check that cannot see what was never
 // enumerated is not a self-check.
-func everyPair() []pair {
-	froms := []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting", "", "not-a-status"}
-	// Everything reconcile/http.go's statusVocab admits, after the gone→""
-	// normalisation. `deleting` and `suspended` are in it because it mirrors the
+func sweepDomain() (froms, observeds []string) {
+	froms = []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting", "", "not-a-status"}
+	// Everything reconcile/http.go's statusVocab admits on the wire, plus junk.
+	// `deleting` and `suspended` are in it because that vocabulary mirrors the
 	// customer-facing enum — that they are ACCEPTED on the wire is exactly why
 	// the mapping has to answer for them.
-	observeds := []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting", "gone", ""}
+	observeds = []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting", "gone", "", "not-a-status"}
+	return froms, observeds
+}
+
+func everyPair() []pair {
+	froms, observeds := sweepDomain()
 	out := make([]pair, 0, len(froms)*len(observeds))
 	for _, f := range froms {
 		for _, o := range observeds {
@@ -69,17 +77,96 @@ func everyPair() []pair {
 	return out
 }
 
-func TestThePairSweepIsTotal(t *testing.T) {
-	if got, want := len(everyPair()), 8*8; got != want {
-		t.Fatalf("the sweep covers %d pairs, want %d — a sweep that shrinks silently proves less "+
-			"each time it is edited", got, want)
+// The sweep must cover the WHOLE vocabulary, not merely a lot of pairs.
+//
+// A count is not coverage: `len(everyPair()) == 8*8` stayed green with the
+// entire `suspended` row, the entire `suspended` column and the empty-`from` row
+// replaced by junk strings, because the product still came to 64. That is the
+// same defect as the `if checked < 30` floor this sweep replaced — a self-check
+// cannot see what was never enumerated. So assert MEMBERSHIP.
+func TestThePairSweepCoversTheWholeVocabulary(t *testing.T) {
+	has := func(hay []string, needle string) bool {
+		for _, h := range hay {
+			if h == needle {
+				return true
+			}
+		}
+		return false
+	}
+	froms, observeds := sweepDomain()
+	for status := range statusCheckVocab {
+		if !has(froms, status) {
+			t.Errorf("the services CHECK constraint allows %q and no pair starts from it", status)
+		}
+		if !has(observeds, status) {
+			t.Errorf("reconcile's statusVocab admits %q on the wire and no pair observes it", status)
+		}
+	}
+	for _, special := range []string{"", "not-a-status"} {
+		if !has(froms, special) {
+			t.Errorf("no pair starts from %q", special)
+		}
+		if !has(observeds, special) {
+			t.Errorf("no pair observes %q", special)
+		}
+	}
+	if !has(observeds, "gone") {
+		t.Error("no pair observes `gone`, which is the teardown signal on the wire")
+	}
+	if got, want := len(everyPair()), len(froms)*len(observeds); got != want {
+		t.Fatalf("the sweep covers %d pairs, want the full product %d", got, want)
 	}
 	seen := map[pair]bool{}
 	for _, c := range everyPair() {
 		if seen[c] {
-			t.Fatalf("duplicate pair %+v — a duplicate inflates the count without covering anything", c)
+			t.Fatalf("duplicate pair %+v — a duplicate inflates the product without covering anything", c)
 		}
 		seen[c] = true
+	}
+}
+
+// THE HALF THE SWEEPS ABOVE CANNOT SEE: SOMETHING MUST ACTUALLY CONVERGE.
+//
+// Every other invariant here is guarded by `if !o.Converged() { continue }`, so
+// they can only ever punish converging too EAGERLY. Measured: replacing the
+// whole body of ObservedStatus with `return Observation{}` — a mapping that does
+// nothing for all 72 pairs — left all of them green. Under-convergence is the
+// ORIGINAL defect of this task (409 every tick, retried forever, nothing
+// visible), so without this the sweep is blind to half the harm it claims.
+//
+// Stated as the harm, not as the implementation: if the cell reported a settled
+// status and the row now rests on exactly that status, there is nothing left to
+// watch and the generation MUST be finished. Anything else means the agent
+// re-applies that service forever.
+//
+// Held rows are excluded because they settle on different evidence (step 1: only
+// a confirmed teardown finishes a hold), which the held-row tests pin directly.
+func TestAnObservationThatComesToRestOnWhatWasReportedFinishesTheGeneration(t *testing.T) {
+	converging := 0
+	for _, c := range everyPair() {
+		if c.from == "deleting" || c.from == "suspended" {
+			continue
+		}
+		o := ObservedStatus(c.from, c.observed)
+		to, ok := o.Edge()
+		final := c.from
+		if ok {
+			final = to
+		}
+		if final != c.observed || !settledStatuses[final] {
+			continue
+		}
+		converging++
+		if !o.Converged() {
+			t.Errorf("from %q observing %q comes to rest on %q — a settled status the cell "+
+				"itself reported — and does NOT finish the generation. The row stays in "+
+				"ListDesiredForCell and the agent re-applies it every tick forever.",
+				c.from, c.observed, final)
+		}
+	}
+	if converging == 0 {
+		t.Fatal("no pair in the whole domain comes to rest on a settled reported status — the " +
+			"mapping is inert and every other invariant here would still pass")
 	}
 }
 
@@ -203,10 +290,16 @@ func TestReportableByCellExcludesExactlyTheLifecycleStates(t *testing.T) {
 // hops — the two-hop paths are `ready`+`failed` → degraded → failed and
 // `failed`+`ready` → provisioning → ready.
 //
-// Reaching a fixed point is NOT the same as converging: a permanently degraded
-// cluster settles at `degraded` and stays deliberately outstanding, which is
-// US-3.11's subject. What this rules out is the mapping oscillating forever
-// between two statuses while the cluster says the same thing every tick.
+// REACHING A FIXED POINT IS NOT THE SAME AS CONVERGING, and this test does not
+// claim it is. `degraded` + `degraded` and `provisioning` + `provisioning` take
+// no edge and never converge: the row stays in ListDesiredForCell and the agent
+// re-applies it every tick, forever. That is deliberate (an impaired row must
+// stay watched — `degraded` bills) and it is filed as US-3.13, which also
+// records that US-3.11 does NOT cover it.
+//
+// What this rules out is narrower and worth ruling out on its own: the mapping
+// oscillating between statuses while the cluster reports the same thing every
+// tick. The positive sweep above owns "something must actually converge".
 func TestEveryObservationReachesAFixedPointWithinTwoHops(t *testing.T) {
 	for _, c := range everyPair() {
 		from := c.from

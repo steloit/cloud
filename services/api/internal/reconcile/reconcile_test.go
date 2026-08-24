@@ -660,20 +660,70 @@ func TestWritebackLeavesAnUnconvergedRowOutstanding(t *testing.T) {
 	}
 }
 
-// A suspended service is not resumed by a converging agent, at the writeback.
-func TestWritebackNeverResumesASuspendedService(t *testing.T) {
-	s, q, _ := newFixture()
-	q.services["svc_s"] = store.Service{
-		ID: "svc_s", CellID: "cell-0", Status: "suspended", Generation: 2, ObservedGeneration: 1,
+// A HELD ROW IS NEITHER RESUMED NOR FINISHED BY A CONTRADICTING REPORT.
+//
+// Not resumed: `suspended → ready` is a legal edge, so a converging agent that
+// sees a healthy cluster would otherwise silently un-suspend the service and
+// restart its metering span.
+//
+// And not FINISHED, which is the half that costs a teardown. `DeleteService`
+// bumps the generation and only then transitions to `deleting`, so a deleting
+// row is outstanding by construction — that is what redelivers the
+// `deleting:true` desired doc. One `ready` report from a cell that has torn
+// nothing down would advance observed_generation, drop the row out of
+// ListDesiredForCell, and leave the cluster running forever while DeleteService
+// answers "deletion already in progress".
+func TestAHeldRowIsNeitherResumedNorFinishedByAContradictingReport(t *testing.T) {
+	for _, from := range []string{"suspended", "deleting"} {
+		for _, observed := range []string{"ready", "provisioning", "degraded", "failed"} {
+			s, q, tr := newFixture()
+			q.services["svc_h"] = store.Service{
+				ID: "svc_h", CellID: "cell-0", Status: from, Generation: 4, ObservedGeneration: 3,
+			}
+			_, err := s.Writeback(context.Background(), "cell-0", Report{
+				ServiceID: "svc_h", ObservedGeneration: 4, Status: observed,
+			})
+			if !errors.Is(err, ErrNotConverged) {
+				t.Errorf("%s+%s: err = %v, want ErrNotConverged — the hold was never observed to "+
+					"take effect, so the row must stay outstanding", from, observed, err)
+			}
+			if got := q.services["svc_h"].Status; got != from {
+				t.Errorf("%s+%s: an observation moved a held service to %q", from, observed, got)
+			}
+			if got := q.services["svc_h"].ObservedGeneration; got == 4 {
+				t.Errorf("%s+%s: observed_generation advanced — the row leaves the outstanding "+
+					"set, so the desired doc that carries the hold is never redelivered",
+					from, observed)
+			}
+			if tr.calls != 0 {
+				t.Errorf("%s+%s: a held row drove the status machine", from, observed)
+			}
+		}
 	}
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{
-		ServiceID: "svc_s", ObservedGeneration: 2, Status: "ready",
-	}); err != nil {
-		t.Fatalf("writeback: %v", err)
-	}
-	if got := q.services["svc_s"].Status; got != "suspended" {
-		t.Errorf("a suspended service was moved to %q by an observation — its metering span "+
-			"restarts and nothing asked for that", got)
+}
+
+// ...and `gone` IS the evidence that finishes it: the hold took effect.
+func TestAHeldRowIsFinishedByAConfirmedTeardown(t *testing.T) {
+	for _, from := range []string{"suspended", "deleting"} {
+		s, q, tr := newFixture()
+		q.services["svc_g"] = store.Service{
+			ID: "svc_g", CellID: "cell-0", Status: from, Generation: 4, ObservedGeneration: 3,
+		}
+		if _, err := s.Writeback(context.Background(), "cell-0", Report{
+			ServiceID: "svc_g", ObservedGeneration: 4, Status: "gone",
+		}); err != nil {
+			t.Errorf("%s+gone: %v", from, err)
+		}
+		if got := q.services["svc_g"].Status; got != from {
+			t.Errorf("%s+gone: status moved to %q — `gone` is never a status edge", from, got)
+		}
+		if got := q.services["svc_g"].ObservedGeneration; got != 4 {
+			t.Errorf("%s+gone: observed_generation = %d, want 4 — a confirmed teardown finishes "+
+				"the generation, or the agent re-issues Delete every tick forever", from, got)
+		}
+		if tr.calls != 0 {
+			t.Errorf("%s+gone: drove the status machine", from)
+		}
 	}
 }
 
@@ -803,62 +853,166 @@ func TestAServiceReportedDegradedStaysOutstanding(t *testing.T) {
 
 // CONCURRENCY CANNOT PARK A ROW ON AN UNSETTLED STATUS.
 //
-// The existing concurrency test covers only the converged provisioning → ready
+// The pre-existing concurrency test covers the CONVERGED provisioning → ready
 // path, where the edge and the advance happen together. Here the first hop is
-// deliberately unconverged, so edge and advance come apart — and interleaving
-// decides how far the row gets: callers that read `failed` take
-// failed → provisioning, callers that read `provisioning` take provisioning →
-// ready and finish it. Both outcomes are legal.
+// deliberately unconverged, so they come apart.
 //
-// What must hold for EVERY interleaving is the invariant the whole mapping rests
-// on: observed_generation advances only when the row rests somewhere settled.
-// Advancing at `provisioning` would drop the row out of ListDesiredForCell
-// mid-apply, which no amount of retrying recovers from.
+// IT USES THE FIXTURE'S BARRIER, and that is not decoration. Without it the test
+// does not reliably race: q.mu serialises GetService against Transition, so most
+// callers read the already-advanced status and never enter the dangerous window
+// at all — measured at 20 runs under -race with the fakeTrans FROM-guard
+// deleted, 17 went undetected. The barrier releases all n callers only once all
+// n have READ, so every one of them holds from="failed" and enters Transition,
+// which is the interleaving that makes the guard load-bearing.
 func TestConcurrentReportsNeverAdvanceObservationOnAnUnsettledRow(t *testing.T) {
-	for attempt := 0; attempt < 20; attempt++ {
-		s, q, _ := newFixture()
-		q.services["svc_c"] = store.Service{
-			ID: "svc_c", CellID: "cell-0", Status: "failed", Generation: 3, ObservedGeneration: 2,
-		}
-		const n = 8
-		var wg sync.WaitGroup
-		errs := make([]error, n)
-		for i := 0; i < n; i++ {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				_, errs[i] = s.Writeback(context.Background(), "cell-0", Report{
-					ServiceID: "svc_c", ObservedGeneration: 3, Status: "ready",
-				})
-			}(i)
-		}
-		wg.Wait()
+	const n = 8
+	s, q, _ := newFixture()
+	q.services["svc_c"] = store.Service{
+		ID: "svc_c", CellID: "cell-0", Status: "failed", Generation: 3, ObservedGeneration: 2,
+	}
 
-		final := q.services["svc_c"].Status
-		advanced := q.services["svc_c"].ObservedGeneration == 3
-		switch final {
-		case "provisioning":
-			if advanced {
-				t.Fatalf("attempt %d: observed_generation advanced while the row rests at "+
-					"`provisioning` — it leaves the outstanding set mid-apply and never reaches ready",
-					attempt)
-			}
-		case "ready":
-			// The two-hop path completed within the batch; finishing here is correct.
+	var arrived atomic.Int64
+	release := make(chan struct{})
+	stuck := make(chan struct{})
+	t.Cleanup(func() { close(stuck) })
+	q.afterRead = func() {
+		if arrived.Add(1) == n {
+			close(release)
+		}
+		select {
+		case <-release:
+		case <-stuck:
+			t.Errorf("only %d of %d callers reached GetService — the barrier never released",
+				arrived.Load(), n)
+		}
+	}
+
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = s.Writeback(context.Background(), "cell-0", Report{
+				ServiceID: "svc_c", ObservedGeneration: 3, Status: "ready",
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	if got := arrived.Load(); got != n {
+		t.Fatalf("only %d of %d callers read — the interleaving under test never happened", got, n)
+	}
+	final := q.services["svc_c"].Status
+	advanced := q.services["svc_c"].ObservedGeneration == 3
+
+	// Every caller holds from="failed", so every edge taken is failed →
+	// provisioning, and `provisioning` is unsettled: nothing may finish here.
+	if final != "provisioning" {
+		t.Fatalf("status = %q, want provisioning — all %d callers read `failed`, and the only "+
+			"edge from there for a healthy report is failed → provisioning", final, n)
+	}
+	if advanced {
+		t.Fatal("observed_generation advanced while the row rests at `provisioning` — the row " +
+			"leaves the outstanding set mid-apply and never reaches ready")
+	}
+	// Exactly one caller may take the edge; the rest lose the FROM-guard race,
+	// which is a different and correct refusal. Nobody may report success.
+	notConverged, conflicts := 0, 0
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			t.Fatalf("caller %d reported success while the row is still outstanding", i)
+		case errors.Is(err, ErrNotConverged):
+			notConverged++
+		case isConflict(err):
+			conflicts++
 		default:
-			t.Fatalf("attempt %d: status = %q — only failed → provisioning → ready is reachable",
-				attempt, final)
+			t.Fatalf("caller %d got an unexpected error: %v", i, err)
 		}
-		// A caller may only report success for a hop that actually finished.
-		for i, err := range errs {
-			if err == nil && !advanced {
-				t.Fatalf("attempt %d: caller %d reported success while the row is still outstanding",
-					attempt, i)
-			}
-			if err != nil && !errors.Is(err, ErrNotConverged) && !isConflict(err) {
-				t.Fatalf("attempt %d: caller %d got an unexpected error: %v", attempt, i, err)
-			}
+	}
+	if notConverged != 1 {
+		t.Errorf("%d callers took the edge and saw ErrNotConverged, want exactly 1 "+
+			"(the other %d must lose the FROM-guard race)", notConverged, n-1)
+	}
+	if notConverged+conflicts != n {
+		t.Errorf("accounted for %d of %d callers", notConverged+conflicts, n)
+	}
+}
+
+// A STALE READ MAY NOT WALK A FINISHED ROW BACKWARDS — driven deterministically,
+// because hoping for the interleaving does not work.
+//
+// The barrier above forces every caller to read the SAME status, so all of them
+// compute the same destination and fakeTrans's "already there" arm rejects the
+// duplicates: that version is blind to the FROM-guard. An unsynchronised
+// free-for-all is barely better — q.mu serialises GetService against Transition,
+// so with the guard deleted a 40-attempt racing version detected it in only
+// 1 run in 10.
+//
+// So this stages the exact window instead. Caller A reads `failed` and is HELD.
+// B then runs to completion (failed → provisioning, unconverged), then C
+// (provisioning → ready, converged — observation advances). Only then is A
+// released, still holding its stale `failed` read and still heading for
+// `provisioning`.
+//
+// The store refuses A: SetServiceStatus is `WHERE id = $1 AND status = $2`, so a
+// caller whose from no longer matches writes nothing. Without that guard A walks
+// a FINISHED row back to `provisioning` while observed_generation stays advanced
+// — the row is out of the outstanding set, resting mid-apply, and nothing will
+// ever converge it again.
+func TestAStaleReadCannotWalkAFinishedRowBackwards(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_x"] = store.Service{
+		ID: "svc_x", CellID: "cell-0", Status: "failed", Generation: 3, ObservedGeneration: 2,
+	}
+
+	var held atomic.Bool
+	hasRead := make(chan struct{})
+	release := make(chan struct{})
+	q.afterRead = func() {
+		if held.CompareAndSwap(false, true) {
+			close(hasRead) // A has its stale read of `failed`
+			<-release
 		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = s.Writeback(context.Background(), "cell-0", Report{
+			ServiceID: "svc_x", ObservedGeneration: 3, Status: "ready",
+		})
+	}()
+	<-hasRead
+
+	// B: failed → provisioning, and it must NOT finish the generation.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_x", ObservedGeneration: 3, Status: "ready",
+	}); !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("B: err = %v, want ErrNotConverged", err)
+	}
+	// C: provisioning → ready, which finishes it.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_x", ObservedGeneration: 3, Status: "ready",
+	}); err != nil {
+		t.Fatalf("C: %v", err)
+	}
+	if got := q.services["svc_x"].ObservedGeneration; got != 3 {
+		t.Fatalf("C did not finish the generation (observed = %d)", got)
+	}
+
+	close(release)
+	wg.Wait()
+
+	if got := q.services["svc_x"].Status; got != "ready" {
+		t.Errorf("a stale read walked the row from `ready` back to %q while "+
+			"observed_generation stayed advanced — the row is out of the outstanding set, "+
+			"resting mid-apply, and nothing will converge it again", got)
+	}
+	if got := q.services["svc_x"].ObservedGeneration; got != 3 {
+		t.Errorf("observed_generation = %d, want 3", got)
 	}
 }
 

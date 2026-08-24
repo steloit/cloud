@@ -373,18 +373,31 @@ func TestABrokenReadyServiceStopsBillingAgainstRealPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := func() []string {
-		rows, err := pool.Query(ctx, `SELECT edge FROM usage_events
-		    WHERE service_id = 'svc_bill' AND meter = 'service_span' ORDER BY at, id`)
+		// ORDER BY at alone: `id` is a random `use_<hex>` and would be a coin
+		// flip, not a tiebreak. Today the two edges land in separate Writeback
+		// transactions so `at` (transaction timestamp) separates them; the
+		// strict-increase assertion below is what would catch a future emitter
+		// that writes both in one transaction, rather than letting the order
+		// silently become arbitrary and flake in CI only.
+		rows, err := pool.Query(ctx, `SELECT edge, at FROM usage_events
+		    WHERE service_id = 'svc_bill' AND meter = 'service_span' ORDER BY at`)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer rows.Close()
 		var out []string
+		var prev time.Time
 		for rows.Next() {
 			var e string
-			if err := rows.Scan(&e); err != nil {
+			var at time.Time
+			if err := rows.Scan(&e, &at); err != nil {
 				t.Fatal(err)
 			}
+			if !prev.IsZero() && !at.After(prev) {
+				t.Fatalf("span %q shares a timestamp with its predecessor — the [open, close] "+
+					"order is then arbitrary and this assertion is a coin flip", e)
+			}
+			prev = at
 			out = append(out, e)
 		}
 		return out
@@ -478,8 +491,10 @@ func TestEveryMappedDestinationSatisfiesTheRealCheckConstraint(t *testing.T) {
 	ctx := context.Background()
 	seedService(t, pool, "svc_check")
 
-	froms := []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting"}
-	observeds := []string{"provisioning", "ready", "degraded", "failed", "suspended", "deleting", "gone", ""}
+	// The vocabulary comes from the one definition, and this test is also what
+	// pins that definition to the REAL CHECK constraint.
+	froms := provisioning.StatusVocabulary()
+	observeds := append(provisioning.StatusVocabulary(), "gone", "", "not-a-status")
 	tried := 0
 	for _, from := range froms {
 		for _, observed := range observeds {
@@ -496,7 +511,13 @@ func TestEveryMappedDestinationSatisfiesTheRealCheckConstraint(t *testing.T) {
 			}
 		}
 	}
-	if tried == 0 {
-		t.Fatal("no edge was exercised — this test proved nothing")
+	// EXACT, not a floor. `if tried == 0` is the same shape as the `if checked <
+	// 30` guard round 3 deleted for being unable to see what was never
+	// enumerated: one surviving edge would keep it green. These are the eight
+	// edges the mapping can emit — provisioning+{ready,failed}, ready+{degraded,
+	// failed}, degraded+{ready,failed}, failed+{provisioning,ready}.
+	if tried != 8 {
+		t.Fatalf("exercised %d edges, want exactly 8 — if the mapping gained or lost an edge, "+
+			"this test must be updated deliberately, not silently", tried)
 	}
 }
