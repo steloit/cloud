@@ -61,6 +61,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 
 	"gopkg.in/yaml.v3"
@@ -174,6 +175,31 @@ type Quota struct {
 // Set reports whether an envelope was supplied at all.
 func (q Quota) Set() bool { return q.CPU != "" || q.Memory != "" || q.Storage != "" }
 
+// RefuseEndPort rejects any NetworkPolicy carrying a port RANGE.
+//
+// EXPORTED SO IT CAN BE TESTED AGAINST A POLICY THAT ACTUALLY CARRIES ONE.
+// Inline, it was unreachable: Render validates the namespace first, so the only
+// input that could smuggle `endPort` into the bytes was already refused, and
+// deleting the whole guard left the suite green. A guard whose test cannot reach
+// it is not a guard — it is a comment that compiles.
+//
+// Dataplane V2 silently does not enforce port ranges on affected versions: the
+// API server accepts the policy and drops nothing, which is the same defect
+// class as shipping NetworkPolicies to a cluster with no provider (ADR-0015).
+func RefuseEndPort(ms []Manifest) error {
+	for _, m := range ms {
+		if m.Kind != "NetworkPolicy" {
+			continue
+		}
+		if bytes.Contains(m.YAML, []byte("endPort")) {
+			return fmt.Errorf("tenancy: %s/%s carries endPort — Dataplane V2 does not "+
+				"enforce port ranges on affected versions, so this policy would be stored and "+
+				"ignored (ADR-0015). Enumerate single ports instead", m.Kind, m.Name)
+		}
+	}
+	return nil
+}
+
 // ValidateCIDR refuses anything that is not a plain IPv4 CIDR.
 //
 // It is interpolated into an ipBlock, so the same injection rule as the
@@ -186,13 +212,28 @@ func ValidateCIDR(c string) error {
 		return fmt.Errorf("no API server CIDR: CNPG's instance manager must reach the " +
 			"kube-apiserver, and under default-deny egress a selector-only peer never matches it")
 	}
-	if !cidrPattern.MatchString(c) {
-		return fmt.Errorf("API server CIDR %q is not a plain IPv4 CIDR", c)
+	pfx, err := netip.ParsePrefix(c)
+	if err != nil {
+		// A shape check (a regexp over digits and dots) accepted
+		// 999.999.999.999/99, which the API server then refuses — so EVERY apply
+		// on the cell fails, from a value that looked fine at boot.
+		return fmt.Errorf("API server CIDR %q is not a valid CIDR: %w", c, err)
+	}
+	if !pfx.Addr().Is4() {
+		return fmt.Errorf("API server CIDR %q is not IPv4", c)
+	}
+	// A wide prefix is the dangerous case, not the malformed one: 0.0.0.0/0
+	// silently turns the apiserver allowance into unrestricted TCP/443 egress
+	// for every CNPG pod — including into the private ranges the sibling rule's
+	// `except` list exists to exclude. A control-plane endpoint is a host or a
+	// small block; /24 is already generous.
+	if pfx.Bits() < 24 {
+		return fmt.Errorf("API server CIDR %q is a /%d — a control plane endpoint is a host or a "+
+			"small block, and a wide prefix here grants CNPG pods egress far beyond it",
+			c, pfx.Bits())
 	}
 	return nil
 }
-
-var cidrPattern = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$`)
 
 // Manifest is one rendered object.
 type Manifest struct {
@@ -528,15 +569,8 @@ spec:
 	// Dataplane V2 silently does not enforce port ranges on affected versions —
 	// the API server accepts the policy and drops nothing, which is the same
 	// class of defect as shipping NetworkPolicies to a cluster with no provider.
-	for _, m := range out {
-		if m.Kind != "NetworkPolicy" {
-			continue
-		}
-		if bytes.Contains(m.YAML, []byte("endPort")) {
-			return nil, fmt.Errorf("tenancy: %s/%s carries endPort — Dataplane V2 does not "+
-				"enforce port ranges on affected versions, so this policy would be stored and "+
-				"ignored (ADR-0015). Enumerate single ports instead", m.Kind, m.Name)
-		}
+	if err := RefuseEndPort(out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

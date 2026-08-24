@@ -496,16 +496,101 @@ func TestTheCNPGAllowancesSelectEveryLifecycleStage(t *testing.T) {
 	}
 }
 
-// AC 8: endPort is REFUSED, on the rendered bytes.
-func TestRenderRefusesAPolicyCarryingEndPort(t *testing.T) {
-	// The guard reads what Render is about to emit, so it is proven by feeding a
-	// namespace whose name injects an endPort key into the YAML — the only way a
-	// caller can reach it today, and exactly the injection ValidateNamespace also
-	// blocks. Both guards are asserted; neither is assumed.
-	if _, err := tenancy.Render(tenancy.Spec{
-		Namespace: "env-a\n    endPort: 9000", Cell: "cell-0",
-		APIServerCIDR: testAPIServerCIDR, Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"},
-	}); err == nil {
-		t.Fatal("a namespace injecting endPort was rendered")
+// AC 8: endPort is REFUSED — tested against a policy that ACTUALLY CARRIES ONE.
+//
+// The first version of this injected endPort through a malformed namespace and
+// was vacuous: Render validates the namespace first, so the guard was never
+// reached and deleting it entirely left the suite green. The guard is exported
+// now precisely so the test can hand it the input it exists to refuse.
+func TestRefuseEndPortRejectsAPortRange(t *testing.T) {
+	bad := []tenancy.Manifest{{
+		Kind: "NetworkPolicy", Name: "allow-range",
+		YAML: []byte("apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\n" +
+			"metadata:\n  name: allow-range\nspec:\n  ingress:\n    - ports:\n" +
+			"        - protocol: TCP\n          port: 8000\n          endPort: 9000\n"),
+	}}
+	if err := tenancy.RefuseEndPort(bad); err == nil {
+		t.Fatal("a policy carrying endPort was accepted — Dataplane V2 stores it and enforces " +
+			"nothing, which is ADR-0015's whole subject")
+	}
+	// And it must not refuse a policy WITHOUT a range, or it refuses everything
+	// and the test above passes for the wrong reason.
+	ok := []tenancy.Manifest{{Kind: "NetworkPolicy", Name: "fine",
+		YAML: []byte("spec:\n  ingress:\n    - ports:\n        - port: 53\n")}}
+	if err := tenancy.RefuseEndPort(ok); err != nil {
+		t.Fatalf("a single-port policy was refused: %v", err)
+	}
+	// Every shipped policy passes it.
+	if err := tenancy.RefuseEndPort(mustRender(t)); err != nil {
+		t.Fatalf("the rendered set carries endPort: %v", err)
+	}
+}
+
+// AC 3's OTHER HALF: "no ipBlock beyond the ones named here".
+//
+// The structural test checked selector peers and let an ipBlock through
+// unconditionally. Measured: adding an egress ipBlock for 169.254.169.254/32 to
+// `allow-same-namespace` — whose `podSelector: {}` selects EVERY pod, including
+// gVisor customer code — left the whole suite green while undoing AC 9, the one
+// property the live run spent two probes proving.
+//
+// So the CIDRs are whitelisted per policy. A new or widened ipBlock is now a
+// test change, which is the point.
+func TestNoPolicyCarriesAnUnexpectedIPBlock(t *testing.T) {
+	// policy name -> the CIDRs it is allowed to name. `allow-cnpg-egress` is the
+	// ONLY policy permitted an ipBlock at all.
+	allowed := map[string]map[string]bool{
+		"allow-cnpg-egress": {
+			"169.254.169.254/32": true, // metadata server, CNPG pods only (AC 9)
+			"0.0.0.0/0":          true, // GCS:443, narrowed by the except list below
+			testAPIServerCIDR:    true, // the control plane endpoint
+		},
+	}
+	for _, m := range mustRender(t) {
+		if m.Kind != "NetworkPolicy" {
+			continue
+		}
+		var pol struct {
+			Spec struct {
+				Ingress []struct {
+					From []map[string]any `yaml:"from"`
+				} `yaml:"ingress"`
+				Egress []struct {
+					To []map[string]any `yaml:"to"`
+				} `yaml:"egress"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal(m.YAML, &pol); err != nil {
+			t.Fatalf("%s: %v", m.Name, err)
+		}
+		var peers []map[string]any
+		for _, r := range pol.Spec.Ingress {
+			peers = append(peers, r.From...)
+		}
+		for _, r := range pol.Spec.Egress {
+			peers = append(peers, r.To...)
+		}
+		for _, p := range peers {
+			raw, ok := p["ipBlock"]
+			if !ok {
+				continue
+			}
+			blk, _ := raw.(map[string]any)
+			cidr, _ := blk["cidr"].(string)
+			if !allowed[m.Name][cidr] {
+				t.Errorf("%s names ipBlock %q, which is not in its whitelist. An ipBlock on a "+
+					"policy selecting all pods hands customer code a route the selectors were "+
+					"written to deny (AC 9).", m.Name, cidr)
+			}
+			// 0.0.0.0/0 is only acceptable BECAUSE of the except list; without
+			// it the rule is unrestricted egress.
+			if cidr == "0.0.0.0/0" {
+				ex, _ := blk["except"].([]any)
+				if len(ex) < 4 {
+					t.Errorf("%s allows 0.0.0.0/0 with %d exceptions — the private ranges must "+
+						"be excluded or this is unrestricted egress", m.Name, len(ex))
+				}
+			}
+		}
 	}
 }

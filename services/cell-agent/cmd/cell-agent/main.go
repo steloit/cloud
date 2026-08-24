@@ -106,6 +106,13 @@ func selectRenderer(getenv func(string) string, cell string, log *slog.Logger) (
 			"required in-cluster (customer DB pods need workload identity + a WAL bucket, and " +
 			"the D7 egress policy needs the control plane's endpoint range)")
 	}
+	// VALIDATED AT BOOT, not at first converge — the same rule ValidateCell
+	// already follows here. A malformed CIDR is accepted by the emptiness check
+	// above, then fails EVERY converge for EVERY service on the cell, with no
+	// writeback and nothing customer-visible. Failing the boot is loud.
+	if err := tenancy.ValidateCIDR(apiCIDR); err != nil {
+		return nil, fmt.Errorf("CELL_APISERVER_CIDR: %w", err)
+	}
 	log.Info("renderer: CNPG (in-cluster, real apply)", "cell", cell, "wal_bucket", wal, "gsa", gsa)
 	return render.NewCNPGRenderer(cnpg.New(), kc, cell, gsa, wal, apiCIDR, log), nil
 }

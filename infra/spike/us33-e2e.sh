@@ -110,6 +110,33 @@ assert_boundary() {
 
   step "7 · ASSERT the D7 boundary (AC 7)"
 
+  # 7·0 SET UP what the assertions read. Without this the checks below either
+  # skip or pass vacuously — which is how this function shipped once already:
+  # defined, never called, and the runbook still only described the boundary.
+  #
+  # The second environment is RENDERED by the agent's own code, not typed here,
+  # so what is asserted is what the agent applies. rendergen is in the repo for
+  # exactly this (services/cell-agent/cmd/rendergen).
+  local api_cidr
+  api_cidr="$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}' >/dev/null 2>&1 && \
+    gcloud container clusters describe "$CELL" --zone "${ZONE:?set ZONE}" \
+      --format='value(privateClusterConfig.privateEndpoint)' 2>/dev/null)/32"
+  [ "$api_cidr" = "/32" ] && { echo "FAIL: cannot resolve the cluster's private endpoint"; return 1; }
+
+  go run ./services/cell-agent/cmd/rendergen "$ns_b" "$CELL" "$api_cidr" | kubectl apply -f - >/dev/null \
+    || { echo "FAIL: could not render/apply $ns_b"; return 1; }
+
+  for ns in "$ns_a" "$ns_b"; do
+    kubectl -n "$ns" run probe-server --image=registry.k8s.io/e2e-test-images/agnhost:2.47 \
+      --labels=app=probe --restart=Never -- netexec --http-port=8080 >/dev/null 2>&1 || true
+  done
+  kubectl -n "$ns_a" run probe-client --image=registry.k8s.io/e2e-test-images/agnhost:2.47 \
+    --labels=app=probe --restart=Never -- sleep 3600 >/dev/null 2>&1 || true
+  for p in "$ns_a/probe-server" "$ns_a/probe-client" "$ns_b/probe-server"; do
+    kubectl -n "${p%%/*}" wait --for=condition=Ready "pod/${p##*/}" --timeout=180s >/dev/null 2>&1 \
+      || { echo "FAIL: $p never became Ready — the assertions below would be vacuous"; return 1; }
+  done
+
   # 7a. the namespace carries its labels
   kubectl get ns "$ns_a" -o jsonpath='{.metadata.labels.steloit\.dev/tenant}' 2>/dev/null \
     | grep -q true || { echo "FAIL: $ns_a is not labelled steloit.dev/tenant=true"; fail=1; }
@@ -157,5 +184,11 @@ assert_boundary() {
   [ "$fail" = 0 ] || { echo "BOUNDARY ASSERTIONS FAILED"; return 1; }
   echo "boundary OK: isolated across environments, open within one, DNS intact"
 }
+
+# AC 7 IS ONLY REAL IF THIS RUNS. The function was defined and not called once;
+# the header above and the task Outcome both claimed the boundary was asserted
+# while the script asserted nothing. `set -e` is on, so a failure here fails the
+# runbook rather than printing and continuing.
+assert_boundary "$NS" "${NS_B:-${NS}-b}"
 
 step "DONE — paste this output into the US-3.3 PR as live evidence"
