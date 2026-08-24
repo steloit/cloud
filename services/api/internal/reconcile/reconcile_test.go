@@ -140,6 +140,16 @@ func (t *fakeTrans) Transition(_ context.Context, svc store.Service, to, via, _,
 	if cur.Status == to {
 		return cur, errors.New("illegal transition (already there)")
 	}
+	// The FROM-GUARD, which the real SetServiceStatus enforces atomically with
+	// `WHERE status = $2` (ErrNoRows → the "state changed concurrently" 409).
+	// Without it this fake is MORE PERMISSIVE than the store on exactly the
+	// property the concurrency tests measure: a caller holding a stale read
+	// could re-apply its edge on top of a newer status and walk the row
+	// backwards. That is not reachable in production, so a test that observes it
+	// here is measuring the fake, not the system.
+	if cur.Status != svc.Status {
+		return store.Service{}, errors.New("illegal transition (state changed concurrently)")
+	}
 	t.calls++
 	t.edges = append(t.edges, cur.Status+"→"+to+"/"+via)
 	cur.Status = to
@@ -376,19 +386,60 @@ func TestHeartbeatFiresEvenOnRejectedReport(t *testing.T) {
 
 func TestHeartbeatOnCurrentGenerationObservation(t *testing.T) {
 	s, q, _ := newFixture()
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3}); err != nil {
-		t.Fatal(err)
+	// svc_a is `provisioning`, so an observation-only ack does NOT finish the
+	// generation — the cell said nothing about status and the row is still
+	// mid-apply. The heartbeat must fire anyway: it runs FIRST precisely so that
+	// an agent which is alive but reporting something the machine will not
+	// accept still counts as seen (see Writeback's ordering note).
+	_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3})
+	if !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged", err)
 	}
 	if q.heartbeat != 1 {
 		t.Fatalf("heartbeat not recorded on an observation-only writeback (%d)", q.heartbeat)
 	}
 }
 
+// AN ACK ON A SETTLED ROW FINISHES THE GENERATION; ON AN UNSETTLED ONE IT DOES
+// NOT. "I applied this generation, no status to report" asserts nothing about
+// where the row rests, so the row's own status decides whether anything is left
+// to watch. `degraded` BILLS — parking one there unwatched bills indefinitely.
+func TestAnAckFinishesAGenerationOnlyOnASettledRow(t *testing.T) {
+	for _, tc := range []struct {
+		status    string
+		converged bool
+	}{
+		{"ready", true}, {"failed", true}, {"provisioning", false}, {"degraded", false},
+	} {
+		s, q, tr := newFixture()
+		q.services["svc_a"] = store.Service{
+			ID: "svc_a", CellID: "cell-0", Status: tc.status, Generation: 3, ObservedGeneration: 2,
+		}
+		_, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3})
+		if tr.calls != 0 {
+			t.Errorf("%s: an ack drove the status machine", tc.status)
+		}
+		advanced := q.services["svc_a"].ObservedGeneration == 3
+		if advanced != tc.converged {
+			t.Errorf("%s: observed_generation advanced=%v, want %v (err=%v)",
+				tc.status, advanced, tc.converged, err)
+		}
+		if tc.converged && err != nil {
+			t.Errorf("%s: %v", tc.status, err)
+		}
+		if !tc.converged && !errors.Is(err, ErrNotConverged) {
+			t.Errorf("%s: err = %v, want ErrNotConverged — the row must stay outstanding", tc.status, err)
+		}
+	}
+}
+
 func TestObservationOnlyWritebackSkipsTransition(t *testing.T) {
 	s, _, tr := newFixture()
-	// Current generation (3), no status → observation only, accepted, no edge.
-	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3}); err != nil {
-		t.Fatal(err)
+	// Current generation (3), no status → observation only, no edge. svc_a is
+	// `provisioning`, so it does not converge (see the ack test above); what is
+	// asserted here is that it never touches the status machine either way.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{ServiceID: "svc_a", ObservedGeneration: 3}); !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged", err)
 	}
 	if tr.calls != 0 {
 		t.Fatal("a report with no status must not drive the status machine")
@@ -658,4 +709,162 @@ func TestAnUnconvergedHopIsAConflictNotAnInternalError(t *testing.T) {
 	if !strings.Contains(body, "remediation") || strings.Contains(body, `"remediation":""`) {
 		t.Errorf("no remediation on the refusal: %s", body)
 	}
+}
+
+// A REPORT THE MACHINE CANNOT PLACE LEAVES THE ROW OUTSTANDING.
+//
+// `provisioning` + `degraded` has no legal edge (ADR-024 allows
+// provisioning → {ready, failed, deleting}). It used to answer "no change,
+// converged": observed_generation advanced, the row left the outstanding set at
+// `provisioning`, and the agent never converged it again — no error, nothing
+// visible, the mirror image of the 409 loop this task exists to remove.
+//
+// The mid-apply pair is the same shape from the other side: `ready` +
+// `provisioning` is what a cell reports during an in-place upgrade, and settling
+// it declares a generation done in the middle of the apply.
+func TestAReportTheMachineCannotPlaceLeavesTheRowOutstanding(t *testing.T) {
+	for _, tc := range []struct{ from, observed string }{
+		{"provisioning", "degraded"},
+		{"failed", "degraded"},
+		{"ready", "provisioning"},
+		{"degraded", "provisioning"},
+	} {
+		s, q, tr := newFixture()
+		q.services["svc_u"] = store.Service{
+			ID: "svc_u", CellID: "cell-0", Status: tc.from, Generation: 5, ObservedGeneration: 4,
+		}
+		_, err := s.Writeback(context.Background(), "cell-0", Report{
+			ServiceID: "svc_u", ObservedGeneration: 5, Status: tc.observed,
+		})
+		if !errors.Is(err, ErrNotConverged) {
+			t.Errorf("%s+%s: err = %v, want ErrNotConverged", tc.from, tc.observed, err)
+		}
+		if got := q.services["svc_u"].Status; got != tc.from {
+			t.Errorf("%s+%s: status moved to %q — there is no legal edge, so nothing may be invented",
+				tc.from, tc.observed, got)
+		}
+		if got := q.services["svc_u"].ObservedGeneration; got == 5 {
+			t.Errorf("%s+%s: observed_generation advanced — the row left the outstanding set at a "+
+				"status the cell never reported and will never be reconciled again",
+				tc.from, tc.observed)
+		}
+		if tr.calls != 0 {
+			t.Errorf("%s+%s: an unplaceable report reached the status machine", tc.from, tc.observed)
+		}
+		// The error names both sides: it is the only trace this report leaves,
+		// and it is what the agent logs and the operator reads in the 409 body.
+		if !strings.Contains(err.Error(), tc.observed) || !strings.Contains(err.Error(), tc.from) {
+			t.Errorf("%s+%s: the refusal names neither side: %v", tc.from, tc.observed, err)
+		}
+	}
+}
+
+// A ONE-HOP LANDING ON `degraded` IS THE SAME BILLING BUG AS THE TWO-HOP ONE.
+//
+// `ready` + `degraded` IS a legal edge, so it took the CanTransition arm and
+// converged — the row left the outstanding set resting on `degraded`, which
+// BILLS, with `degraded → failed` (the only edge that emits a metering `close`)
+// permanently unreachable because nothing observes the cluster again.
+//
+// That is exactly the defect review found on `ready` + `failed`, which was fixed
+// for that hop ALONE. Convergence is decided by the destination now, so both are
+// covered by one rule.
+func TestAServiceReportedDegradedStaysOutstanding(t *testing.T) {
+	s, q, _ := newFixture()
+	q.services["svc_d"] = store.Service{
+		ID: "svc_d", CellID: "cell-0", Status: "ready", Generation: 6, ObservedGeneration: 5,
+	}
+	_, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_d", ObservedGeneration: 6, Status: "degraded",
+	})
+	if !errors.Is(err, ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged", err)
+	}
+	if got := q.services["svc_d"].Status; got != "degraded" {
+		t.Errorf("status = %q, want degraded — the legal edge should still have been taken", got)
+	}
+	if got := q.services["svc_d"].ObservedGeneration; got == 6 {
+		t.Fatal("observed_generation advanced at `degraded`: the row rests on a BILLING state " +
+			"that nothing will observe again, so it bills indefinitely")
+	}
+	// The next tick resolves it either way, which is what makes staying outstanding correct.
+	if _, err := s.Writeback(context.Background(), "cell-0", Report{
+		ServiceID: "svc_d", ObservedGeneration: 6, Status: "failed",
+	}); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	if got := q.services["svc_d"].Status; got != "failed" {
+		t.Errorf("after the second tick status = %q, want failed — the span never closes", got)
+	}
+	if got := q.services["svc_d"].ObservedGeneration; got != 6 {
+		t.Errorf("observed_generation = %d, want 6 once converged", got)
+	}
+}
+
+// CONCURRENCY CANNOT PARK A ROW ON AN UNSETTLED STATUS.
+//
+// The existing concurrency test covers only the converged provisioning → ready
+// path, where the edge and the advance happen together. Here the first hop is
+// deliberately unconverged, so edge and advance come apart — and interleaving
+// decides how far the row gets: callers that read `failed` take
+// failed → provisioning, callers that read `provisioning` take provisioning →
+// ready and finish it. Both outcomes are legal.
+//
+// What must hold for EVERY interleaving is the invariant the whole mapping rests
+// on: observed_generation advances only when the row rests somewhere settled.
+// Advancing at `provisioning` would drop the row out of ListDesiredForCell
+// mid-apply, which no amount of retrying recovers from.
+func TestConcurrentReportsNeverAdvanceObservationOnAnUnsettledRow(t *testing.T) {
+	for attempt := 0; attempt < 20; attempt++ {
+		s, q, _ := newFixture()
+		q.services["svc_c"] = store.Service{
+			ID: "svc_c", CellID: "cell-0", Status: "failed", Generation: 3, ObservedGeneration: 2,
+		}
+		const n = 8
+		var wg sync.WaitGroup
+		errs := make([]error, n)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, errs[i] = s.Writeback(context.Background(), "cell-0", Report{
+					ServiceID: "svc_c", ObservedGeneration: 3, Status: "ready",
+				})
+			}(i)
+		}
+		wg.Wait()
+
+		final := q.services["svc_c"].Status
+		advanced := q.services["svc_c"].ObservedGeneration == 3
+		switch final {
+		case "provisioning":
+			if advanced {
+				t.Fatalf("attempt %d: observed_generation advanced while the row rests at "+
+					"`provisioning` — it leaves the outstanding set mid-apply and never reaches ready",
+					attempt)
+			}
+		case "ready":
+			// The two-hop path completed within the batch; finishing here is correct.
+		default:
+			t.Fatalf("attempt %d: status = %q — only failed → provisioning → ready is reachable",
+				attempt, final)
+		}
+		// A caller may only report success for a hop that actually finished.
+		for i, err := range errs {
+			if err == nil && !advanced {
+				t.Fatalf("attempt %d: caller %d reported success while the row is still outstanding",
+					attempt, i)
+			}
+			if err != nil && !errors.Is(err, ErrNotConverged) && !isConflict(err) {
+				t.Fatalf("attempt %d: caller %d got an unexpected error: %v", attempt, i, err)
+			}
+		}
+	}
+}
+
+// A losing caller hits Transition's from-guard, which is a different — and
+// correct — refusal from "this hop did not finish".
+func isConflict(err error) bool {
+	return strings.Contains(err.Error(), "illegal") || strings.Contains(err.Error(), "concurrent") ||
+		strings.Contains(err.Error(), "transition")
 }

@@ -147,62 +147,129 @@ documents.
 is untouched: it reports what it OBSERVES, the control plane decides what that
 means, and the data plane holds no copy of the machine (ADR-0001 D9/A2.5).
 
-**TWO hops are not converged, and the second one was a billing bug I shipped.**
-Review caught it: `ready` + `failed` → `degraded` was marked CONVERGED, so
-`observed_generation` advanced, the row left the outstanding set, and a cluster
-CNPG reports as "unrecoverable and needs manual intervention" would rest at
-`degraded` — which BILLS — with nothing ever observing it again. Measured:
-`degraded → failed` is the ONLY edge that emits a metering `close`, and
-`IsBilling("degraded")` is true. The justification in my own test was
-measurably false, too: it said marking the hop unconverged "would keep the row
-outstanding forever", when `ObservedStatus("degraded","failed")` is converged and
-terminates in two hops — exactly the shape of the path below. The asymmetry was
-a defect, not a design.
+**Round 3 replaced four hand-written flags with one derived rule.** Both
+reviewers, independently, found the same three defects, and each was a hop where
+a hand-written `converged:` literal was wrong or missing. That is a class, not
+three bugs, so the flag is no longer written per hop:
 
-**The other hop that is not converged.** ADR-024 has `failed → {provisioning,
-deleting}` and no `failed → ready`, so a healthy cluster under a failed row moves
-to `provisioning` and the NEXT tick lands `ready`. `Observation.Converged()` is
-false for exactly that hop, and `Writeback` returns `ErrNotConverged` without
-advancing `observed_generation` — so `ListDesiredForCell` keeps returning the row.
-This is the same rule Kubernetes states for `status.observedGeneration`: it
-advances when a generation is reconciled, not when it was merely looked at.
+> a generation is reconciled only when the row comes to rest on a **settled**
+> status (not `provisioning`, not `degraded`) that the cell **actually reported**.
 
-**An unconverged hop is a 409, not a 500.** `ErrNotConverged` had no arm in
-`writeErr`, so it fell to `problem.Internal`: an HTTP 500 the OpenAPI contract
-does not declare for that route, an ERROR boundary log, and a remediation telling
-the operator to "contact support with the event id" — an id that is never minted.
-Every failed-service recovery in the fleet would have emitted a control-plane
-5xx. 409 is already in the contract and is already what the agent's own client
-doc calls "just another re-poll".
+Both halves are load-bearing, and together they subsume every special case the
+function used to carry — including the two hops round 2 had already fixed by
+hand. There is no per-hop flag left to get wrong.
 
-**A type, not a `(string, bool)` pair — and an honest account of what that
-buys.** ADR-0014 says the unsafe form must not compile. The type removes the
-failure mode that actually happened (a discarded second return value), and the
-zero value is inert, so a caller that never consults the machine does nothing
-rather than something wrong. It does NOT force a caller to ask: nothing in Go
-makes `Converged()` mandatory. That half is held by a test at the call site, and
-`Writeback ignoring Converged()` is measured RED. Claiming full compile-time
-enforcement here would be false.
+### What that fixed
 
-**Three arms deleted as equivalent mutants.** `observed == ""`, `from == ""`, and
-an unknown `from` were written as separate cases and are all indistinguishable
-from the default — measured, by deleting them and finding nothing failed. They
-read as three guards while being one; they are named in the default's comment and
-pinned by BEHAVIOUR instead.
+- **A cell could delete or suspend any service in its cells.** `statusVocab`
+  admits both (it mirrors the customer-facing enum) and `CanTransition` accepts
+  both from `ready`, so one POST with the reconciler token — a single shared
+  secret scoped by a cell list — moved a service to the terminal `deleting`.
+  `SetServiceStatus` does not bump the generation, so no `deleting:true` desired
+  doc is produced and no teardown runs; `deleting` has no outgoing edge; and
+  `DeleteService` then answers "deletion already in progress" forever, metering
+  span closed, workload still running. Refused in **two** representations now:
+  `ReportableByCell` gates the mapping, and the HTTP handler 422s the report
+  before it reaches the store. Settling it would have been the quieter attack —
+  advancing `observed_generation` drops a row out of `ListDesiredForCell` for
+  good — so a refused report also stays outstanding.
+- **`ready` + `degraded` rested on a billing state in one hop**, while round 2
+  had correctly made the two-hop `ready` + `failed` path stay outstanding. Same
+  guard, same harm: `degraded` bills, `degraded → failed` is the only edge that
+  emits a metering `close`, and a row parked there unwatched bills indefinitely.
+- **A transient finished a generation mid-apply.** `ready` + `provisioning` and
+  `provisioning` + `provisioning` both settled, which meant the control plane was
+  relying on the agent's own `terminal()` guard — a data-plane dependency this
+  task's premise says it must not have.
+- **An unplaceable report settled at a stale status, silently.**
+  `provisioning` + `degraded` has no legal edge; it used to answer "no change,
+  converged", advancing observation and dropping the row out of the outstanding
+  set with no error and nothing visible — the mirror image of the 409 loop this
+  task exists to remove. `ErrNotConverged` now names both sides, which is the
+  only trace such a report leaves.
 
-**Eight mutations RED** on a green baseline asserted before and after: the
-ready+failed→degraded arm, failed+ready marked converged, the suspended arm,
-the default echoing the observation, `observed == from` producing an edge,
-`Writeback` using the raw report, `Writeback` ignoring `Converged()`, and
-`Converged()` hardcoded true.
+### A defect the invariant found that no reviewer did
 
-*Method note: my first sweep restored the tree only BEFORE each mutation, so the
-"green after" assertion measured the last mutation rather than a clean tree. It
-reported `FINAL: 4`. Re-run with a restore before the final check.*
+Writing the harm as a sweep (*a converged row must not rest on a state still
+being watched*) immediately failed on a path nobody had flagged: **`gone` on a
+live service**. The handler was normalising the wire's `gone` into `""`, which
+destroyed the difference between *"the thing you asked me to run does not exist"*
+and *"I applied this generation and have nothing to say about its status"*. Both
+converged. So a workload that vanished while desired still wanted it alive
+advanced `observed_generation`, left `ListDesiredForCell` permanently, kept
+showing the customer `ready`, and kept billing a `ready` span — and the agent,
+which only ever sees outstanding rows, would never re-create it.
 
-**Where the type lives.** `reconcile` imports `provisioning` for the value type.
-The Transitioner interface exists so this package never reimplements the legal
-edges, the spine events or the metering rule — not to avoid naming a struct — and
-Go has no covariant returns, so a mirrored type here cannot satisfy a method
-returning the real one. The alternative, `provisioning` importing `reconcile`,
-points the domain at its own caller.
+The existing test called an agent reporting `gone` for a live service "a bug" and
+asserted the status was not mutated. It was right about both; it never asked what
+happened to the row afterwards. `gone` is passed through unnormalised now and the
+machine answers the two meanings separately.
+
+### Evidence
+
+**12 mutations RED**, on a baseline asserted green **before and after** — in a
+`cp -R` sandbox, scaffolded with `docs/dev/` because a module-only copy is red on
+arrival (this bit again: the first sweep reported a red baseline until
+`money-range-audit.md` was copied in).
+
+| mutation | |
+|---|---|
+| the mapping accepts a lifecycle report | RED |
+| the HTTP handler accepts one | RED |
+| `degraded` marked settled | RED |
+| `provisioning` marked settled | RED |
+| drop the "cell actually reported it" half | RED |
+| `gone` converges | RED |
+| drop the `suspended` arm (auto-resume) | RED |
+| drop the `deleting` arm | RED |
+| `Converged()` hardcoded true | RED |
+| `Writeback` ignores `Converged()` | RED |
+| `Writeback` uses the RAW report | RED |
+| `ErrNotConverged` falls through to 500 | RED |
+
+Two things the sweep could not have told me, both found by running the tests
+rather than reading them:
+
+- **My own integration assertion was answered by something else.** It checked
+  `observed_generation != 1` after the degraded hop — but the previous hop had
+  already left it at 1, so it could not distinguish "did not advance" from
+  "already there". The scenario was also unreachable as written: a `ready` row
+  with `observed == generation` is not outstanding, so no agent would ever poll
+  it. Fixed by bumping the generation first, which is the reachable path the task
+  describes (a PATCH on a READY service).
+- **The unit fake was more permissive than the store.** `fakeTrans` applied an
+  edge without the `WHERE status = $2` FROM-guard `SetServiceStatus` enforces, so
+  a concurrency test could observe a row walking backwards — a property of the
+  fake, not the system. The fake enforces the guard now, and the concurrency test
+  asserts the invariant (observation never advances on an unsettled row) instead
+  of one interleaving.
+
+The billing claim is measured against real Postgres for the first time: the
+two-hop path emits exactly `[open, close]`, the `close` arrives only on
+`degraded → failed`, and both edges land on the spine. It is RED when the
+degraded hop is made to converge.
+
+```
+services/api        go test -count=1 -race ./...   all ok (containers)
+services/cell-agent go build ./... && go vet ./... && go test -count=1 -race ./...   ok
+gofmt -l services/                                  clean
+node scripts/spec-sync/validate.mjs                 OK: 242 tasks
+```
+
+### Recorded, not fixed here
+
+- The route's OpenAPI description defines 409 as *"a report whose generation is
+  not the one desired holds right now is rejected **rather than applied**"*. The
+  unconverged 409 is the opposite — the edge WAS applied, only the generation did
+  not advance. The 409 response itself is declared, so this is a description gap,
+  not contract drift; `openapi.yaml` is outside this task's `files:` globs.
+- `last_reconciled_at` is not stamped on an unconverged hop (`MarkObserved` is
+  its only writer). Nothing reads the column today; it matters to whatever
+  staleness alerting consumes it.
+- A permanently degraded cluster now stays outstanding indefinitely — visible to
+  the customer as `degraded`, which the original defect was not. Terminalising it
+  is **US-3.11**.
+- `ObservedStatus` is on the `Transitioner` interface as a method that ignores
+  its receiver. `Transition` earns the interface; this member does not, and a
+  package-level call would be equivalent. Left as-is to keep one owner for "when
+  do we consult the machine".

@@ -65,10 +65,12 @@ func New(q Querier, trans Transitioner) *Service { return &Service{q: q, trans: 
 // outstanding) and converges the current generation.
 var ErrStaleGeneration = errors.New("reconcile: generation mismatch")
 
-// ErrNotConverged is a report the status machine accepted but could not finish
-// in one hop — today only `failed` + a healthy cluster, which ADR-024 routes
-// through `provisioning`. The row deliberately stays outstanding.
-var ErrNotConverged = errors.New("reconcile: report needs another converge")
+// ErrNotConverged is a report that did NOT finish the generation: the status
+// machine came to rest on a status that is still transient (`provisioning`,
+// `degraded`), or it could not place the report at all. Either way the row
+// deliberately stays outstanding, so the next tick re-observes it. Rendered as
+// a 409 — a normal, expected event, not a failure.
+var ErrNotConverged = errors.New("reconcile: report does not finish this generation")
 
 // ErrUnknownCell covers both "no such cell" and "not your cell" — the caller
 // renders 404 for each, so a reconciler token cannot enumerate cells.
@@ -168,7 +170,8 @@ type Report struct {
 //     set. MarkObserved's exact-match guard is the atomic backstop for the
 //     read-then-check race.
 //
-// Repeating an identical writeback is a no-op: an already-current status skips
+// Repeating an identical writeback is a no-op ONCE converged (an unsettled
+// report is deliberately repeatable — that is how the second hop lands): an already-current status skips
 // the transition, and MarkObserved re-sets observed to the same value.
 // Concurrency is handled by Transition's own FROM-guard, so two agents
 // reporting the same edge apply the edge once.
@@ -232,15 +235,18 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 			return store.Service{}, err // observed NOT advanced — row stays outstanding
 		}
 	}
-	// An UNSETTLED hop must not advance observation. `failed` + a healthy cluster
-	// moves to `provisioning` and needs one more tick to reach `ready`; marking
-	// it converged here would strand the row at `provisioning` forever, because
-	// ListDesiredForCell selects on observed_generation < generation. Returning
-	// an error keeps the row outstanding and is the same shape as the failed
-	// -Transition path above.
+	// An UNSETTLED hop must not advance observation. The machine converges only
+	// onto a settled status the cell actually reported, so this covers both "the
+	// edge was taken and needs one more tick" (`failed` + healthy → provisioning)
+	// and "the report could not be placed" (`provisioning` + degraded). Marking
+	// either converged strands the row, because ListDesiredForCell selects on
+	// observed_generation < generation.
+	//
+	// The error names BOTH sides: it is the only trace an unplaceable report
+	// leaves, it reaches the operator in the 409 body, and the agent logs it.
 	if !obs.Converged() {
-		return store.Service{}, fmt.Errorf("%w: %s needs another hop from %s",
-			ErrNotConverged, rep.ServiceID, svc.Status)
+		return store.Service{}, fmt.Errorf("%w: %s reported %q from %q",
+			ErrNotConverged, rep.ServiceID, rep.Status, svc.Status)
 	}
 
 	// The transition (if any) is durable; now record that the cell converged this
