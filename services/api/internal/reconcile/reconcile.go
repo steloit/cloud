@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
+	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
 
 // Querier is the store surface this package needs. Narrow on purpose: the
@@ -30,7 +31,23 @@ type Querier interface {
 // from the first. This package only decides *when* to call it.
 type Transitioner interface {
 	Transition(ctx context.Context, svc store.Service, to, via, actor, orgID string) (store.Service, error)
+
+	// ObservedStatus maps a cell's report onto a status legal from the service's
+	// CURRENT one. It is on this interface for the same reason Transition is:
+	// the machine lives in provisioning, and reconcile decides only WHEN to
+	// consult it.
+	ObservedStatus(from, observed string) provisioning.Observation
 }
+
+// The status machine's Observation type lives in `provisioning`, next to the
+// machine itself, and is named in the Transitioner interface above.
+//
+// Importing that VALUE type is not the coupling the interface exists to avoid:
+// the interface is here so this package never reimplements the legal edges, the
+// spine events or the metering rule, and so it can be faked in tests. Go has no
+// covariant returns, so a mirrored struct here cannot satisfy a method that
+// returns the real one — and making `provisioning` import `reconcile` instead
+// would point the domain at its own caller.
 
 // Service is the control-plane half of the reconciler protocol.
 type Service struct {
@@ -47,6 +64,13 @@ func New(q Querier, trans Transitioner) *Service { return &Service{q: q, trans: 
 // desired as done or drive its status. The agent re-polls (the row is still
 // outstanding) and converges the current generation.
 var ErrStaleGeneration = errors.New("reconcile: generation mismatch")
+
+// ErrNotConverged is a report that did NOT finish the generation: the status
+// machine came to rest on a status that is still transient (`provisioning`,
+// `degraded`), or it could not place the report at all. Either way the row
+// deliberately stays outstanding, so the next tick re-observes it. Rendered as
+// a 409 — a normal, expected event, not a failure.
+var ErrNotConverged = errors.New("reconcile: report does not finish this generation")
 
 // ErrUnknownCell covers both "no such cell" and "not your cell" — the caller
 // renders 404 for each, so a reconciler token cannot enumerate cells.
@@ -146,7 +170,8 @@ type Report struct {
 //     set. MarkObserved's exact-match guard is the atomic backstop for the
 //     read-then-check race.
 //
-// Repeating an identical writeback is a no-op: an already-current status skips
+// Repeating an identical writeback is a no-op ONCE converged (an unsettled
+// report is deliberately repeatable — that is how the second hop lands): an already-current status skips
 // the transition, and MarkObserved re-sets observed to the same value.
 // Concurrency is handled by Transition's own FROM-guard, so two agents
 // reporting the same edge apply the edge once.
@@ -186,19 +211,42 @@ func (s *Service) Writeback(ctx context.Context, cell string, rep Report) (store
 
 	// Order is deliberate and load-bearing: the status edge runs FIRST, and
 	// observed_generation advances ONLY after it durably lands. If Transition
-	// fails (illegal edge, or a mid-request DB error), observed has NOT advanced,
+	// fails — a concurrent status change, or a mid-request DB error; the
+	// illegal-edge case is no longer reachable from here, because ObservedStatus
+	// only ever emits edges CanTransition accepts — observed has NOT advanced,
 	// so the row stays outstanding and the next tick retries it — the whole
 	// retry story depends on this. The reverse order stranded the row: observed
 	// advanced, the row left the outstanding set, and a failed edge was lost.
-	if rep.Status != "" && rep.Status != svc.Status {
+	//
+	// THE REPORT IS MAPPED, NOT USED RAW. The agent reads only the CNPG phase, so
+	// it answers identically whatever state the row is in — while this edge asks
+	// "is that legal from svc.Status". ADR-024 has no `ready → failed`, so a
+	// cluster that breaks while READY made the agent report `failed`, Transition
+	// rejected it every tick, observed_generation never advanced, and the service
+	// was retried forever with nothing visible to the customer. US-3.3h.
+	obs := s.trans.ObservedStatus(svc.Status, rep.Status)
+	if to, ok := obs.Edge(); ok {
 		orgID, err := s.q.OrgForService(ctx, rep.ServiceID)
 		if err != nil {
 			return store.Service{}, err
 		}
 		// via=system: this edge came from the cell converging, not a person.
-		if _, err := s.trans.Transition(ctx, svc, rep.Status, "system", "system", orgID); err != nil {
+		if _, err := s.trans.Transition(ctx, svc, to, "system", "system", orgID); err != nil {
 			return store.Service{}, err // observed NOT advanced — row stays outstanding
 		}
+	}
+	// An UNSETTLED hop must not advance observation. The machine converges only
+	// onto a settled status the cell actually reported, so this covers both "the
+	// edge was taken and needs one more tick" (`failed` + healthy → provisioning)
+	// and "the report could not be placed" (`provisioning` + degraded). Marking
+	// either converged strands the row, because ListDesiredForCell selects on
+	// observed_generation < generation.
+	//
+	// The error names BOTH sides: it is the only trace an unplaceable report
+	// leaves, it reaches the operator in the 409 body, and the agent logs it.
+	if !obs.Converged() {
+		return store.Service{}, fmt.Errorf("%w: %s reported %q from %q",
+			ErrNotConverged, rep.ServiceID, rep.Status, svc.Status)
 	}
 
 	// The transition (if any) is durable; now record that the cell converged this

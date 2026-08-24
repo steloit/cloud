@@ -14,6 +14,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/billing"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -135,6 +136,25 @@ func (s *Service) enforceBudget(ctx context.Context, orgID string, newMonthly mo
 	return nil
 }
 
+// StatusVocabulary is the ADR-024 status set, and it is the ONE definition.
+//
+// It was retyped in four places before US-3.3h round 4 — reconcile's wire gate
+// and three separate test sweeps — with nothing tying them, so a status added
+// here would have been swept by none of them. reconcile builds its wire vocab
+// from this, and the sweeps assert membership against it.
+//
+// It mirrors the services CHECK constraint
+// (platform/db/migrations/20260718203138_services.up.sql); the integration suite
+// pins that binding against the real constraint.
+func StatusVocabulary() []string {
+	out := make([]string, 0, len(transitions))
+	for st := range transitions {
+		out = append(out, st)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // transitions is the closed status machine. deleting is terminal (the
 // reconciler removes the row after teardown + final backup).
 var transitions = map[string][]string{
@@ -144,6 +164,274 @@ var transitions = map[string][]string{
 	"failed":       {"provisioning", "deleting"}, // retry re-provisions
 	"suspended":    {"ready", "deleting"},
 	"deleting":     {},
+}
+
+// Observation is what the status machine decided to do with a cell's report.
+//
+// IT IS A TYPE, NOT A (string, bool) PAIR, and ADR-0014 is why. `to, _ :=
+// ObservedStatus(...)` compiles, and dropping that second value silently
+// re-introduces the defect US-3.3a round 12 was reverted for: the writeback
+// advances observed_generation for a hop the machine has not finished, the row
+// leaves the outstanding set, and nothing observes it again. A caller here
+// cannot advance observation without having asked whether it converged.
+//
+// The zero value is deliberately useless: it reports no edge and not converged,
+// so a caller that forgets to call ObservedStatus does nothing rather than
+// something wrong.
+type Observation struct {
+	to        string
+	edge      bool
+	converged bool
+}
+
+// Edge is the transition to take, if any. ok=false means leave the status alone.
+func (o Observation) Edge() (to string, ok bool) { return o.to, o.edge }
+
+// Converged reports whether this report finishes the generation. FALSE means the
+// machine needs another hop, so observed_generation must NOT advance — the row
+// has to stay outstanding for the next tick. This is the same rule Kubernetes
+// states for `status.observedGeneration`: it advances only when the controller
+// has actually reconciled that generation, never merely because it looked.
+func (o Observation) Converged() bool { return o.converged }
+
+// settledStatuses are the statuses the platform is content to STOP WATCHING.
+//
+// `provisioning` is still working and `degraded` is impaired — a row that comes
+// to rest on either has, by definition, not finished anything. Everything else
+// is an end state: `ready` (healthy), `failed` (needs a human), and the two
+// lifecycle holds, which never reach this table because a cell cannot report
+// them (see reportableByCell).
+//
+// THIS IS THE WHOLE CONVERGENCE RULE. Four separate `converged: false` literals
+// used to be written by hand, one per interesting hop, and every defect review
+// found in this function was a hop where the hand-written flag was wrong or
+// missing — `ready`+`degraded` converging on a billing state in one hop while
+// `ready`+`failed` correctly took two, a transient `provisioning` finishing a
+// generation mid-apply, and an unplaceable report finishing one at a stale
+// status. Deriving the flag from the DESTINATION removes the class: there is no
+// per-hop flag left to get wrong.
+// It holds only the two END STATES a cell can actually report the row into.
+// `suspended` and `deleting` are deliberately ABSENT rather than merely unused:
+// `to` can only become one of them via an edge, step 2 refuses both as
+// observations, and step 1 answers before any from-state could reach here — so
+// entries for them would be dead weight a later sweep has to re-derive as
+// equivalent mutants. Held rows settle in step 1, on their own rule.
+var settledStatuses = map[string]bool{"ready": true, "failed": true}
+
+// reportableByCell is the ADR-024 vocabulary a CELL can legitimately OBSERVE.
+//
+// `deleting` and `suspended` are things the control plane DOES to a service,
+// never things a cell sees; the agent's statusFromPhase cannot produce either
+// (it emits only ready / provisioning / failed). They are in the wire enum
+// because that enum is the customer-facing ServiceStatus, shared with a field
+// where they are meaningful.
+var reportableByCell = map[string]bool{
+	"provisioning": true, "ready": true, "degraded": true, "failed": true,
+}
+
+// ReportableByCell reports whether a cell may assert this status about a
+// workload it is looking at. Neither `gone` nor "" is in the set — they are not
+// claims about a workload's health (one says it is absent, the other says
+// nothing at all) and both are answered ahead of this check, in step 1b.
+//
+// Exported because the HTTP handler enforces it too: reconcile's status route
+// refuses a non-reportable status as a 422 before the request reaches the store.
+// That route is the ONLY caller of Writeback, so it is the enforcement point;
+// the arm below is a backstop for a direct caller, and it is deliberately NOT
+// total — step 1 answers first, so on a `deleting` or `suspended` row a
+// non-reportable status is accepted and converges. That is correct (those rows
+// take no edge from any report, and making them 409 forever on a held status
+// would be worse) but it does mean the backstop does not cover every from.
+func ReportableByCell(observed string) bool { return reportableByCell[observed] }
+
+// ObservedStatus maps a cell's OBSERVATION onto a status that is legal from the
+// service's CURRENT one, and decides whether that finishes the generation.
+//
+// WHY THIS LIVES HERE AND NOT IN THE AGENT. `statusFromPhase` on the cell reads
+// only the CNPG phase, so it answers identically whatever state the row is in —
+// while the writeback asks "is this edge legal from svc.Status". ADR-024 allows
+// `ready → {degraded, suspended, deleting}`, so a cluster that breaks while READY
+// makes the agent report `failed`, Transition rejects it, observed_generation
+// never advances, and the service is retried forever with nothing visible.
+// Reachable normally: UpdateServiceShape bumps the generation for any status but
+// `deleting`, and ListDesiredForCell has no status filter.
+//
+// US-3.3a round 12 put this in the AGENT and was reverted: a data-plane copy of
+// a control-plane machine is a plane leak (ADR-0001 D9/A2.5), and it collapsed
+// the agent's "never report a transient" guard on the way past. The control
+// plane is the only place holding both `from` and the machine.
+func ObservedStatus(from, observed string) Observation {
+	// 1. HELD ROWS ANSWER FIRST. `deleting` is terminal (transitions["deleting"]
+	// is empty) and a SUSPENDED service is never auto-resumed — `suspended →
+	// ready` is a legal edge, so without this a converging agent that sees a
+	// healthy cluster silently un-suspends the service and restarts its metering
+	// span. Something held it; observing health is not consent to release it.
+	// Neither ever takes an edge from a report.
+	//
+	// BUT THE HOLD DOES NOT FINISH THE GENERATION — only evidence that it was
+	// APPLIED does, and the only such evidence a cell can give is `gone`.
+	//
+	// This is the guard in step 2 wearing its other face, and getting it wrong
+	// here costs the same thing. `DeleteService` does BumpServiceGeneration
+	// (gen → N+1) and only THEN Transition → `deleting`, so a deleting row is
+	// OUTSTANDING by construction, and that is what redelivers the
+	// `deleting:true` desired doc until the teardown is confirmed. Converging on
+	// any report — a plain `ready` from a cell that has not torn anything down
+	// yet — advances observed_generation, drops the row out of
+	// ListDesiredForCell, and the cluster keeps running while DeleteService
+	// answers "deletion already in progress" forever. Step 2 stops a cell
+	// ASKING for a delete; this stops a cell ABANDONING one.
+	//
+	// `suspended` has no producer in the tree yet (nothing transitions a service
+	// to it, and step 2 now refuses to let a cell report it), so its arm is a
+	// stance rather than a measured requirement: a hold that was never observed
+	// to take effect keeps the row outstanding, which is loud, rather than
+	// settling it, which is invisible. Whatever implements suspend owns the
+	// question of what evidence releases it.
+	switch {
+	case from == "deleting", from == "suspended":
+		return Observation{to: from, edge: false, converged: observed == "gone"}
+	}
+
+	// 1b. NO STATUS REPORTED vs THE WORKLOAD IS GONE. These are different
+	// answers and they used to be the same value: reconcile's handler collapsed
+	// the wire's `gone` into "", so the machine could not tell "I converged this
+	// generation and have nothing to say about its status" from "the thing you
+	// asked me to run does not exist".
+	//
+	//   - "" is the observation-only ack. It converges: the agent applied the
+	//     generation, the status is unchanged, and there is nothing to watch.
+	//   - `gone` on a row that is NOT `deleting`/`suspended` (both answered
+	//     above, where a missing workload is exactly what we asked for) means it
+	//     VANISHED while desired still wants it alive. Settling that advances
+	//     observed_generation on a service that no longer exists: the row leaves
+	//     the outstanding set, the customer keeps seeing `ready`, metering keeps
+	//     billing a `ready` span, and the agent — which re-creates from the
+	//     desired doc and only ever sees rows ListDesiredForCell returns — never
+	//     touches it again. Staying outstanding is what puts it back.
+	//
+	// The existing test for this path called an agent reporting `gone` for a
+	// live service "a bug" and asserted only that the status was not mutated. It
+	// was right about both; what it did not ask is what happens to the row
+	// AFTERWARDS. Found by the convergence invariant, not by inspection — it is
+	// the same defect as `ready` + `degraded` wearing the teardown path's clothes.
+	// `gone` never converges here. "" is NOT short-circuited: it is the
+	// observation-only ack, it carries no destination of its own, and it is
+	// settled by the SAME rule as everything else in step 4 — so an ack on a row
+	// that is still `provisioning` or `degraded` keeps the row outstanding
+	// instead of parking it unwatched.
+	if observed == "gone" {
+		return Observation{to: from, edge: false, converged: false}
+	}
+
+	// 2. A CELL REPORTS WHAT IT OBSERVES — it does not issue lifecycle commands.
+	//
+	// Without this arm, CanTransition below accepts `deleting` and `suspended`
+	// straight from `ready`, and one POST with the reconciler token bricks a
+	// service permanently: the edge lands, but SetServiceStatus does NOT bump
+	// the generation, so no `deleting:true` desired doc is ever produced and no
+	// teardown runs; `deleting` has no outgoing edge; and DeleteService then
+	// answers "deletion already in progress" forever — metering span closed,
+	// workload still running. The reconciler secret is one shared value across a
+	// configured cell list, so the blast radius is every service in every cell.
+	//
+	// This is the arm above, argued in the other direction: observing health is
+	// not consent to resume, and observing anything is not consent to delete.
+	//
+	// NOT CONVERGED. Settling here would hand the same token a quieter attack —
+	// POST a non-reportable status and observed_generation advances, dropping
+	// the row out of ListDesiredForCell so it is never reconciled again.
+	if observed != "" && !ReportableByCell(observed) {
+		return Observation{to: from, edge: false, converged: false}
+	}
+
+	// 3. Choose the DESTINATION. Only legal edges, and only ones the machine can
+	// justify from `from`.
+	to, edge := from, false
+	switch {
+	// ADR-024 has no `ready → failed`. A cluster that broke while READY goes to
+	// `degraded` — the legal edge and the semantically right answer. Without it
+	// the answer would be "no change", and a broken database reported `ready`
+	// forever is worse than the 409 loop this function exists to remove: no
+	// writeback, no alert, indistinguishable from healthy.
+	case from == "ready" && observed == "failed":
+		to, edge = "degraded", true
+
+	// ADR-024 has no `failed → ready` either, so a healthy cluster under a
+	// failed row moves to `provisioning` and the NEXT tick lands `ready`.
+	case from == "failed" && observed == "ready":
+		to, edge = "provisioning", true
+
+	case CanTransition(from, observed):
+		to, edge = observed, true
+
+	default:
+		// No legal edge and no rule above: report NO CHANGE rather than
+		// inventing one. This carries `from == ""` and a `from` outside the
+		// machine entirely — neither can happen through the store (the services
+		// CHECK constraint), and neither may be echoed back as a status, because
+		// the same CHECK would refuse the UPDATE and turn bad input into a 500.
+		// It also carries the in-vocabulary pairs with no edge between them,
+		// such as `provisioning` + `degraded`, AND the steady-state report
+		// (`observed == from`), which had its own arm until it was measured to
+		// decide nothing: `transitions` has no self-edges, so
+		// CanTransition(from, from) is always false and the arm produced the
+		// identical `to = from, edge = false`. A self-edge added later would be
+		// caught by TestEveryObservationReachesAFixedPointWithinTwoHops, which
+		// fails on an edge to itself.
+	}
+
+	// 4. ONE RULE DECIDES CONVERGENCE, and it is about the DESTINATION, not the
+	// hop: a generation is reconciled only when the row comes to rest on a
+	// SETTLED status that the cell ACTUALLY REPORTED.
+	//
+	// Both halves are load-bearing:
+	//
+	//   - `settledStatuses[to]` keeps the row outstanding whenever it lands on
+	//     `provisioning` (still working) or `degraded` (impaired). `degraded`
+	//     BILLS (metering.IsBilling) and `degraded → failed` is the ONLY edge
+	//     that emits a metering `close`, so a row that rests at `degraded` with
+	//     nothing observing it again bills INDEFINITELY. That is true of the
+	//     one-hop `ready` + `degraded` exactly as it is of the two-hop
+	//     `ready` + `failed`, which is why this is not a per-hop decision.
+	//
+	//   - `to == observed` keeps it outstanding when we could not place the
+	//     report — `ready` + `provisioning` (mid-apply, no legal edge) and
+	//     `provisioning` + `degraded` both leave `to` at `from`, and settling
+	//     there would advance observed_generation onto a status the cell never
+	//     reported and drop the row out of ListDesiredForCell for good.
+	//
+	// This is the rule Kubernetes states for `status.observedGeneration`: it
+	// advances when a generation is RECONCILED, not when it was merely looked at.
+	//
+	// WHAT THIS DOES NOT OWN, stated plainly because a wrong citation is worse
+	// than none: a row that stays unconverged while genuinely stuck — a cluster
+	// that reports `degraded` on every tick forever — has NO owner. It is
+	// visible to the customer as `degraded`, which the bug this task fixes was
+	// not, and `last_reconciled_at` is written on converged writebacks only and
+	// has no reader anywhere in the repo. US-3.11 does NOT cover it (its ACs are
+	// about the AGENT distinguishing an unrecoverable render error from a
+	// transient one, not about a control-plane row that never advances).
+	// Filed as US-3.12. Not reachable today: no CNPG phase maps to `degraded`
+	// (unknown phases map to `failed`), but render's terminal() already accepts
+	// `degraded`, so one phase-mapping change makes it live.
+	//   - the `observed == ""` arm of the second half is the observation-only
+	//     ack — "I applied this generation, I have nothing to say about status".
+	//     It asserts nothing about where the row rests, so the FIRST half still
+	//     decides: an ack on a `ready` row settles, an ack on a `provisioning` or
+	//     `degraded` row does not.
+	return Observation{to: to, edge: edge,
+		converged: settledStatuses[to] && (to == observed || observed == "")}
+}
+
+// ObservedStatus is the method form, so *Service satisfies
+// reconcile.Transitioner. The mapping is the package-level function above; this
+// exists only because the reconciler holds a *Service, not a package.
+//
+// It returns the concrete Observation, which is the type reconcile.Transitioner
+// names — see that interface for why the import points this way.
+func (s *Service) ObservedStatus(from, observed string) Observation {
+	return ObservedStatus(from, observed)
 }
 
 // CanTransition reports whether from → to is a legal edge.
@@ -1021,10 +1309,14 @@ func (s *Service) DeleteService(ctx context.Context, svc store.Service, orgID, a
 	// THEN transition status to deleting. Two writes, not one transaction (the
 	// atomicity hardening is a carried finding). A crash BETWEEN them is not
 	// poll-self-healing — the cell would converge the teardown and report `gone`,
-	// which is observation-only, so status would stay at its pre-delete value
-	// while the desired doc says deleting. It IS retry-recoverable: status is not
-	// yet `deleting`, so a second DeleteService passes the guard above and
-	// completes the transition. Ordered desired-first deliberately: the reverse
+	// which takes no edge, so status would stay at its pre-delete value while the
+	// desired doc says deleting. Since US-3.3h that report does not CONVERGE
+	// either (status is not yet `deleting`, so `gone` means "it vanished while
+	// desired still wants it"), which leaves the row outstanding and the
+	// idempotent teardown re-issued each tick instead of dropping silently out of
+	// the outstanding set. It IS retry-recoverable: status is not yet `deleting`,
+	// so a second DeleteService passes the guard above and completes the
+	// transition. Ordered desired-first deliberately: the reverse
 	// (status-first) would strand a row that the guard then refuses to retry.
 	dns, err := s.resolveNamespace(ctx, svc.EnvID)
 	if err != nil {

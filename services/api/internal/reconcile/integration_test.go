@@ -14,6 +14,7 @@ package reconcile_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -271,8 +272,12 @@ func TestHeartbeatPersistsAgainstRealPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT now()").Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_hb", ObservedGeneration: 1}); err != nil {
-		t.Fatal(err)
+	// svc_hb is `provisioning`, so an observation-only ack does not finish the
+	// generation (the cell said nothing about status and the row is mid-apply).
+	// The heartbeat runs FIRST precisely so an agent that is alive but reporting
+	// something the machine will not accept still counts as seen.
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{ServiceID: "svc_hb", ObservedGeneration: 1}); !errors.Is(err, reconcile.ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged", err)
 	}
 	cell, err := q.GetCell(ctx, "cell-0")
 	if err != nil {
@@ -345,5 +350,174 @@ func TestMarkObservedSQLGuardDirectAgainstRealPostgres(t *testing.T) {
 	}
 	if row.ObservedGeneration != 2 {
 		t.Fatalf("observed_generation not advanced to 2: %d", row.ObservedGeneration)
+	}
+}
+
+// THE BILLING ARGUMENT, MEASURED — not asserted in a comment.
+//
+// The whole reason `ready` + `failed` → `degraded` must not converge is that
+// `degraded` BILLS and `degraded → failed` is the ONLY edge that emits a
+// metering `close`. Every unit test for that path runs against a fake
+// Transitioner that emits no spans at all, so the claim was pinned nowhere.
+//
+// This drives the real provisioning.Service and the real metering emitter
+// against real Postgres, across the whole two-hop path, and counts the spans the
+// invoice would actually be built from.
+func TestABrokenReadyServiceStopsBillingAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_bill")
+
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := func() []string {
+		// ORDER BY at alone: `id` is a random `use_<hex>` and would be a coin
+		// flip, not a tiebreak. Today the two edges land in separate Writeback
+		// transactions so `at` (transaction timestamp) separates them; the
+		// strict-increase assertion below is what would catch a future emitter
+		// that writes both in one transaction, rather than letting the order
+		// silently become arbitrary and flake in CI only.
+		rows, err := pool.Query(ctx, `SELECT edge, at FROM usage_events
+		    WHERE service_id = 'svc_bill' AND meter = 'service_span' ORDER BY at`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		var prev time.Time
+		for rows.Next() {
+			var e string
+			var at time.Time
+			if err := rows.Scan(&e, &at); err != nil {
+				t.Fatal(err)
+			}
+			if !prev.IsZero() && !at.After(prev) {
+				t.Fatalf("span %q shares a timestamp with its predecessor — the [open, close] "+
+					"order is then arbitrary and this assertion is a coin flip", e)
+			}
+			prev = at
+			out = append(out, e)
+		}
+		return out
+	}
+
+	// provisioning → ready opens the span, and finishes generation 1.
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: "svc_bill", ObservedGeneration: 1, Status: "ready"}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if got := spans(); len(got) != 1 || got[0] != "open" {
+		t.Fatalf("spans after reaching ready = %v, want [open]", got)
+	}
+
+	// A PATCH bumps the generation, which is what makes a READY service
+	// reachable by the agent again: ListDesiredForCell selects on
+	// observed_generation < generation and has no status filter, and
+	// UpdateServiceShape bumps for any status but `deleting`. Without this the
+	// break below is unreachable through the ordinary flow AND the assertions on
+	// observed_generation are answered by the value the FIRST hop already left
+	// there — a green that means nothing.
+	if _, err := pool.Exec(ctx,
+		`UPDATE services SET generation = 2 WHERE id = 'svc_bill'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// The cluster breaks. The agent reports `failed`, which ADR-024 does not
+	// allow from `ready`; the machine routes it to `degraded` — which still
+	// BILLS, so this hop must NOT finish the generation.
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: "svc_bill", ObservedGeneration: 2, Status: "failed"}); !errors.Is(err, reconcile.ErrNotConverged) {
+		t.Fatalf("hop 1: err = %v, want ErrNotConverged", err)
+	}
+	row, err := q.GetService(ctx, "svc_bill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "degraded" {
+		t.Fatalf("status = %q, want degraded", row.Status)
+	}
+	if row.ObservedGeneration != 1 {
+		t.Fatalf("observed_generation = %d, want 1 (still behind generation 2): advancing at "+
+			"`degraded` drops the row out of ListDesiredForCell on a BILLING state, and nothing "+
+			"observes the cluster again — it bills indefinitely", row.ObservedGeneration)
+	}
+	if got := spans(); len(got) != 1 {
+		t.Fatalf("spans at degraded = %v — degraded still bills, so nothing may close here", got)
+	}
+
+	// Still broken on the next tick. degraded → failed is the ONLY edge that
+	// closes the span, and it is reachable only because hop 1 stayed outstanding.
+	if _, err := svc.Writeback(ctx, "cell-0", reconcile.Report{
+		ServiceID: "svc_bill", ObservedGeneration: 2, Status: "failed"}); err != nil {
+		t.Fatalf("hop 2: %v", err)
+	}
+	row, err = q.GetService(ctx, "svc_bill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Status != "failed" {
+		t.Fatalf("status = %q, want failed — the span never closes", row.Status)
+	}
+	if row.ObservedGeneration != 2 {
+		t.Fatalf("observed_generation = %d, want 2 once converged", row.ObservedGeneration)
+	}
+	if got := spans(); len(got) != 2 || got[1] != "close" {
+		t.Fatalf("spans = %v, want [open close] — an unrecoverable database that never stops "+
+			"billing is the defect this two-hop path exists to prevent", got)
+	}
+
+	// D10: both edges are on the spine, and both came from the cell converging.
+	for _, action := range []string{"service.degraded", "service.failed"} {
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM events WHERE subject = 'svc_bill' AND action = $1`, action).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Fatalf("expected exactly one %s spine event, got %d", action, n)
+		}
+	}
+}
+
+// EVERY STATUS THE MAPPING CAN EMIT IS ONE THE DATABASE ACCEPTS.
+//
+// ObservedStatus is a pure function over strings, so a destination outside the
+// services CHECK constraint would only ever surface as a 500 at the UPDATE. This
+// walks the full (from × observed) domain against the real constraint.
+func TestEveryMappedDestinationSatisfiesTheRealCheckConstraint(t *testing.T) {
+	pool, _ := realDB(t)
+	ctx := context.Background()
+	seedService(t, pool, "svc_check")
+
+	// The vocabulary comes from the one definition, and this test is also what
+	// pins that definition to the REAL CHECK constraint.
+	froms := provisioning.StatusVocabulary()
+	observeds := append(provisioning.StatusVocabulary(), "gone", "", "not-a-status")
+	tried := 0
+	for _, from := range froms {
+		for _, observed := range observeds {
+			to, ok := provisioning.ObservedStatus(from, observed).Edge()
+			if !ok {
+				continue
+			}
+			tried++
+			if _, err := pool.Exec(ctx,
+				`UPDATE services SET status = $1 WHERE id = 'svc_check'`, to); err != nil {
+				t.Errorf("from %q observing %q yields %q, which the services CHECK constraint "+
+					"refuses (%v) — the mapping would turn a cell report into a 500",
+					from, observed, to, err)
+			}
+		}
+	}
+	// EXACT, not a floor. `if tried == 0` is the same shape as the `if checked <
+	// 30` guard round 3 deleted for being unable to see what was never
+	// enumerated: one surviving edge would keep it green. These are the eight
+	// edges the mapping can emit — provisioning+{ready,failed}, ready+{degraded,
+	// failed}, degraded+{ready,failed}, failed+{provisioning,ready}.
+	if tried != 8 {
+		t.Fatalf("exercised %d edges, want exactly 8 — if the mapping gained or lost an edge, "+
+			"this test must be updated deliberately, not silently", tried)
 	}
 }
