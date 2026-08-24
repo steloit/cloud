@@ -147,7 +147,41 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 				return "", fmt.Errorf("render: delete %s/%s: %w", o.Kind, o.Name, err)
 			}
 		}
-		r.log.Info("converged: teardown applied", "service", svc.ID, "namespace", namespace)
+		// A DELETE THAT WAS ACCEPTED IS NOT A WORKLOAD THAT IS GONE.
+		//
+		// Kubernetes answers 2xx the MOMENT it accepts a delete, with finalizers
+		// and graceful termination still pending — and a CNPG Cluster has both.
+		// Reporting `gone` on the strength of that 2xx reports acceptance as
+		// completion, and everything downstream reads `gone` as absence:
+		// US-3.3h converges `deleting` + `gone`, and US-3.3b then advertises the
+		// environment's NAMESPACE for deletion, which would remove a database
+		// whose pods are still terminating and whose WAL is still archiving.
+		//
+		// So observe it. "" is a real 404 — the Cluster is actually gone — and
+		// anything else means still terminating, which is ErrNotConverged: the
+		// apply landed, the row stays outstanding, and the next tick re-checks.
+		// That is the same shape the provisioning path already uses, arrived at
+		// from the other end.
+		// The name is taken from the objects we just deleted, NOT re-derived:
+		// they are dnsName-sanitized by the driver, and observing a name the
+		// driver did not use would 404 and read as "gone" — the same
+		// wrong-name-reads-as-absent trap the comment above this block names.
+		var cluster string
+		for _, o := range objs {
+			if o.Kind == "Cluster" {
+				cluster = o.Name
+			}
+		}
+		if cluster == "" {
+			return "", fmt.Errorf("render: teardown of %s enumerated no Cluster to observe — "+
+				"reporting gone would be reporting a delete nobody confirmed", svc.ID)
+		}
+		if phase, err := r.applier.Observe(ctx, namespace, cluster); err != nil {
+			return "", fmt.Errorf("render: observe %s during teardown: %w", svc.ID, err)
+		} else if phase != "" {
+			return "", fmt.Errorf("%w: %s is still terminating (%s)", agent.ErrNotConverged, svc.ID, phase)
+		}
+		r.log.Info("converged: teardown complete", "service", svc.ID, "namespace", namespace)
 		return "gone", nil
 	}
 

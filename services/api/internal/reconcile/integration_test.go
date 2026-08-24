@@ -15,6 +15,7 @@ package reconcile_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"github.com/steloit/cloud/services/api/internal/platform/db"
+	"github.com/steloit/cloud/services/api/internal/platform/problem"
 	"github.com/steloit/cloud/services/api/internal/platform/testenv"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 	"github.com/steloit/cloud/services/api/internal/reconcile"
@@ -88,7 +90,7 @@ func newReconciler(pool *pgxpool.Pool, q *store.Queries) (*reconcile.Service, er
 	}
 	rec := events.NewRecorder(q, events.NewHub())
 	prov := provisioning.NewService(pool, rec, secrets.NewVault(q, kek), metering.NewEmitter(q), plans)
-	return reconcile.New(q, prov), nil
+	return reconcile.New(q, prov, reconcile.WithRecorder(rec)), nil
 }
 
 // The founder-gated criterion, the AC's LITERAL scenario: the agent reports
@@ -729,5 +731,143 @@ func TestAnEnvironmentOnAnotherCellIs404AgainstRealPostgres(t *testing.T) {
 	}
 	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_far"); !errors.Is(err, reconcile.ErrUnknownEnvironment) {
 		t.Fatalf("err = %v, want ErrUnknownEnvironment (404, never 403 — existence is not leaked)", err)
+	}
+}
+
+// A CONFIRMATION THAT ARRIVES AFTER THE ENVIRONMENT STOPPED BEING ELIGIBLE IS
+// REFUSED — because `torn_down_at` is a ONE-WAY LATCH.
+//
+// The agent polls, then deletes, then confirms. If a service appears in that
+// window, a confirmation without the poll's fence latches an environment that is
+// no longer eligible: it is never advertised again, so when that service is
+// later deleted its namespace leaks FOREVER — the leak this task exists to
+// close, reintroduced through the back door.
+//
+// (`CreateService` now refuses to create into a scheduled environment, so this
+// is defence in depth — but the fence is what makes the window safe rather than
+// merely narrow, and the two guards fail independently.)
+func TestAConfirmationIsRefusedIfTheEnvironmentBecameIneligibleAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedEnv(t, pool, "env_race")
+	scheduleEnvDeletion(t, pool, "env_race")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The poll sees it: nothing is inside.
+	if got := advertisedEnvs(t, svc); len(got) != 1 || got[0] != "env_race" {
+		t.Fatalf("precondition: advertised %v", got)
+	}
+	// ...and then something appears inside it, before the confirmation lands.
+	seedEnvService(t, pool, "env_race", "svc_late", "provisioning", 1, 0)
+
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_race"); !errors.Is(err, reconcile.ErrTeardownNotOutstanding) {
+		t.Fatalf("err = %v, want ErrTeardownNotOutstanding — latching here strands the "+
+			"environment: never advertised again, namespace leaks forever", err)
+	}
+	var torn bool
+	if err := pool.QueryRow(ctx,
+		`SELECT torn_down_at IS NOT NULL FROM environments WHERE id = 'env_race'`).Scan(&torn); err != nil {
+		t.Fatal(err)
+	}
+	if torn {
+		t.Fatal("torn_down_at was latched for an environment that is no longer eligible")
+	}
+	// And it is not advertised while that service is alive, so the agent stops
+	// asking — the state is consistent, not stuck.
+	if got := advertisedEnvs(t, svc); len(got) != 0 {
+		t.Fatalf("still advertised %v with a live service inside", got)
+	}
+}
+
+// The teardown's completion lands on the SPINE (D10). DeleteEnvironment records
+// `env.deletion_scheduled`; without this the feed shows a teardown that starts
+// and never finishes.
+func TestAConfirmedTeardownIsRecordedOnTheSpineAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedEnv(t, pool, "env_spine")
+	scheduleEnvDeletion(t, pool, "env_spine")
+	svc, err := newReconciler(pool, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_spine"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE subject = 'env_spine' AND action = 'env.torn_down'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly one env.torn_down spine event, got %d", n)
+	}
+	// A refused replay must not append a second one.
+	_ = svc.ConfirmEnvironmentTeardown(ctx, "cell-0", "env_spine")
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM events WHERE subject = 'env_spine' AND action = 'env.torn_down'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("a refused replay appended another spine event (%d)", n)
+	}
+}
+
+// NOTHING NEW GOES INTO AN ENVIRONMENT THAT IS BEING TORN DOWN.
+//
+// `DeleteEnvironment` enforces "nothing live is in here" at SCHEDULE time and
+// nothing preserved it afterwards, so a service created later sat inside a
+// namespace the agent had been told to delete. Mirrors CreateProject's org check.
+func TestCreateServiceRefusesAScheduledEnvironmentAgainstRealPostgres(t *testing.T) {
+	pool, q := realDB(t)
+	ctx := context.Background()
+	seedEnv(t, pool, "env_sched")
+	scheduleEnvDeletion(t, pool, "env_sched")
+
+	env, err := q.GetEnvironment(ctx, "env_sched")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !env.DeletionScheduledAt.Valid {
+		t.Fatal("precondition: deletion is not scheduled")
+	}
+	kek, err := secrets.NewEnvKEK("test-v1", testKEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := billing.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := provisioning.NewService(pool, events.NewRecorder(q, events.NewHub()),
+		secrets.NewVault(q, kek), metering.NewEmitter(q), plans)
+
+	_, err = prov.CreateService(ctx, nil, env, "org_it", provisioning.CreateServiceInput{
+		Name: "db", EstimateID: "est_x",
+	})
+	if err == nil {
+		t.Fatal("a service was created into an environment scheduled for deletion")
+	}
+	// It must be MY conflict, not the estimate lookup failing first — the input
+	// deliberately carries a bogus estimate id, so `err != nil` alone would be
+	// satisfied by an unrelated refusal a few lines further down.
+	c, ok := errors.AsType[problem.Carrier](err)
+	if !ok {
+		t.Fatalf("not a problem-carrying error: %v", err)
+	}
+	p := c.Problem()
+	if p.Status != 409 {
+		t.Fatalf("status = %d, want 409", p.Status)
+	}
+	var named bool
+	for _, r := range p.Reasons {
+		if strings.Contains(r.Message, "scheduled for deletion") {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("the refusal is a 409 for some OTHER reason: %+v", p.Reasons)
 	}
 }

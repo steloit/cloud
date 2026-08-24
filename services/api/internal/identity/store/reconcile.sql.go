@@ -219,14 +219,25 @@ type ListEnvironmentTeardownsForCellRow struct {
 //
 // THE `NOT EXISTS` IS A SAFETY GATE, NOT AN OPTIMISATION. Deleting a namespace
 // deletes everything in it, so advertising an environment before its services
-// are actually gone would tear down a still-terminating CNPG cluster out from
-// under US-3.5's final-backup contract. DeleteEnvironment only requires every
-// service to have REACHED `deleting`; that is not the same as torn down, so the
-// gate is here rather than there.
+// are actually gone would tear down a still-terminating CNPG cluster.
+// DeleteEnvironment only requires every service to have REACHED `deleting`; that
+// is not the same as torn down, so the gate is here rather than there.
 //
-// "Actually gone" is `status = 'deleting' AND observed_generation >= generation`
-// — the cell converged the teardown and reported it (US-3.3h: `deleting` + `gone`
-// converges). It is NOT row absence: nothing in the tree deletes a service row.
+// "Actually gone" is `status = 'deleting' AND observed_generation >= generation`.
+// That is only as strong as what `gone` MEANS, and the first cut of this got it
+// wrong: the renderer used to issue its deletes and report `gone` on the next
+// line, while Kubernetes answers 2xx the moment it ACCEPTS a delete — finalizers
+// and graceful termination still pending. The renderer now observes the Cluster
+// absent before reporting `gone`, which is what makes this predicate mean what
+// it says. If that check is ever removed, this gate silently weakens to "the
+// delete was accepted" and a database gets deleted mid-termination.
+//
+// It is NOT row absence: nothing in the tree deletes a service row.
+//
+// NOT a final-backup guarantee. US-3.5 (the final backup) is `status: blocked`,
+// so there is no such contract to honour yet — an earlier version of this
+// comment claimed one. What is guaranteed is only that the workload is gone
+// before its namespace is.
 //
 // cell_id lives on PROJECTS, not on environments, hence the join.
 func (q *Queries) ListEnvironmentTeardownsForCell(ctx context.Context, arg ListEnvironmentTeardownsForCellParams) ([]ListEnvironmentTeardownsForCellRow, error) {
@@ -250,15 +261,31 @@ func (q *Queries) ListEnvironmentTeardownsForCell(ctx context.Context, arg ListE
 }
 
 const markEnvironmentTornDown = `-- name: MarkEnvironmentTornDown :execrows
-UPDATE environments
+UPDATE environments e
 SET torn_down_at = now()
-WHERE id = $1 AND deletion_scheduled_at IS NOT NULL AND torn_down_at IS NULL
+WHERE e.id = $1
+  AND e.deletion_scheduled_at IS NOT NULL
+  AND e.torn_down_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM services s
+      WHERE s.env_id = e.id
+        AND (s.status <> 'deleting' OR s.observed_generation < s.generation)
+  )
 `
 
-// The cell confirming the namespace is gone. Guarded on both halves so a replay
-// is a no-op and a report for an environment nobody scheduled cannot invent a
-// teardown: 0 rows means "not eligible", which the caller renders as a refusal
-// rather than a success.
+// The cell confirming the namespace is gone.
+//
+// IT CARRIES THE SAME `NOT EXISTS` FENCE AS THE POLL, and that is not
+// belt-and-braces — `torn_down_at` is a ONE-WAY LATCH with no reset. The agent
+// polls, then deletes, then confirms; if a service is created in that
+// environment in between, confirming without the fence latches an environment
+// that is no longer eligible. It is never advertised again, so when that service
+// is later deleted its namespace leaks FOREVER — exactly the leak this task
+// exists to close, reintroduced through the back door.
+//
+// 0 rows means "not eligible", which the caller renders as a refusal (409)
+// rather than a success. That covers all three ways to be ineligible: never
+// scheduled, already confirmed, or something is alive in there again.
 func (q *Queries) MarkEnvironmentTornDown(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, markEnvironmentTornDown, id)
 	if err != nil {

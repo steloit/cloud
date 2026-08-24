@@ -1222,7 +1222,7 @@ paths:
                     items: {$ref: "#/components/schemas/DesiredService"}
                   environments:
                     type: array
-                    description: "Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case."
+                    description: "Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case."
                     items: {$ref: "#/components/schemas/DesiredEnvironmentTeardown"}
         "401": {description: "auth_failed — not a reconciler-scoped token", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "404": {description: "Unknown cell, or a cell this token does not own — existence is not leaked (404, never 403)", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}

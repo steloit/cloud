@@ -305,14 +305,6 @@ func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
 	return fmt.Sprintf("%s/namespaces/%s/%s/%s", prefix, namespace, plural, name), nil
 }
 
-// IsClusterScoped reports whether a kind lives outside any namespace.
-//
-// Exported because TEARDOWN turns on it: everything namespaced is removed by
-// deleting the namespace, and only the cluster-scoped objects have to be deleted
-// explicitly. tenancy uses it to derive its teardown set instead of keeping a
-// second list, so a kind added there cannot quietly fall outside both.
-func IsClusterScoped(kind string) bool { return clusterScoped[kind] }
-
 // clusterScoped is explicit for the same reason plurals is: guessing scope from
 // the kind name is how a manifest silently applies to the wrong path.
 var clusterScoped = map[string]bool{

@@ -18954,7 +18954,7 @@ type GetDesiredStateResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *struct {
-		// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+		// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case.
 		Environments []DesiredEnvironmentTeardown `json:"environments"`
 		Services     []DesiredService             `json:"services"`
 	}
@@ -18970,7 +18970,7 @@ type GetDesiredStateResponse struct {
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r GetDesiredStateResponse) GetJSON200() *struct {
-	// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+	// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case.
 	Environments []DesiredEnvironmentTeardown `json:"environments"`
 	Services     []DesiredService             `json:"services"`
 } {
@@ -25236,7 +25236,7 @@ func ParseGetDesiredStateResponse(rsp *http.Response) (*GetDesiredStateResponse,
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+			// Environments Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case.
 			Environments []DesiredEnvironmentTeardown `json:"environments"`
 			Services     []DesiredService             `json:"services"`
 		}

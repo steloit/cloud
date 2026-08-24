@@ -153,6 +153,57 @@ set to `TrimPrefix(namespace, "env-")`, which yielded `9f3c1a2b` for the id
 `env_9f3c1a2b` and named nothing the control plane knew. There is one derivation
 now, and the agent does not own it.
 
+### Review round 2: the gate's premise was false
+
+The reviewer's blocker, and it is the one that mattered: **`gone` did not mean
+gone.** `Converge`'s deleting arm issued its deletes and returned `gone` on the
+next line, and `kube.Delete` treats any 2xx as success — which Kubernetes returns
+the *moment* it accepts a delete, with finalizers and graceful termination still
+pending, and a CNPG Cluster has both. So the gate's `observed_generation` half
+established "the cell's delete was **accepted**", not "the workload is gone", and
+the namespace was removed roughly one tick (~10s) later while pods were still
+terminating.
+
+The teardown now **observes the Cluster absent** before reporting `gone` (`""`
+from `Observe` is a real 404); anything else is `ErrNotConverged`, so the row
+stays outstanding and the next tick re-checks. That is what makes the gate's
+predicate mean what it says. The Cluster's name comes from the objects just
+deleted rather than being re-derived — observing a name the driver did not use
+would 404 and read as absence.
+
+**I also cited a contract that does not exist.** The comment justified the gate
+by "US-3.5's final-backup contract"; `US-3.5` is `status: blocked`. That is the
+second false citation in this session (US-3.3h cited US-3.11 for something its
+ACs do not cover). Both are now corrected to claim only what is established.
+
+### And a one-way latch
+
+`MarkEnvironmentTornDown` guarded only on scheduled-and-not-yet-torn-down, so a
+confirmation arriving after the environment stopped being eligible **latched** it.
+`torn_down_at` has no reset, so that environment is never advertised again — and
+when the service inside it is later deleted, its namespace leaks *forever*, which
+is the leak this task exists to close, reintroduced through the back door. The
+confirmation now carries the **same `NOT EXISTS` fence as the poll**.
+
+Two guards that failed independently, so both are fixed: `CreateService` also
+refuses an environment with `deletion_scheduled_at` set, mirroring
+`CreateProject`'s org check. `DeleteEnvironment` enforced "nothing live is in
+here" at *schedule* time and nothing preserved it afterwards.
+
+### Three more
+
+- **D10:** `torn_down_at` is a durable state change and the record that a tenant
+  boundary was destroyed, and it emitted no spine event — the feed showed a
+  teardown that starts (`env.deletion_scheduled`) and never finishes. It records
+  `env.torn_down` now, only on the call that actually latched it.
+- **The ordering test did not test ordering.** `len(reports) > 0 &&
+  len(confirmed) > 0` is true in *either* order; the reviewer moved
+  `tearDownEnvironments` above the service loop and the whole package stayed
+  green. Both halves append to one sequence log now, and every report must
+  precede every teardown.
+- `kube.IsClusterScoped` was **dead code** whose comment described a design I
+  replaced with YAML-derived scope. Deleted.
+
 ### Evidence
 
 Eight mutations RED, baseline asserted green **before and after**:
@@ -163,6 +214,16 @@ Eight mutations RED, baseline asserted green **before and after**:
 | gate ignores `observed_generation` | RED | teardown deletes nothing | RED |
 | the poll ignores the cell | RED | teardown also deletes namespaced objects | RED |
 | the confirmation guard removed | RED | | |
+
+Round 2 added five more, each on a green baseline:
+
+| mutation | |
+|---|---|
+| `gone` reported on ACCEPTANCE (no absence check) | RED |
+| the confirmation's fence removed (the latch) | RED |
+| the `CreateService` guard removed | RED |
+| the `env.torn_down` spine event removed | RED |
+| environments torn down BEFORE services converge | RED |
 
 The gate mutations are only catchable against **real Postgres** (the condition is
 SQL), so those run there: a `ready` service, then one mid-teardown

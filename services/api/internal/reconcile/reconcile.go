@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/steloit/cloud/services/api/internal/events"
 	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/provisioning"
 )
@@ -55,13 +56,38 @@ type Transitioner interface {
 // returns the real one — and making `provisioning` import `reconcile` instead
 // would point the domain at its own caller.
 
+// Recorder appends to the audit spine. Narrow on purpose: this package records
+// exactly one thing, and taking the whole events.Recorder would let it grow.
+//
+// D10 says every durable state change lands on the spine. The status path gets
+// that for free — Transition owns it — but an environment teardown never goes
+// through Transition, so without this the spine would show a teardown that
+// starts (env.deletion_scheduled) and never finishes.
+type Recorder interface {
+	Append(ctx context.Context, in events.Input) (store.Event, error)
+}
+
 // Service is the control-plane half of the reconciler protocol.
 type Service struct {
 	q     Querier
 	trans Transitioner
+	rec   Recorder // may be nil: the spine is not load-bearing for correctness here
 }
 
-func New(q Querier, trans Transitioner) *Service { return &Service{q: q, trans: trans} }
+func New(q Querier, trans Transitioner, opts ...Option) *Service {
+	s := &Service{q: q, trans: trans}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// Option configures a Service. Variadic so every existing caller — and every
+// test — keeps compiling without threading a recorder it does not need.
+type Option func(*Service)
+
+// WithRecorder wires the audit spine for the environment-teardown path.
+func WithRecorder(r Recorder) Option { return func(s *Service) { s.rec = r } }
 
 // ErrStaleGeneration is a writeback whose reported generation is not the one
 // desired holds right now — either BEHIND (the agent converged an older desired
@@ -229,6 +255,18 @@ func (s *Service) ConfirmEnvironmentTeardown(ctx context.Context, cell, envID st
 	n, err := s.q.MarkEnvironmentTornDown(ctx, env.ID)
 	if err != nil {
 		return err
+	}
+	if n == 1 && s.rec != nil {
+		// D10: the teardown's completion is a durable state change and the record
+		// that a tenant boundary was destroyed. DeleteEnvironment records
+		// `env.deletion_scheduled`; without this the feed shows a teardown that
+		// starts and never finishes. AFTER the guarded UPDATE, so only the caller
+		// that actually latched it records one — and never rolled back by a
+		// spine failure, which is the same rule metering follows.
+		_, _ = s.rec.Append(ctx, events.Input{
+			OrgID: env.OrgID, Kind: "lifecycle", Via: "system", Actor: "system",
+			Action: "env.torn_down", Subject: env.ID,
+		})
 	}
 	if n == 0 {
 		// The SQL guard is the authority, not a pre-read: `WHERE

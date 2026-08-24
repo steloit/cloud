@@ -4294,7 +4294,7 @@ export type GetDesiredStateResponses = {
     200: {
         services: Array<DesiredService>;
         /**
-         * Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a still-terminating database before its final backup. Always present; empty in the ordinary case.
+         * Environments in this cell whose NAMESPACE still has to be removed — scheduled for deletion and not yet confirmed torn down. Advertised only once every service in the environment is actually gone (status `deleting` AND observed_generation caught up), because deleting a namespace deletes everything in it and would otherwise destroy a database whose pods are still terminating. `gone` from a cell means the workload was observed ABSENT, not merely that a delete was accepted. Always present; empty in the ordinary case.
          */
         environments: Array<DesiredEnvironmentTeardown>;
     };

@@ -657,6 +657,22 @@ func (s *Service) CreateService(ctx context.Context, est *estimates.Service, env
 		return store.Service{}, problemError{p: problem.ValidationFailed(
 			[]problem.FieldError{{Field: "estimate_id", Detail: "required — nothing provisions without an accepted estimate (F2)"}})}
 	}
+	// NOTHING NEW GOES INTO AN ENVIRONMENT THAT IS BEING TORN DOWN. This mirrors
+	// CreateProject's org check, and until US-3.3b it had no owner: scheduling an
+	// environment's deletion did nothing at all, so creating a service into one
+	// was merely odd.
+	//
+	// It is load-bearing now. DeleteEnvironment enforces "nothing live is in
+	// here" at SCHEDULE time and nothing preserved it afterwards, so a service
+	// created later sat inside a namespace the agent had been told to delete.
+	// The reconciler's poll and its confirmation both fence on the same
+	// condition, which turns that race into a refused confirmation rather than
+	// data loss — but the honest fix is not to let it start.
+	if env.DeletionScheduledAt.Valid {
+		return store.Service{}, problemError{p: problem.Conflict(
+			[]string{"this environment is scheduled for deletion"},
+			"Create the service in another environment — this one's namespace is being torn down.")}
+	}
 	// Price line for THIS shape (also validates product/size before burning
 	// the one-shot estimate).
 	line, err := estimates.Price(estimates.ShapeInput{

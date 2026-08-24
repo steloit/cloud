@@ -3,9 +3,11 @@ package render
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 )
 
@@ -421,5 +423,63 @@ func TestEnvironmentTeardownRefusesAnInvalidNamespace(t *testing.T) {
 		if len(a.deleted) != 0 {
 			t.Fatalf("teardown of %q deleted %v before validating", ns, a.deleted)
 		}
+	}
+}
+
+// A DELETE THAT WAS ACCEPTED IS NOT A WORKLOAD THAT IS GONE.
+//
+// Kubernetes answers 2xx the MOMENT it accepts a delete — finalizers and
+// graceful termination still pending, and a CNPG Cluster has both. The teardown
+// used to report `gone` on the strength of that 2xx, which reports acceptance as
+// completion. Everything downstream reads `gone` as absence: US-3.3h converges
+// `deleting` + `gone`, and US-3.3b then advertises the environment's NAMESPACE
+// for deletion — removing a database whose pods are still terminating.
+//
+// So the teardown observes the Cluster absent first. Here the object survives
+// the delete (a finalizer, modelled by re-adding it), and the converge must NOT
+// report gone.
+func TestATeardownDoesNotReportGoneWhileTheClusterSurvives(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	s := svc("svc_0123456789abcdef0123456789abcdef", "provisioning")
+	if _, err := r.Converge(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	// The delete is accepted, but a finalizer keeps the object alive: whatever
+	// Delete removes, it is still there when we look.
+	a.mu.Lock()
+	live := map[string]bool{}
+	for k, v := range a.live {
+		live[k] = v
+	}
+	// onDelete runs INSIDE Delete, which already holds f.mu — so it must not
+	// take the lock again.
+	a.onDelete = func() { a.live = live }
+	a.mu.Unlock()
+
+	status, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
+	if status == "gone" {
+		t.Fatal("reported `gone` while the Cluster is still present — the control plane would " +
+			"converge the service and then delete the whole namespace out from under a " +
+			"terminating database")
+	}
+	if !errors.Is(err, agent.ErrNotConverged) {
+		t.Fatalf("err = %v, want ErrNotConverged — the teardown landed and is not finished", err)
+	}
+}
+
+// ...and once it IS absent, the same converge reports gone.
+func TestATeardownReportsGoneOnceTheClusterIsAbsent(t *testing.T) {
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
+	if err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+	if status != "gone" {
+		t.Fatalf("status = %q, want gone once the Cluster is actually absent", status)
 	}
 }

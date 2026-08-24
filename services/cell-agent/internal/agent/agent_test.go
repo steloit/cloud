@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -33,6 +34,12 @@ type fakeCP struct {
 	// fake does not model cell ownership — that rule is the control plane's and
 	// is tested there, against real Postgres.
 	envCellIgnored bool
+
+	// seq is the ONE ordered log both halves append to, so a test can assert
+	// which happened first. Two separate counters cannot: `len(reports) > 0 &&
+	// len(confirmed) > 0` is satisfied by either order, which is how an ordering
+	// test came to pass with the teardown moved ABOVE the service loop.
+	seq []string
 }
 
 // Desired models the real server: it returns OUTSTANDING work — services whose
@@ -75,6 +82,7 @@ func (f *fakeCP) ConfirmEnvironmentTeardown(_ context.Context, _, envID string) 
 		return f.confirmErr
 	}
 	f.confirmed = append(f.confirmed, envID)
+	f.seq = append(f.seq, "teardown:"+envID)
 	kept := f.envs[:0]
 	for _, e := range f.envs {
 		if e.ID != envID {
@@ -92,6 +100,7 @@ func (f *fakeCP) Report(_ context.Context, _ string, r Report) error {
 		return f.reportErr
 	}
 	f.reports = append(f.reports, r)
+	f.seq = append(f.seq, "report:"+r.ServiceID)
 	f.applyReport(r)
 	return nil
 }
@@ -518,16 +527,27 @@ func TestARendererThatCannotTearDownNeverConfirms(t *testing.T) {
 	}
 }
 
-// SERVICES ARE CONVERGED BEFORE ENVIRONMENTS ARE TORN DOWN. The real protection
-// is server-side (an environment is not advertised until its services are gone),
-// but a tick that removed a namespace before converging the services in it would
-// be deleting a workload it was in the middle of managing.
+// SERVICES ARE CONVERGED BEFORE ENVIRONMENTS ARE TORN DOWN.
+//
+// The real protection is server-side (an environment is not advertised until
+// every service in it is gone), but a tick that removed a namespace before
+// converging the services in it would be deleting a workload it was in the
+// middle of managing.
+//
+// ASSERTED ON A SEQUENCE, not on two counters. The first version of this test
+// checked `len(reports) > 0 && len(confirmed) > 0`, which is true in EITHER
+// order — moving tearDownEnvironments above the service loop left it, and the
+// whole package, green.
 func TestEnvironmentsAreTornDownAfterServicesConverge(t *testing.T) {
 	cp := &fakeCP{
 		services: map[string]DesiredService{
 			"svc_1": {ID: "svc_1", Generation: 1, ObservedGeneration: 0, Desired: map[string]any{}},
+			"svc_2": {ID: "svc_2", Generation: 1, ObservedGeneration: 0, Desired: map[string]any{}},
 		},
-		envs:           []DesiredEnvironmentTeardown{{ID: "env_z", Namespace: "env-z"}},
+		envs: []DesiredEnvironmentTeardown{
+			{ID: "env_z", Namespace: "env-z"},
+			{ID: "env_w", Namespace: "env-w"},
+		},
 		envCellIgnored: true,
 	}
 	r := &envRenderer{}
@@ -535,20 +555,25 @@ func TestEnvironmentsAreTornDownAfterServicesConverge(t *testing.T) {
 
 	a.Tick(context.Background())
 
-	r.mu.Lock()
-	converged := len(r.fakeRenderer.converged)
-	torn := len(r.tornDown)
-	r.mu.Unlock()
-	if converged != 1 {
-		t.Fatalf("the service was not converged (%d)", converged)
-	}
-	if torn != 1 {
-		t.Fatalf("the environment was not torn down (%d)", torn)
-	}
 	cp.mu.Lock()
-	order := len(cp.reports) > 0 && len(cp.confirmed) > 0
+	seq := append([]string(nil), cp.seq...)
 	cp.mu.Unlock()
-	if !order {
-		t.Fatal("expected both a service report and an environment confirmation in one tick")
+
+	if len(seq) != 4 {
+		t.Fatalf("sequence = %v, want two reports and two teardowns", seq)
+	}
+	// EVERY report must precede EVERY teardown.
+	lastReport, firstTeardown := -1, len(seq)
+	for i, e := range seq {
+		if strings.HasPrefix(e, "report:") && i > lastReport {
+			lastReport = i
+		}
+		if strings.HasPrefix(e, "teardown:") && i < firstTeardown {
+			firstTeardown = i
+		}
+	}
+	if lastReport > firstTeardown {
+		t.Fatalf("a namespace was torn down before every service was converged: %v\n"+
+			"the tick would be deleting a workload it is in the middle of managing", seq)
 	}
 }
