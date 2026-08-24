@@ -36,10 +36,14 @@ mock_provider "google-beta" {}
 mock_provider "kubernetes" {}
 mock_provider "helm" {}
 
-# kubectl is mocked for the same reason kubernetes and helm are: this suite
-# asserts the PLANNED cell, and an unmocked provider tries to reach a real API
-# (measured: it dialled a cluster IP and timed out). ADR-0017 moved every raw
-# manifest onto it, so it is now part of the plan the same way helm is.
+# kubectl is mocked for the same reason kubernetes and helm are: ADR-0017 moved
+# every raw manifest onto it, so it is part of the plan the same way helm is.
+#
+# NOTE FOR THE NEXT READER: mocking it also HIDES the provider's own plan-time
+# configuration, so this suite cannot see whether `lazy_load` is set — and
+# without that the real from-zero apply fails. That property is guarded by
+# TestTheKubectlProviderLoadsLazily instead, deliberately, because there is no
+# way to assert it here and mock the provider at the same time.
 mock_provider "kubectl" {}
 
 variables {

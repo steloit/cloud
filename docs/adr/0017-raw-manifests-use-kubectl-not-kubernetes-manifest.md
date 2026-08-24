@@ -50,6 +50,36 @@ example does exactly this. Only `kubernetes_manifest` reaches out during plan.
 | **CNPG's `cluster` Helm chart instead of raw YAML** | would work, but `infra/k8s/control-plane/cnpg-cluster.yaml` is ground truth that `parity_test.go` asserts the agent's renderer against. Replacing it with chart values moves that truth into a third-party chart's templating and breaks the binding. |
 | **`null_resource` + `local-exec kubectl apply`** | a workaround with no state, no drift detection and no destroy. |
 
+## The provider must load LAZILY, or the fix does not work
+
+`alekc/kubectl` **configures at plan time** and errors when `host`/
+`cluster_ca_certificate` are still unknown — which is exactly the from-zero case
+this ADR exists to fix. The first version of this change therefore replaced one
+plan-time failure with another, and review caught it. Measured, with the provider
+block copied verbatim and its host taken from a not-yet-applied resource:
+
+```
+without lazy_load:  Plan: 1 to add, then
+  Error: invalid provider configuration: default cluster has no server defined
+with lazy_load:     Plan: 2 to add, clean
+```
+
+`hashicorp/kubernetes` and `hashicorp/helm` tolerate an unconfigured client at
+plan; this one does not. So `lazy_load = true` is not a tuning knob — it is half
+the fix. Terraform re-configures providers during the apply walk, where the
+values are known, so nothing is swallowed.
+
+`apply_retry_count = 3` for the same reason: 2.4.1's default is a SINGLE attempt,
+and the CNPG `Cluster` is applied moments after the operator's chart returns. A
+transient CRD-registration or admission-webhook window would fail the whole apply
+with no retry — the difference between a one-pass apply that works and one that
+is lucky.
+
+**Neither property can be seen by anything else.** `terraform validate` never
+configures providers, and the env `terraform test` suites mock this provider
+wholesale, which is what makes them pass. `TestTheKubectlProviderLoadsLazily` is
+the only instrument left, and it is a text guard that says so.
+
 ## Consequences
 
 - One more provider to keep current. It is pinned `~> 2.4` and locked for
@@ -63,6 +93,15 @@ example does exactly this. Only `kubernetes_manifest` reaches out during plan.
   plan. The YAML under `infra/k8s/` is parsed in CI by the "k8s manifests parse"
   step, which is where that check belongs anyway — it covers the files whether
   or not Terraform is involved.
+- **Destroy blocks less than it did.** `kubectl_manifest`'s `wait` defaults to
+  false, so deleting the CNPG `Cluster` is fire-and-forget where
+  `kubernetes_manifest` blocked until the object was gone. This is believed
+  mitigated — `depends_on` puts `kubernetes_namespace.control_plane` after the
+  Cluster on destroy, and the kubernetes provider does block on namespace
+  termination, which cannot finish while the Cluster's finalizers and PVCs are
+  outstanding. That is an INFERENCE, not a measurement: it needs a live cluster
+  to confirm, and `wait = true` on the Cluster would make it a guarantee. Stated
+  rather than assumed.
 - The CNPG chart annotates its CRDs `helm.sh/resource-policy: keep`, so a
   `helm uninstall` does not cascade-delete CRDs or the Clusters built on them.
   The usual reason to split CRD installation out of the chart does not apply.

@@ -60,8 +60,9 @@ apply nobody runs by hand.
 
 `terraform validate` never contacts a cluster, so CI validation is unaffected.
 
-**Destroy** still has an ordering constraint, and it is real: the Kubernetes and
-Helm providers are configured from `module.gke_cell` outputs, so destroy the
+**Destroy** still has an ordering constraint, and it is real: the Kubernetes,
+Helm **and kubectl** providers are all configured from `module.gke_cell`
+outputs — kubectl owns four of the five in-cluster resources — so destroy the
 in-cluster resources first (`destroy -target=module.cnpg`) and the cluster after.
 Terraform cannot express "tear this down before the thing that configures my
 provider", so this one is documented rather than solved.

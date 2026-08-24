@@ -367,3 +367,79 @@ func countTF(t *testing.T, root string) int {
 	})
 	return n
 }
+
+// EVERY `provider "kubectl"` MUST SET lazy_load (T1.4a).
+//
+// alekc/kubectl CONFIGURES at plan time and errors when host/CA are still
+// unknown — which is exactly the from-zero case T1.4a exists to fix. Measured
+// with the provider block copied verbatim and its host taken from a
+// not-yet-applied resource:
+//
+//	without lazy_load: Plan: 1 to add, then
+//	  Error: invalid provider configuration: default cluster has no server defined
+//	with lazy_load:    Plan: 2 to add, clean
+//
+// hashicorp/kubernetes and helm tolerate an unconfigured client at plan; this
+// one does not. So removing this one line reintroduces the -target bootstrap in
+// a different disguise, and it would read as tidying.
+//
+// NOTHING ELSE CAN SEE IT. `terraform validate` never configures providers, and
+// the env `terraform test` suites mock this provider wholesale — which is what
+// makes them pass. This is the only instrument left, so it is a text guard and
+// says so.
+func TestTheKubectlProviderLoadsLazily(t *testing.T) {
+	root := filepath.Join(repoRoot, "infra")
+	blocks := 0
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".tf") {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		src := string(b)
+		i := strings.Index(src, `provider "kubectl" {`)
+		for i >= 0 {
+			depth, j := 0, i
+			for ; j < len(src); j++ {
+				if src[j] == '{' {
+					depth++
+				} else if src[j] == '}' {
+					if depth--; depth == 0 {
+						break
+					}
+				}
+			}
+			body := src[i:min(j+1, len(src))]
+			blocks++
+			rel, _ := filepath.Rel(repoRoot, path)
+			if !strings.Contains(body, "lazy_load") || !strings.Contains(body, "lazy_load = true") {
+				t.Errorf("%s: the kubectl provider does not set `lazy_load = true`. It configures at "+
+					"PLAN time, so a from-zero apply fails with \"default cluster has no server "+
+					"defined\" before anything is created — the -target bootstrap T1.4a removed, "+
+					"back in a different disguise.", rel)
+			}
+			if !strings.Contains(body, "apply_retry_count") {
+				t.Errorf("%s: the kubectl provider does not set `apply_retry_count`. The 2.4.1 "+
+					"default is a SINGLE attempt, and the CNPG Cluster is applied moments after the "+
+					"operator's chart returns — a transient CRD-registration window then fails the "+
+					"whole apply.", rel)
+			}
+			next := strings.Index(src[j:], `provider "kubectl" {`)
+			if next < 0 {
+				break
+			}
+			i = j + next
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking infra/: %v — this check must not pass by failing to look", err)
+	}
+	// Every env that instantiates the cell configures this provider; if the walk
+	// finds none, the check is asserting nothing.
+	if blocks < 2 {
+		t.Fatalf("found %d `provider \"kubectl\"` blocks under infra/, want at least 2 (dev, cell0)", blocks)
+	}
+}
