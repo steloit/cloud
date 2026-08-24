@@ -227,6 +227,7 @@ func renderedStorageGB(t *testing.T, yaml []byte) int {
 func TestSnapshotBranchManifest(t *testing.T) {
 	m, err := New().SnapshotBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch",
+		Shape: map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -245,6 +246,7 @@ func TestSnapshotBranchManifest(t *testing.T) {
 func TestBranchRecoveryFromSnapshot(t *testing.T) {
 	m, _ := New().SnapshotBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch",
+		Shape: map[string]any{"size": "dev"},
 	})
 	if !strings.Contains(string(m[1].YAML), "svc-db01-snap-1") {
 		t.Fatal("branch cluster must recover from the named snapshot")
@@ -256,7 +258,7 @@ func TestPITRBranchManifest(t *testing.T) {
 	m, err := New().PITRBranch(driver.BranchSource{
 		Name: "svc_db01", Namespace: "proj--prod", Target: "svc_db01-pitr", Cell: "cell-0",
 		WALBucket: "steloit-dev-wal-customer", GSAEmail: "ci-image-push@steloit-dev.iam.gserviceaccount.com",
-		HasArchivedWAL: true, TargetTime: ts,
+		HasArchivedWAL: true, TargetTime: ts, Shape: map[string]any{"size": "dev"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -365,7 +367,7 @@ func TestInstancesClampAndFlowThrough(t *testing.T) {
 }
 
 func TestPITRRequiresTargetTimeAndPlacement(t *testing.T) {
-	base := driver.BranchSource{Name: "s", Namespace: "ns", Target: "t", HasArchivedWAL: true,
+	base := driver.BranchSource{Name: "s", Namespace: "ns", Target: "t", HasArchivedWAL: true, Shape: map[string]any{},
 		WALBucket: "b", GSAEmail: "g@x"}
 	// zero target time refused
 	if _, err := New().PITRBranch(base); err == nil {
@@ -398,5 +400,129 @@ func TestRenderRejectsNonPostgres(t *testing.T) {
 	s.Product = "valkey"
 	if _, err := New().Render(s); err == nil {
 		t.Fatal("the CNPG driver must reject a non-postgres product")
+	}
+}
+
+// A BRANCH IS SIZED FROM THE SOURCE, FOR EVERY SIZE THE CATALOG SELLS.
+//
+// Both branch entry points hardcoded "10Gi". T3.4c fixed Render and, by raising
+// `standard` from 32Gi to 50Gi, widened this gap rather than closing it.
+//
+// EQUALITY, not `>=`, for the reason T3.4c recorded: an inequality binds only one
+// direction, and mutations survive it. Equality also satisfies the AC's "at least
+// as large as the source" a fortiori. Binding both branch paths to what Render
+// produces for the SAME shape is what stops the three drifting again — the
+// alternative, a retyped table of expected sizes, is a fourth copy of the
+// catalog.
+func TestEveryCatalogSizeBranchesAtTheSourceSize(t *testing.T) {
+	for size := range catalogSizes(t) {
+		shape := map[string]any{"size": size}
+
+		spec := devSpec()
+		spec.Shape = shape
+		created, err := New().Render(spec)
+		if err != nil {
+			t.Fatalf("size %q: %v", size, err)
+		}
+		want := renderedStorageGB(t, created[0].YAML)
+
+		snap, err := New().SnapshotBranch(driver.BranchSource{
+			Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0",
+			SnapshotName: "svc_db01-snap-1", Target: "svc_db01-branch", Shape: shape,
+		})
+		if err != nil {
+			t.Fatalf("size %q snapshot branch: %v", size, err)
+		}
+		if got := renderedStorageGB(t, snap[1].YAML); got != want {
+			t.Errorf("size %q: the source volume is %dGi and a snapshot branch asks for %dGi. "+
+				"A PVC cannot shrink, and external-provisioner refuses a request below the "+
+				"snapshot's restoreSize outright (#727, closed NOT PLANNED) — the branch does "+
+				"not come up small, it does not come up.", size, want, got)
+		}
+
+		pitr, err := New().PITRBranch(driver.BranchSource{
+			Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0", Target: "svc_db01-pitr",
+			WALBucket: "b", GSAEmail: "g@x", HasArchivedWAL: true,
+			TargetTime: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC), Shape: shape,
+		})
+		if err != nil {
+			t.Fatalf("size %q PITR: %v", size, err)
+		}
+		if got := renderedStorageGB(t, pitr[0].YAML); got != want {
+			t.Errorf("size %q: the source volume is %dGi and a PITR restore asks for %dGi. "+
+				"PITR has NO restoreSize guard — nothing refuses it. The volume is created at "+
+				"%dGi and the base backup + WAL replay fills it until it is full, mid-restore.",
+				size, want, got, got)
+		}
+	}
+}
+
+// ...and the PRICED extra storage flows through too, not merely the size floor.
+// `storage_gb` above the included floor is what the customer bought; a branch
+// that ignores it is short by exactly the amount they are paying for.
+func TestABranchCarriesPricedStorageNotJustTheSizeFloor(t *testing.T) {
+	shape := map[string]any{"size": "standard", "storage_gb": float64(400)} // float64: JSON round-trip
+	spec := devSpec()
+	spec.Shape = shape
+	created, err := New().Render(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := renderedStorageGB(t, created[0].YAML)
+	if want != 400 {
+		t.Fatalf("precondition: Render gave %dGi for a priced 400 GB, want 400", want)
+	}
+	m, err := New().SnapshotBranch(driver.BranchSource{
+		Name: "svc_db01", Namespace: "proj--prod", Cell: "cell-0",
+		SnapshotName: "s", Target: "t", Shape: shape,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := renderedStorageGB(t, m[1].YAML); got != want {
+		t.Errorf("a branch of a 400GB service renders %dGi, want %dGi — the floor was used "+
+			"instead of what was sold", got, want)
+	}
+}
+
+// A MISSING SHAPE IS REFUSED, NOT DEFAULTED.
+//
+// storageForShape reads an absent size as `dev` (the API's closed schema defaults
+// it), which is correct for a create and would silently re-render exactly the
+// 10Gi this task exists to remove. So nil — "the caller never plumbed it" — has
+// to be an error, while an empty-but-present shape stays legal (a dev postgres
+// names no size).
+func TestABranchWithNoSourceShapeIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(driver.BranchSource) (driver.Manifests, error)
+		base driver.BranchSource
+	}{
+		{"snapshot", New().SnapshotBranch, driver.BranchSource{
+			Name: "s", Namespace: "ns", SnapshotName: "snap", Target: "t"}},
+		{"pitr", New().PITRBranch, driver.BranchSource{
+			Name: "s", Namespace: "ns", Target: "t", WALBucket: "b", GSAEmail: "g@x",
+			HasArchivedWAL: true, TargetTime: time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)}},
+	} {
+		if _, err := tc.call(tc.base); err == nil {
+			t.Errorf("%s: a branch with no source Shape was rendered — it would ask for a "+
+				"defaulted 10Gi volume", tc.name)
+		} else if !strings.Contains(err.Error(), "Shape") {
+			t.Errorf("%s: the refusal must name the missing field, got: %v", tc.name, err)
+		}
+
+		// An empty-but-present shape is a legitimate dev postgres.
+		withEmpty := tc.base
+		withEmpty.Shape = map[string]any{}
+		if _, err := tc.call(withEmpty); err != nil {
+			t.Errorf("%s: an empty shape is a dev postgres and must render: %v", tc.name, err)
+		}
+
+		// And an unknown size is loud, exactly as it is on the create path.
+		withUnknown := tc.base
+		withUnknown.Shape = map[string]any{"size": "enormous"}
+		if _, err := tc.call(withUnknown); err == nil {
+			t.Errorf("%s: an unknown size branched silently", tc.name)
+		}
 	}
 }

@@ -72,6 +72,21 @@ type BranchSource struct {
 	GSAEmail       string    // workload-identity SA (PITR pod must read GCS WAL)
 	HasArchivedWAL bool      // PITR requires a real archived-WAL basis (ADR-0007 F4)
 	TargetTime     time.Time // PITR recovery target (derived from WAL, never wall-clock)
+
+	// Shape is the SOURCE service's shape, and it is REQUIRED — a branch's
+	// volume is sized from it by the same function that sizes a create, so the
+	// two cannot drift.
+	//
+	// It is the shape rather than a pre-resolved size string on purpose: a
+	// `StorageSize string` here would let each caller compute its own answer,
+	// which is how SnapshotBranch and PITRBranch came to hardcode "10Gi" while
+	// Render was reading the catalog (T3.4c/T3.4d).
+	//
+	// nil means "the caller did not plumb it" and is REFUSED. An empty-but-
+	// non-nil shape is legitimate — a dev postgres names no size, and the
+	// catalog resolves that to dev — but nil would resolve to dev too, which
+	// silently reproduces exactly the 10Gi bug this field exists to remove.
+	Shape map[string]any
 }
 
 // BranchingDriver is the Postgres-specific extension — the D2 branch primitive
