@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 · **ALL 5 PRs MERGED** · `main` @ `392152b` · queue is clear
+**Updated:** 2026-08-24 · `main` @ `78eb465` · **US-3.3h (#328) in flight, round 3**
 
 ---
 
@@ -16,30 +16,48 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 ## In flight
 
-**Nothing.** US-3.3a (#320), US-3.3f (#323), US-3.3e (#324), O19 (#325) and
-T3.4c (#322) all merged. Only `task/O2` remains as a worktree, still waiting on
-the founder's revised spec.
+**US-3.3h — PR #328**, branch `task/US-3.3h`, worktree `.../scratchpad/wt-u33h`,
+HEAD `11b6f22` (pushed, `0 0` vs origin). Round 3 committed and pushed; CI was
+green on round 2 and re-running. Both reviewers have run **twice**: once on
+round 1 (three findings, fixed in round 2) and once on the round-3 delta
+(judgement-call pass under ADR-0016, because round 3 restructured the function
+and changed `gone` semantics — paths the first pass never named).
 
-## Next action
+**Round 3 in one line:** four hand-written `converged:` literals in
+`provisioning.ObservedStatus` became ONE derived rule —
+`converged = settledStatuses[to] && (to == observed || observed == "")`, where
+`settledStatuses` excludes `provisioning` and `degraded`. Both reviewers had
+independently found three defects that were all *the same class*: a hop where a
+hand-written flag was wrong. Deriving it removed the class.
 
-Claim from the ready queue: **O9**, **T1.4a**, **US-10.7** — plus the ten tasks
-this session filed: **US-3.3c/d/g/h/i**, **O30**, **O31**, **O32**, **O33**, and
-**T3.4d**.
+Also in round 3: `ReportableByCell` (a cell may report only
+provisioning/ready/degraded/failed — `deleting`/`suspended` refused in the
+mapping AND 422'd at the route, because one POST with the reconciler token could
+otherwise brick any service in the cell list), and `gone` is no longer collapsed
+into `""` by the handler.
 
-**ADR-0016 (founder, 2026-08-24):** both reviewers, **ONCE per PR on the final
-diff**, scoped to **code and behavioural claims**. Records — counts, citations,
-task narrative — are the implementer's own pass; it has already caught a stale
-citation that survived a targeted fix (the name was WRAPPED across two comment
-lines) and eight more repo-wide (filed as O33). The bigger lever is not the
-pipeline: **do the task and nothing more.** Four rounds this session went to
-undoing an improvement nobody asked for.
+**Next action:** read the two review results, fix anything blocking, then merge
+#328 and take **T3.4d** (see below).
 
-**Merge hygiene that earned itself twice:** verify the MERGED tree, not the
-branch. Two bad conflict resolutions were caught by `gofmt -e`/`go vet` and by
-asserting every top-level function from both sides survived. Resolve by asking
-what each side changed relative to the MERGE BASE — `git show :2:` is the
-conflict side, not the auto-merged result, and rebuilding from it silently
-discards the other side's non-conflicting work.
+## Next task, already researched: T3.4d
+
+`cnpg.SnapshotBranch` and `cnpg.PITRBranch` hardcode `StorageSize: "10Gi"`.
+Research done (do NOT redo):
+
+- **Snapshot branch is HARD-REFUSED**, above the CSI driver, by
+  external-provisioner: *"requested volume size %d is less than the size %d for
+  the source snapshot %s"*. kubernetes-csi/external-provisioner **issue #727**
+  asked for the request to be treated as a minimum and was closed **not
+  planned** — so this is durable behaviour, not a driver bug, and NOT
+  GKE-specific. The task's inferred claim is CONFIRMED.
+- **PITR is NOT refused** — there is no snapshot data source, so no
+  `restoreSize` to compare against, and CNPG documents no size requirement of
+  its own. The 10Gi PVC is created happily and the base backup + WAL replay
+  fills it. Failure is later, dirtier, and conditional on how much data the
+  source holds. **This is the worse of the two** and the task does not
+  distinguish them; the manifest is the only line of defence.
+- `driver.BranchSource` has **no Shape field** — it will need one (or the
+  resolved `storage_gb`) to call T3.4c's `storageForShape`.
 
 ## Blocked on a human
 
