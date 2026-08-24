@@ -13,7 +13,10 @@
 // forbids substrate names in CUSTOMER surfaces, not in this internal plane.
 package driver
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Spec is the rendering input: product grammar plus the placement the control
 // plane resolved (namespace, cell, workload-identity SA, WAL bucket). Grammar
@@ -82,11 +85,31 @@ type BranchSource struct {
 	// which is how SnapshotBranch and PITRBranch came to hardcode "10Gi" while
 	// Render was reading the catalog (T3.4c/T3.4d).
 	//
-	// nil means "the caller did not plumb it" and is REFUSED. An empty-but-
-	// non-nil shape is legitimate — a dev postgres names no size, and the
-	// catalog resolves that to dev — but nil would resolve to dev too, which
-	// silently reproduces exactly the 10Gi bug this field exists to remove.
+	// It is the SOURCE's shape, not the target's: a branch inherits the volume it
+	// is restoring into, and the target does not have one yet.
+	//
+	// nil means "the caller did not plumb it" and is REFUSED by RequireShape. An
+	// empty-but-non-nil shape is legitimate — a legacy dev postgres genuinely has
+	// `shape = '{}'` (the column is NOT NULL DEFAULT '{}'), and 10Gi is genuinely
+	// its right size — but nil would resolve to dev too, silently reproducing
+	// exactly the 10Gi bug this field exists to remove.
 	Shape map[string]any
+}
+
+// RequireShape refuses a BranchSource whose Shape was never plumbed.
+//
+// It lives HERE, next to the field, rather than in each driver: the contract is
+// declared in this package, so a second BranchingDriver must not have to
+// re-derive the nil check to be safe (ADR-0014 — one owner for an invariant that
+// holds at more than one site). It cannot be a compile-time guarantee while
+// BranchSource is a struct literal, so it fails closed at render instead.
+func (b BranchSource) RequireShape() error {
+	if b.Shape == nil {
+		return fmt.Errorf("driver: branch of %q requires the source service's Shape — a branch "+
+			"volume is sized from the source, and defaulting it renders a 10Gi PVC that a "+
+			"snapshot restore refuses outright and a PITR restore fills up", b.Name)
+	}
+	return nil
 }
 
 // BranchingDriver is the Postgres-specific extension — the D2 branch primitive

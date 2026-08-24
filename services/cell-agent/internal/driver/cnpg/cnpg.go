@@ -223,10 +223,8 @@ type branchData struct {
 // absent size as `dev` (the API's closed schema defaults it), which is right for
 // a create and would silently re-render 10Gi here.
 func branchStorage(b driver.BranchSource) (string, error) {
-	if b.Shape == nil {
-		return "", fmt.Errorf("cnpg: branch of %q requires the source service's Shape — "+
-			"a branch volume is sized from the source, and defaulting it renders a 10Gi PVC "+
-			"that a snapshot restore refuses outright and a PITR restore fills up", b.Name)
+	if err := b.RequireShape(); err != nil {
+		return "", err
 	}
 	return storageForShape(b.Shape)
 }
