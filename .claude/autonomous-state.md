@@ -5,7 +5,7 @@ git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
 Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
 never here.
 
-**Updated:** 2026-08-24 · `main` @ `78eb465` · **US-3.3h (#328) in flight, round 3**
+**Updated:** 2026-08-24 · `main` @ `779f9ea` · **US-3.3h MERGED (#328)** · T3.4d (#329) in flight
 
 ---
 
@@ -16,50 +16,57 @@ Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement 
 
 ## In flight
 
-**US-3.3h — PR #328**, branch `task/US-3.3h`, worktree `.../scratchpad/wt-u33h`,
-HEAD `11b6f22` (pushed, `0 0` vs origin). Round 3 committed and pushed; CI was
-green on round 2 and re-running. Both reviewers have run **twice**: once on
-round 1 (three findings, fixed in round 2) and once on the round-3 delta
-(judgement-call pass under ADR-0016, because round 3 restructured the function
-and changed `gone` semantics — paths the first pass never named).
+**T3.4d — PR #329**, branch `task/T3.4d`, worktree `.../442530ba-.../scratchpad/wt-t34d`.
+Round 2 pushed, main merged in and the merged tree verified. Both reviewers have
+run once (reviewer: APPROVE-WITH-NOTES; QA: one blocking, now fixed and
+mutation-verified). **Waiting on CI, then merge.** No third pass — round 2 was
+fixes to named findings (ADR-0016).
 
-**Round 3 in one line:** four hand-written `converged:` literals in
-`provisioning.ObservedStatus` became ONE derived rule —
+## Recently merged
+
+**US-3.3h (#328)** — four rounds. The control plane maps a cell's report onto a
+status legal from the current one, and convergence is **derived from the
+destination** rather than written per hop:
 `converged = settledStatuses[to] && (to == observed || observed == "")`, where
-`settledStatuses` excludes `provisioning` and `degraded`. Both reviewers had
-independently found three defects that were all *the same class*: a hop where a
-hand-written flag was wrong. Deriving it removed the class.
+`settledStatuses` = {ready, failed}. That one rule subsumed four hand-written
+flags and closed a class both reviewers kept finding one instance of at a time.
 
-Also in round 3: `ReportableByCell` (a cell may report only
-provisioning/ready/degraded/failed — `deleting`/`suspended` refused in the
-mapping AND 422'd at the route, because one POST with the reconciler token could
-otherwise brick any service in the cell list), and `gone` is no longer collapsed
-into `""` by the handler.
+Three things from it that are easy to re-break:
 
-**Next action:** read the two review results, fix anything blocking, then merge
-#328 and take **T3.4d** (see below).
+1. **A cell may not decide a lifecycle hold, in EITHER position.** `deleting`/
+   `suspended` as an *observation* are refused (`ReportableByCell`, plus a 422 at
+   the route). And a *held row* converges only on `gone` — because
+   `DeleteService` bumps the generation and only then transitions, so a deleting
+   row is outstanding by construction, and one `ready` report used to finish the
+   generation and abandon the teardown forever.
+2. **`gone` and `""` are different** and the handler no longer collapses them.
+   `gone` from a live row means the workload vanished while desired still wants
+   it — the row stays outstanding so the agent re-creates it.
+3. **`provisioning.StatusVocabulary` is the one ADR-024 definition.** It was
+   retyped in four places; reconcile's wire gate and the sweeps derive from it.
 
-## Next task, already researched: T3.4d
+## Next task after T3.4d
 
-`cnpg.SnapshotBranch` and `cnpg.PITRBranch` hardcode `StorageSize: "10Gi"`.
-Research done (do NOT redo):
+Ready queue (`grep -l "^status: ready" tasks/**/*.md`): **US-3.3b** (env teardown
+— nothing removes a namespace), **US-3.3g**, **US-3.10**, **US-3.11**, plus the
+two US-3.3h filed:
 
-- **Snapshot branch is HARD-REFUSED**, above the CSI driver, by
-  external-provisioner: *"requested volume size %d is less than the size %d for
-  the source snapshot %s"*. kubernetes-csi/external-provisioner **issue #727**
-  asked for the request to be treated as a minimum and was closed **not
-  planned** — so this is durable behaviour, not a driver bug, and NOT
-  GKE-specific. The task's inferred claim is CONFIRMED.
-- **PITR is NOT refused** — there is no snapshot data source, so no
-  `restoreSize` to compare against, and CNPG documents no size requirement of
-  its own. The 10Gi PVC is created happily and the base backup + WAL replay
-  fills it. Failure is later, dirtier, and conditional on how much data the
-  source holds. **This is the worse of the two** and the task does not
-  distinguish them; the manifest is the only line of defence.
-- `driver.BranchSource` has **no Shape field** — it will need one (or the
-  resolved `storage_gb`) to call T3.4c's `storageForShape`.
+- **US-3.12** (high) — the reconcile status contract advertises `suspended`/
+  `deleting`, which the API now **422s**, and an "omit for a heartbeat" clause
+  that no longer holds. Real contract drift; needs `openapi.yaml` + regenerated
+  types, which is why it was not done inline.
+- **US-3.13** (medium) — a row whose `observed_generation` never advances has no
+  owner. A steadily `degraded` service 409s forever (measured: 25 ticks, no
+  convergence). **US-3.11 does NOT cover this** — its ACs are about the *agent's*
+  render errors. Not reachable today (no CNPG phase maps to `degraded`) but
+  `render.terminal()` already accepts it, so one phase-mapping change makes it
+  live.
 
-## Blocked on a human
+**US-3.3c is priority `critical` but two of its ACs need a live GKE cell**, and
+there are still zero clusters in `steloit-dev`. Do not claim it expecting to
+finish it.
+
+## Blocked on a human## Blocked on a human
 
 | # | decision | where |
 |---|---|---|
