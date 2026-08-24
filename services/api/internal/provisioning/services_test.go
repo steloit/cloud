@@ -2,6 +2,7 @@ package provisioning
 
 import (
 	"encoding/json"
+	"github.com/steloit/cloud/services/api/internal/billing"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"strings"
 	"testing"
@@ -72,9 +73,14 @@ func TestServiceViewDoesNotLeakReconcilerColumns(t *testing.T) {
 	}
 }
 
+// testEnvelope is the `pro` row from plans.json, the shape the control plane
+// resolves and ships. desiredDoc refuses to omit it silently, so every fixture
+// carries one.
+var testEnvelope = billing.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}
+
 func TestDesiredDocShape(t *testing.T) {
 	// product + intent + shape + scaling, no deleting flag
-	d := desiredDoc("postgres", "database", "acme--prod", []byte(`{"size":"dev"}`), []byte(`{"mode":"auto"}`), nil, false)
+	d := desiredDoc("postgres", "database", "acme--prod", testEnvelope, []byte(`{"size":"dev"}`), []byte(`{"mode":"auto"}`), nil, false)
 	var m map[string]any
 	if err := json.Unmarshal(d, &m); err != nil {
 		t.Fatal(err)
@@ -89,7 +95,7 @@ func TestDesiredDocShape(t *testing.T) {
 		t.Fatal("a live service must not carry a deleting flag")
 	}
 	// deleting flag present when set
-	d2 := desiredDoc("postgres", "", "acme--prod", []byte(`{}`), nil, nil, true)
+	d2 := desiredDoc("postgres", "", "acme--prod", testEnvelope, []byte(`{}`), nil, nil, true)
 	_ = json.Unmarshal(d2, &m)
 	if m["deleting"] != true {
 		t.Fatal("deleting flag not set")
@@ -103,23 +109,41 @@ func TestDesiredDocShape(t *testing.T) {
 }
 
 func TestDesiredDocEdgeCases(t *testing.T) {
-	// nil shape + nil scaling → just product, valid JSON
-	d := desiredDoc("postgres", "", "", nil, nil, nil, false)
+	// nil shape + nil scaling → product and the quota envelope, valid JSON.
+	// The envelope is NOT optional: it is namespace-scoped state the cell needs
+	// on every converge, so it rides every doc rather than only the ones that
+	// happen to carry a shape.
+	d := desiredDoc("postgres", "", "", testEnvelope, nil, nil, nil, false)
 	var m map[string]any
 	if err := json.Unmarshal(d, &m); err != nil {
 		t.Fatalf("nil shape/scaling produced invalid JSON: %v", err)
 	}
-	if len(m) != 1 || m["product"] != "postgres" {
-		t.Fatalf("want just product, got %v", m)
+	if len(m) != 2 || m["product"] != "postgres" {
+		t.Fatalf("want product + quota, got %v", m)
+	}
+	q, ok := m["quota"].(map[string]any)
+	if !ok || q["cpu"] != "8" || q["memory"] != "16Gi" || q["storage"] != "100Gi" {
+		t.Fatalf("the envelope did not survive into the doc: %v", m["quota"])
+	}
+
+	// An UNRESOLVED envelope must not be silently omitted — a doc without one
+	// makes the agent refuse to render, which is the fail-closed behaviour, but
+	// it must be visibly absent rather than quietly defaulted here.
+	bare := desiredDoc("postgres", "", "", billing.Quota{}, nil, nil, nil, false)
+	var bm map[string]any
+	_ = json.Unmarshal(bare, &bm)
+	if _, has := bm["quota"]; has {
+		t.Fatal("an empty envelope was written into the doc — the agent would then render a " +
+			"ResourceQuota with empty strings, which the API server rejects at apply")
 	}
 	// malformed shape JSON is dropped (not fatal) — pin current behavior
-	d2 := desiredDoc("postgres", "", "", []byte("not json"), nil, nil, false)
+	d2 := desiredDoc("postgres", "", "", testEnvelope, []byte("not json"), nil, nil, false)
 	_ = json.Unmarshal(d2, &m)
 	if _, has := m["shape"]; has {
 		t.Fatal("malformed shape must be dropped, not embedded")
 	}
 	// empty product still produces valid JSON (no panic)
-	if !json.Valid(desiredDoc("", "", "", nil, nil, nil, true)) {
+	if !json.Valid(desiredDoc("", "", "", testEnvelope, nil, nil, nil, true)) {
 		t.Fatal("empty product produced invalid JSON")
 	}
 }
@@ -197,7 +221,7 @@ func TestDesiredDocEmbedsThePinItIsHanded(t *testing.T) {
 		{"nil is the only thing that omits it", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := desiredDoc("web", "app", "env-x", []byte(`{"size":"standard-1"}`), nil, tc.override, false)
+			doc := desiredDoc("web", "app", "env-x", testEnvelope, []byte(`{"size":"standard-1"}`), nil, tc.override, false)
 			var d map[string]any
 			if err := json.Unmarshal(doc, &d); err != nil {
 				t.Fatal(err)
@@ -221,6 +245,33 @@ func TestIsBillingGatesTheStatusesThatHaveAnOpenSpan(t *testing.T) {
 		if got := metering.IsBilling(status); got != want {
 			t.Fatalf("IsBilling(%q) = %v, want %v — a rate change is only meaningful while a span is open, and emitting one otherwise bills a service that never ran",
 				status, got, want)
+		}
+	}
+}
+
+// The OTHER copy of the agent's legal-edge set.
+//
+// services/cell-agent has a separate go.mod and no go.work, so it cannot import
+// this table; its TestEveryTerminalStatusIsALegalEdgeFromProvisioning duplicates
+// {ready, failed, deleting}. Duplicated knowledge drifts silently unless both
+// copies are pinned, and the first live consequence was
+// `"Waiting for user action": "degraded"` — a status the agent could emit that
+// this machine rejects forever.
+func TestTheAgentsLegalEdgesMatchTheStatusMachine(t *testing.T) {
+	want := map[string]bool{"ready": true, "failed": true, "deleting": true}
+	got := map[string]bool{}
+	for _, s := range transitions["provisioning"] {
+		got[s] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("provisioning transitions to %v; the cell-agent's copy says %v. Update "+
+			"services/cell-agent/internal/render's legalFromProvisioning in the same change, "+
+			"or the agent will emit a status this machine rejects forever.", got, want)
+	}
+	for s := range want {
+		if !got[s] {
+			t.Fatalf("provisioning can no longer transition to %q, but the cell-agent's copy "+
+				"still lists it", s)
 		}
 	}
 }

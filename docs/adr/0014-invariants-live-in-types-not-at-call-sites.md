@@ -1,15 +1,16 @@
 # ADR-0014 — Platform invariants live in types, not at call sites
 
-**Status:** Proposed (agent, 2026-07-27) — needs founder ratification
+**Status:** Accepted (founder-ratified 2026-08-23) · proposed by agent 2026-07-27
 
-**If the founder declines:** the code stands regardless. `money.Cents` and
-`problem.FromDenial` each close specific, reproduced defects (a spend cap
-permanently bypassable by one authenticated request; a 403/404 divergence
-between two transports of one operation), and those fixes are not contingent on
-the general rule. What would lapse is only the RULE — "where a platform
-invariant can be encoded in a type, it must be" — which would stop binding
-future work. A "no" here is not a request to revert; it is a decision about
-precedent.
+The rule now BINDS: where a platform invariant can be encoded in a type, it must
+be. Reviews may cite this as standing authority.
+
+*Pre-ratification framing, kept because it scopes what was decided:* the code was
+never contingent on the ruling. `money.Cents` and `problem.FromDenial` each close
+specific, reproduced defects (a spend cap permanently bypassable by one
+authenticated request; a 403/404 divergence between two transports of one
+operation). What was open was only the PRECEDENT — whether the general rule binds
+future work. It does.
 
 **Deciders:** Founder
 **Relates to:** ADR-025 (money is integer cents), ADR-0008 (review pipeline),
@@ -64,6 +65,30 @@ commercial ceiling; picking "at most N instances" remains a pricing decision the
 implementation never makes (founder, 2026-07-27). What is merely unaffordable is
 still the hard spend cap's job.
 
+**THE CEILING BOUNDS ONE SERVICE-MONTH, NOT THE AGGREGATE (O19, 2026-08-23).**
+That derivation makes `rate × one month` fit an int64 *exactly*, so a single
+service at the ceiling consumes the entire budget and the **second** service
+wraps. `Rollup` accumulates across every span of every service in the org, and
+this ADR's own text said the amount survives "the whole money path" — false as
+written for the org-wide sum, which is the number the invoice, the month-to-date
+spend and the hard cap all read.
+
+The fix is not a bigger constant and not a check at the accumulation site. It is
+a **second type**: `money.Accrual`, a 128-bit Σ(rate × seconds). An accrual is
+not an amount — bounding it by `MaxMonthly` would refuse arithmetic that is
+simply correct (two service-months is a legitimate business fact), and bounding
+it by `MaxInt64` is the wrap itself. At 128 bits the accumulation cannot
+overflow in practice (~3.7e19 service-months at the ceiling), so the class is
+unrepresentable rather than tested-against — the same move as `Cents`, applied
+to the quantity `Cents` is multiplied into. The single narrowing point,
+`Accrual.Int64()`, is the only place that can fail, and it fails loudly without
+writing.
+
+`Accrual.DivSeconds` exists for the same reason `AddMul` does: the 128-by-64
+division has a trap — `bits.Div64` **panics** when the high word is at least the
+divisor, which is precisely the large-org case. A caller writing that division
+by hand crashes the process instead of getting an error.
+
 ### 2. `problem.FromDenial` owns the denial→response mapping
 
 One decision (`AccessDeniedError.AccessDeniedNoStanding`, next to the strings it
@@ -114,4 +139,19 @@ uncompilable, it should.
 
 The money ceiling is derived from today's billing arithmetic. If `Rollup` ever
 weights across a longer window, `MaxMonthly` must be re-derived; it is a single
-constant with its derivation written next to it.
+constant with its derivation written next to it. That coupling is now asserted
+from **metering's** side (`TestEveryRealPeriodFitsWhatTheCeilingWasDerivedFrom`),
+not only from money's — the earlier test re-implemented `AddDate(0,1,0)` rather
+than driving the real `periodBounds`, so it could catch the constant drifting
+and never the period window growing, which is the half that breaks the
+derivation.
+
+**Not decided here, and not decidable in implementation: what `quota_usage.
+rate_cents` MEANS.** `Rollup` writes Σ(seconds × monthly rate) — cent-seconds —
+and its column comment says so — as does `usage_http`, which DIVIDES by a
+seconds-per-month constant — while `invoice.Close`, `mtdSpend` and
+`billing_export` read the same column as cents. Measured end to end on one row:
+the invoice says **$86,400.00** and `GET /usage` says **3 cents**, for one
+service at $24.00/month running for one hour. Which side is authoritative, and the proration convention if
+the writer is the one that moves, are pricing decisions — filed as **O30** with a
+`NEEDS FOUNDER INPUT` row rather than settled here.

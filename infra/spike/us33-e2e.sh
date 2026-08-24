@@ -26,9 +26,21 @@ step "0 · preflight: cluster reachable, CNPG operator present"
 kubectl cluster-info | head -2
 kubectl get crd clusters.postgresql.cnpg.io -o name || {
   echo "CNPG CRD missing — apply module.cnpg first"; exit 1; }
-# NOTE: nothing in product code or terraform creates this namespace yet — the
-# runbook doing it is a GAP, filed as US-3.3a (namespace + D7 default-deny
-# NetworkPolicy + ResourceQuota + LimitRange at environment creation).
+# NOTE: the cell-agent now creates this namespace itself on every converge
+# (US-3.3a), so the line below is belt-and-braces rather than the GAP it used to
+# be. It is deliberately still here: removing it would make this runbook unable
+# to run until a cell exists to prove the replacement works, and there are
+# currently zero GKE clusters in steloit-dev.
+#
+# US-3.3a AC 3 ("proven without the runbook's preflight") is therefore NOT
+# ticked. US-3.3c AC 7 owns replacing this with assertions: that the namespace
+# exists with its labels, that the D7 policies exist AND are enforced, that a pod
+# in env A cannot reach a pod in env B, and that a pod can still resolve DNS and
+# reach its own database.
+#
+# What the agent does NOT yet create: the D7 NetworkPolicies, ResourceQuota and
+# LimitRange (withdrawn to US-3.3c/d/e — nothing on this cell enforces a
+# NetworkPolicy today).
 kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
 step "1 · control plane: a service is accepted (estimate → createService)"

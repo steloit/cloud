@@ -9,6 +9,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
+	"regexp"
 )
 
 //go:embed plans.json
@@ -18,9 +20,10 @@ var plansJSON []byte
 // custom/negotiated (Enterprise) — never a hard-coded number. A -1 limit is
 // unlimited.
 type Plan struct {
-	FeeCents      *int `json:"fee_cents"`
-	ProjectLimit  int  `json:"project_limit"`
-	IncludedSeats int  `json:"included_seats"`
+	FeeCents      *int  `json:"fee_cents"`
+	ProjectLimit  int   `json:"project_limit"`
+	IncludedSeats int   `json:"included_seats"`
+	Quota         Quota `json:"quota"`
 }
 
 // Overage is the soft-quota unit-price schedule (plan-independent).
@@ -30,6 +33,22 @@ type Overage struct {
 	BuildCentsPerMin     int `json:"build_cents_per_min"`
 	EventCentsPerMillion int `json:"event_cents_per_million"`
 	AICentsPer1k         int `json:"ai_cents_per_1k"`
+}
+
+// Quota is a plan's PER-ENVIRONMENT resource envelope (founder 2026-08-23).
+//
+// Kubernetes quantity strings, carried verbatim: "1", "16Gi", "250Gi". They are
+// never parsed into numbers here and never re-rendered — a quantity that makes a
+// round trip through a float is a quantity that can come back different, and
+// these end up in a ResourceQuota the API server enforces at admission.
+//
+// This is the ONLY definition. The control plane resolves an org's plan to its
+// envelope and ships the resolved values in the desired doc, so the cell-agent
+// never holds a second copy of the plan table — the same boundary as pricing.
+type Quota struct {
+	CPU     string `json:"cpu"`     // cores, e.g. "8"
+	Memory  string `json:"memory"`  // e.g. "16Gi"
+	Storage string `json:"storage"` // total PVC capacity, e.g. "100Gi"
 }
 
 // Table is the parsed pricing/quota data.
@@ -66,6 +85,25 @@ func parse(data []byte) (*Table, error) {
 		if p.ProjectLimit < -1 || p.IncludedSeats < -1 {
 			return nil, fmt.Errorf("billing: plan %q has an invalid allowance (< -1)", name)
 		}
+		// The quota envelope must be PRESENT and PARSEABLE for every plan, and it
+		// fails boot rather than degrading. An absent or malformed value would
+		// otherwise render a ResourceQuota with an empty string, which the API
+		// server rejects at apply — turning a config typo into an environment
+		// that can never converge, discovered on a cell rather than at startup.
+		//
+		// There is deliberately no default: an unquota'd plan is an environment
+		// with no ceiling, which is the failure this whole task exists to prevent.
+		for dim, v := range map[string]string{
+			"cpu": p.Quota.CPU, "memory": p.Quota.Memory, "storage": p.Quota.Storage,
+		} {
+			if v == "" {
+				return nil, fmt.Errorf("billing: plan %q has no %s quota — an unquota'd plan is "+
+					"an environment with no ceiling", name, dim)
+			}
+			if err := validQuantity(dim, v); err != nil {
+				return nil, fmt.Errorf("billing: plan %q %s quota: %w", name, dim, err)
+			}
+		}
 	}
 	// Every overage rate must be a positive price — a typo'd 0 would silently
 	// bill an entire meter for free.
@@ -81,6 +119,52 @@ func parse(data []byte) (*Table, error) {
 		}
 	}
 	return &t, nil
+}
+
+// cpuQuantity / byteQuantity are the CLOSED grammar we accept in a plan
+// envelope. Deliberately narrower than Kubernetes' own quantity parser.
+//
+// We do not import k8s.io/apimachinery to validate these, and that is not
+// laziness: `services/api/go.mod` contains no k8s.io/* at all, and that absence
+// is load-bearing evidence for the two-plane split (D6, ADR-0001) — it is the
+// argument US-3.3a used to establish that the control plane must not hold
+// cluster credentials. Pulling in apimachinery to check four strings would
+// quietly spend that.
+//
+// Narrower is also better here. Kubernetes accepts "0.5", "1500m", "1e3",
+// "1000000Ki"; a founder-owned envelope should be readable at a glance and
+// comparable by eye across four plans, so we accept whole cores and whole
+// Mi/Gi/Ti only. Anything else is a config error, not a value to interpret.
+var (
+	cpuQuantity  = regexp.MustCompile(`^[1-9][0-9]*$`)
+	byteQuantity = regexp.MustCompile(`^[1-9][0-9]*(Mi|Gi|Ti)$`)
+)
+
+func validQuantity(dim, v string) error {
+	if dim == "cpu" {
+		if !cpuQuantity.MatchString(v) {
+			return fmt.Errorf("%q is not a whole number of CPU cores (e.g. \"8\")", v)
+		}
+		return nil
+	}
+	if !byteQuantity.MatchString(v) {
+		return fmt.Errorf("%q is not a whole Mi/Gi/Ti quantity (e.g. \"16Gi\")", v)
+	}
+	return nil
+}
+
+// Envelope is a plan's per-environment resource quota.
+//
+// Deny-by-default, like IncludedSeats: an unknown plan is a programming error,
+// never a silent unlimited. The caller must handle the error — there is no
+// zero-value Quota that would be safe to render.
+func (t *Table) Envelope(plan string) (Quota, error) {
+	p, ok := t.Plans[plan]
+	if !ok {
+		return Quota{}, fmt.Errorf("billing: no quota envelope for plan %q — the plans are "+
+			"free, pro, business, enterprise (orgs.plan CHECK constraint)", plan)
+	}
+	return p.Quota, nil
 }
 
 // IncludedSeats is the seat allowance for a plan (0 for an unknown plan — fail
@@ -126,9 +210,39 @@ func (t *Table) PlanFeeCents(plan string) (int, bool) {
 // is exactly the number the overview and invoice show — one arithmetic
 // everywhere (F9). meteredRateCents are the per-meter accrued cents for the
 // current period.
+//
+// IT SATURATES RATHER THAN WRAPPING (O19), and it is a DISPLAY figure.
+//
+// The wrap was real — SpendToDate(2900, MaxInt64/2, MaxInt64/2) returned
+// -9223372036854772910 — but an earlier revision of this comment justified the
+// fix by saying "this is the number the hard cap enforces against". That is
+// FALSE and was corrected on review: the cap is provisioning.enforceBudget,
+// which never calls this function, does its own arithmetic through
+// money.FromInt/Cents.Add, and already fails closed on an unrepresentable
+// stored row. The only production callers here are the billing OVERVIEW
+// (identity.mtdSpend), which renders a month-to-date number to a human.
+//
+// Saturating is right for that caller and only that caller: it has to show
+// something, and a negative month-to-date spend is worse than an obviously
+// pegged one. It is emphatically NOT right for a figure that gets FROZEN —
+// invoice.Close sums with a checked addition and REFUSES instead, because an
+// invoice total is a charge and there is no safe direction in which a charge
+// can be MaxInt64.
 func SpendToDate(planFeeCents int64, meteredRateCents ...int64) int64 {
 	total := planFeeCents
+	if total < 0 {
+		return math.MaxInt64
+	}
 	for _, c := range meteredRateCents {
+		// `c < 0` is PROVABLY REDUNDANT, and is kept for legibility rather than
+		// as a guard — recorded because it cannot be mutation-killed and should
+		// not be mistaken for an untested branch. Proof: the arm above
+		// guarantees total >= 0, and for c < 0 the expression MaxInt64-c
+		// overflows to a negative, so `total > MaxInt64-c` is already true.
+		// Deleting it changes no outcome for any input.
+		if c < 0 || total > math.MaxInt64-c {
+			return math.MaxInt64
+		}
 		total += c
 	}
 	return total

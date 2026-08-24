@@ -88,21 +88,77 @@ var ciGates = []ciGate{
 		why: "the drift gate must regenerate sqlc, or a .sql edit that never reached the generator ships a query nobody reviewed"},
 	{task: "§16/§17", job: "go", runContains: "git diff --cached --exit-code -- services packages apps",
 		why: "the generators are a no-op that looks busy without the diff that compares their output"},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: `terraform -chdir="$d" test || fail=1`,
+		why: "terraform validate cannot check a VALUE. This is the only gate asserting that " +
+			"each cell enables NetworkPolicy enforcement — without it the API server stores " +
+			"D7's policies and drops nothing, which is the defect US-3.3a withdrew for.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		// CONTIGUOUS, deliberately. A bare "exit $fail" needle is satisfied while the
+		// gate is neutered: review measured that inserting `fail=0` on the line before
+		// it leaves every registered needle intact — `|| fail=1`, `exit $fail`, the
+		// "did not run" message — and the step exits 0 with all three terraform suites
+		// failing. Matching the loop's tail THROUGH the exit means any statement
+		// slipped in between breaks the match. This is the same lesson the O6f entry
+		// below records for authority-paths, applied to the step that repeated it.
+		runContains: "  echo \"::endgroup::\"\ndone\nexit $fail",
+		why: "the loop reports per-module failures ONLY through this; `exit 0` — or a " +
+			"`fail=0` inserted between the loop and the exit — fails the gate OPEN",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "instantiates the cell but owns no terraform test with a run block",
+		why: "emptiness alone is not coverage: deleting ONE env's tests/ left the gate green " +
+			"over the remaining dirs, hardcoding discovery to the module passed too, and a " +
+			"suite gutted to zero run blocks exits 0 with \"Success! 0 passed\". The " +
+			"behaviour is pinned by TestTheTerraformGate* (which EXECUTES this step); this " +
+			"needle only keeps the step itself from being deleted wholesale.",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['log'] is True",
+		why: "the k8s step's only other gate is a content-BLIND glob parse; these assertions " +
+			"are the sole check on network-logging.yaml, and deleting the whole heredoc was " +
+			"measured green everywhere",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "d['spec']['cluster']['deny']['delegate'] is False",
+		why: "delegate=false is what makes \"every denied connection is logged\" hold for " +
+			"namespaces created later; flipping it was measured green",
+	},
+	{
+		task: "US-3.3f", job: "infra",
+		runContains: "this gate did not run",
+		why: "GitHub's default shell has no pipefail and -e does not fire on a failing command " +
+			"substitution in a for header, so empty discovery would skip every test and exit 0. " +
+			"The emptiness guard is the only thing that makes that loud.",
+	},
 	{task: "O13", job: "go", runContains: "gofmt -l",
 		why: "go vet does not check formatting, so nothing else in this pipeline reports it"},
 	{task: "O13", job: "go", runContains: "git ls-files '*/go.mod'",
 		why: "the gofmt module list must stay DERIVED — a hardcoded list makes a fifth module invisible"},
-	{task: "O13", job: "go", runContains: "go test -race -timeout 30m ./...",
-		why: "the detector had never run in CI; O14 reached the base branch and sat there a month"},
+	{task: "O13", job: "go", runContains: "go test -count=1 -race -timeout 30m ./...",
+		why: "the detector had never run in CI; O14 reached the base branch and sat there a month. " +
+			"The -count=1 is part of the needle deliberately (US-3.3a): the test cache's " +
+			"boundary is the MODULE ROOT, so a fixture outside it — ci.yml five directories up, " +
+			"which THIS test reads — is edited without invalidating anything and comes back " +
+			"`ok (cached)`. Measured live: disarming a gate is cached-green without the flag and " +
+			"FAIL with it, and setup-go restores GOCACHE across commits. It fails OPEN. Note it " +
+			"must be pinned through EXECUTABLE text: runContains matches against " +
+			"stripShellComments, so a gate can never be armed by a comment"},
 	{task: "O13", job: "go", runContains: `out="$(gofmt -l "$m" 2>&1)"`,
 		why: "the exit-status/stderr capture: gofmt reports CLEAN on stdout for a file that does not parse"},
 	{task: "§17", job: "go", runContains: "make gen-go",
 		why: "the oapi contract generator"},
 	{task: "§17", job: "go", runContains: "make gen-canon",
 		why: "the canon fixtures copy"},
-	{task: "T3.4", job: "go", runContains: "cd ../cell-agent && go build ./... && go vet ./... && go test -race",
+	{task: "T3.4", job: "go", runContains: "cd ../cell-agent && go build ./... && go vet ./... && go test -count=1 -race",
 		why: "the cell-agent module is otherwise unbuilt and untested in CI"},
-	{task: "E5", job: "go", runContains: "apps/cli && go build ./... && go vet ./... && go test -race",
+	{task: "E5", job: "go", runContains: "apps/cli && go build ./... && go vet ./... && go test -count=1 -race",
 		why: "the CLI module is otherwise unbuilt and untested in CI"},
 	{task: "O23", job: "go", envKey: "STELOIT_REQUIRE_CONTAINERS",
 		why: "without it a missing container runtime is a SKIP and the job goes green having run nothing"},

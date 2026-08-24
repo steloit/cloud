@@ -45,7 +45,12 @@ type Client struct {
 	fieldOwner string
 }
 
-const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+// saDir is a var, not a const, for the same reason NewClientForTest exists: the
+// in-cluster arm is the ONLY one that runs on a cell, and with a fixed path it is
+// unreachable from a test — substituting a panic for the CNPG renderer in
+// main.run was a green change. A test points this at a temp dir; nothing in
+// production writes it.
+var saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // NewInCluster builds a Client from the pod's projected ServiceAccount. It
 // returns an error (never a partially-configured client) when the agent is not
@@ -103,32 +108,82 @@ type objMeta struct {
 // the agent the authoritative field manager for the fields it owns (so a manual
 // kubectl edit is corrected on the next converge — level-triggered, §2).
 func (c *Client) Apply(ctx context.Context, namespace string, manifests [][]byte) error {
+	// The loop does ONE thing: order and abort. Every per-manifest rule lives in
+	// applyOne, which has no index and therefore cannot be made correct "for the
+	// first one only".
+	//
+	// That structure is the fix for a class this file relocated eight times.
+	// With the rules inline here, every one of them was expressible as
+	// `… && i == 0`, and each round's test closed one more component — the
+	// guards, then the kinds, then the body shape, then five of the six request
+	// fields, then the path, then the response — while the next component stayed
+	// green. A per-index rule is not something to test harder; it is something to
+	// make unrepresentable.
+	//
+	// Aborting rather than continuing is load-bearing: the Namespace is applied
+	// first and everything after it is namespaced, so proceeding past a failure
+	// would apply a service into a namespace that may not exist.
 	for _, m := range manifests {
-		var meta objMeta
-		if err := yaml.Unmarshal(m, &meta); err != nil {
-			return fmt.Errorf("kube: parse manifest: %w", err)
-		}
-		path, err := resourcePath(meta.APIVersion, meta.Kind, namespace, meta.Metadata.Name)
-		if err != nil {
+		if err := c.applyOne(ctx, namespace, m); err != nil {
 			return err
 		}
-		url := c.base + path + "?fieldManager=" + c.fieldOwner + "&force=true"
-		req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(m))
-		if err != nil {
-			return err
+	}
+	return nil
+}
+
+// applyOne validates, routes and server-side-applies a single manifest.
+//
+// It takes no index and no slice, so "correct for the first manifest" is not a
+// state this function can be in.
+func (c *Client) applyOne(ctx context.Context, namespace string, m []byte) error {
+	// EXACTLY ONE DOCUMENT. yaml.Unmarshal silently returns only the first
+	// document of a multi-document stream, so every check below — the kind we
+	// route on, the name we address, the namespace we compare — would describe
+	// document 1 while the whole body is PATCHed. A second document could carry
+	// any kind into any namespace with all of it green.
+	if err := exactlyOneDocument(m); err != nil {
+		return err
+	}
+	var meta objMeta
+	if err := yaml.Unmarshal(m, &meta); err != nil {
+		return fmt.Errorf("kube: parse manifest: %w", err)
+	}
+	// A manifest is routed by the CALLER's namespace, not by its own
+	// metadata.namespace — so a manifest declaring a different namespace would be
+	// written into the caller's. The API server rejects that with a 400, which
+	// makes it fail-closed but leaves the tenant boundary being enforced a network
+	// hop away, and only for namespaced kinds. Refuse locally instead.
+	if got := meta.Metadata.Namespace; got != "" {
+		if clusterScoped[meta.Kind] {
+			return fmt.Errorf("kube: %s/%s is cluster-scoped but declares namespace %q",
+				meta.Kind, meta.Metadata.Name, got)
 		}
-		req.Header.Set("Content-Type", "application/apply-patch+yaml")
-		req.Header.Set("Accept", "application/json")
-		c.auth(req)
-		resp, err := c.hc.Do(req)
-		if err != nil {
-			return fmt.Errorf("kube: apply %s/%s: %w", meta.Kind, meta.Metadata.Name, err)
+		if got != namespace {
+			return fmt.Errorf("kube: %s/%s declares namespace %q but is being applied to %q",
+				meta.Kind, meta.Metadata.Name, got, namespace)
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return fmt.Errorf("kube: apply %s/%s: %d: %s", meta.Kind, meta.Metadata.Name, resp.StatusCode, bytes.TrimSpace(body))
-		}
+	}
+	path, err := resourcePath(meta.APIVersion, meta.Kind, namespace, meta.Metadata.Name)
+	if err != nil {
+		return err
+	}
+	url := c.base + path + "?fieldManager=" + c.fieldOwner + "&force=true"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(m))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/apply-patch+yaml")
+	req.Header.Set("Accept", "application/json")
+	c.auth(req)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("kube: apply %s/%s: %w", meta.Kind, meta.Metadata.Name, err)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("kube: apply %s/%s: %d: %s",
+			meta.Kind, meta.Metadata.Name, resp.StatusCode, bytes.TrimSpace(body))
 	}
 	return nil
 }
@@ -173,9 +228,10 @@ func (c *Client) Observe(ctx context.Context, namespace, name string) (string, e
 // Delete removes the CNPG Cluster (teardown). A 404 is success — idempotent, so
 // a repeated teardown converges to the same absence.
 func (c *Client) Delete(ctx context.Context, namespace, kind, name string) error {
-	apiVersion := "postgresql.cnpg.io/v1"
-	if kind == "VolumeSnapshot" {
-		apiVersion = "snapshot.storage.k8s.io/v1"
+	apiVersion, ok := apiVersions[kind]
+	if !ok {
+		return fmt.Errorf("kube: cannot delete %s/%s — no apiVersion for kind %q; "+
+			"add it to apiVersions rather than letting it route under a guessed group", kind, name, kind)
 	}
 	path, err := resourcePath(apiVersion, kind, namespace, name)
 	if err != nil {
@@ -191,6 +247,10 @@ func (c *Client) Delete(ctx context.Context, namespace, kind, name string) error
 		return fmt.Errorf("kube: delete %s: %w", name, err)
 	}
 	defer resp.Body.Close()
+	// ONLY 404 means gone. Widening this to any 4xx/5xx was a green change, and
+	// what it costs is severe: a 403 or 409 would become "already gone", Converge
+	// would report `gone`, and the control plane would mark the service deleted
+	// and stop metering while the CNPG cluster kept running and billing us.
 	if resp.StatusCode == http.StatusNotFound {
 		return nil // already gone
 	}
@@ -221,8 +281,8 @@ func (c *Client) auth(req *http.Request) {
 // (Cluster→clusters, ScheduledBackup→scheduledbackups, VolumeSnapshot→
 // volumesnapshots); an unknown kind is an error rather than a wrong guess.
 func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
-	if kind == "" || name == "" || namespace == "" {
-		return "", fmt.Errorf("kube: manifest missing kind/name/namespace")
+	if kind == "" || name == "" {
+		return "", fmt.Errorf("kube: manifest missing kind/name")
 	}
 	plural, ok := plurals[kind]
 	if !ok {
@@ -232,7 +292,23 @@ func resourcePath(apiVersion, kind, namespace, name string) (string, error) {
 	if !strings.Contains(apiVersion, "/") { // core group, e.g. "v1"
 		prefix = "/api/" + apiVersion
 	}
+	// CLUSTER-SCOPED kinds live at /<prefix>/<plural>/<name>. A Namespace nested
+	// under /namespaces/<ns>/ is a 404 at apply time — the same class the plural
+	// map exists to prevent, one level up. US-3.3a needs this because the agent
+	// must create the env namespace itself, and a namespace has no namespace.
+	if clusterScoped[kind] {
+		return fmt.Sprintf("%s/%s/%s", prefix, plural, name), nil
+	}
+	if namespace == "" {
+		return "", fmt.Errorf("kube: %s/%s is namespaced but no namespace was given", kind, name)
+	}
 	return fmt.Sprintf("%s/namespaces/%s/%s/%s", prefix, namespace, plural, name), nil
+}
+
+// clusterScoped is explicit for the same reason plurals is: guessing scope from
+// the kind name is how a manifest silently applies to the wrong path.
+var clusterScoped = map[string]bool{
+	"Namespace": true,
 }
 
 // plurals is explicit, not inferred: a wrong pluralization is a 404 at apply
@@ -245,4 +321,75 @@ var plurals = map[string]string{
 	"Backup":          "backups",
 	"Secret":          "secrets",
 	"StatefulSet":     "statefulsets",
+	// US-3.3a — the env namespace. The D7 policy kinds are deliberately NOT here:
+	// nothing renders them (they were withdrawn to US-3.3c), and an entry in this
+	// map is not inert — it is what lets Delete build a path for a kind, so an
+	// unrendered kind here converts Delete's loud refusal into a silent 404.
+	"Namespace": "namespaces",
+	// US-3.3e — the per-environment ceiling. Removed in US-3.3a when the D7
+	// objects were withdrawn and nothing rendered them; back now that tenancy
+	// does. TestPluralsAndAPIVersionsNameTheSameKinds keeps the two maps moving
+	// together, and it is what caught this the moment the renderer changed.
+	"ResourceQuota": "resourcequotas",
+	"LimitRange":    "limitranges",
+}
+
+// apiVersions is the group/version each kind lives in. Delete needs it because,
+// unlike Apply, it has no manifest to read apiVersion from.
+//
+// It replaces a hardcoded "postgresql.cnpg.io/v1" with one special case for
+// VolumeSnapshot. That default was already wrong for two kinds in `plurals`:
+// Secret is v1 and StatefulSet is apps/v1, so Delete built a path under the CNPG
+// group, got a 404, and mapped it to "already gone" — the exact silent-success
+// class TestDeleteRoutesByKind exists to prevent. Neither is reachable today (no
+// driver renders a Secret and the valkey driver is not wired to a renderer), but
+// the mechanism was a trap and US-3.3a widened it by four kinds.
+var apiVersions = map[string]string{
+	"Cluster":         "postgresql.cnpg.io/v1",
+	"ScheduledBackup": "postgresql.cnpg.io/v1",
+	"Backup":          "postgresql.cnpg.io/v1",
+	"VolumeSnapshot":  "snapshot.storage.k8s.io/v1",
+	"Secret":          "v1",
+	"StatefulSet":     "apps/v1",
+	"Namespace":       "v1",
+	"ResourceQuota":   "v1",
+	"LimitRange":      "v1",
+}
+
+// exactlyOneDocument refuses a multi-document YAML stream. Callers pass one
+// object per []byte; anything else means the routing metadata we parsed does not
+// describe all of the bytes we are about to send.
+func exactlyOneDocument(m []byte) error {
+	dec := yaml.NewDecoder(bytes.NewReader(m))
+	docs := 0
+	for {
+		var node yaml.Node
+		err := dec.Decode(&node)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("kube: parse manifest: %w", err)
+		}
+		// An empty document — a leading or trailing `---` with nothing after it —
+		// is ordinary YAML and carries no object. yaml.v3 surfaces it either as a
+		// zero node or as a null scalar depending on position, so both are skipped.
+		if node.Kind == 0 || (node.Kind == yaml.DocumentNode && len(node.Content) == 0) {
+			continue
+		}
+		if node.Kind == yaml.DocumentNode && len(node.Content) == 1 &&
+			node.Content[0].Tag == "!!null" {
+			continue
+		}
+		docs++
+	}
+	switch docs {
+	case 1:
+		return nil
+	case 0:
+		return fmt.Errorf("kube: manifest contains no YAML document")
+	default:
+		return fmt.Errorf("kube: manifest contains %d YAML documents, want exactly 1 — "+
+			"only the first would be routed, while all of it would be sent", docs)
+	}
 }

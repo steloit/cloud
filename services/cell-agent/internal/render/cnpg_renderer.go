@@ -13,6 +13,7 @@ import (
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 	"github.com/steloit/cloud/services/cell-agent/internal/kube"
 )
 
@@ -42,7 +43,24 @@ type cnpgDriver interface {
 // (it runs IN the cell with those credentials); only the per-service namespace
 // comes from the control plane via the desired doc.
 func NewCNPGRenderer(pg cnpgDriver, applier kube.Applier, cell, gsaEmail, walBucket string, log *slog.Logger) *CNPGRenderer {
+	// A nil applier is a wiring bug that would otherwise surface as a nil deref
+	// on the first converge, on a cell, at 3am. Building one is a programming
+	// error, so panic here rather than return an error nobody would check.
+	if applier == nil {
+		panic("render: CNPGRenderer built with a nil applier")
+	}
 	return &CNPGRenderer{pg: pg, applier: applier, log: log, cell: cell, gsaEmail: gsaEmail, walBucket: walBucket}
+}
+
+// Placement reports the per-cell values this renderer was built with.
+//
+// Exported so a CALLER's wiring can be asserted rather than inferred from a log
+// line: swapping the gsaEmail and walBucket arguments at the construction site
+// renders `destinationPath: gs://sa@…` and an empty workload-identity
+// annotation — no WAL archiving and no PITR (ADR-0007 F3) — while every log line
+// still reads correctly.
+func (r *CNPGRenderer) Placement() (cell, gsaEmail, walBucket string) {
+	return r.cell, r.gsaEmail, r.walBucket
 }
 
 // placement is the control-plane-resolved location for a service, carried in the
@@ -56,7 +74,50 @@ func namespaceOf(svc agent.DesiredService) (string, error) {
 	if ns == "" {
 		return "", fmt.Errorf("render: service %s has no resolved namespace in desired", svc.ID)
 	}
+	// Validated HERE, not inside tenancy.Render, because Converge's deleting
+	// branch returns before Render is reached — so a check living in Render
+	// guards the create path only, and teardown is the path that interpolates
+	// this value into a DELETE URL. One owner, both paths.
+	if err := tenancy.ValidateNamespace(ns); err != nil {
+		return "", fmt.Errorf("render: service %s: %w", svc.ID, err)
+	}
 	return ns, nil
+}
+
+// quotaOf reads the plan's per-environment envelope out of the desired doc.
+//
+// The control plane resolves it from the org's plan (billing.Table.Envelope) and
+// ships the VALUES; the agent never sees a plan name and holds no copy of the
+// plan table. An absent or partial envelope is refused by tenancy.Render rather
+// than defaulted — a missing ceiling is the failure this exists to prevent.
+func quotaOf(svc agent.DesiredService) tenancy.Quota {
+	q := asMap(svc.Desired["quota"])
+	return tenancy.Quota{
+		CPU:     asString(q["cpu"]),
+		Memory:  asString(q["memory"]),
+		Storage: asString(q["storage"]),
+	}
+}
+
+// tenancyManifests renders the environment's namespace.
+//
+// The namespace is passed through, never re-derived: it is the single value the
+// control plane resolved (ADR-0012, env-<environment_id>), and tenancy.Render
+// refuses anything that is not in that shape rather than trusting this caller.
+func (r *CNPGRenderer) tenancyManifests(namespace string, svc agent.DesiredService) ([][]byte, error) {
+	objs, err := tenancy.Render(tenancy.Spec{
+		Namespace: namespace,
+		Cell:      r.cell,
+		Quota:     quotaOf(svc),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render: tenancy for %s: %w", namespace, err)
+	}
+	yamls := make([][]byte, len(objs))
+	for i, o := range objs {
+		yamls[i] = o.YAML
+	}
+	return yamls, nil
 }
 
 // Converge renders → applies → observes. A deleting service tears down and
@@ -90,6 +151,34 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 		return "gone", nil
 	}
 
+	// THE ENV NAMESPACE AND ITS D7 BOUNDARY COME FIRST (US-3.3a).
+	//
+	// Nothing created this namespace before: not the control plane (which has no
+	// kube dependency at all), not terraform (which makes only cnpg-system and
+	// control-plane), not the agent. The live e2e worked because a runbook ran
+	// `kubectl create ns` in preflight, so a genuinely new project/env would 404
+	// on first apply.
+	//
+	// D7 also requires the namespace to CARRY default-deny NetworkPolicies, a
+	// ResourceQuota and a LimitRange. The quota and the LimitRange ARE rendered
+	// now (US-3.3e), from the envelope the control plane resolved and put in this
+	// service's desired doc. The NetworkPolicies are still withheld — see the
+	// tenancy package doc for the reason and task/US-3.3f for the enforcement.
+	//
+	// NOTE THE ASYMMETRY, because it is the reason US-3.3g exists: the namespace
+	// and its quota are ENVIRONMENT-scoped, but they are rendered from a SERVICE's
+	// doc, and every service in the environment renders them. Sibling docs written
+	// either side of a plan change disagree, and the namespace then carries
+	// whichever service converged last — the quota oscillates rather than merely
+	// going stale.
+	//
+	// Applied on every converge, not once: SSA is idempotent, and level-triggered
+	// means a namespace or policy deleted out from under us comes back.
+	tenancyObjs, err := r.tenancyManifests(namespace, svc)
+	if err != nil {
+		return "", err
+	}
+
 	spec := driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
@@ -100,9 +189,15 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	if err != nil {
 		return "", fmt.Errorf("render: %w", err)
 	}
-	objs := make([][]byte, len(manifests))
-	for i, m := range manifests {
-		objs[i] = m.YAML
+	// ONE Apply, in order: the namespace, then the service.
+	// Apply iterates in slice order, so the ordering invariant lives in
+	// tenancy.Render's documented ordering rather than being re-established here
+	// — and a single call keeps "how many times did we apply" meaning one
+	// converge, which is what the retry accounting asserts.
+	objs := make([][]byte, 0, len(tenancyObjs)+len(manifests))
+	objs = append(objs, tenancyObjs...)
+	for _, m := range manifests {
+		objs = append(objs, m.YAML)
 	}
 	if err := r.applier.Apply(ctx, namespace, objs); err != nil {
 		return "", fmt.Errorf("render: apply %s: %w", svc.ID, err)
@@ -181,7 +276,14 @@ var phaseStatus = map[string]string{
 	"Switchover in progress":                       "provisioning",
 	"Failing over":                                 "provisioning",
 	"Upgrading cluster":                            "provisioning",
-	"Waiting for user action":                      "degraded",
+	// `failed`, NOT `degraded`. The control plane's status machine allows
+	// provisioning → {ready, failed, deleting} only; degraded is reachable from
+	// `ready`. An agent that answers a still-provisioning cluster with `degraded`
+	// has its writeback REJECTED every tick, so observed_generation never
+	// advances and the row is retried forever — the exact invisible-retry failure
+	// statusFromPhase argues against thirty lines below, arrived at from the
+	// other side.
+	"Waiting for user action": "failed",
 	// terminal-bad (manual intervention or a definition error)
 	"Cluster is unrecoverable and needs manual intervention":                                  "failed",
 	"Invalid cluster definition":                                                              "failed",

@@ -1,188 +1,150 @@
 # Autonomous session state
 
-Handoff between autonomous Claude Code sessions. **Not authoritative** — the repo,
-git, CI and `tasks/` are. Verify before trusting; correct this file when it is wrong.
+A **small current-state handoff**, not a diary. **Not authoritative** — the repo,
+git, CI and `tasks/` are. Verify before trusting; correct this file when wrong.
+Durable lessons live in `contexts/provisioning.md` (mistake bank) and `AGENTS.md`,
+never here.
 
-**Last updated:** 2026-08-23 (session 2, cont.) · `main` @ `f105f25` · CI **green** · **1 open PR (#320)**
+**Updated:** 2026-08-24 · **3 of 5 PRs MERGED** (US-3.3f, US-3.3a, O19) · 2 open
 
 ---
 
 ## Current objective
 
-Work the `tasks/` ready queue under the AGENTS.md task protocol: claim → implement →
-`verify:` → **both reviewers (ADR-0008)** → CI → merge. No standing objective beyond
-that; the queue is the plan.
+Work the `tasks/` ready queue under the AGENTS.md protocol: claim → implement →
+`verify:` → **both reviewers (ADR-0008)** → CI → merge. The queue is the plan.
 
-## Current phase
+## In flight
 
-**US-3.3a implemented** (PR #320) — env namespace + D7 isolation. Security review
-running; do not merge before it reports.
-
----
-
-## Next concrete action
-
-**Land #320 (US-3.3a)** once its security review reports, then pick the next `high`
-from the ready queue.
-
-**US-3.3a is DONE and must not be redone.** The decision was settled on evidence:
-`services/api/go.mod` has **no `k8s.io/*` at all**, so control-plane-side namespace
-creation would be an architecture delta (D6/ADR-0001). Agent-side, in
-`services/cell-agent/internal/driver/tenancy`, applied before the service manifests
-in one ordered `Apply`. Six manifests; Namespace first because everything after it
-is namespaced.
-
-Two things it uncovered, both fixed on that branch:
-- `resourcePath` could not express a **cluster-scoped** resource (a Namespace has
-  no namespace). `clusterScoped` is now explicit alongside `plurals`.
-- Eleven `internal/render` fixtures still used `acme--prod`, the pre-ADR-0012
-  `proj--env` shape. `internal/kube`'s eleven uses are legitimately arbitrary.
-
-**AC 4 (env deletion removes the namespace) is filed as US-3.3b**, not done: there
-is no environment-teardown path in the agent — teardown is per-service — so it
-needs a control-plane contract that does not exist.
-
-Do **not** pick `T3.4c` — see "Blocked on a human" below.
-
----
-
-## Blocked on a human — do not guess these
-
-| # | Decision | Where |
+| PR | task | state |
 |---|---|---|
-| 1 | **T3.4c**: what does a `standard` postgres with `storage_gb` unset receive? Price says 50 GB included; the AC implies 0. Cannot both hold, and it changes what customers get. Both readings written up. | PR **#315** (open, CI green) |
-| 2 | **ADR-0014 ratification.** Code is on the trunk; `Status: Proposed`. Flipping it would forge a founder decision. The ADR states declining does **not** imply a revert. | `docs/adr/0014-*.md` |
-| 3 | **O2 cost guardrail.** Terraform (50/80/100% monthly budget), the task (50/80/100% of the $300 trial credit) and live GCP (`steloit-dev tripwire`: 50/90/100% of ₹1000/month, empty `notificationsRule`) describe three different alarms. | `tasks/eops/O2.md` (kept `stub` with facts recorded) |
+| ~~#320~~ | US-3.3a | **MERGED.** 16 rounds. r12 was a regression (reverted in r13). |
+| **#322** | T3.4c | **round 5.** 3 migration blockers + a teardown deleting another product's objects, all fixed and verified on real postgres. QA in flight from before ADR-0016. |
+| ~~#323~~ | US-3.3f | **MERGED.** CI gate pinned by EXECUTING it. |
+| **#324** | US-3.3e | conflict with main resolved (one import line). CI watched. `requests.storage` WITHDRAWN — see US-3.3i. |
+| ~~#325~~ | O19 | **MERGED.** `money.Accrual`; my SpendToDate justification was false and the invoice saturation was worse than the wrap — both corrected in r4. |
 
----
+**Stacking:** US-3.3e branches from US-3.3a. Merge order must be
+US-3.3a → US-3.3e; US-3.3f and T3.4c are independent.
 
-## Session 2 additions — do NOT redo
+## Next action
 
-- **Audited all five CI gates against a real run log**, not `ci.yml`. All five
-  EXECUTE. The container gate is proven by behaviour (identity 350.8s, reconcile
-  146.5s, db 31.1s, 0 SKIP) because its env var is masked in logs.
-- **O29** — four of five gates could be deleted from `ci.yml` with a green suite.
-  Now parsed with `yaml.v3` and asserted on `steps[].run`/`.env` + no `if:` on the
-  job + `pull_request` trigger. **Twelve mutation classes red.** Two earlier
-  versions were theatre (whole-file text match; then whole-line-comment strip,
-  defeated by an *inline* comment plus an emptied env value).
-- **O20** — `docs/dev/money-range-audit.md` + a test that EXTRACTS the SQL from the
-  doc and proves it finds seeded poison in all five money locations. My first
-  query used `services.org_id`, which does not exist (chain is
-  services→environments→projects).
-- **O2** — the module is **INERT** (`billing_account` defaults `""`, no tfvars sets
-  it), so there is no drift: a dormant module and a hand-made budget that never met.
-  `currency_code` is **DELETED** (the server supplies the account currency — the
-  discovery doc says "provided on output"; setting it is the only way to fail). My
-  first fix made it a variable, which REMOVED a guard: `INR` + `units=300` = ₹300/mo
-  ≈ $3.60. The amount is now a required env variable with no default, so `plan`
-  refuses until it is chosen alongside `billing_account`.
-- **O2 has SIX founder decisions now, not four** — the amount/currency pairing and
-  `alert_emails` were missed. With currency server-supplied the direction of the
-  amount divergence FLIPS: live's ₹1000 is ~3.3× larger than terraform's ₹300.
+Land **#322** and **#324**. Then the ready queue: **O9**, **T1.4a**, **US-10.7**,
+and this session's filings: **US-3.3c/d/g/h/i**, **O30**, **O31**, **O32**.
 
-## Completed in session 1 — do NOT redo
+**ADR-0016 (founder, 2026-08-24) changes how reviews run:** both reviewers, but
+**ONCE per PR on the final diff**, scoped to **code and behavioural claims only**.
+Task-file narrative, counts and citations are the implementer's own pass. The
+biggest lever is not the pipeline though — **do the task and nothing more**: four
+rounds this session went to undoing an improvement nobody asked for.
 
-12 PRs merged (#305–#314, #316). Tasks 101 → 116 done; stale `in-progress` 3 → 0.
+## Blocked on a human
 
-**Live defects closed** (all verified against merged `main`, not inferred from diffs):
-- **O16** — integer overflow let one authenticated request permanently disable an org's
-  hard spend cap (`postgres {storage_gb:1e18}` → `-5340232221128652948`, persisted, and
-  `enforceBudget` projects against `SumOrgMonthlyEstimate`).
-- **Q10/O14** — data race in `reconcile`'s test doubles; killed the test **binary** in
-  ~1% of plain runs via `fatal error: concurrent map read and map write`.
-- **O22** — duplicated `cost_guardrails` terraform module had CI's `infra` job red, so
-  cell0 validation and all `infra/k8s/**` parsing had never run.
-
-**CI gates built — none existed before:**
-| gate | note |
-|---|---|
-| `make gen-sql` in the drift step | O7; also sweeps stale output so a *deleted* query is caught |
-| `gofmt -l` per module | O13; list **derived** from `git ls-files '*/go.mod'` |
-| `-timeout 30m` | O13; default is 10 min **per package** and identity measures ~350s |
-| `-race` | O13; **had never run in this repo**. Runs ~9 min on the hosted runner |
-| containers actually started | O23; `STELOIT_REQUIRE_CONTAINERS` — pinned to `ci.yml` by a test |
-
-**Also:** O15 (composition-root worker registry), O24/O27 (task-state drift; T3.4 was
-`critical`/`ready` but had shipped in #298), O25/O26 (see "What went wrong").
-
----
-
-## Architectural decisions recorded
-
-- **`money.Cents` is a struct, not `type Cents int64`** — Go will not compile `a + b`, so
-  arithmetic can only go through checked methods. `MaxMonthly` is **derived** from a full
-  billing month because `metering.Rollup` multiplies an accepted rate by a month of
-  seconds. (ADR-0014, Proposed.)
-- **`problem.FromDenial`** is the single denial→response mapping. It lives in `problem`
-  because `events` cannot import `identity` (`identity` imports `events`).
-- **O23's gate is one decision in one place** (`testenv.SkipOrFail`) — three helpers each
-  making it independently is how one quietly stops.
-- `secondsInLongestMonth` is **unexported**; `Cents.SurvivesBillingMonth()` answers the
-  question without handing out the constant.
-
-## Discoveries worth keeping
-
-- **Container runtime is required for real verification.** Without it the suite prints
-  `ok` having skipped. Use:
-  `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`
-- **GCP access is available**: project `steloit-dev`, billing `016006-61AFB9-0DD7E7`.
-  `gcloud` defaults to a *different* project — pass `--billing-project=steloit-dev`
-  explicitly; do **not** change the user's global config.
-- Full `services/api` suite: ~4 min plain, ~9–10 min under `-race`. `identity` alone is
-  250–500s and is the binding package for the timeout.
-
----
-
-## Known risks / defects (all filed, none silent)
-
-| task | pri | what |
+| # | decision | where |
 |---|---|---|
-| **O19** | high | `MaxMonthly` bounds one service-month; `Rollup` accumulates across every service in the org. Two services at the ceiling wrap `quota_usage.rate_cents`. Pre-existing. |
-| **O20** | high | O16 closed the ingress, shipped no detection for rows the old overflow already wrote. Failure mode changed from silent-permissive to silent-**blocking** (permanent 409). |
-| **O28** | medium | O23's gate is negative-only: with a runtime present and the gate armed, `t.Skip("quarantined")` still yields `ok` with zero containers. Also `ckm3_checkpoint_test.go` panics in `t.Cleanup`, aborting the whole binary (~100 identity results lost). |
-| **O21** | medium | `reconcile/http.go`'s `problem.Carrier → 409` arm is deletable with the whole suite green. |
-| **Q11** | medium | `TestIdempotentCreateWebhookReplaysTheRevealOnceSecret` failed once under `-race`; output not preserved. Observation, not a diagnosis. Reveal-once is a security property. |
-| **O18** | low | Nothing detects duplicate tasks (Q10/O14 were the same defect, both `ready` for a month) nor a `ready` task whose named tests all already exist (T3.4). |
+| 1 | **O2 cost guardrail.** The founder gave ₹1,000/mo at 50/80/100 and "use the existing ops recipient", then said an **updated spec is coming**. Nothing has been written for O2 — `task/O2` worktree is clean. WAIT for it. | `tasks/eops/O2.md` |
+| 2 | **A SIZE downgrade's price** while storage is retained (T3.4c). Not ruled; three options recorded with market evidence. | `docs/founder-config.md` §5 |
+| 3 | **O30 — `quota_usage.rate_cents` is written as cent-seconds and read as cents.** Measured: a $24/mo service billed one hour invoices **$86,400**. Which side moves, and the proration divisor, are pricing decisions. | `tasks/eops/O30.md` |
 
----
+**Answered 2026-08-23:** T3.4c `included_gb` semantics · ADR-0014 **ratified**
+(merged, #321) · US-3.3e envelope (free 1/2Gi/10Gi · pro 8/16Gi/100Gi ·
+business 12/24Gi/200Gi · enterprise 16/32Gi/250Gi, per environment).
 
-## What went wrong — read this before working
+## GCP access
 
-Reviews caught defects in my own work on **six** branches. Three shared one cause:
-**verifying one representation of something that has two.**
-- pinned 1 of 5 fail-closed guards while writing "all five re-verified"
-- wrote a test with only positive assertions — in the fix for an only-positive test
-- drove one disjunct of a two-disjunct condition
+`gcloud` is active as **hashir@humanetechnologies.in** (the founder's instruction:
+never `admin@`). Re-verified 2026-08-23: `container clusters list --project
+steloit-dev` → `[]`, exit 0, and `projects describe` proves the credential works.
+ADC is saved; the quota project `humane-dev-493708` lacks `serviceusage.services.use`,
+so pass `--billing-project=steloit-dev`.
 
-Also, and worse:
-- **Lost an entire review round.** Made fixes in a `git worktree`, never committed;
-  `git push` sent only the pre-existing commit, the PR merged that, and
-  `worktree remove --force` destroyed the rest. **The merged PR description claimed work
-  it did not contain.** Corrected publicly on #310; O26 re-landed it.
-- Ran fault injection against the **working tree** (a failed `cd` left a stale cwd).
-- Nearly reverted all of O13 by branching from a stale `main` — caught by reading the
-  diffstat against `origin/main` before pushing.
+## Do NOT redo
 
-**Rules now in `AGENTS.md` (with *measured* tells — my first version stated two that were
-false):** a worktree is not a commit; the tell is that plain `git worktree remove`
-**refuses** and names `--force`. Needing `--force` *is* the warning. Fault injection goes
-in a `cp -R` copy, absolute paths only.
+- **US-3.3a's namespace half.** `services/api/go.mod` has **no `k8s.io/*`**, so
+  control-plane-side creation is an architecture delta (D6/ADR-0001). Agent-side,
+  in `internal/driver/tenancy`, applied before the service manifests.
+- **D7's policy objects were withdrawn on purpose.** Two of the three are BACK:
+  US-3.3e reinstates the ResourceQuota and the LimitRange (`defaultRequest` only —
+  a `default` would cap every managed Postgres, since `cluster.yaml.tmpl` declares
+  no resources). NetworkPolicy is still withheld: not enforced on the cell today
+  (#323 turns it on) and the allow-set would fence CNPG off Workload Identity /
+  GCS / the apiserver. `tenancy.Render`'s package doc records the current split.
+- **Only STORAGE actually binds** in the quota today; cpu/memory bind as a
+  pod-count proxy until US-3.3d makes the Cluster declare its own resources.
+- **There are ZERO GKE clusters in `steloit-dev`** — re-verified 2026-08-23 under
+  `hashir@`. `infra/modules/gke-cell` has never been applied, which is what makes
+  #323's create-time-only Dataplane V2 flip free. US-3.3a's AC 3 ("proven without
+  the runbook's preflight") is **not** provable yet, and US-3.3c's pod-to-pod
+  assertions need a cell first.
+- **O2's module is INERT** (`billing_account` defaults `""`, no tfvars sets it),
+  `currency_code` is deliberately DELETED (the server supplies it), and the
+  amount is a required env variable with no default so `plan` refuses.
 
-**Operating consequence:** do not merge on your own assessment of a review you requested.
-Wait for the re-verification. A green suite is not evidence a test *discriminates* — and a
-mutation result is only evidence about the **invocation it was measured at** (18/100 →
-3/100 → 100/100 at CI's plain `go test`, while `-count=50` looked fine throughout).
+## Verification rules that keep catching me
 
----
+These are in `contexts/provisioning.md` in full. The short form:
 
-## Conventions that saved time
+1. **A mutation harness must produce a GREEN no-mutation baseline first.** A
+   module-only `cp -R` of `services/cell-agent` is RED on arrival (three
+   `parity_test.go` cases need the repo root); scaffold one:
+   `AGENTS.md` + `infra/k8s` + `infra/spike` + `services/cell-agent`. Assert 0
+   FAILs before and after the sweep, and assert each mutation applied.
+2. **Verify every representation**, not the one you edited: rendered vs stored vs
+   *enforced*; struct field vs bytes; create path vs teardown; validator vs its
+   call site vs `main` honouring it; the test's fixtures vs production's bytes.
+3. **Never widen an assertion from one object to a collection** — it reads as
+   generalisation and is a weakening.
+4. **Never merge on your own read of a pending review.**
+5. `git worktree remove` refusing and naming `--force` IS the warning.
+6. **Verify the branch you are about to change, not the one you remember.** r12
+   asserted "separate go.mod files, so neither module can import the other" —
+   `apps/cli/go.mod` already imports `packages/contracts/go` across exactly that
+   boundary with a `replace`. An architectural premise is checkable in ten seconds.
+7. **A fix can be a regression.** r12's mapping made a transient phase terminal
+   for any non-provisioning from-state, defeating the guard three lines below it.
+   When a change makes a guard's INPUT different, re-check the guard.
+8. **A count restated is not a count measured.** US-3.3a published "59 distinct"
+   and "one short fixture kept"; counting mechanically gave **61 distinct** (34+29
+   entries, 2 duplicates) and **four** fixture lengths. Re-derive every number you
+   repeat — a figure carried forward from a previous round is an assertion.
+9. **Pin duplicated knowledge against a shared artifact, not a copy of the other
+   side** — and note a repo-root fixture is invisible to the Go test cache
+   (`-count=1` is now in CI for all three modules, pinned through executable text).
+10. **A legality sweep cannot see "no change".** Skipping answers equal to `from`
+   hides the case where no change is the WRONG answer. Assert the DESTINATION.
+11. **A substring needle cannot pin control flow.** Pinning a CI step's `exit $fail`
+   by text was defeated twice by moving `fail=0` one line. EXECUTE the step in a
+   test instead — and split the stub, or the script dies at `init` under `-e` and
+   the assertion passes for an unrelated reason.
+12. **A guard nothing can distinguish is not a guard.** Three separate branches on
+   one CI step turned out to be subsumed by the loop below them; removing each
+   changed no outcome. Remove them rather than inventing a test.
+13. **Run the SHIPPED artifact, not a paraphrase.** Two migrations this session had
+   defects invisible because a test hand-copied a simplified statement, or ran the
+   real one only against an empty database where a no-op UPDATE looks correct.
+14. **`strings.Contains` over a file cannot tell code from a comment.** A text pin
+   passed with the expression parked in a `# was:` line and the value gutted.
 
-- Work in a `git worktree` per task; check `git status` **before** removing it.
+## Conventions
+
+- Worktree per task; `git status` in it **before** removing it.
 - After pushing: `git rev-list --left-right --count origin/<branch>...HEAD` → `0 0`.
-  (Necessary, not sufficient — it compares commits, so it cannot see uncommitted work.)
-- Reviewers: `subagent_type: "reviewer"` and `"qa"`, **by name**. They are worth the wall
-  clock; they found real defects every single time.
+- Reviewers by name: `subagent_type: "reviewer"` and `"qa"` — **ONCE per PR, on
+  the final diff, code only** (ADR-0016, founder 2026-08-24). Not after every
+  round; task-file narrative/counts/citations are the implementer's own pass.
 - `node scripts/spec-sync/validate.mjs` after any `tasks/` edit.
-- Context packs have a hard budget (`contexts/*.md`, 150 documented / 160 enforced — O12
-  owns that discrepancy). Compress an existing entry to fund a new one.
+- Context packs: documented cap 150 lines, validator enforces >160 (O12 owns the
+  discrepancy). Compress an existing entry to fund a new one.
+- Container runtime for the API's integration tests:
+  `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock TESTCONTAINERS_RYUK_DISABLED=true`
+- GCP: project `steloit-dev`, billing `016006-61AFB9-0DD7E7`. `gcloud` defaults to
+  a different project — pass `--billing-project=steloit-dev`; never change global config.
+
+## Known risks (all filed)
+
+`O19` high — `MaxMonthly` bounds one service-month while `Rollup` accumulates
+org-wide · `O20` high — detection shipped, no remediation for rows the old
+overflow wrote · `O28` medium — the container gate is negative-only · `O21`
+medium · `Q11` medium — a reveal-once webhook test failed once under `-race` ·
+`O18` low. Stray tracked empty file `300-line` at the repo root (from `c3f0876`,
+O24) — harmless, unowned, delete when convenient.

@@ -1,21 +1,65 @@
 {
-  "$note": "Pricing + quota as DATA (T11.1) — the plan/quota axis of the ONE billing table. Resource-shape prices live in estimates/pricing.json (the PAYG infrastructure axis, T3.1); the two axes are disjoint (ADR-022/041 hybrid model) — no price appears in both. The estimate engine, quota evaluator (T11.5), and invoice generator (T11.3) read the plan/quota numbers HERE; a second copy of any of these constants is a bug (billing pack). Money is integer cents (ADR-025). Sources: F9 (feature-specs.md — Free 3 / Pro 5 / Business 20 seats; Pro $29 canonical per ADR-041; Business $99 = canon plan_fee_cents) and the shipped seat gate (identity/orgs.go). project_limit / included_seats: -1 = unlimited; enterprise seats 1000 matches the shipped SubscriptionInfo. Enterprise fee is custom (null). Per-plan EGRESS allowances are deferred to T11.5 (only the Business org's 100 GB is canon-pinned; Free/Pro are not sourced yet — do not invent them here).",
-  "plans": {
-    "free":       {"fee_cents": 0,    "project_limit": 1,  "included_seats": 3},
-    "pro":        {"fee_cents": 2900, "project_limit": 3,  "included_seats": 5},
-    "business":   {"fee_cents": 9900, "project_limit": -1, "included_seats": 20},
-    "enterprise": {"fee_cents": null, "project_limit": -1, "included_seats": 1000}
+ "$note": "Pricing + quota as DATA (T11.1) \u2014 the plan/quota axis of the ONE billing table. Resource-shape prices live in estimates/pricing.json (the PAYG infrastructure axis, T3.1); the two axes are disjoint (ADR-022/041 hybrid model) \u2014 no price appears in both. The estimate engine, quota evaluator (T11.5), and invoice generator (T11.3) read the plan/quota numbers HERE; a second copy of any of these constants is a bug (billing pack). Money is integer cents (ADR-025). Sources: F9 (feature-specs.md \u2014 Free 3 / Pro 5 / Business 20 seats; Pro $29 canonical per ADR-041; Business $99 = canon plan_fee_cents) and the shipped seat gate (identity/orgs.go). project_limit / included_seats: -1 = unlimited; enterprise seats 1000 matches the shipped SubscriptionInfo. Enterprise fee is custom (null). Per-plan EGRESS allowances are deferred to T11.5 (only the Business org's 100 GB is canon-pinned; Free/Pro are not sourced yet \u2014 do not invent them here). Per-ENVIRONMENT resource quota envelope (founder 2026-08-23, US-3.3e): free 1/2Gi/10Gi, pro 8/16Gi/100Gi, business 12/24Gi/200Gi, enterprise 16/32Gi/250Gi. Values are Kubernetes quantity strings and are the ONLY definition \u2014 the control plane resolves them and ships them to the cell in the desired doc, so the cell-agent never carries a copy of the plan table.",
+ "plans": {
+  "free": {
+   "fee_cents": 0,
+   "project_limit": 1,
+   "included_seats": 3,
+   "quota": {
+    "cpu": "1",
+    "memory": "2Gi",
+    "storage": "10Gi"
+   }
   },
-  "overage": {
-    "$note": "Soft-quota unit prices (F9 / billing pack). Plan-independent; charged beyond the plan's included allowance, only with confirm=true + shown price.",
-    "egress_cents_per_gb": 9,
-    "seat_cents": 700,
-    "build_cents_per_min": 1,
-    "event_cents_per_million": 120,
-    "ai_cents_per_1k": 200
+  "pro": {
+   "fee_cents": 2900,
+   "project_limit": 3,
+   "included_seats": 5,
+   "quota": {
+    "cpu": "8",
+    "memory": "16Gi",
+    "storage": "100Gi"
+   }
   },
-  "never_gated": {
-    "$note": "Plans gate capabilities, never safety (F9 / billing pack). This list is law; the quota evaluator (T11.5) consults IsNeverGated before any plan gate, and a test asserts the list is complete.",
-    "capabilities": ["tls", "backups", "mfa", "policies", "alerts", "dunning_protections", "self_deletion"]
+  "business": {
+   "fee_cents": 9900,
+   "project_limit": -1,
+   "included_seats": 20,
+   "quota": {
+    "cpu": "12",
+    "memory": "24Gi",
+    "storage": "200Gi"
+   }
+  },
+  "enterprise": {
+   "fee_cents": null,
+   "project_limit": -1,
+   "included_seats": 1000,
+   "quota": {
+    "cpu": "16",
+    "memory": "32Gi",
+    "storage": "250Gi"
+   }
   }
+ },
+ "overage": {
+  "$note": "Soft-quota unit prices (F9 / billing pack). Plan-independent; charged beyond the plan's included allowance, only with confirm=true + shown price.",
+  "egress_cents_per_gb": 9,
+  "seat_cents": 700,
+  "build_cents_per_min": 1,
+  "event_cents_per_million": 120,
+  "ai_cents_per_1k": 200
+ },
+ "never_gated": {
+  "$note": "Plans gate capabilities, never safety (F9 / billing pack). This list is law; the quota evaluator (T11.5) consults IsNeverGated before any plan gate, and a test asserts the list is complete.",
+  "capabilities": [
+   "tls",
+   "backups",
+   "mfa",
+   "policies",
+   "alerts",
+   "dunning_protections",
+   "self_deletion"
+  ]
+ }
 }

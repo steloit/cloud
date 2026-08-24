@@ -5,17 +5,19 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/steloit/cloud/services/cell-agent/internal/driver/tenancy"
 )
 
 func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
 	a := newFakeApplier("Cluster in healthy state")
 	r := newRenderer(a)
 	// create both objects first
-	if _, err := r.Converge(context.Background(), svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	// now tear down
-	if _, err := r.Converge(context.Background(), svc("svc_db01", "deleting")); err != nil {
+	if _, err := r.Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "deleting")); err != nil {
 		t.Fatal(err)
 	}
 	// the ScheduledBackup must not survive the cluster (it would keep firing
@@ -23,7 +25,7 @@ func TestDeleteRemovesEveryRenderedObject(t *testing.T) {
 	if len(a.deleted) < 2 {
 		t.Fatalf("teardown deleted %d object(s); the driver rendered 2 (Cluster + ScheduledBackup): %v", len(a.deleted), a.deleted)
 	}
-	for _, ns := range []string{"acme--prod/Cluster/svc-db01", "acme--prod/ScheduledBackup/svc-db01-nightly"} {
+	for _, ns := range []string{"env-0123456789abcdef0123456789abcdef/Cluster/svc-0123456789abcdef0123456789abcdef", "env-0123456789abcdef0123456789abcdef/ScheduledBackup/svc-0123456789abcdef0123456789abcdef-nightly"} {
 		var found bool
 		for _, d := range a.deleted {
 			if d == ns {
@@ -48,7 +50,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 	r := newRenderer(a)
 	ctx := context.Background()
 
-	status, err := r.Converge(ctx, svc("svc_db01", "provisioning"))
+	status, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +58,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 		t.Fatalf("a failed CNPG phase must report failed, got %q", status)
 	}
 	liveAfterFailure := len(a.live)
-	firstManifests := append([][]byte(nil), a.applied["acme--prod"]...)
+	firstManifests := append([][]byte(nil), a.applied["env-0123456789abcdef0123456789abcdef"]...)
 	if liveAfterFailure == 0 {
 		// Guard against a vacuous pass: if the failed attempt applied nothing,
 		// the "no new objects" check below compares 0 to 0 and proves nothing.
@@ -65,7 +67,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 
 	// The retry: same desired state, cluster now healthy.
 	a.phase = "Cluster in healthy state"
-	status, err = r.Converge(ctx, svc("svc_db01", "provisioning"))
+	status, err = r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +85,7 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 	if a.applies != 2 {
 		t.Fatalf("the retry applied %d times, want 2 — a retry that skips the apply repairs nothing", a.applies)
 	}
-	second := a.applied["acme--prod"]
+	second := a.applied["env-0123456789abcdef0123456789abcdef"]
 	if len(second) != len(firstManifests) {
 		t.Fatalf("the retry rendered %d objects, the first attempt %d", len(second), len(firstManifests))
 	}
@@ -93,12 +95,55 @@ func TestFailedProvisioningRetryLeavesExactlyOneCluster(t *testing.T) {
 				i, firstManifests[i], second[i])
 		}
 	}
-	// And nothing was orphaned under a different name.
+	// And nothing was orphaned under a different name. Environment objects (the
+	// namespace and its D7 policies) are expected and excluded — they are not
+	// this service's, and every converge reapplies them by design.
+	envObjs := envObjectKeys(t)
 	for k := range a.live {
-		if !strings.Contains(k, "svc-db01") {
+		if envObjs[k] {
+			continue
+		}
+		if !strings.Contains(k, "svc-0123456789abcdef0123456789abcdef") {
 			t.Fatalf("retry left an object under an unexpected name: %s", k)
 		}
 	}
+}
+
+// testNamespace is the ADR-0012 shape, sanitize(env_id) — e.g. env_9f3c1a2b
+// becomes env-0123456789abcdef0123456789abcdef. The fixtures used the pre-ADR-0012 `proj--env` form
+// (`acme--prod`), which the platform can no longer produce.
+// PRODUCTION-SHAPED IDENTIFIERS. ids.New mints a 32-hex suffix, so a real
+// namespace is `env-<32 hex>` (36 chars) and a real service id `svc_<32 hex>`.
+// These fixtures were `env-9f3c1a2b` (12) and `svc_db01` (8) — three times
+// shorter than anything the platform can produce — so every rule keyed on
+// identifier LENGTH was unpinned. Four such mutations survived, two of which
+// switched off this task's headline behaviours for every real environment: a
+// Delete that no-ops above 12 chars, and a teardown that deletes nothing and
+// still reports gone.
+//
+// Provenance worth recording: ADR-0012 writes the shape as `env_9f3c… →
+// env-9f3c…` with a typographic ELLIPSIS, and the fixture read that elision as
+// a literal. An elided example became the test data (AGENTS.md: examples are
+// normative).
+const testNamespace = "env-0123456789abcdef0123456789abcdef"
+
+// envObjectKeys is the set of objects that belong to the ENVIRONMENT rather than
+// to any service — today the namespace, and whatever US-3.3c adds beside it.
+// DERIVED from tenancy.Render, never retyped: a hardcoded list silently stops
+// covering an object added there, which is how a test starts asserting less
+// than it claims.
+func envObjectKeys(t *testing.T) map[string]bool {
+	t.Helper()
+	ms, err := tenancy.Render(tenancy.Spec{Namespace: testNamespace, Cell: "cell-0",
+		Quota: tenancy.Quota{CPU: "8", Memory: "16Gi", Storage: "100Gi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, m := range ms {
+		out[testNamespace+"/"+m.Name] = true
+	}
+	return out
 }
 
 // The DELETE half: a service abandoned in `failed` and then deleted must leave
@@ -110,21 +155,82 @@ func TestDeletingAFailedServiceLeavesNothingBehind(t *testing.T) {
 	r := newRenderer(a)
 	ctx := context.Background()
 
-	if _, err := r.Converge(ctx, svc("svc_db01", "provisioning")); err != nil {
+	if _, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.live) == 0 {
 		t.Fatal("the failed attempt applied nothing — this test would prove nothing")
 	}
-	status, err := r.Converge(ctx, svc("svc_db01", "deleting"))
+	status, err := r.Converge(ctx, svc("svc_0123456789abcdef0123456789abcdef", "deleting"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status != "gone" {
 		t.Fatalf("teardown must report gone, got %q", status)
 	}
-	if len(a.live) != 0 {
-		t.Fatalf("deleting a FAILED service stranded %d object(s): %v", len(a.live), a.live)
+	// Nothing of the SERVICE may remain. The environment's namespace and its D7
+	// policies deliberately DO remain — they belong to the environment, not to
+	// this service, and other services live in the same namespace. Deleting one
+	// service must not dismantle the tenant boundary around its siblings.
+	//
+	// The env-scoped set is DERIVED from tenancy.Render, not retyped: a list here
+	// would silently stop covering a policy added there.
+	envObjs := envObjectKeys(t)
+	for k := range a.live {
+		if !envObjs[k] {
+			t.Fatalf("deleting a FAILED service stranded a SERVICE object: %s (live: %v)", k, a.live)
+		}
+	}
+	// And the boundary must still be standing — asserted positively, because
+	// "no service object remains" is also satisfied by having deleted the
+	// namespace along with everything in it.
+	for k := range envObjs {
+		if !a.live[k] {
+			t.Fatalf("service teardown removed the ENVIRONMENT object %s — the tenant boundary "+
+				"belongs to the env and its siblings still need it", k)
+		}
+	}
+}
+
+// The TEARDOWN path must validate the namespace too.
+//
+// Converge's deleting branch returns before tenancy.Render is ever reached, so a
+// check living inside Render guards the create path alone — and teardown is the
+// path that fmt.Sprintf's the value straight into a DELETE URL. Probed before
+// the fix: a namespace of "../../../api/v1/namespaces/kube-system" was refused on
+// create and accepted on teardown, reporting gone after issuing deletes against
+// paths that walk out of the namespace entirely.
+func TestTeardownRefusesANamespaceItWouldNotHaveCreated(t *testing.T) {
+	for _, bad := range []string{
+		"../../../api/v1/namespaces/kube-system",
+		"env-x/../kube-system",
+		"kube-system",
+		"env-UPPER",
+		"env-x\nmetadata: injected",
+	} {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+		s.Desired["namespace"] = bad
+
+		if _, err := newRenderer(a).Converge(context.Background(), s); err == nil {
+			t.Errorf("teardown accepted namespace %q", bad)
+		}
+		if len(a.deleted) != 0 {
+			t.Errorf("teardown issued deletes for %q: %v", bad, a.deleted)
+		}
+	}
+
+	// And the legitimate teardown still works, or the above would be satisfied by
+	// a Converge that refuses every deletion.
+	a := newFakeApplier("Cluster in healthy state")
+	if _, err := newRenderer(a).Converge(context.Background(), svc("svc_0123456789abcdef0123456789abcdef", "provisioning")); err != nil {
+		t.Fatal(err)
+	}
+	s := svc("svc_0123456789abcdef0123456789abcdef", "deleting")
+	if status, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+		t.Fatalf("a legitimate teardown was refused: %v", err)
+	} else if status != "gone" {
+		t.Fatalf("teardown reported %q, want gone", status)
 	}
 }
 
