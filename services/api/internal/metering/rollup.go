@@ -25,6 +25,15 @@ func tstz(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, V
 // Period is the billing month key, YYYY-MM (UTC).
 func Period(t time.Time) string { return t.UTC().Format("2006-01") }
 
+// SpanMeter is the ONE name Rollup writes and carryForward can account for.
+//
+// A single owner rather than two literals, because the two must not be able to
+// drift: if Rollup ever writes a meter carryForward cannot handle, late usage on
+// it is silently lost for every closed period. The runtime guard in carryForward
+// is the backstop; `TestRollupWritesOnlyTheMeterCarryForwardCanAccountFor` is what
+// makes that backstop never fire, by failing CI instead of a customer's page.
+const SpanMeter = "service_span_seconds"
+
 // PeriodBounds is exported so the invoice can refuse to close a period that has
 // not ended — the accounting boundary is the calendar, not the caller.
 func PeriodBounds(period string) (time.Time, time.Time, error) {
@@ -158,7 +167,7 @@ func (e *Emitter) Rollup(ctx context.Context, orgID, period string, now time.Tim
 		return e.carryForward(ctx, orgID, period, totalSeconds, weightedCents)
 	}
 	return e.q.UpsertQuotaUsage(ctx, store.UpsertQuotaUsageParams{
-		OrgID: orgID, Meter: "service_span_seconds", Period: period,
+		OrgID: orgID, Meter: SpanMeter, Period: period,
 		Used: totalSeconds, RateCents: weightedCents,
 	})
 }
@@ -198,7 +207,7 @@ func (e *Emitter) carryForward(ctx context.Context, orgID, period string, totalS
 	// rollup it cannot account for, rather than carrying one meter and dropping
 	// the rest. Extending it means iterating the frozen rows per meter, and this
 	// error is what will say so.
-	const meter = "service_span_seconds"
+	const meter = SpanMeter
 	frozen, err := e.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
 	if err != nil {
 		return err
