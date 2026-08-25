@@ -4,7 +4,7 @@ package metering
 //
 // money.MaxMonthly is derived as MaxInt64 / (31 days of seconds), and
 // TestTheBillingMonthConstantCoversTheLongestRealPeriod (in package money)
-// RE-IMPLEMENTS AddDate(0,1,0) to check it — because periodBounds is unexported
+// RE-IMPLEMENTS AddDate(0,1,0) to check it — because PeriodBounds is now exported (O39: the invoice needs it to refuse an early close)
 // and in this package. That catches the CONSTANT drifting and cannot catch
 // metering's period WINDOW growing, which is the half that actually breaks the
 // derivation. Nothing in this package referenced money at all; only prose tied
@@ -18,7 +18,7 @@ import (
 )
 
 // TestEveryRealPeriodFitsWhatTheCeilingWasDerivedFrom drives the REAL
-// periodBounds — not a re-implementation of it — across every month of several
+// PeriodBounds — not a re-implementation of it — across every month of several
 // years, including leap Februaries and the DST-shifting months, and asserts that
 // a rate at the ceiling multiplied by that period's seconds still fits.
 func TestEveryRealPeriodFitsWhatTheCeilingWasDerivedFrom(t *testing.T) {
@@ -28,9 +28,9 @@ func TestEveryRealPeriodFitsWhatTheCeilingWasDerivedFrom(t *testing.T) {
 	for year := 2024; year <= 2032; year++ { // 2024, 2028, 2032 are leap years
 		for month := 1; month <= 12; month++ {
 			period := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).Format("2006-01")
-			start, end, err := periodBounds(period)
+			start, end, err := PeriodBounds(period)
 			if err != nil {
-				t.Fatalf("periodBounds(%q): %v", period, err)
+				t.Fatalf("PeriodBounds(%q): %v", period, err)
 			}
 			secs := int64(end.Sub(start) / time.Second)
 			if secs <= 0 {
@@ -69,7 +69,7 @@ func TestTheLongestPeriodThisFunctionProducesIsThirtyOneDays(t *testing.T) {
 	for year := 2024; year <= 2032; year++ {
 		for month := 1; month <= 12; month++ {
 			period := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).Format("2006-01")
-			start, end, err := periodBounds(period)
+			start, end, err := PeriodBounds(period)
 			if err != nil {
 				t.Fatal(err)
 			}

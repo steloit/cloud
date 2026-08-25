@@ -13,14 +13,12 @@ import (
 	"time"
 
 	"github.com/steloit/cloud/services/api/internal/billing"
-	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/invoice"
 )
 
 func TestInvoiceGenerator(t *testing.T) {
 	w := newWorld(t, time.Hour)
 	ctx := context.Background()
-	q := store.New(w.pool)
 	plans, err := billing.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +45,7 @@ func TestInvoiceGenerator(t *testing.T) {
 		}
 	}
 
-	gen := invoice.NewService(q, plans)
+	gen := invoice.NewService(w.pool, plans)
 
 	// --- close: plan fee + metered lines, integer cents ---------------------
 	inv, err := gen.Close(ctx, org.ID, period)
@@ -117,9 +115,18 @@ func TestInvoiceGenerator(t *testing.T) {
 		t.Fatalf("monthly close not idempotent: %d invoices for the period", count)
 	}
 
-	// --- the freeze is real: usage changing after close does NOT re-price -----
-	if _, err := w.pool.Exec(ctx, "update quota_usage set rate_cents=999999 where org_id=$1 and meter='egress_bytes'", org.ID); err != nil {
-		t.Fatal(err)
+	// --- the freeze is real, and O39 made it STRONGER than this test assumed ---
+	//
+	// This step used to mutate quota_usage after close and then assert the invoice
+	// did not follow. That mutation is now REFUSED outright by
+	// quota_usage_no_write_after_close: a closed period cannot change at all, so
+	// the invoice cannot diverge from the rollup it was computed from. Asserting
+	// the refusal is the stronger claim, and the old arrangement can no longer be
+	// set up — which is the point.
+	if _, err := w.pool.Exec(ctx, "update quota_usage set rate_cents=999999 where org_id=$1 and meter='egress_bytes'", org.ID); err == nil {
+		t.Fatal("quota_usage for a CLOSED period accepted an UPDATE — the freeze is caller discipline again")
+	} else if !strings.Contains(err.Error(), "is frozen") {
+		t.Fatalf("refused, but not by the close guard: %v", err)
 	}
 	inv3, err := gen.Close(ctx, org.ID, period)
 	if err != nil {
@@ -160,7 +167,6 @@ func TestAnInvoiceNeverFreezesATotalItsLinesDoNotSumTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newWorld(t, time.Hour)
 			ctx := context.Background()
-			q := store.New(w.pool)
 			plans, err := billing.Load()
 			if err != nil {
 				t.Fatal(err)
@@ -179,7 +185,7 @@ func TestAnInvoiceNeverFreezesATotalItsLinesDoNotSumTo(t *testing.T) {
 				}
 			}
 
-			inv, err := invoice.NewService(q, plans).Close(ctx, org.ID, period)
+			inv, err := invoice.NewService(w.pool, plans).Close(ctx, org.ID, period)
 			if err != nil {
 				// Refusing is the correct outcome; nothing must have been frozen.
 				var n int
