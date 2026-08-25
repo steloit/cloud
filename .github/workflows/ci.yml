@@ -18,6 +18,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Task files valid (schema, deps, caps)
         run: node scripts/spec-sync/validate.mjs
+      # O37: the merge-eligibility guard is unit-tested, because the defect it
+      # exists to prevent was a predicate that could not fail. Mutating any of its
+      # seven branches turns this red.
+      - name: CI check-state guard tests (O37)
+        run: node --test scripts/ci/check-state.test.mjs
       - name: protect-authority hook regression tests
         run: bash .claude/hooks/protect-authority.test.sh
       - name: Authority paths unchanged (human decision only — AGENTS.md hard rule)

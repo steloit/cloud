@@ -55,6 +55,12 @@ never hand-written · demo data from `19-canon` only.
    (behavioral — they hold `Bash`; ADR-0008), and run on the branch diff *before* merge; blocking
    findings are fixed and re-verified, non-blocking ones recorded. Only pure typo/comment/doc edits
    are exempt.
+5b. **Do not read CI by eye.** `node scripts/ci/await-checks.mjs <pr> --allow-skipped build-sign`
+   exits 0 only when every required check reached an explicit terminal SUCCESS for the PR's
+   current head, 1 on a red build, **2 on timeout or "cannot determine" — neither is a pass**.
+   A merge was once made on a rollup reading `validate= go= infra=`, because an unfinished
+   check has an EMPTY conclusion and the predicate tested for the string "pending" (O37).
+   Empty, missing, unknown and skipped are never success.
 6. PR title `<id>: <title>`. Flip `status: done` and append the task's `## Outcome` (5–10 lines) in the same PR.
 7. Spec conflicts you discover are **findings**: record them in the PR and file a follow-up task — never resolve silently.
 8. Lessons that should outlive the task go to a *living file* — the domain pack's mistake bank, the nearest
