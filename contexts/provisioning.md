@@ -30,9 +30,10 @@ if a task requires violating an invariant, STOP and surface it (§8).
   egress) tagged org/project/env from the FIRST deploy. Backfill is impossible — never defer.
 - **BYOC is demand-gated to v3 (ADR-0005):** the cell/reconciler/`cell_id` design is justified by
   isolation/regions/resilience/scale — **BYOC is a free rider on it, not its justification.** Carry the
-  portable shape; build **zero** BYOC-specific machinery until all five exit criteria hold. Run the
-  residency ladder on any "BYOC" ask (residency → regional cell; network → PrivateLink; keys → BYOK;
-  only contractually-required sovereignty → BYOC).
+  portable shape; build **zero** BYOC-specific machinery — no multi-cloud abstraction, no cross-account
+  IAM, no AWS/Azure drivers (ADR-0005 §consequences names this pack as the owner) — until all five exit
+  criteria hold. **Not every enterprise request is a BYOC request:** run the residency ladder (residency →
+  regional cell; network → PrivateLink; keys → BYOK; only contractual sovereignty → BYOC).
 - **Estimate gate:** `createService` requires an accepted `estimate_id`; nothing provisions or
   bills before acceptance; the estimate's line grammar is the invoice's line grammar, verbatim.
 
@@ -46,8 +47,10 @@ rules; branching mechanics reference Xata OSS (Apache-2.0), substrate `docs/adr/
 **Not products (A5)** — CLAUDE.md carries the rule; what it does not carry: Cache (Valkey) is
 *provision-on-add*, idle-suspend, hard quotas — never a pod per project by default (A5.1). Queue is
 pgmq **inside the customer's DB**, drained by a scale-to-zero worker (A5.2; A3.1/R3 retired). A
-Binding is provider + config + secret-ref, estimate-at-bind shows the PROVIDER's price, and the AI
-Binding is control-plane governance only — no proxy, no routing, no in-line caps (A5.3-A5.5).
+Binding is provider + config + secret-ref and estimate-at-bind shows the PROVIDER's price; **NO Binding
+proxies bytes/traffic, routes across providers, bears egress, or enforces a hard in-line cap** — that is
+the commodity we don't build, and the AI Binding is control-plane governance only (A5.3-A5.5). GPU is
+out; a future GPU need is a Binding to Modal/Replicate, v4+.
 
 Preview/content served on the content eTLD+1 (A2.4) applies to *preview environments* (E4), not to a storage product.
 
@@ -56,7 +59,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - Provisioning imperatively from a request handler instead of writing desired state (violates D9).
 - A resource table without `cell_id`, or provisioning that skips the cell-selection function (inv. 1).
 - Letting a substrate name (cnpg/zfs/gke/gcs — or the retired neon) into an id, error, URL, or metric label (D8).
-- Metering only "when billing ships" — it is day-one (D10). Scale-to-zero designs needing an always-awake poller (A1.2).
+- Metering only "when billing ships" — it is day-one (D10). Scale-to-zero designs needing an always-awake poller (A1.2 — *internal jobs*; the customer queue is pgmq-in-DB drained by a scale-to-zero worker).
 - Backend-swapping a capability into different semantics ("Jobs on Kafka"): a NEW named service via the gate, never a swap, and never a silent or unpriced migration under a live Product (ADR-038/040).
 - Zombie state on failed provisioning: failures must converge to a clean desired/actual pair, never bill.
 - **Moving a guard without asking what else it was doing.** US-3.8's five blockers over three rounds
@@ -76,7 +79,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   tenancy manifests satisfy alone — widening one object to a set IS a weakening. *Text presence is
   not semantics:* US-3.3c's policy tests grepped for `cnpg.io/cluster`, so flipping the selector's
   operator `Exists`->`DoesNotExist` — which selects exactly the CUSTOMER pods and INVERTS the rule —
-  stayed green, as did a label left in a comment. Parse the object; assert on the parsed selector.
+  stayed green — as would a label left only in a comment. Parse it; assert on the parsed selector.
   Ask: **if I delete the line this test is named after, does it fail?** *Corrected 2026-07-27:* this
   first blamed query-plan reordering; it was deterministic duplication — **naming the wrong cause
   teaches the wrong reflex** (O11).
@@ -84,7 +87,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   one, finalizers pending, and `kube.Delete` maps any 2xx to nil — so US-3.3b's namespace-teardown
   gate meant acceptance while calling itself absence. Observe absence before reporting it.
 - **Enumerate every workload in the flow, INCLUDING the ones that exist only at bootstrap — and
-  verify a security rule while the environment still exists.** US-3.3c's CNPG allowances selected
+  verify a security rule while the environment still exists.** the CNPG allowances (authored US-3.3a, defect found US-3.3c) selected
   `cnpg.io/podRole: instance`; CNPG bootstraps through a JOB whose pod carries `cnpg.io/jobRole` and
   `cnpg.io/cluster` but NOT podRole, so the initdb pod matched no allowance and the cluster never
   started. A selector correct in steady state can match nothing at t=0. The second half is the
@@ -104,19 +107,15 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   (siblings kept wrapping, and a wrapped price disabled the org's spend cap permanently); a
   404-for-no-standing conversion went into one transport of two. Both correct, both partial; more care
   at the next site would not have changed the rate. `int64` cents compiles `a * b`; `money.Cents` is a
-  struct and does not. **Ask not "is this guard right" but "how many places must be right, and what
-  stops the next being missed?"** If the answer is "a reviewer", the design is wrong. *Deferral (founder,
-  2026-07-27: US-3.8 keeps only the one-arm bound) closed by O16* — `money.Cents` is live across every
-  priced dimension, so those sibling arms can no longer wrap.
-- **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape`'s
-  pre-existing stale-read race was a mere desired-doc divergence until US-3.8 wrote the price column on
-  every PATCH — then it could disagree three ways at once: the column holding one shape, the cell
-  rendering another, the invoice charging a third rate no reprice could detect (both sides of the
-  comparison come from the same stale read). Fence on the generation read, 409 "re-read and retry" —
-  a silent overwrite of money is not recoverable.
-- **Never hand-append to a committed raw evidence log.** Commit the producing command as a
-  script/manifest with line-by-line provenance (results/PROVENANCE.md); reviewers WILL catch the
-  timestamp/format seams of an unattributed append (T1.0).
+  struct and does not. **Ask not "is this guard right" but "how many places must be
+  right, and what stops the next being missed?"** If the answer is "a reviewer", the design is wrong.
+  (Closed by O16: `money.Cents` is live across every priced dimension, so the siblings cannot wrap.)
+- **A row read, priced, and written back needs a generation fence.** `UpdateServiceShape`'s stale-read
+  race was mere desired-doc divergence until US-3.8 wrote the price column on every PATCH — then column,
+  cell and invoice could disagree three ways at once, undetectably by a reprice (both sides of that
+  comparison come from the same stale read). Fence on the generation read, 409 "re-read and retry".
+- **Never hand-append to a committed raw evidence log.** Commit the producing command with
+  line-by-line provenance; reviewers WILL catch an unattributed append's seams (T1.0).
 - **A findings ADR that changes frozen text is a formal delta, not a reinterpretation.** If
   architecture.md/00-sources literally name what you're replacing, propose the amendment text
   (the ADR-0003→A4 precedent) — never "no delta because the semantic contract is unchanged"
@@ -143,17 +142,18 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
 - **Guard every document, element and path — not the first of each.** `yaml.Unmarshal` returns only
   document 1 with a nil error, which has now bitten three times, most recently US-3.3b classifying an
   object's SCOPE from doc 1. Refuse multi-doc, as `kube.applyOne` does. Pinning for one element, then
-  0-1, then 0-3 is a constant a mutation can match; and `Converge`'s deleting branch returns before
-  the renderer, so a guard in `Render` covered create only — `"../../../api/v1/namespaces/kube-system"`
-  was refused on create and ACCEPTED on teardown.
+  0-1, then 0-3 is a constant a mutation can match, and a skip keyed on byte length or `spec:` stayed
+  green because every fixture was hand-written — **build fixtures from the real renderers.** And
+  `Converge`'s deleting branch returns before the renderer, so a guard in `Render` covered create only:
+  `"../../../api/v1/namespaces/kube-system"` was refused on create and ACCEPTED on teardown.
 - **A driver reading a key the API's closed schema forbids is silent contract drift.** T3.4c:
   `cnpg.storageForShape` sized the PVC from `shape["storage"]`, which `estimates.shapeSchema`
   rejects, so the priced `storage_gb` was never read — a customer billed for 78 GB got the size
   default, with invoice and audit trail both agreeing. Bind the driver to the catalog with a test
   that READS `pricing.json`; check every path the refusal sits on (the same call served TEARDOWN,
   making the service undeletable); and **prove the wire** — deleting the key en route left the
-  agent suite green — US-3.3b hit it twice more, pinning the poll's `environments` key and the
-  teardown's whole HTTP path on ONE side of a two-module wire.
+  agent suite green — US-3.3b hit it twice more, pinning a key and a whole HTTP path on ONE side of a
+  two-module wire.
 - **A floor HIDES a wrong sign.** `max(declared, included)` is the coherent way to default
   `storage_gb`, but it made the negative-value check unreachable. Reject out-of-range BEFORE
   defaulting.
