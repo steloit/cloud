@@ -31,7 +31,7 @@ if a task requires violating an invariant, STOP and surface it (§8).
 - **BYOC is demand-gated to v3 (ADR-0005):** the cell/reconciler/`cell_id` design is justified by
   isolation/regions/resilience/scale — **BYOC is a free rider on it, not its justification.** Carry the
   portable shape; build **zero** BYOC-specific machinery — no multi-cloud abstraction, no cross-account
-  IAM, no AWS/Azure drivers (ADR-0005 §consequences names this pack as the owner) — until all five exit
+  IAM, no AWS/Azure drivers (ADR-0005 §Ripple assigns this here) — until all five exit
   criteria hold. **Not every enterprise request is a BYOC request:** run the residency ladder (residency →
   regional cell; network → PrivateLink; keys → BYOK; only contractual sovereignty → BYOC).
 - **Estimate gate:** `createService` requires an accepted `estimate_id`; nothing provisions or
@@ -87,10 +87,11 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   one, finalizers pending, and `kube.Delete` maps any 2xx to nil — so US-3.3b's namespace-teardown
   gate meant acceptance while calling itself absence. Observe absence before reporting it.
 - **Enumerate every workload in the flow, INCLUDING the ones that exist only at bootstrap — and
-  verify a security rule while the environment still exists.** the CNPG allowances (authored US-3.3a, defect found US-3.3c) selected
+  verify a security rule while the environment still exists.** US-3.3c's CNPG allowances selected
   `cnpg.io/podRole: instance`; CNPG bootstraps through a JOB whose pod carries `cnpg.io/jobRole` and
   `cnpg.io/cluster` but NOT podRole, so the initdb pod matched no allowance and the cluster never
-  started. A selector correct in steady state can match nothing at t=0. The second half is the
+  started — a FIFTH allowance, where US-3.3a's security review had enumerated four. A selector
+  correct in steady state can match nothing at t=0, and an enumeration is not a proof of coverage. The second half is the
   costlier one: a tightening discovered AFTER the cell is destroyed cannot be tested, and shipping it
   unverified is worse than a named exception — it reads as stronger and can fence the very thing it
   protects (US-3.3j, left wide on purpose).
@@ -114,8 +115,7 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   race was mere desired-doc divergence until US-3.8 wrote the price column on every PATCH — then column,
   cell and invoice could disagree three ways at once, undetectably by a reprice (both sides of that
   comparison come from the same stale read). Fence on the generation read, 409 "re-read and retry".
-- **Never hand-append to a committed raw evidence log.** Commit the producing command with
-  line-by-line provenance; reviewers WILL catch an unattributed append's seams (T1.0).
+- **Never hand-append to a committed raw evidence log.** Commit the producing command with line-by-line provenance; reviewers WILL catch an unattributed append's seams (T1.0).
 - **A findings ADR that changes frozen text is a formal delta, not a reinterpretation.** If
   architecture.md/00-sources literally name what you're replacing, propose the amendment text
   (the ADR-0003→A4 precedent) — never "no delta because the semantic contract is unchanged"
