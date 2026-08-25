@@ -50,6 +50,31 @@ for r in d.get('resources',[]):
 done
 echo
 
+echo "## Declared vs LIVE — the third representation"
+# T1.7 disclosed that steloit-dev had an API enabled that neither declared list
+# carried. That drift is reconciled, but nothing re-checked it — so this compares
+# project-base's local.services against what is actually enabled, rather than
+# printing a count and leaving the reader to eyeball it. A count is not a check.
+declared=$(python3 - <<'PY'
+import re
+s=open("infra/modules/project-base/main.tf").read()
+b=re.search(r'services\s*=\s*\[(.*?)\]', s, re.S).group(1)
+print("\n".join(re.findall(r'"([^"]+)"', b)))
+PY
+)
+live=$(gcloud services list --enabled --format='value(config.name)' 2>/dev/null)
+missing=""
+for a in $declared; do printf '%s\n' "$live" | grep -qx "$a" || missing="$missing $a"; done
+if [ -n "$missing" ]; then
+  row "declared but NOT live" "$missing"
+  echo "  ^ project-base declares these and the project does not have them enabled."
+  echo "    A from-zero apply would fail on whatever consumes them."
+  DRIFT=1
+else
+  row "declared vs live" "all $(printf '%s\n' "$declared" | wc -l | tr -d ' ') declared APIs are enabled"
+fi
+echo
+
 echo "## Cost — anything running?"
 row "GKE clusters"     "$(list container clusters list --format=value\(name\))"
 row "compute instances" "$(list compute instances list --format=value\(name\))"
@@ -57,3 +82,6 @@ row "persistent disks" "$(list compute disks list --format=value\(name\))"
 echo
 echo "# Compare against docs/founder-config.md §2. A row that disagrees is a finding,"
 echo "# not a licence to edit the live project."
+# Exit non-zero on the one thing this script can decide by itself, so a caller can
+# gate on it. Everything else it prints needs a human against §2.
+exit "${DRIFT:-0}"
