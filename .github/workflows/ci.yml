@@ -196,6 +196,15 @@ jobs:
       # got there.
       - name: Required APIs are declared (T1.7)
         run: node scripts/infra/required-apis.mjs
+      # T1.8: the list being complete (above) is not the same as anything WAITING
+      # for it. google_project_service.enabled had zero edges in either direction,
+      # so on a clean project every resource raced its own API. This asserts
+      # REACHABILITY, not a direct edge — `depends_on = [module.project_base]`
+      # orders against project-base's leaves, which depend on `enabled`; demanding
+      # a direct edge would fail correct config and invite a redundant depends_on
+      # to appease the checker.
+      - name: API enablement is ordered before its consumers (T1.8)
+        run: node scripts/infra/api-ordering.mjs
       - name: Validate envs (credential-free)
         run: |
           terraform -chdir=infra/envs/dev init -backend=false -input=false

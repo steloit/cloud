@@ -14,7 +14,11 @@ by this file. This file is **not** hook-protected `00-sources/`; it is
 maintained by agents as values arrive.
 
 **Status legend.** ✅ set · ⏳ `PENDING` (founder will provide — do not invent) ·
-❓ `NEEDS FOUNDER INPUT` (no decision on record; interrupt before assuming).
+❓ `NEEDS FOUNDER INPUT` (no decision on record; interrupt before assuming) ·
+⏳ **absent** (T1.9 — *decided and declared in code, but not applied to the live
+project*; waits on an apply, **not** on the founder, so it is not an interrupt) ·
+a split cell such as ✅ *in code* · ⏳ *not applied* means the two halves of one row
+have different answers, and both are stated rather than averaged.
 
 ---
 
@@ -37,8 +41,10 @@ gcloud discovery + provisioning (least-privilege IAM, stay in the free trial).
 Rows carry ✅ **created** only where that check found the resource; a row the check
 found ABSENT says so and keeps its history rather than being quietly deleted.
 Re-run the checks in `tasks/e1-substrate/T1.9.md` before trusting a ✅ older than
-this line — the previous revision of this table asserted seven resources as
-created that do not exist, and nothing detected it for weeks.
+this line — the previous revision asserted **eight resources** as created that do
+not exist (artifacts bucket, `images` AR repo, two WAL buckets, the `github-ci`
+pool, the `github-oidc` provider, and both CI service accounts), across four rows,
+and nothing detected it for weeks.
 
 | Key | Value | Status |
 |---|---|---|
@@ -52,13 +58,13 @@ created that do not exist, and nothing detected it for weeks.
 | Terraform state | `gs://steloit-dev-tfstate` (prefix `dev`) — versioned, migrated | ✅ **created** · verified 2026-08-25 |
 | Artifact Registry | `steloit-dev-artifacts` bucket + AR `images` repo (keyless cosign, T1.3) — **DECLARED IN TERRAFORM, NOT PRESENT.** `gcloud storage buckets list` returns only `steloit-dev-tfstate`; `gcloud artifacts repositories list` returns nothing. *Was ✅ **created** here until 2026-08-25; that claim was never true of the live project, not a resource later destroyed — Terraform state holds only the state bucket.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
 | WAL/backup buckets | `steloit-dev-wal-customer`, `steloit-dev-wal-control` (separate, INF-001 #10) — **DECLARED, NOT PRESENT.** *Was ✅ **created** until 2026-08-25. The separation requirement is unchanged and still binding; only the claim that the buckets exist was wrong.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
-| KMS | key ring **`cell-dev-core`** + `secrets` crypto key (envelope KEK substrate) | ✅ **created** · verified 2026-08-25 — *the ring exists; its name is `cell-dev-core`, not `core` as this row said* |
+| KMS | key ring **`cell-dev-core`** (*this row said `core`; the ring's real name is `cell-dev-core`*) + crypto key **`secrets-envelope`** (envelope KEK substrate; `project-base` declares `name = "secrets-envelope"`, this row said `secrets`) | ring ✅ **created** · verified 2026-08-25 · **key NOT CHECKED** — `gcloud kms keys list --keyring cell-dev-core` was not run, so this row does not claim the key exists (T1.9) |
 | Workload Identity Federation | pool `github-ci` + provider `github-oidc`; SAs `ci-terraform-plan`, `ci-image-push` (least-priv) — **zero static keys (D5)** — **DECLARED, NOT PRESENT.** The only pool is GKE's managed `steloit-dev.svc.id.goog`; `gcloud iam service-accounts list` shows only the default compute SA. *Was ✅ **created** until 2026-08-25. **D5 remains the standing rule** — this row records that the mechanism is not yet built, never that keyless CI was abandoned. It is also why T1.7's missing API went unnoticed: `ci_plan_viewer`, its first consumer, has never been applied.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
-| APIs enabled | **`infra/modules/project-base/main.tf`'s `local.services` is the list** — 15 entries, `cloudresourcemanager` first. Enumerating them here too was the whole problem: this row said 14 and the module said 14, they agreed, and both were short one. `scripts/infra/required-apis.mjs` now proves the module's list covers every API `infra/` uses, in CI. *Live `steloit-dev` has 42 APIs enabled — a superset, since GCP enables many by default; extras are harmless.* | ✅ **enabled** · verified 2026-08-25 · the list lives in code |
-| — **15th API: `cloudresourcemanager.googleapis.com`** | **RESOLVED BY THE REPOSITORY, not by a preference** — see `tasks/e1-substrate/T1.7.md`. This was raised as `❓ NEEDS FOUNDER INPUT` on the reading that the service list is an owner-level choice. Investigating the intended OWNER settled it instead: `infra/README.md`'s bootstrap contract is **Terraform-first** — on a clean project step 2 is `apply -target=module.project_base`, with **no** manual `gcloud services enable` — and `project-base` holds the only `google_project_service` in the entire tree. So its list must be sufficient for its own resources to apply, and it was not: `google_project_iam_member.ci_plan_viewer` lives in that module and is served by Cloud Resource Manager (measured on the wire). **The module could not complete its own documented bootstrap step.** That is an internal inconsistency, not a policy question, so it was fixed rather than escalated. Enforced by `scripts/infra/required-apis.mjs` in CI's infra job, which refuses an unclassified `google_*` resource rather than skipping it. *Note: the procedure recorded below inserted a manual `gcloud services enable` of "the 14 APIs", which is what masked this — that line and the ✅ row above it are now stale and are **T1.9**'s to reconcile.* | **evidence 2026-08-25** · T1.7 |
+| APIs enabled | **cloudresourcemanager**, compute, container, storage, secretmanager, cloudkms, iam(+creds), sts, dns, artifactregistry, cloudscheduler, billingbudgets, monitoring, logging — *15 with `iam` and `iamcredentials` counted separately*. This enumeration is kept per T1.7 option (a) ("fifteen in `local.services`, fifteen in the founder-config row"); it must equal `infra/modules/project-base/main.tf`'s `local.services`, and **the two agreeing is not proof** — they agreed at 14 and were both short one. `scripts/infra/required-apis.mjs` proves the MODULE's list covers every API `infra/` uses, in CI; nothing yet proves this row equals the module (see T1.10). *Live `steloit-dev` reported 42 APIs enabled on 2026-08-25 — a superset, since GCP enables many by default.* | ✅ **enabled** · verified 2026-08-25 |
+| — **15th API: `cloudresourcemanager.googleapis.com`** | **RESOLVED BY THE REPOSITORY, not by a preference** — see `tasks/e1-substrate/T1.7.md`. This was raised as `❓ NEEDS FOUNDER INPUT` on the reading that the service list is an owner-level choice. Investigating the intended OWNER settled it instead: `infra/README.md`'s bootstrap contract is **Terraform-first** — on a clean project step 2 is `apply -target=module.project_base`, with **no** manual `gcloud services enable` — and `project-base` holds the only `google_project_service` in the entire tree. So its list must be sufficient for its own resources to apply, and it was not: `google_project_iam_member.ci_plan_viewer` lives in that module and is served by Cloud Resource Manager (measured on the wire). **The module could not complete its own documented bootstrap step.** That is an internal inconsistency, not a policy question, so it was fixed rather than escalated. Enforced by `scripts/infra/required-apis.mjs` in CI's infra job, which refuses an unclassified `google_*` resource rather than skipping it. *Note: the procedure recorded below inserted a manual `gcloud services enable` of "the 14 APIs", which is what masked this. **T1.9 reconciled both** — the row above now lists 15 and the procedure paragraph is marked historical.* | **evidence 2026-08-25** · T1.7 |
 | GKE cluster / compute | **none yet** (~$0 running) — stood up by the T1.0 spike / T1.2 | ⏳ next |
 | DNS provider | **GoDaddy** (`steloit.com`) — records generated for founder to apply | ✅ |
-| GitHub repo WIF binding | repo attribute condition **is set in `project-base`** (code, verified); the pool/provider it binds are **not applied** — see the row above. | ✅ *in code* · ⏳ *not applied* · verified 2026-08-25 |
+| GitHub repo WIF binding | repo attribute condition **is set in `project-base`** (code, verified); the pool/provider it binds are **not applied** — see the row above. *Was plain ✅ / "pool/provider created; repo attribute condition set in `project-base`" until 2026-08-25.* | ✅ *in code* · ⏳ *not applied* · verified 2026-08-25 |
 | Substrate | CNPG on **GKE PD-CSI** at dev/alpha (**ADR-0007 ratified 2026-07-19**; Arch v1.3 + INF-001 A6); ZFS-LocalPV re-scoped to a Cell-1 density option; object storage **proxied** | ✅ | ADR-0007 |
 
 **Bootstrap procedure — `infra/README.md` §Bootstrap is the contract; follow that,
@@ -74,9 +80,19 @@ APIs" before the Terraform step. That step is not in the contract, and it masked
 project IAM binding whose API its own list omitted. Do not reintroduce it: a manual
 enable makes the contract untestable and hides exactly this class of gap.*
 
-*Also historical: `-target=module.project_base` was only ever run far enough to
-create the state bucket. That is why the ⏳ **absent** rows above are absent — they
-were never applied, not destroyed.*
+*Why the ⏳ **absent** rows are absent is NOT established. The leading inference is
+that `-target=module.project_base` was only ever run far enough to create the state
+bucket — `dev/default.tfstate` holds exactly one resource — but that story does not
+account for the KMS ring existing while not being in that state file, and the absent
+resources depend only on `google_project_service`, so a partial apply at default
+parallelism would not plausibly stop at exactly one bucket. Recorded as an open
+question in `tasks/e1-substrate/T1.9.md`, not as history here.*
+
+**Before re-running the bootstrap:** if the KMS ring genuinely exists outside
+Terraform's state, `apply -target=module.project_base` will fail on
+`google_kms_key_ring.core` with an already-exists error until it is
+`terraform import`ed. Confirm which before following the contract above — exactly
+one of "the ring is out of band" and "the partial-apply story is right" can be true.
 
 ## 3 · Providers (all behind a provider interface — never a platform dependency)
 

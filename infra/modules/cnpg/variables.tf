@@ -38,3 +38,4 @@ variable "control_plane_storage_size" {
   description = "Capacity, supplied by the env when control_plane = true (shape never carries numbers — no real default, review finding; null is 'not deploying a control plane here')"
   default     = null
 }
+

@@ -34,3 +34,4 @@ variable "alert_emails" {
   description = "Founder emails for budget notifications"
   default     = []
 }
+
