@@ -25,7 +25,12 @@ JOIN environments e ON e.id = s.env_id
 WHERE e.project_id = $1 AND s.status <> 'deleting';
 
 -- name: SetServiceStatus :one
-UPDATE services SET status = $3, provisioning_steps = coalesce(sqlc.narg('steps'), provisioning_steps)
+UPDATE services SET status = $3, provisioning_steps = coalesce(sqlc.narg('steps'), provisioning_steps),
+    -- O38: a transition needs an IDENTITY, or a dedupe key built from
+    -- (service, edge, from->to) collapses every ready->suspended cycle into one
+    -- class and silently drops revenue on the second. Stamped here, in the same
+    -- statement as the status, so the two can never disagree.
+    status_changed_at = now()
 WHERE id = $1 AND status = $2
 RETURNING *;
 

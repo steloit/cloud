@@ -15,7 +15,7 @@ const bumpServiceGeneration = `-- name: BumpServiceGeneration :one
 UPDATE services
 SET desired = $2, generation = generation + 1
 WHERE id = $1
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type BumpServiceGenerationParams struct {
@@ -51,6 +51,7 @@ func (q *Queries) BumpServiceGeneration(ctx context.Context, arg BumpServiceGene
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }
@@ -299,7 +300,7 @@ UPDATE services
 SET observed_generation = $2,
     last_reconciled_at  = now()
 WHERE id = $1 AND generation = $2
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type MarkObservedParams struct {
@@ -340,6 +341,7 @@ func (q *Queries) MarkObserved(ctx context.Context, arg MarkObservedParams) (Ser
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }

@@ -901,9 +901,14 @@ func (s *Service) Transition(ctx context.Context, svc store.Service, to, via, ac
 	// D10: billing span edges — metering starts at ready, never before.
 	if edge := metering.BillingEdge(svc.Status, to); edge != "" && s.meter != nil {
 		if env, err := s.q.GetEnvironment(ctx, svc.EnvID); err == nil {
+			// O38: the key comes off `row` — the transition that was just
+			// COMMITTED — not off svc (the pre-transition read) and not off the
+			// clock. A retry of this emit recomputes the same key; the next
+			// genuine transition stamps a new status_changed_at and does not.
 			s.meter.MustEmitSpan(ctx, metering.Tags{
 				OrgID: orgID, ProjectID: env.ProjectID, EnvID: svc.EnvID, ServiceID: svc.ID,
-			}, edge, svc.Product, svc.MonthlyEstimateCents)
+			}, metering.SpanKeyForStatus(svc.ID, edge, row.StatusChangedAt.Time),
+				edge, svc.Product, svc.MonthlyEstimateCents)
 		}
 	}
 	return row, nil
@@ -1051,8 +1056,10 @@ func (s *Service) repriceSpan(ctx context.Context, orgID string, svc store.Servi
 		return
 	}
 	tags := metering.Tags{OrgID: orgID, ProjectID: env.ProjectID, EnvID: svc.EnvID, ServiceID: svc.ID}
-	s.meter.MustEmitSpan(ctx, tags, "close", svc.Product, oldCents)
-	s.meter.MustEmitSpan(ctx, tags, "open", svc.Product, newCents)
+	// O38: a reprice is a desired-state write, so `generation` identifies it. The
+	// pair shares the generation and is separated by the edge.
+	s.meter.MustEmitSpan(ctx, tags, metering.SpanKeyForReprice(svc.ID, "close", svc.Generation), "close", svc.Product, oldCents)
+	s.meter.MustEmitSpan(ctx, tags, metering.SpanKeyForReprice(svc.ID, "open", svc.Generation), "open", svc.Product, newCents)
 }
 
 // overrideInstances reports the pinned instance count of a LIVE override.

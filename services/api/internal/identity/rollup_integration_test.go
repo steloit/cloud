@@ -40,8 +40,8 @@ func TestQuotaRollup(t *testing.T) {
 	period := metering.Period(t0)
 	plant := func(svc, edge string, at time.Time, rate int64) {
 		if _, err := w.pool.Exec(ctx,
-			`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-			 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
+			`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+			 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
 			org.ID, prj.ID, env.ID, svc, edge, rate, at); err != nil {
 			t.Fatal(err)
 		}
@@ -130,8 +130,8 @@ func TestARollupThatCannotBeRepresentedFailsClosedAndWritesNothing(t *testing.T)
 	period := metering.Period(t0)
 	plant := func(svc, edge string, at time.Time, rate int64) {
 		if _, err := w.pool.Exec(ctx,
-			`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-			 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
+			`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+			 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
 			org.ID, prj.ID, env.ID, svc, edge, rate, at); err != nil {
 			t.Fatal(err)
 		}
@@ -242,8 +242,8 @@ func TestARollupRefusesASpanWhoseRateIsNotARepresentableAmount(t *testing.T) {
 	period := metering.Period(t0)
 	plant := func(svc, edge string, at time.Time, rate int64) {
 		if _, err := w.pool.Exec(ctx,
-			`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-			 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
+			`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+			 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
 			org.ID, prj.ID, env.ID, svc, edge, rate, at); err != nil {
 			t.Fatal(err)
 		}
@@ -316,8 +316,8 @@ func TestConsecutivePeriodsPartitionOneLongSpan(t *testing.T) {
 	}
 	plant := func(edge string, at time.Time) {
 		if _, err := w.pool.Exec(ctx,
-			`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-			 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, 'svc_long', 'service_span', $4, 'postgres', 2400, $5)`,
+			`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+			 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, 'svc_long', 'service_span', $4, 'postgres', 2400, $5)`,
 			org.ID, prj.ID, env.ID, edge, at); err != nil {
 			t.Fatal(err)
 		}
@@ -384,8 +384,8 @@ func TestARollupRefusesASpanWithANegativeRate(t *testing.T) {
 	period := metering.Period(t0)
 	plant := func(svc, edge string, at time.Time, rate int64) {
 		if _, err := w.pool.Exec(ctx,
-			`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-			 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
+			`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+			 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
 			org.ID, prj.ID, env.ID, svc, edge, rate, at); err != nil {
 			t.Fatal(err)
 		}
@@ -443,8 +443,8 @@ func TestAFailedRollupIsLoud(t *testing.T) {
 			at   time.Time
 		}{{"open", t0}, {"close", t0.AddDate(0, 1, 0)}} {
 			if _, err := w.pool.Exec(ctx,
-				`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-				 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
+				`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+				 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', $5, 'postgres', $6, $7)`,
 				org.ID, prj.ID, env.ID, id, e.edge, money.MaxMonthly, e.at); err != nil {
 				t.Fatal(err)
 			}
@@ -507,8 +507,8 @@ func TestAnUnrepresentableRateIsAlsoLoud(t *testing.T) {
 				at   time.Time
 			}{{"open", t0}, {"close", t0.Add(time.Hour)}} {
 				if _, err := w.pool.Exec(ctx,
-					`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-					 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, 'svc_bad', 'service_span', $4, 'postgres', $5, $6)`,
+					`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+					 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, 'svc_bad', 'service_span', $4, 'postgres', $5, $6)`,
 					org.ID, prj.ID, env.ID, e.edge, tc.rate, e.at); err != nil {
 					t.Fatal(err)
 				}

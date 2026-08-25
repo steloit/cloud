@@ -1,6 +1,6 @@
 # ADR-0018 — Price allocated resources, not SIZE bundles and not consumption
 
-**Status:** proposed (engineering) · 2026-08-25
+**Status:** **ACCEPTED — founder-ratified 2026-08-25** · engineering
 **Supersedes nothing.** Implements ADR-041's ratified terminal form. Rates are
 founder-owned and are **not** decided here.
 
@@ -111,6 +111,17 @@ O30's divisor ambiguity rather than answering it — there is no monthly sticker
 price for infrastructure to reproduce, so February legitimately costs less than
 January. "One arithmetic everywhere" is about lines summing to the total and is
 unaffected.
+
+## Ratification
+
+Founder, 2026-08-25: *"use allocated-resource metering for infrastructure … not
+consumption-based CPU/memory metering"*; compute/memory/storage are **allocated
+resources × time**, backups/egress are **consumed**; and *"the hard spend cap must
+continue to work from a knowable committed monthly run-rate at acceptance time —
+do not change the F9 hard-cap model into an alert-only budget."*
+
+Explicitly ruled out: introducing CPU-consumption metering "merely to call the
+system PAYG".
 
 ## Consequences
 
