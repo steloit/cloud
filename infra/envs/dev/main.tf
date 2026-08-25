@@ -69,6 +69,26 @@ module "network" {
   cell_id        = var.cell_id
   subnet_cidr    = "10.10.0.0/20"
   content_domain = var.content_domain
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
 
 module "gke_cell" {
@@ -89,6 +109,26 @@ module "gke_cell" {
   storage_driver        = "pd" # canonical (ADR-0007/A6); "zfs" is the Cell-1 knob
   workload_machine_type = "e2-standard-4"
   workload_max_nodes    = 3
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
 
 module "cnpg" {
@@ -98,6 +138,26 @@ module "cnpg" {
   control_plane              = true # the control-plane DB lives in dev (invariant 10 bucket below)
   wal_control_bucket         = module.project_base.wal_control_bucket
   control_plane_storage_size = "10Gi" # capacity lives HERE, not in the module
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
 
 module "cost_guardrails" {
@@ -107,6 +167,26 @@ module "cost_guardrails" {
   billing_account      = var.billing_account
   monthly_budget_units = var.monthly_budget_units
   alert_emails         = var.alert_emails
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
 
 # ADR-0015's first reason for Dataplane V2 is denied-connection logging; this is
@@ -120,6 +200,26 @@ module "observability" {
   source     = "../../modules/observability"
   project_id = var.project_id
   cell_id    = var.cell_id
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
 
 # Dev only: duty-cycling (A1.6 — the destroyable founder env sleeps).
@@ -127,4 +227,24 @@ module "duty_cycle" {
   source     = "../../modules/duty-cycle"
   project_id = var.project_id
   cell_id    = var.cell_id
+
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction in BOTH envs, so nothing waited for the APIs project_base
+  # enables. From-zero applies worked only because the bootstrap procedure ran a
+  # manual `gcloud services enable` first — which infra/README.md's contract does
+  # not include, and which is what masked T1.7's missing API.
+  #
+  # `depends_on` on the whole module, not a threaded value: an `apis_ready` output
+  # consumed as a module argument was tried first and MEASURED to create no edge
+  # at all, because a variable no resource reads does not order that module's
+  # resources. An argument that looks like enforcement and enforces nothing is
+  # worse than none.
+  #
+  # Coarse on purpose — this also orders against buckets and WIF — because API
+  # enablement genuinely is a project-wide precondition.
+  #
+  # NOT A TOTAL GUARANTEE: `google_project_service` returning success does not mean
+  # the API is instantly usable; GCP enablement propagation lag is real. This
+  # narrows the race, it does not close it.
+  depends_on = [module.project_base]
 }
