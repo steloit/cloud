@@ -3,7 +3,24 @@ locals {
     cell_id    = var.cell_id
     managed_by = "steloit-terraform"
   }
+  # THE LIST MUST COVER THIS MODULE'S OWN RESOURCES, and then the rest of infra/.
+  # `infra/README.md`'s bootstrap contract is Terraform-first — on a clean project
+  # step 2 is `apply -target=module.project_base`, with no manual `gcloud services
+  # enable` — and this is the only `google_project_service` in the tree, so
+  # enablement is this module's job. `scripts/infra/required-apis.mjs` enforces it
+  # and REFUSES an unclassified resource type rather than skipping it.
   services = [
+    # cloudresourcemanager serves projects.{get,set}IamPolicy, which is what a
+    # `google_project_iam_member` IS. Omitting it meant this module could not
+    # complete its own bootstrap step: `ci_plan_viewer` below is a project IAM
+    # binding, so `apply -target=module.project_base` fails on a genuinely clean
+    # project — before `gke-cell` is ever reached. It went unnoticed because the
+    # procedure actually used (docs/founder-config.md §2) inserted a manual
+    # `gcloud services enable` that masked it, and because `ci_plan_viewer` has
+    # never been applied to steloit-dev at all (T1.9). Measured on the wire:
+    #   $ gcloud projects get-iam-policy steloit-dev --log-http
+    #   uri: https://cloudresourcemanager.googleapis.com/v1/projects/...:getIamPolicy
+    "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "storage.googleapis.com",

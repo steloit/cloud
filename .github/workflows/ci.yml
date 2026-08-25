@@ -185,6 +185,17 @@ jobs:
         with: { terraform_version: "1.15.8" }
       - name: Terraform fmt
         run: terraform fmt -check -recursive infra
+      # T1.7: project-base is the ONLY declarer of google_project_service, and
+      # infra/README.md's bootstrap contract applies it first on a clean project
+      # with no manual `gcloud services enable` — so its list must cover every API
+      # infra/ needs, starting with its own resources. It did not:
+      # ci_plan_viewer is a project IAM binding and cloudresourcemanager was
+      # absent, so the documented bootstrap step could not complete. This refuses
+      # an unclassified google_* resource rather than skipping it, because a
+      # lookup table that silently ignores what it does not know is how the gap
+      # got there.
+      - name: Required APIs are declared (T1.7)
+        run: node scripts/infra/required-apis.mjs
       - name: Validate envs (credential-free)
         run: |
           terraform -chdir=infra/envs/dev init -backend=false -input=false
