@@ -49,6 +49,15 @@ resource "google_project_service" "enabled" {
 # `-backend=false` apply of this module (infra/README.md), then the env's
 # backend points at it. Never auto-created by the env that uses it.
 resource "google_storage_bucket" "state" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   name                        = "${var.project_id}-tfstate"
   project                     = var.project_id
   location                    = var.region
@@ -62,6 +71,15 @@ resource "google_storage_bucket" "state" {
 }
 
 resource "google_storage_bucket" "artifacts" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   name                        = "${var.project_id}-artifacts"
   project                     = var.project_id
   location                    = var.region
@@ -73,6 +91,15 @@ resource "google_storage_bucket" "artifacts" {
 # WAL archives + backups (architecture §3: PITR to GCS; control-plane DB uses
 # a SEPARATE bucket per INF-001 invariant 10 — hence two).
 resource "google_storage_bucket" "wal_customer" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   name                        = "${var.project_id}-wal-customer"
   project                     = var.project_id
   location                    = var.region
@@ -82,6 +109,15 @@ resource "google_storage_bucket" "wal_customer" {
 }
 
 resource "google_storage_bucket" "wal_control" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   name                        = "${var.project_id}-wal-control"
   project                     = var.project_id
   location                    = var.region
@@ -93,6 +129,15 @@ resource "google_storage_bucket" "wal_control" {
 # Image home (T1.3): AR docker repo; images are keyless-cosign-signed with
 # provenance from the FIRST build (invariant 11).
 resource "google_artifact_registry_repository" "images" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   project       = var.project_id
   location      = var.region
   repository_id = "steloit"
@@ -109,6 +154,15 @@ resource "google_artifact_registry_repository" "images" {
 }
 
 resource "google_kms_key_ring" "core" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   name     = "${var.cell_id}-core"
   project  = var.project_id
   location = var.region
@@ -125,6 +179,15 @@ resource "google_kms_crypto_key" "secrets" {
 # CI federation: GitHub Actions -> WIF -> plan-only service account.
 # Zero static keys (D5); apply stays founder-run (infra/README.md).
 resource "google_iam_workload_identity_pool" "ci" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   project                   = var.project_id
   workload_identity_pool_id = "github-ci"
   display_name              = "GitHub Actions CI"
@@ -148,12 +211,30 @@ resource "google_iam_workload_identity_pool_provider" "github" {
 }
 
 resource "google_service_account" "ci_plan" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   project      = var.project_id
   account_id   = "ci-terraform-plan"
   display_name = "CI terraform plan (read-only; apply is founder-run)"
 }
 
 resource "google_project_iam_member" "ci_plan_viewer" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   project = var.project_id
   role    = "roles/viewer"
   member  = "serviceAccount:${google_service_account.ci_plan.email}"
@@ -167,6 +248,15 @@ resource "google_storage_bucket_iam_member" "ci_plan_state" {
 
 # Image-push identity: separate from plan SA; writer on the ONE repo only.
 resource "google_service_account" "ci_image" {
+  # T1.8: WAIT FOR THE APIs. `google_project_service.enabled` had ZERO edges in
+  # either direction, so nothing in this module — or any other — waited for the
+  # APIs it enables. A from-zero apply worked only because the bootstrap
+  # procedure ran a manual `gcloud services enable` first (T1.7), which is not in
+  # infra/README.md's contract. This is COARSE on purpose: API enablement is a
+  # project-wide precondition, so ordering against the whole set is correct rather
+  # than merely convenient.
+  depends_on = [google_project_service.enabled]
+
   project      = var.project_id
   account_id   = "ci-image-push"
   display_name = "CI image build/push (keyless signing via GitHub OIDC)"
