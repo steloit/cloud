@@ -11,6 +11,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const carriedTotalForOrigin = `-- name: CarriedTotalForOrigin :one
+SELECT coalesce(sum(used), 0)::bigint AS used, coalesce(sum(rate_cents), 0)::bigint AS rate_cents
+FROM usage_carry_forward WHERE org_id = $1 AND meter = $2 AND origin_period = $3
+`
+
+type CarriedTotalForOriginParams struct {
+	OrgID        string
+	Meter        string
+	OriginPeriod string
+}
+
+type CarriedTotalForOriginRow struct {
+	Used      int64
+	RateCents int64
+}
+
+// What has ALREADY been carried for this origin, applied or not. The remainder is
+// `recomputed - frozen - this`, so a second late arrival cannot re-carry the first.
+func (q *Queries) CarriedTotalForOrigin(ctx context.Context, arg CarriedTotalForOriginParams) (CarriedTotalForOriginRow, error) {
+	row := q.db.QueryRow(ctx, carriedTotalForOrigin, arg.OrgID, arg.Meter, arg.OriginPeriod)
+	var i CarriedTotalForOriginRow
+	err := row.Scan(&i.Used, &i.RateCents)
+	return i, err
+}
+
 const getQuotaUsage = `-- name: GetQuotaUsage :many
 SELECT org_id, meter, period, used, rate_cents, computed_at FROM quota_usage WHERE org_id = $1 AND period = $2 ORDER BY meter
 `
@@ -49,16 +74,20 @@ func (q *Queries) GetQuotaUsage(ctx context.Context, arg GetQuotaUsageParams) ([
 
 const markCarryForwardApplied = `-- name: MarkCarryForwardApplied :exec
 UPDATE usage_carry_forward SET applied_period = $2
-WHERE org_id = $1 AND applied_period IS NULL
+WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL
 `
 
 type MarkCarryForwardAppliedParams struct {
 	OrgID         string
 	AppliedPeriod pgtype.Text
+	Column3       []string
 }
 
+// BY ID. A blanket `WHERE applied_period IS NULL` stamped every row unapplied at
+// mark time — including ones created after the read, and ones skipped for a zero
+// amount — marking money billed that never reached a line.
 func (q *Queries) MarkCarryForwardApplied(ctx context.Context, arg MarkCarryForwardAppliedParams) error {
-	_, err := q.db.Exec(ctx, markCarryForwardApplied, arg.OrgID, arg.AppliedPeriod)
+	_, err := q.db.Exec(ctx, markCarryForwardApplied, arg.OrgID, arg.AppliedPeriod, arg.Column3)
 	return err
 }
 
@@ -82,11 +111,8 @@ func (q *Queries) PeriodIsClosed(ctx context.Context, arg PeriodIsClosedParams) 
 }
 
 const recordCarryForward = `-- name: RecordCarryForward :exec
-INSERT INTO usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (org_id, meter, origin_period)
-DO UPDATE SET used = EXCLUDED.used, rate_cents = EXCLUDED.rate_cents, detected_at = now()
-WHERE usage_carry_forward.applied_period IS NULL
+INSERT INTO usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents, kind, rate_unit)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type RecordCarryForwardParams struct {
@@ -96,10 +122,13 @@ type RecordCarryForwardParams struct {
 	OriginPeriod string
 	Used         int64
 	RateCents    int64
+	Kind         string
+	RateUnit     string
 }
 
-// Idempotent on (org, meter, origin_period): the amount is a DELTA against a
-// frozen number, so re-detecting the same shortfall must not charge twice.
+// APPEND-ONLY, one row per detection. No conflict clause: a remainder of zero is
+// never recorded, so repeated recomputes append nothing, and a second or nth late
+// arrival appends its own remainder instead of colliding with the first.
 func (q *Queries) RecordCarryForward(ctx context.Context, arg RecordCarryForwardParams) error {
 	_, err := q.db.Exec(ctx, recordCarryForward,
 		arg.ID,
@@ -108,6 +137,8 @@ func (q *Queries) RecordCarryForward(ctx context.Context, arg RecordCarryForward
 		arg.OriginPeriod,
 		arg.Used,
 		arg.RateCents,
+		arg.Kind,
+		arg.RateUnit,
 	)
 	return err
 }
@@ -158,11 +189,21 @@ func (q *Queries) SpanEdgesForOrg(ctx context.Context, arg SpanEdgesForOrgParams
 }
 
 const unappliedCarryForward = `-- name: UnappliedCarryForward :many
-SELECT id, org_id, meter, origin_period, applied_period, used, rate_cents, detected_at FROM usage_carry_forward WHERE org_id = $1 AND applied_period IS NULL ORDER BY origin_period
+SELECT id, org_id, meter, origin_period, applied_period, used, rate_cents, kind, rate_unit, detected_at FROM usage_carry_forward
+WHERE org_id = $1 AND applied_period IS NULL AND kind = 'charge' AND origin_period < $2
+ORDER BY origin_period
 `
 
-func (q *Queries) UnappliedCarryForward(ctx context.Context, orgID string) ([]UsageCarryForward, error) {
-	rows, err := q.db.Query(ctx, unappliedCarryForward, orgID)
+type UnappliedCarryForwardParams struct {
+	OrgID        string
+	OriginPeriod string
+}
+
+// CHARGES ONLY, and only from a period that ENDED before the one being closed: an
+// invoice dated June must never carry usage from July. Credits are excluded —
+// recording them is an engineering obligation, refunding them is commercial.
+func (q *Queries) UnappliedCarryForward(ctx context.Context, arg UnappliedCarryForwardParams) ([]UsageCarryForward, error) {
+	rows, err := q.db.Query(ctx, unappliedCarryForward, arg.OrgID, arg.OriginPeriod)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +219,45 @@ func (q *Queries) UnappliedCarryForward(ctx context.Context, orgID string) ([]Us
 			&i.AppliedPeriod,
 			&i.Used,
 			&i.RateCents,
+			&i.Kind,
+			&i.RateUnit,
+			&i.DetectedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unappliedCredits = `-- name: UnappliedCredits :many
+SELECT id, org_id, meter, origin_period, applied_period, used, rate_cents, kind, rate_unit, detected_at FROM usage_carry_forward
+WHERE org_id = $1 AND applied_period IS NULL AND kind = 'credit' ORDER BY origin_period
+`
+
+// Over-billing, surfaced. Not auto-applied.
+func (q *Queries) UnappliedCredits(ctx context.Context, orgID string) ([]UsageCarryForward, error) {
+	rows, err := q.db.Query(ctx, unappliedCredits, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageCarryForward
+	for rows.Next() {
+		var i UsageCarryForward
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Meter,
+			&i.OriginPeriod,
+			&i.AppliedPeriod,
+			&i.Used,
+			&i.RateCents,
+			&i.Kind,
+			&i.RateUnit,
 			&i.DetectedAt,
 		); err != nil {
 			return nil, err

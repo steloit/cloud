@@ -449,6 +449,8 @@ type UsageCarryForward struct {
 	AppliedPeriod pgtype.Text
 	Used          int64
 	RateCents     int64
+	Kind          string
+	RateUnit      string
 	DetectedAt    pgtype.Timestamptz
 }
 

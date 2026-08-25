@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/steloit/cloud/services/api/internal/metering"
 	"math"
 	"time"
 
@@ -37,7 +38,7 @@ type Store interface {
 	GetOrg(ctx context.Context, id string) (store.Org, error)
 	GetQuotaUsage(ctx context.Context, arg store.GetQuotaUsageParams) ([]store.QuotaUsage, error)
 	UpsertInvoiceForPeriod(ctx context.Context, arg store.UpsertInvoiceForPeriodParams) (store.Invoice, error)
-	UnappliedCarryForward(ctx context.Context, orgID string) ([]store.UsageCarryForward, error)
+	UnappliedCarryForward(ctx context.Context, arg store.UnappliedCarryForwardParams) ([]store.UsageCarryForward, error)
 	MarkCarryForwardApplied(ctx context.Context, arg store.MarkCarryForwardAppliedParams) error
 	GetInvoiceForPeriod(ctx context.Context, arg store.GetInvoiceForPeriodParams) (store.Invoice, error)
 }
@@ -60,6 +61,21 @@ func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return
 // usage_ref. Idempotent — a re-close returns the existing invoice unchanged
 // (the ON CONFLICT DO NOTHING gate), so a monthly close can be retried safely.
 func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoice, error) {
+	// A PERIOD THAT HAS NOT ENDED CANNOT BE CLOSED. Without this, closing early
+	// silently converts the REST OF THE MONTH into "late usage": measured,
+	// closing 2026-07 on the 2nd froze the first day and turned 86,400s of
+	// ordinary in-period usage into a carry-forward billed on a later invoice.
+	// Closing is an accounting boundary, so it must be bounded by the calendar
+	// rather than by whoever calls it.
+	_, end, err := metering.PeriodBounds(period)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	if s.now().Before(end) {
+		return store.Invoice{}, fmt.Errorf(
+			"invoice: period %s has not ended (ends %s) — closing it early would turn the rest of the month into late usage",
+			period, end.Format("2006-01-02"))
+	}
 	// The plan fee is sourced from the org's own plan row — a wrong fee would be
 	// frozen permanently, so it is never trusted to a caller argument.
 	org, err := s.q.GetOrg(ctx, orgID)
@@ -115,14 +131,26 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 	// would have been a more elaborate way of losing it. Each carried delta is its
 	// own line naming the period it belongs to, so the customer sees "late usage
 	// from 2026-07" on their August invoice rather than an unexplained increase.
-	carried, err := s.q.UnappliedCarryForward(ctx, orgID)
+	// ORIGIN < PERIOD. Without it, closing an EARLIER period bills a later
+	// period's late usage: measured, `Close(org, "2026-06")` after July's carry
+	// produced a June invoice line reading "late usage from 2026-07". An invoice
+	// dated June carrying July's usage is not defensible to a customer or an
+	// auditor. The query also excludes credits — recording an over-bill is an
+	// engineering obligation, refunding it is a commercial decision.
+	carried, err := s.q.UnappliedCarryForward(ctx, store.UnappliedCarryForwardParams{
+		OrgID: orgID, OriginPeriod: period,
+	})
 	if err != nil {
 		return store.Invoice{}, err
 	}
+	// Only the ids that actually produce a line may be marked applied. A blanket
+	// mark stamped rows skipped here as billed.
+	var appliedIDs []string
 	for _, cf := range carried {
 		if cf.RateCents == 0 {
 			continue
 		}
+		appliedIDs = append(appliedIDs, cf.ID)
 		lines = append(lines, Line{
 			Description: "late usage from " + cf.OriginPeriod,
 			Cents:       cf.RateCents,
@@ -159,9 +187,14 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 	// Marked applied only after the invoice that carries them actually exists, so
 	// a failure anywhere above leaves them unapplied and they land on the next
 	// close instead of vanishing.
-	if len(carried) > 0 {
+	if len(appliedIDs) > 0 {
+		// BY ID, not by "everything unapplied right now". The blanket UPDATE
+		// stamped rows created between the read above and this write — and
+		// `GET /usage?month=<closed>` calls Rollup on the read path, so any
+		// billing.view user could open that window and have their late usage
+		// marked billed without reaching a line.
 		if err := s.q.MarkCarryForwardApplied(ctx, store.MarkCarryForwardAppliedParams{
-			OrgID: orgID, AppliedPeriod: pgtype.Text{String: period, Valid: true},
+			OrgID: orgID, AppliedPeriod: pgtype.Text{String: period, Valid: true}, Column3: appliedIDs,
 		}); err != nil {
 			return inv, fmt.Errorf("invoice: carried usage was billed but not marked applied (it would bill again): %w", err)
 		}

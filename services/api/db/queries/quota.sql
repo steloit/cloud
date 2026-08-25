@@ -26,17 +26,34 @@ SELECT * FROM quota_usage WHERE org_id = $1 AND period = $2 ORDER BY meter;
 SELECT EXISTS (SELECT 1 FROM invoices WHERE org_id = $1 AND period = $2);
 
 -- name: RecordCarryForward :exec
--- Idempotent on (org, meter, origin_period): the amount is a DELTA against a
--- frozen number, so re-detecting the same shortfall must not charge twice.
-INSERT INTO usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (org_id, meter, origin_period)
-DO UPDATE SET used = EXCLUDED.used, rate_cents = EXCLUDED.rate_cents, detected_at = now()
-WHERE usage_carry_forward.applied_period IS NULL;
+-- APPEND-ONLY, one row per detection. No conflict clause: a remainder of zero is
+-- never recorded, so repeated recomputes append nothing, and a second or nth late
+-- arrival appends its own remainder instead of colliding with the first.
+INSERT INTO usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents, kind, rate_unit)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: CarriedTotalForOrigin :one
+-- What has ALREADY been carried for this origin, applied or not. The remainder is
+-- `recomputed - frozen - this`, so a second late arrival cannot re-carry the first.
+SELECT coalesce(sum(used), 0)::bigint AS used, coalesce(sum(rate_cents), 0)::bigint AS rate_cents
+FROM usage_carry_forward WHERE org_id = $1 AND meter = $2 AND origin_period = $3;
 
 -- name: UnappliedCarryForward :many
-SELECT * FROM usage_carry_forward WHERE org_id = $1 AND applied_period IS NULL ORDER BY origin_period;
+-- CHARGES ONLY, and only from a period that ENDED before the one being closed: an
+-- invoice dated June must never carry usage from July. Credits are excluded —
+-- recording them is an engineering obligation, refunding them is commercial.
+SELECT * FROM usage_carry_forward
+WHERE org_id = $1 AND applied_period IS NULL AND kind = 'charge' AND origin_period < $2
+ORDER BY origin_period;
 
 -- name: MarkCarryForwardApplied :exec
+-- BY ID. A blanket `WHERE applied_period IS NULL` stamped every row unapplied at
+-- mark time — including ones created after the read, and ones skipped for a zero
+-- amount — marking money billed that never reached a line.
 UPDATE usage_carry_forward SET applied_period = $2
-WHERE org_id = $1 AND applied_period IS NULL;
+WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL;
+
+-- name: UnappliedCredits :many
+-- Over-billing, surfaced. Not auto-applied.
+SELECT * FROM usage_carry_forward
+WHERE org_id = $1 AND applied_period IS NULL AND kind = 'credit' ORDER BY origin_period;
