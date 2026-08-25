@@ -88,13 +88,13 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   gate meant acceptance while calling itself absence. Observe absence before reporting it.
 - **Enumerate every workload in the flow, INCLUDING the ones that exist only at bootstrap — and
   verify a security rule while the environment still exists.** US-3.3c's CNPG allowances selected
-  `cnpg.io/podRole: instance`; CNPG bootstraps through a JOB whose pod carries `cnpg.io/jobRole` and
-  `cnpg.io/cluster` but NOT podRole, so the initdb pod matched no allowance and the cluster never
-  started — a FIFTH allowance, where US-3.3a's security review had enumerated four. A selector
-  correct in steady state can match nothing at t=0, and an enumeration is not a proof of coverage. The second half is the
-  costlier one: a tightening discovered AFTER the cell is destroyed cannot be tested, and shipping it
-  unverified is worse than a named exception — it reads as stronger and can fence the very thing it
-  protects (US-3.3j, left wide on purpose).
+  `cnpg.io/podRole: instance`; CNPG bootstraps through a JOB whose pod carries `cnpg.io/jobRole`
+  and `cnpg.io/cluster` but NOT podRole, so the initdb pod matched no allowance and the cluster
+  never started: a fifth WORKLOAD none of the four allowances US-3.3a's review enumerated covered.
+  An enumeration of rules is not a proof of coverage, and a selector correct in steady state can
+  match nothing at t=0. The headline's second half is costlier still — a tightening discovered AFTER
+  the cell is destroyed cannot be tested, and shipping it unverified is worse than a named exception:
+  it reads as stronger and can fence the very thing it protects (US-3.3j, wide on purpose).
 - **Verify the no-mutation baseline is GREEN before AND after any mutation sweep.** A module-only
   `cp -R` is red on arrival wherever tests reach outside the module, and the list keeps growing —
   find it by RUNNING the copy, never by recall. So far: `services/api` needs
@@ -115,7 +115,8 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   race was mere desired-doc divergence until US-3.8 wrote the price column on every PATCH — then column,
   cell and invoice could disagree three ways at once, undetectably by a reprice (both sides of that
   comparison come from the same stale read). Fence on the generation read, 409 "re-read and retry".
-- **Never hand-append to a committed raw evidence log.** Commit the producing command with line-by-line provenance; reviewers WILL catch an unattributed append's seams (T1.0).
+- **Never hand-append to a committed raw evidence log.** Commit the producing command with
+  line-by-line provenance; reviewers WILL catch an unattributed append's seams (T1.0).
 - **A findings ADR that changes frozen text is a formal delta, not a reinterpretation.** If
   architecture.md/00-sources literally name what you're replacing, propose the amendment text
   (the ADR-0003→A4 precedent) — never "no delta because the semantic contract is unchanged"
@@ -129,16 +130,15 @@ Preview/content served on the content eTLD+1 (A2.4) applies to *preview environm
   Rendered / stored / enforced are three representations and the suite covered one. US-3.3c proved
   the same class LIVE, twice: the DNS rule named `k8s-app: kube-dns` and resolved NOTHING, because
   NodeLocal DNSCache (default-on, unpinned by our terraform) answers the query; and the apiserver
-  peer named the `kubernetes` ClusterIP, which Dataplane V2 never matches because it evaluates
-  egress POST-translation — the private endpoint is the real destination. Both LOOKED right, and
-  `/etc/resolv.conf` actively corroborated the wrong one. Observe the datapath on a cell; a
-  platform-managed component you did not install is still the thing enforcing.
+  peer named the `kubernetes` ClusterIP, which Dataplane V2 never matches — it evaluates egress
+  POST-translation, so the private endpoint is the real destination. Both LOOKED right and
+  `/etc/resolv.conf` corroborated the wrong one. Observe the datapath: a platform-managed component
+  you did not install is still the thing enforcing.
 - **Widening a lookup table without widening its consumer turns a loud error into a silent success.**
   Kinds added to `kube`'s `plurals` were not inert: `Delete` hardcoded the CNPG apiVersion, so they
-  built plausible paths under the wrong group, 404'd, and 404 maps to "already gone" — reporting
-  success while the object lived. A kind absent from the consumer must be REFUSED, the two key sets
-  asserted EQUAL, **and the VALUES pinned**: US-3.3c added NetworkPolicy to both maps, and
-  `networkpolicies`->`networkpolicys` still survived until a per-kind path row named it.
+  built paths under the wrong group, 404'd, and 404 maps to "already gone" — reporting success while
+  the object lived. A kind absent from the consumer must be REFUSED, the key sets asserted EQUAL,
+  **and the VALUES pinned**: `networkpolicies`->`networkpolicys` survived equal keys (US-3.3c).
 - **Guard every document, element and path — not the first of each.** `yaml.Unmarshal` returns only
   document 1 with a nil error, which has now bitten three times, most recently US-3.3b classifying an
   object's SCOPE from doc 1. Refuse multi-doc, as `kube.applyOne` does. Pinning for one element, then

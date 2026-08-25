@@ -236,7 +236,7 @@ the exact failure US-3.3a shipped.
 | AC | state |
 |---|---|
 | 1 (struck) | already US-3.3f — Dataplane V2 confirmed live (`anetd` on every node) |
-| 2 | done — policy set restored WITH five CNPG allowances |
+| 2 | done — policy set restored, its four CNPG allowances scoped to cover the bootstrap Job too (*corrected 2026-08-25: this row said "five CNPG allowances"; there are four — the initdb Job was a fifth WORKLOAD, not a fifth rule*) |
 | 3 | done — peers asserted structurally (parsed), one named exception → US-3.3j |
 | 4 | ~~struck~~ → **US-3.3k** (this PR WIDENS the gap: it adds `networkpolicies` to what the agent writes) |
 | 5 | done — NodeLocal DNSCache confirmed live; Cloud DNS variant still unpinned |
