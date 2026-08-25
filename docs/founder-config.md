@@ -14,7 +14,11 @@ by this file. This file is **not** hook-protected `00-sources/`; it is
 maintained by agents as values arrive.
 
 **Status legend.** ✅ set · ⏳ `PENDING` (founder will provide — do not invent) ·
-❓ `NEEDS FOUNDER INPUT` (no decision on record; interrupt before assuming).
+❓ `NEEDS FOUNDER INPUT` (no decision on record; interrupt before assuming) ·
+⏳ **absent** (T1.9 — *decided and declared in code, but not applied to the live
+project*; waits on an apply, **not** on the founder, so it is not an interrupt) ·
+a split cell such as ✅ *in code* · ⏳ *not applied* means the two halves of one row
+have different answers, and both are stated rather than averaged.
 
 ---
 
@@ -33,7 +37,14 @@ maintained by agents as values arrive.
 
 GCP-first is ratified (ADR-029 / INF-001). The founder authorized autonomous
 gcloud discovery + provisioning (least-privilege IAM, stay in the free trial).
-The **dev** foundation is bootstrapped; identifiers below are live.
+**Live state last verified 2026-08-25** (T1.9), read-only against `steloit-dev`.
+Rows carry ✅ **created** only where that check found the resource; a row the check
+found ABSENT says so and keeps its history rather than being quietly deleted.
+Re-run the checks in `tasks/e1-substrate/T1.9.md` before trusting a ✅ older than
+this line — the previous revision asserted **eight resources** as created that do
+not exist (artifacts bucket, `images` AR repo, two WAL buckets, the `github-ci`
+pool, the `github-oidc` provider, and both CI service accounts), across four rows,
+and nothing detected it for weeks.
 
 | Key | Value | Status |
 |---|---|---|
@@ -44,23 +55,44 @@ The **dev** foundation is bootstrapped; identifiers below are live.
 | **Dev project** | **`steloit-dev`** (# `850447601666`, us-central1) — billing linked | ✅ **created** |
 | Cell-0 project (partner) | `steloit-cell0` (asia-south1) — not yet created (cost: create at Cell-1) | ⏳ later |
 | Primary region (dev) | `us-central1` (dev default); partner cell `asia-south1` (A1.7) | ✅ |
-| Terraform state | `gs://steloit-dev-tfstate` (prefix `dev`) — versioned, migrated | ✅ **created** |
-| Artifact Registry | repo `steloit-dev-artifacts` bucket + AR `images` repo (keyless cosign, T1.3) | ✅ **created** |
-| WAL/backup buckets | `steloit-dev-wal-customer`, `steloit-dev-wal-control` (separate, INF-001 #10) | ✅ **created** |
-| KMS | key ring `core` + `secrets` crypto key (envelope KEK substrate) | ✅ **created** |
-| Workload Identity Federation | pool `github-ci` + provider `github-oidc`; SAs `ci-terraform-plan`, `ci-image-push` (least-priv) — **zero static keys (D5)** | ✅ **created** |
-| APIs enabled | compute, container, storage, secretmanager, cloudkms, iam(+creds), sts, dns, artifactregistry, cloudscheduler, billingbudgets, monitoring, logging | ✅ **enabled** |
-| — **15th API: `cloudresourcemanager.googleapis.com`** | **RESOLVED BY THE REPOSITORY, not by a preference** — see `tasks/e1-substrate/T1.7.md`. This was raised as `❓ NEEDS FOUNDER INPUT` on the reading that the service list is an owner-level choice. Investigating the intended OWNER settled it instead: `infra/README.md`'s bootstrap contract is **Terraform-first** — on a clean project step 2 is `apply -target=module.project_base`, with **no** manual `gcloud services enable` — and `project-base` holds the only `google_project_service` in the entire tree. So its list must be sufficient for its own resources to apply, and it was not: `google_project_iam_member.ci_plan_viewer` lives in that module and is served by Cloud Resource Manager (measured on the wire). **The module could not complete its own documented bootstrap step.** That is an internal inconsistency, not a policy question, so it was fixed rather than escalated. Enforced by `scripts/infra/required-apis.mjs` in CI's infra job, which refuses an unclassified `google_*` resource rather than skipping it. *Note: the procedure recorded below inserted a manual `gcloud services enable` of "the 14 APIs", which is what masked this — that line and the ✅ row above it are now stale and are **T1.9**'s to reconcile.* | **evidence 2026-08-25** · T1.7 |
+| Terraform state | `gs://steloit-dev-tfstate` (prefix `dev`) — versioned, migrated | ✅ **created** · verified 2026-08-25 |
+| Artifact Registry | `steloit-dev-artifacts` bucket + AR `images` repo (keyless cosign, T1.3) — **DECLARED IN TERRAFORM, NOT PRESENT.** `gcloud storage buckets list` returns only `steloit-dev-tfstate`; `gcloud artifacts repositories list` returns nothing. *Was ✅ **created** here until 2026-08-25; that claim was never true of the live project, not a resource later destroyed — Terraform state holds only the state bucket.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
+| WAL/backup buckets | `steloit-dev-wal-customer`, `steloit-dev-wal-control` (separate, INF-001 #10) — **DECLARED, NOT PRESENT.** *Was ✅ **created** until 2026-08-25. The separation requirement is unchanged and still binding; only the claim that the buckets exist was wrong.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
+| KMS | key ring **`cell-dev-core`** (*this row said `core`; the ring's real name is `cell-dev-core`*) + crypto key **`secrets-envelope`** (envelope KEK substrate; `project-base` declares `name = "secrets-envelope"`, this row said `secrets`) | ring ✅ **created** · verified 2026-08-25 · **key NOT CHECKED** — `gcloud kms keys list --keyring cell-dev-core` was not run, so this row does not claim the key exists (T1.9) |
+| Workload Identity Federation | pool `github-ci` + provider `github-oidc`; SAs `ci-terraform-plan`, `ci-image-push` (least-priv) — **zero static keys (D5)** — **DECLARED, NOT PRESENT.** The only pool is GKE's managed `steloit-dev.svc.id.goog`; `gcloud iam service-accounts list` shows only the default compute SA. *Was ✅ **created** until 2026-08-25. **D5 remains the standing rule** — this row records that the mechanism is not yet built, never that keyless CI was abandoned. It is also why T1.7's missing API went unnoticed: `ci_plan_viewer`, its first consumer, has never been applied.* | ⏳ **absent** · verified 2026-08-25 · T1.9 |
+| APIs enabled | **cloudresourcemanager**, compute, container, storage, secretmanager, cloudkms, iam(+creds), sts, dns, artifactregistry, cloudscheduler, billingbudgets, monitoring, logging — *15 with `iam` and `iamcredentials` counted separately*. This enumeration is kept per T1.7 option (a) ("fifteen in `local.services`, fifteen in the founder-config row"); it must equal `infra/modules/project-base/main.tf`'s `local.services`, and **the two agreeing is not proof** — they agreed at 14 and were both short one. `scripts/infra/required-apis.mjs` proves the MODULE's list covers every API `infra/` uses, in CI; nothing yet proves this row equals the module (see T1.10). *Live `steloit-dev` reported 42 APIs enabled on 2026-08-25 — a superset, since GCP enables many by default.* | ✅ **enabled** · verified 2026-08-25 |
+| — **15th API: `cloudresourcemanager.googleapis.com`** | **RESOLVED BY THE REPOSITORY, not by a preference** — see `tasks/e1-substrate/T1.7.md`. This was raised as `❓ NEEDS FOUNDER INPUT` on the reading that the service list is an owner-level choice. Investigating the intended OWNER settled it instead: `infra/README.md`'s bootstrap contract is **Terraform-first** — on a clean project step 2 is `apply -target=module.project_base`, with **no** manual `gcloud services enable` — and `project-base` holds the only `google_project_service` in the entire tree. So its list must be sufficient for its own resources to apply, and it was not: `google_project_iam_member.ci_plan_viewer` lives in that module and is served by Cloud Resource Manager (measured on the wire). **The module could not complete its own documented bootstrap step.** That is an internal inconsistency, not a policy question, so it was fixed rather than escalated. Enforced by `scripts/infra/required-apis.mjs` in CI's infra job, which refuses an unclassified `google_*` resource rather than skipping it. *Note: the procedure recorded below inserted a manual `gcloud services enable` of "the 14 APIs", which is what masked this. **T1.9 reconciled both** — the row above now lists 15 and the procedure paragraph is marked historical.* | **evidence 2026-08-25** · T1.7 |
 | GKE cluster / compute | **none yet** (~$0 running) — stood up by the T1.0 spike / T1.2 | ⏳ next |
 | DNS provider | **GoDaddy** (`steloit.com`) — records generated for founder to apply | ✅ |
-| GitHub repo WIF binding | pool/provider created; repo attribute condition set in `project-base` | ✅ |
+| GitHub repo WIF binding | repo attribute condition **is set in `project-base`** (code, verified); the pool/provider it binds are **not applied** — see the row above. *Was plain ✅ / "pool/provider created; repo attribute condition set in `project-base`" until 2026-08-25.* | ✅ *in code* · ⏳ *not applied* · verified 2026-08-25 |
 | Substrate | CNPG on **GKE PD-CSI** at dev/alpha (**ADR-0007 ratified 2026-07-19**; Arch v1.3 + INF-001 A6); ZFS-LocalPV re-scoped to a Cell-1 density option; object storage **proxied** | ✅ | ADR-0007 |
 
-**Bootstrap procedure used** (repeatable for `cell0`): create project → link billing
-→ `gcloud services enable` the 14 APIs → `terraform -chdir=infra/envs/dev apply
--target=module.project_base` (local state) → migrate state to `gs://<id>-tfstate`.
-Terraform auth uses the founder's gcloud user token (`GOOGLE_OAUTH_ACCESS_TOKEN`)
-— no ADC/service-account key needed.
+**Bootstrap procedure — `infra/README.md` §Bootstrap is the contract; follow that,
+not this paragraph.** It is Terraform-first: `init -backend=false` → `apply
+-target=module.project_base` → re-init onto the backend → full `apply`. Terraform
+auth uses the founder's gcloud user token (`GOOGLE_OAUTH_ACCESS_TOKEN`) — no
+ADC/service-account key needed.
+
+*Historical, and kept because it explains a defect (T1.7): the procedure actually
+**used** for `steloit-dev` inserted a manual `gcloud services enable` of "the 14
+APIs" before the Terraform step. That step is not in the contract, and it masked
+`project-base` being unable to complete its own bootstrap — the module declares a
+project IAM binding whose API its own list omitted. Do not reintroduce it: a manual
+enable makes the contract untestable and hides exactly this class of gap.*
+
+*Why the ⏳ **absent** rows are absent is NOT established. The leading inference is
+that `-target=module.project_base` was only ever run far enough to create the state
+bucket — `dev/default.tfstate` holds exactly one resource — but that story does not
+account for the KMS ring existing while not being in that state file, and the absent
+resources depend only on `google_project_service`, so a partial apply at default
+parallelism would not plausibly stop at exactly one bucket. Recorded as an open
+question in `tasks/e1-substrate/T1.9.md`, not as history here.*
+
+**Before re-running the bootstrap:** if the KMS ring genuinely exists outside
+Terraform's state, `apply -target=module.project_base` will fail on
+`google_kms_key_ring.core` with an already-exists error until it is
+`terraform import`ed. Confirm which before following the contract above — exactly
+one of "the ring is out of band" and "the partial-apply story is right" can be true.
 
 ## 3 · Providers (all behind a provider interface — never a platform dependency)
 
