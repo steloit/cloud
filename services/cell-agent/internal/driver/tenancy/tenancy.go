@@ -482,9 +482,10 @@ spec:
 		// everything else is still covered by default-deny. Widening this to
 		// `podSelector: {}` silently grants customer code the metadata server.
 		//
-		// `cnpg.io/cluster` EXISTS, not `cnpg.io/podRole: instance` — and this is
-		// the fifth allowance, which US-3.3a's review did not name and only a
-		// live run found. CNPG bootstraps through a JOB whose pod carries
+		// `cnpg.io/cluster` EXISTS, not `cnpg.io/podRole: instance`. This is not
+		// a fifth ALLOWANCE — the four above are still four — it is a fifth
+		// WORKLOAD that none of the four covered, which US-3.3a's review did not
+		// name and only a live run found. CNPG bootstraps through a JOB whose pod carries
 		// `cnpg.io/jobRole: initdb` and `cnpg.io/cluster`, but NOT
 		// `cnpg.io/podRole: instance`: that label appears only once an instance
 		// exists. Selecting on podRole therefore matches NOTHING during
