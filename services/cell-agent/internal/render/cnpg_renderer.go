@@ -8,8 +8,10 @@ package render
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 
 	"github.com/steloit/cloud/services/cell-agent/internal/agent"
 	"github.com/steloit/cloud/services/cell-agent/internal/driver"
@@ -224,7 +226,7 @@ func (r *CNPGRenderer) Converge(ctx context.Context, svc agent.DesiredService) (
 	spec := driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
-		Instances: instancesOf(svc.Desired), Cell: r.cell,
+		Instances: r.instancesOf(svc.Desired), Cell: r.cell,
 		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
 	}
 	manifests, err := r.pg.Render(spec)
@@ -291,7 +293,7 @@ func (r *CNPGRenderer) teardownObjects(svc agent.DesiredService, namespace strin
 	return r.pg.Objects(driver.Spec{
 		Name: svc.ID, Namespace: namespace, Product: svc.Product,
 		Intent: asString(svc.Desired["intent"]), Shape: asMap(svc.Desired["shape"]),
-		Instances: instancesOf(svc.Desired), Cell: r.cell,
+		Instances: r.instancesOf(svc.Desired), Cell: r.cell,
 		GSAEmail: r.gsaEmail, WALBucket: r.walBucket,
 	})
 }
@@ -359,13 +361,108 @@ func asMap(v any) map[string]any {
 	m, _ := v.(map[string]any)
 	return m
 }
-func instancesOf(desired map[string]any) int {
-	if o, ok := desired["override"].(map[string]any); ok {
-		if n, ok := o["instances"].(float64); ok && n >= 1 {
-			return int(n)
+
+// haInstances is what `ha: true` provisions.
+//
+// TWO, and the number is not a preference. The create frame sells HA as
+// "High availability · standby + auto-failover · +$19/mo" — ONE standby, plus
+// failover. Microcopy in `docs/product/00-sources/` is verbatim-binding, so a
+// primary and a single standby is what was sold and is what must exist.
+//
+// TWO REALLY DOES FAIL OVER — checked, not assumed. CNPG coordinates promotion
+// through the Kubernetes API server and a per-cluster lease, NOT through a quorum
+// of Postgres instances, so a primary + one standby promotes automatically. (A
+// Postgres quorum reading would have made 3 the minimum, which is why this was
+// worth confirming rather than reasoning about.) Quorum-based synchronous
+// replication is a separate, opt-in feature via minSyncReplicas/maxSyncReplicas.
+//
+// CNPG *recommends* 3 for production — the third instance is what leaves you a
+// standby after a failover or during maintenance. That is a stronger promise than
+// this product sells today; upgrading to it is a pricing decision (the frame
+// prices one standby), not an implementation detail to change here.
+const haInstances = 2
+
+// instancesOf resolves the replica count from the desired doc.
+//
+// WHY IT IS A max(), NOT A PRECEDENCE RULE. Two inputs can raise the count: the
+// HA the customer bought, and a manual capacity pin (D22). Making one "win"
+// means the other can silently lose, and a pin of 1 on an HA service would drop
+// the standby the customer is billed $19/month for while the price stays put.
+// max() means no value of `override` takes a service below what it was sold.
+//
+// REACHABILITY, stated so this reads as the floor it is rather than as a live
+// guard: a postgres pin cannot be set through the API. `estimates.PriceWithInstances`
+// 422s an `override.instances` for any product whose shape has no `instances`
+// key, and postgres's does not — "capacity we cannot price is capacity we must
+// not provision". So the only producers are a migration or a support script,
+// which is the population `provisioning.overrideInstances` documents itself as
+// serving. Defensive, and deliberately so.
+//
+// READING THE VALUES: `ha` and `instances` are read through helpers that accept
+// every shape a JSON round-trip can produce. A bare `.(float64)` was wrong for
+// exactly the reason `cnpg.asGB` already records — an int or a json.Number on a
+// hand-planted row would silently mean "absent", and for `ha` that is US-3.16's
+// own bug arriving by type instead of by omission.
+//
+// US-3.16: before this, `ha` was priced by the estimate and read by NOTHING on
+// the cell side — `ha: true` and `ha: false` both rendered `instances: 1`.
+func (r *CNPGRenderer) instancesOf(desired map[string]any) int {
+	instances := 1
+	if shape, ok := desired["shape"].(map[string]any); ok {
+		if ha, ok := asFlag(shape["ha"]); ok && ha {
+			instances = haInstances
 		}
 	}
-	return 1
+	if o, ok := desired["override"].(map[string]any); ok {
+		if n, ok := asCount(o["instances"]); ok && n > instances {
+			instances = n
+		} else if ok && n < instances {
+			// FLOORED, NOT IGNORED. An operator's pin carries a stated reason
+			// (D22); silently overriding it with no signal is how a deliberate
+			// action becomes invisible. The expiry path emits `override_expired`
+			// for the same reason.
+			r.log.Warn("instance pin is below the HA floor and was raised to it",
+				"pin", n, "floor", instances, "reason", asString(o["reason"]))
+		}
+	}
+	return instances
+}
+
+// asFlag reads a bool that may have survived a JSON round-trip as a bool, or been
+// hand-planted as a string. Anything else is "not a flag" rather than false.
+func asFlag(v any) (bool, bool) {
+	switch b := v.(type) {
+	case bool:
+		return b, true
+	case string:
+		return b == "true", true
+	}
+	return false, false
+}
+
+// asCount reads a count across every numeric shape a desired doc can carry. The
+// wire path decodes into float64, but a migrated or support-script row may hold
+// an int, an int64 or a json.Number, and reading only one of them would make a
+// deliberate pin silently vanish.
+func asCount(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n != math.Trunc(n) || n > math.MaxInt32 {
+			return 0, false // fractional or absurd: not a count
+		}
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i > math.MaxInt32 {
+			return 0, false
+		}
+		return int(i), true
+	}
+	return 0, false
 }
 
 // TeardownEnvironment removes an environment's cluster-scoped objects — today
