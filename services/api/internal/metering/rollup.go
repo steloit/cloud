@@ -186,6 +186,18 @@ func (e *Emitter) Rollup(ctx context.Context, orgID, period string, now time.Tim
 // carries forward. Carry-forward is the only one that neither loses money
 // silently nor changes a number the customer has already seen.
 func (e *Emitter) carryForward(ctx context.Context, orgID, period string, totalSeconds, weightedCents int64) error {
+	// SINGLE-METER, and that is a stated limit rather than an oversight.
+	//
+	// `Rollup` computes exactly one meter today (`service_span_seconds`), so it is
+	// the only one whose recompute can differ from the frozen figure. But
+	// `quota_usage.meter` already names `egress_bytes | build_minutes | events |
+	// ai_requests`, and ADR-0018 ratifies an expanded set — the moment a second
+	// meter is rolled up, late usage on it would vanish here in silence.
+	//
+	// So the guard is structural: this refuses to run if the caller ever passes a
+	// rollup it cannot account for, rather than carrying one meter and dropping
+	// the rest. Extending it means iterating the frozen rows per meter, and this
+	// error is what will say so.
 	const meter = "service_span_seconds"
 	frozen, err := e.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
 	if err != nil {
@@ -195,6 +207,17 @@ func (e *Emitter) carryForward(ctx context.Context, orgID, period string, totalS
 	for _, u := range frozen {
 		if u.Meter == meter {
 			billedSeconds, billedCents = u.Used, u.RateCents
+		}
+	}
+	// A frozen meter this function cannot account for must be LOUD, not skipped:
+	// silently carrying one meter while dropping another is exactly the invisible
+	// under-billing this whole task exists to prevent.
+	for _, u := range frozen {
+		if u.Meter != meter {
+			return fmt.Errorf(
+				"metering: closed period %s/%s holds meter %q, which carryForward cannot account for — "+
+					"late usage on it would be silently lost; extend carryForward to iterate meters before rolling it up",
+				orgID, period, u.Meter)
 		}
 	}
 	carried, err := e.q.CarriedTotalForOrigin(ctx, store.CarriedTotalForOriginParams{
@@ -244,4 +267,15 @@ func (e *Emitter) carryForward(ctx context.Context, orgID, period string, totalS
 // Usage returns the stored rollup rows for an org+period (billing/report reads).
 func (e *Emitter) Usage(ctx context.Context, orgID, period string) ([]store.QuotaUsage, error) {
 	return e.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
+}
+
+// CarryForwardForTest drives the remainder arithmetic directly.
+//
+// Exported for tests ONLY because the sign matrix cannot be produced through
+// spans: a recompute that is smaller on one axis and larger on the other is
+// reachable in production (a late `close` shortening an open span while another
+// service's edges arrive late) but is fiddly to arrange, and the arithmetic is
+// what needs pinning. The production path calls the same unexported function.
+func (e *Emitter) CarryForwardForTest(ctx context.Context, orgID, period string, seconds, cents int64) error {
+	return e.carryForward(ctx, orgID, period, seconds, cents)
 }

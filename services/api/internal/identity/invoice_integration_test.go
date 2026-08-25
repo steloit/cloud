@@ -13,14 +13,12 @@ import (
 	"time"
 
 	"github.com/steloit/cloud/services/api/internal/billing"
-	"github.com/steloit/cloud/services/api/internal/identity/store"
 	"github.com/steloit/cloud/services/api/internal/invoice"
 )
 
 func TestInvoiceGenerator(t *testing.T) {
 	w := newWorld(t, time.Hour)
 	ctx := context.Background()
-	q := store.New(w.pool)
 	plans, err := billing.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +45,7 @@ func TestInvoiceGenerator(t *testing.T) {
 		}
 	}
 
-	gen := invoice.NewService(q, plans)
+	gen := invoice.NewService(w.pool, plans)
 
 	// --- close: plan fee + metered lines, integer cents ---------------------
 	inv, err := gen.Close(ctx, org.ID, period)
@@ -169,7 +167,6 @@ func TestAnInvoiceNeverFreezesATotalItsLinesDoNotSumTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := newWorld(t, time.Hour)
 			ctx := context.Background()
-			q := store.New(w.pool)
 			plans, err := billing.Load()
 			if err != nil {
 				t.Fatal(err)
@@ -188,7 +185,7 @@ func TestAnInvoiceNeverFreezesATotalItsLinesDoNotSumTo(t *testing.T) {
 				}
 			}
 
-			inv, err := invoice.NewService(q, plans).Close(ctx, org.ID, period)
+			inv, err := invoice.NewService(w.pool, plans).Close(ctx, org.ID, period)
 			if err != nil {
 				// Refusing is the correct outcome; nothing must have been frozen.
 				var n int

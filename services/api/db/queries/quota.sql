@@ -46,12 +46,18 @@ SELECT * FROM usage_carry_forward
 WHERE org_id = $1 AND applied_period IS NULL AND kind = 'charge' AND origin_period < $2
 ORDER BY origin_period;
 
--- name: MarkCarryForwardApplied :exec
--- BY ID. A blanket `WHERE applied_period IS NULL` stamped every row unapplied at
--- mark time — including ones created after the read, and ones skipped for a zero
--- amount — marking money billed that never reached a line.
+-- name: ClaimCarryForward :many
+-- CLAIM, not mark. A single atomic UPDATE ... RETURNING: only rows this close
+-- actually took come back, so two concurrent closes cannot both bill the same
+-- carry. The previous `:exec` mark discarded the row count, so that double-bill
+-- was not merely possible but undetectable.
+--
+-- BY ID, because a blanket `WHERE applied_period IS NULL` stamped every row
+-- unapplied at mark time — including ones created after the read, and ones
+-- skipped for a zero amount — marking money billed that never reached a line.
 UPDATE usage_carry_forward SET applied_period = $2
-WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL;
+WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL
+RETURNING *;
 
 -- name: UnappliedCredits :many
 -- Over-billing, surfaced. Not auto-applied.

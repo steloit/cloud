@@ -36,6 +36,57 @@ func (q *Queries) CarriedTotalForOrigin(ctx context.Context, arg CarriedTotalFor
 	return i, err
 }
 
+const claimCarryForward = `-- name: ClaimCarryForward :many
+UPDATE usage_carry_forward SET applied_period = $2
+WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL
+RETURNING id, org_id, meter, origin_period, applied_period, used, rate_cents, kind, rate_unit, detected_at
+`
+
+type ClaimCarryForwardParams struct {
+	OrgID         string
+	AppliedPeriod pgtype.Text
+	Column3       []string
+}
+
+// CLAIM, not mark. A single atomic UPDATE ... RETURNING: only rows this close
+// actually took come back, so two concurrent closes cannot both bill the same
+// carry. The previous `:exec` mark discarded the row count, so that double-bill
+// was not merely possible but undetectable.
+//
+// BY ID, because a blanket `WHERE applied_period IS NULL` stamped every row
+// unapplied at mark time — including ones created after the read, and ones
+// skipped for a zero amount — marking money billed that never reached a line.
+func (q *Queries) ClaimCarryForward(ctx context.Context, arg ClaimCarryForwardParams) ([]UsageCarryForward, error) {
+	rows, err := q.db.Query(ctx, claimCarryForward, arg.OrgID, arg.AppliedPeriod, arg.Column3)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageCarryForward
+	for rows.Next() {
+		var i UsageCarryForward
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Meter,
+			&i.OriginPeriod,
+			&i.AppliedPeriod,
+			&i.Used,
+			&i.RateCents,
+			&i.Kind,
+			&i.RateUnit,
+			&i.DetectedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getQuotaUsage = `-- name: GetQuotaUsage :many
 SELECT org_id, meter, period, used, rate_cents, computed_at FROM quota_usage WHERE org_id = $1 AND period = $2 ORDER BY meter
 `
@@ -70,25 +121,6 @@ func (q *Queries) GetQuotaUsage(ctx context.Context, arg GetQuotaUsageParams) ([
 		return nil, err
 	}
 	return items, nil
-}
-
-const markCarryForwardApplied = `-- name: MarkCarryForwardApplied :exec
-UPDATE usage_carry_forward SET applied_period = $2
-WHERE org_id = $1 AND id = ANY($3::text[]) AND applied_period IS NULL
-`
-
-type MarkCarryForwardAppliedParams struct {
-	OrgID         string
-	AppliedPeriod pgtype.Text
-	Column3       []string
-}
-
-// BY ID. A blanket `WHERE applied_period IS NULL` stamped every row unapplied at
-// mark time — including ones created after the read, and ones skipped for a zero
-// amount — marking money billed that never reached a line.
-func (q *Queries) MarkCarryForwardApplied(ctx context.Context, arg MarkCarryForwardAppliedParams) error {
-	_, err := q.db.Exec(ctx, markCarryForwardApplied, arg.OrgID, arg.AppliedPeriod, arg.Column3)
-	return err
 }
 
 const periodIsClosed = `-- name: PeriodIsClosed :one

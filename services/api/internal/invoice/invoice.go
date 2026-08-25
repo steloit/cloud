@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/steloit/cloud/services/api/internal/metering"
 	"math"
 	"time"
@@ -39,18 +40,19 @@ type Store interface {
 	GetQuotaUsage(ctx context.Context, arg store.GetQuotaUsageParams) ([]store.QuotaUsage, error)
 	UpsertInvoiceForPeriod(ctx context.Context, arg store.UpsertInvoiceForPeriodParams) (store.Invoice, error)
 	UnappliedCarryForward(ctx context.Context, arg store.UnappliedCarryForwardParams) ([]store.UsageCarryForward, error)
-	MarkCarryForwardApplied(ctx context.Context, arg store.MarkCarryForwardAppliedParams) error
+	ClaimCarryForward(ctx context.Context, arg store.ClaimCarryForwardParams) ([]store.UsageCarryForward, error)
 	GetInvoiceForPeriod(ctx context.Context, arg store.GetInvoiceForPeriodParams) (store.Invoice, error)
 }
 
 type Service struct {
 	q     Store
+	db    *pgxpool.Pool // when set, Close runs as ONE transaction (see Close)
 	plans *billing.Table
 	now   func() time.Time
 }
 
-func NewService(q Store, plans *billing.Table) *Service {
-	return &Service{q: q, plans: plans, now: time.Now}
+func NewService(db *pgxpool.Pool, plans *billing.Table) *Service {
+	return &Service{q: store.New(db), db: db, plans: plans, now: time.Now}
 }
 
 func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return s }
@@ -76,14 +78,26 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 			"invoice: period %s has not ended (ends %s) — closing it early would turn the rest of the month into late usage",
 			period, end.Format("2006-01-02"))
 	}
+	// ONE TRANSACTION. Closing a period reads the meter, claims carried usage and
+	// writes the invoice; without a transaction two concurrent closes both read
+	// the same unapplied carries and both bill them, and the loser's claim is a
+	// silent no-op. Money must not depend on the two statements happening to
+	// interleave favourably.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+	q := store.New(tx)
+
 	// The plan fee is sourced from the org's own plan row — a wrong fee would be
 	// frozen permanently, so it is never trusted to a caller argument.
-	org, err := s.q.GetOrg(ctx, orgID)
+	org, err := q.GetOrg(ctx, orgID)
 	if err != nil {
 		return store.Invoice{}, err
 	}
 	plan := org.Plan
-	usage, err := s.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
+	usage, err := q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
 	if err != nil {
 		return store.Invoice{}, err
 	}
@@ -137,20 +151,32 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 	// dated June carrying July's usage is not defensible to a customer or an
 	// auditor. The query also excludes credits — recording an over-bill is an
 	// engineering obligation, refunding it is a commercial decision.
-	carried, err := s.q.UnappliedCarryForward(ctx, store.UnappliedCarryForwardParams{
+	carried, err := q.UnappliedCarryForward(ctx, store.UnappliedCarryForwardParams{
 		OrgID: orgID, OriginPeriod: period,
 	})
 	if err != nil {
 		return store.Invoice{}, err
 	}
-	// Only the ids that actually produce a line may be marked applied. A blanket
-	// mark stamped rows skipped here as billed.
-	var appliedIDs []string
+	// CLAIM BEFORE BILLING. Only the ids that actually produce a line are claimed,
+	// and only the rows the claim RETURNS are billed — so a row another close took
+	// first never reaches a line here. Inside the transaction, so a failure below
+	// releases the claim rather than stranding the money as billed-but-invoiceless.
+	var candidateIDs []string
 	for _, cf := range carried {
-		if cf.RateCents == 0 {
-			continue
+		if cf.RateCents != 0 {
+			candidateIDs = append(candidateIDs, cf.ID)
 		}
-		appliedIDs = append(appliedIDs, cf.ID)
+	}
+	var claimed []store.UsageCarryForward
+	if len(candidateIDs) > 0 {
+		claimed, err = q.ClaimCarryForward(ctx, store.ClaimCarryForwardParams{
+			OrgID: orgID, AppliedPeriod: pgtype.Text{String: period, Valid: true}, Column3: candidateIDs,
+		})
+		if err != nil {
+			return store.Invoice{}, err
+		}
+	}
+	for _, cf := range claimed {
 		lines = append(lines, Line{
 			Description: "late usage from " + cf.OriginPeriod,
 			Cents:       cf.RateCents,
@@ -170,34 +196,25 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 	if err != nil {
 		return store.Invoice{}, err
 	}
-	inv, err := s.q.UpsertInvoiceForPeriod(ctx, store.UpsertInvoiceForPeriodParams{
+	inv, err := q.UpsertInvoiceForPeriod(ctx, store.UpsertInvoiceForPeriodParams{
 		ID: ids.New("inv"), OrgID: orgID, Period: period, Status: "open",
 		TotalCents: total, Lines: linesJSON, Tax: nil,
 		ClosedAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		// already closed for this period — return the frozen invoice unchanged.
-		// The carry-forward rows are deliberately NOT marked applied here: this
-		// close billed nothing, so claiming they were billed would lose them.
+		// Already closed. The transaction is ROLLED BACK by the deferred call, so
+		// any rows this attempt claimed are released — they were not billed, and
+		// claiming them would lose them. Read the frozen invoice outside the tx.
 		return s.q.GetInvoiceForPeriod(ctx, store.GetInvoiceForPeriodParams{OrgID: orgID, Period: period})
 	}
 	if err != nil {
 		return inv, err
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.Invoice{}, fmt.Errorf("invoice: close %s/%s did not commit: %w", orgID, period, err)
+	}
 	// Marked applied only after the invoice that carries them actually exists, so
 	// a failure anywhere above leaves them unapplied and they land on the next
 	// close instead of vanishing.
-	if len(appliedIDs) > 0 {
-		// BY ID, not by "everything unapplied right now". The blanket UPDATE
-		// stamped rows created between the read above and this write — and
-		// `GET /usage?month=<closed>` calls Rollup on the read path, so any
-		// billing.view user could open that window and have their late usage
-		// marked billed without reaching a line.
-		if err := s.q.MarkCarryForwardApplied(ctx, store.MarkCarryForwardAppliedParams{
-			OrgID: orgID, AppliedPeriod: pgtype.Text{String: period, Valid: true}, Column3: appliedIDs,
-		}); err != nil {
-			return inv, fmt.Errorf("invoice: carried usage was billed but not marked applied (it would bill again): %w", err)
-		}
-	}
 	return inv, nil
 }

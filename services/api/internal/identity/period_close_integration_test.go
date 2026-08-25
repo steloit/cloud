@@ -2,6 +2,7 @@ package identity_test
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5/pgtype"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func newCloseWorld(t *testing.T, email, name string) *closeWorld {
 	// accidental dependency a billing suite must not have.
 	clock := func() time.Time { return time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC) }
 	return &closeWorld{world: w, org: org.ID, prj: prj.ID, env: env.ID,
-		em: metering.NewEmitter(q), inv: invoice.NewService(q, plans).WithClock(clock), q: q}
+		em: metering.NewEmitter(q), inv: invoice.NewService(w.pool, plans).WithClock(clock), q: q}
 }
 
 func (c *closeWorld) plant(t *testing.T, svc, edge string, at time.Time) {
@@ -490,5 +491,228 @@ func TestAClosedPeriodCannotGainANewMeterRow(t *testing.T) {
 	// out from under every closed invoice.
 	if _, err := c.pool.Exec(ctx, `truncate quota_usage`); err == nil {
 		t.Fatal("quota_usage was TRUNCATEd — every closed invoice lost its input")
+	}
+}
+
+// THE SIGN MATRIX, stated exhaustively rather than left to whichever branch runs.
+// The first design's guard was `deltaSeconds <= 0 && deltaCents <= 0`, which is
+// only correct when both axes agree — and they need not.
+func TestEverySignCombinationOfARemainderIsHandled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		frozenSec, frozenCents,
+		recompSec, recompCents int64
+		wantRows int
+		wantKind string
+	}{
+		{"zero remainder — no row at all", 3600, 100, 3600, 100, 0, ""},
+		{"positive seconds, positive money — a charge", 3600, 100, 7200, 200, 1, "charge"},
+		{"negative seconds, negative money — a credit", 7200, 200, 3600, 100, 1, "credit"},
+		{"positive seconds, NEGATIVE money — a credit, never a poisoned charge", 3600, 500, 7200, 100, 1, "credit"},
+		{"negative seconds, POSITIVE money — a charge", 7200, 100, 3600, 500, 1, "charge"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCloseWorld(t, "sign-"+strings.ReplaceAll(tc.name[:8], " ", "")+"@example.com", "sign"+tc.name[:4])
+			ctx := context.Background()
+			// Plant the frozen figure directly, then close, then drive carryForward
+			// with a recompute of the given shape. Going through spans cannot
+			// produce every sign combination, and the point here is the arithmetic.
+			if _, err := c.pool.Exec(ctx,
+				`insert into quota_usage (org_id, meter, period, used, rate_cents)
+				 values ($1,'service_span_seconds','2026-07',$2,$3)`, c.org, tc.frozenSec, tc.frozenCents); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.inv.Close(ctx, c.org, "2026-07"); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.em.CarryForwardForTest(ctx, c.org, "2026-07", tc.recompSec, tc.recompCents); err != nil {
+				t.Fatalf("carryForward refused a %s remainder: %v", tc.name, err)
+			}
+			var rows int
+			var kind string
+			_ = c.pool.QueryRow(ctx,
+				`select count(*), coalesce(max(kind),'') from usage_carry_forward where org_id=$1`, c.org).Scan(&rows, &kind)
+			if rows != tc.wantRows {
+				t.Fatalf("%s produced %d ledger rows, want %d", tc.name, rows, tc.wantRows)
+			}
+			if tc.wantRows > 0 && kind != tc.wantKind {
+				t.Fatalf("%s recorded kind %q, want %q", tc.name, kind, tc.wantKind)
+			}
+			// AND every later invoice must still close. A mixed-sign remainder that
+			// wrote a negative CHARGE made Close refuse to total, permanently.
+			for _, p := range []string{"2026-08", "2026-09"} {
+				if _, err := c.inv.Close(ctx, c.org, p); err != nil {
+					t.Fatalf("close(%s) failed after a %s remainder — one ledger row poisoned "+
+						"every future invoice: %v", p, tc.name, err)
+				}
+			}
+		})
+	}
+}
+
+// A CARRY ALREADY TAKEN BY ANOTHER CLOSE MUST NOT BE BILLED AGAIN.
+//
+// This is the property that makes concurrent closes safe, and it is asserted
+// DETERMINISTICALLY rather than by racing goroutines. A first attempt did spawn
+// two closes and count lines — and mutation testing showed it did not
+// discriminate: the goroutines serialised, so the second close read no carries and
+// the mutation survived. A test whose outcome depends on scheduling proves
+// nothing about the mechanism.
+//
+// Here the claim is taken out from under `Close` first, exactly as a concurrent
+// close would, and the invoice must then contain no carried line.
+func TestACarryAlreadyClaimedElsewhereIsNotBilledAgain(t *testing.T) {
+	c := newCloseWorld(t, "close-claimed@example.com", "closeclaimed")
+	ctx := context.Background()
+	t0 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	c.plant(t, "svc_a", "open", t0)
+	c.plant(t, "svc_a", "close", t0.Add(time.Hour))
+	_ = c.em.Rollup(ctx, c.org, "2026-07", t0.AddDate(0, 1, 0))
+	if _, err := c.inv.Close(ctx, c.org, "2026-07"); err != nil {
+		t.Fatal(err)
+	}
+	c.plant(t, "svc_late", "open", t0.Add(2*time.Hour))
+	c.plant(t, "svc_late", "close", t0.Add(5*time.Hour))
+	_ = c.em.Rollup(ctx, c.org, "2026-07", time.Now())
+
+	pending := c.carried(t)
+	if len(pending) != 1 {
+		t.Fatalf("expected one carry to claim, got %d", len(pending))
+	}
+	// Another close takes it first.
+	taken, err := c.q.ClaimCarryForward(ctx, store.ClaimCarryForwardParams{
+		OrgID: c.org, AppliedPeriod: pgtype.Text{String: "2026-08", Valid: true},
+		Column3: []string{pending[0].ID},
+	})
+	if err != nil || len(taken) != 1 {
+		t.Fatalf("the first claim did not take the row: %d rows, %v", len(taken), err)
+	}
+	// A SECOND claim of the same id must return nothing — that atomicity is what
+	// makes two closes safe.
+	again, err := c.q.ClaimCarryForward(ctx, store.ClaimCarryForwardParams{
+		OrgID: c.org, AppliedPeriod: pgtype.Text{String: "2026-09", Valid: true},
+		Column3: []string{pending[0].ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("the same carry was claimed twice (%d rows) — two closes would both bill it", len(again))
+	}
+
+	// And Close must bill only what IT claimed, not what it merely read.
+	sep, err := c.inv.Close(ctx, c.org, "2026-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(sep.Lines), "carry:service_span_seconds:2026-07") {
+		t.Fatalf("an invoice billed a carry it did not claim — Close is billing what it READ, "+
+			"not what it TOOK: %s", sep.Lines)
+	}
+}
+
+// DELETING AN INVOICE MUST NOT UN-FREEZE ITS PERIOD. The freeze is defined by the
+// invoice's existence, so removing the evidence of the boundary removed the
+// boundary — and orphaned every carry-forward referencing it as origin.
+func TestAnInvoiceCannotBeDeletedOrRewritten(t *testing.T) {
+	c := newCloseWorld(t, "close-inv@example.com", "closeinv")
+	ctx := context.Background()
+	t0 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	c.plant(t, "svc_a", "open", t0)
+	c.plant(t, "svc_a", "close", t0.Add(time.Hour))
+	_ = c.em.Rollup(ctx, c.org, "2026-07", t0.AddDate(0, 1, 0))
+	if _, err := c.inv.Close(ctx, c.org, "2026-07"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.pool.Exec(ctx, `delete from invoices where org_id=$1 and period='2026-07'`, c.org); err == nil {
+		t.Fatal("an invoice was DELETED — its period is mutable again and every carry-forward " +
+			"referencing it as origin is orphaned")
+	}
+	if _, err := c.pool.Exec(ctx,
+		`update invoices set total_cents=1 where org_id=$1 and period='2026-07'`, c.org); err == nil {
+		t.Fatal("a closed invoice's total was rewritten")
+	}
+	if _, err := c.pool.Exec(ctx, `truncate invoices`); err == nil {
+		t.Fatal("invoices was TRUNCATEd — every closed period became mutable")
+	}
+	// The lifecycle status is deliberately still mutable.
+	if _, err := c.pool.Exec(ctx,
+		`update invoices set status='paid' where org_id=$1 and period='2026-07'`, c.org); err != nil {
+		t.Fatalf("status must remain changeable (open -> paid/void): %v", err)
+	}
+}
+
+// A METER carryForward CANNOT ACCOUNT FOR MUST BE LOUD, not skipped. Carrying one
+// meter while silently dropping another is the invisible under-billing this task
+// exists to prevent, and `quota_usage.meter` already names four others.
+func TestAnUnaccountableMeterInAClosedPeriodIsRefusedNotSkipped(t *testing.T) {
+	c := newCloseWorld(t, "close-meter@example.com", "closemeter")
+	ctx := context.Background()
+	t0 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	c.plant(t, "svc_a", "open", t0)
+	c.plant(t, "svc_a", "close", t0.Add(time.Hour))
+	_ = c.em.Rollup(ctx, c.org, "2026-07", t0.AddDate(0, 1, 0))
+	// A second meter in the same period, BEFORE close so the freeze allows it.
+	if _, err := c.pool.Exec(ctx,
+		`insert into quota_usage (org_id, meter, period, used, rate_cents)
+		 values ($1,'egress_bytes','2026-07',5,500)`, c.org); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.inv.Close(ctx, c.org, "2026-07"); err != nil {
+		t.Fatal(err)
+	}
+	c.plant(t, "svc_late", "open", t0.Add(2*time.Hour))
+	c.plant(t, "svc_late", "close", t0.Add(3*time.Hour))
+
+	err := c.em.Rollup(ctx, c.org, "2026-07", time.Now())
+	if err == nil {
+		t.Fatal("a closed period holding a meter carryForward cannot account for was rolled up " +
+			"silently — late usage on that meter would vanish")
+	}
+	if !strings.Contains(err.Error(), "cannot account for") {
+		t.Fatalf("refused, but not for the right reason: %v", err)
+	}
+}
+
+// BILLING MUST READ WHAT WAS CLAIMED, NOT WHAT WAS READ.
+//
+// The discriminating case is a carry that is READ but deliberately NOT claimed: a
+// zero-amount row is excluded from the claim (there is nothing to bill), so if
+// Close loops over `carried` instead of `claimed` it emits a phantom zero line and
+// — worse — the row is never claimed, so it stays unapplied forever while having
+// appeared on an invoice.
+//
+// A previous version of this test claimed the row externally first, which made
+// `carried` EMPTY and so could not tell the two loops apart at all. Mutation
+// testing caught that; the zero-amount row is what actually discriminates.
+func TestCloseBillsWhatItClaimedNotWhatItRead(t *testing.T) {
+	c := newCloseWorld(t, "close-claimread@example.com", "closeclaimread")
+	ctx := context.Background()
+
+	// A carry whose money is zero but whose seconds are not — reachable whenever a
+	// span's duration changes at a zero rate.
+	if _, err := c.pool.Exec(ctx,
+		`insert into usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents, kind)
+		 values ('cf_zero', $1, 'service_span_seconds', '2026-06', 3600, 0, 'charge')`, c.org); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := c.inv.Close(ctx, c.org, "2026-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(inv.Lines), "carry:service_span_seconds:2026-06") {
+		t.Fatalf("a zero-amount carry was billed as a line — Close is iterating what it READ "+
+			"rather than what it CLAIMED: %s", inv.Lines)
+	}
+	// And it must remain unapplied: it was never claimed, so nothing may say it was.
+	var applied *string
+	if err := c.pool.QueryRow(ctx,
+		`select applied_period from usage_carry_forward where id='cf_zero'`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != nil {
+		t.Fatalf("an unclaimed carry was marked applied to %q — money marked billed that never "+
+			"reached a line", *applied)
 	}
 }
