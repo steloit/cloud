@@ -3363,7 +3363,7 @@ func TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provisioned := desiredStorageGB(t, before.Desired, before.Shape)
+	provisioned := desiredStorageGB(t, before.Desired)
 	if provisioned != 50 {
 		t.Fatalf("a standard provisioned %d GB, want 50 — the ratchet has nothing to hold", provisioned)
 	}
@@ -3378,7 +3378,7 @@ func TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := desiredStorageGB(t, after.Desired, after.Shape)
+	got := desiredStorageGB(t, after.Desired)
 	if got < provisioned {
 		t.Fatalf("after downgrading to dev, desired carries %d GB against %d provisioned — the "+
 			"cell would render a smaller PVC, the CSI driver would refuse it, and the service "+
@@ -3394,27 +3394,36 @@ func TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState(t *testing.T) {
 	}
 }
 
-// desiredStorageGB reads storage_gb from the DESIRED doc — what the agent
-// receives — falling back to the stored shape only if desired carries no shape,
-// so a doc that silently lost the key is visible rather than papered over.
-func desiredStorageGB(t *testing.T, desired, shape []byte) int {
+// desiredStorageGB reads storage_gb out of the DESIRED doc — the document the
+// cell-agent actually receives — and out of NOTHING ELSE.
+//
+// An earlier version fell back to the stored shape when the desired doc carried
+// no `shape` key at all. That made the test green on the one failure it exists to
+// catch: `desiredDoc` builds the doc with `embed("shape", ...)`, which OMITS the
+// key entirely for an empty payload, and the stored column always carries the
+// retained 50 — so deleting the embed left the test passing while the agent,
+// handed a doc with no shape, would resolve size->dev and render a 10Gi PVC.
+// A helper that reads a second representation when the first is missing is not
+// reading the first.
+func desiredStorageGB(t *testing.T, desired []byte) int {
 	t.Helper()
 	var d struct {
 		Shape map[string]any `json:"shape"`
 	}
-	if err := json.Unmarshal(desired, &d); err == nil && d.Shape != nil {
-		if v, ok := d.Shape["storage_gb"]; ok {
-			return int(v.(float64))
-		}
+	if err := json.Unmarshal(desired, &d); err != nil {
+		t.Fatalf("desired doc is not JSON: %v (%s)", err, desired)
+	}
+	if d.Shape == nil {
+		t.Fatalf("the desired doc carries NO shape — the agent would resolve every key "+
+			"to its default and render the smallest volume: %s", desired)
+	}
+	v, ok := d.Shape["storage_gb"]
+	if !ok {
 		t.Fatalf("the desired doc carries a shape with NO storage_gb: %s", desired)
 	}
-	var sh map[string]any
-	if err := json.Unmarshal(shape, &sh); err != nil {
-		t.Fatalf("stored shape: %v", err)
-	}
-	v, ok := sh["storage_gb"]
+	f, ok := v.(float64)
 	if !ok {
-		t.Fatalf("neither desired nor the stored shape carries storage_gb: %s / %s", desired, shape)
+		t.Fatalf("desired storage_gb is %T (%v), not a number: %s", v, v, desired)
 	}
-	return int(v.(float64))
+	return int(f)
 }

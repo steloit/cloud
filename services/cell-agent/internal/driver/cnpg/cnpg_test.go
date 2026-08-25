@@ -615,6 +615,17 @@ func TestASizeDowngradeRendersTheRetainedVolume(t *testing.T) {
 		}
 		before := renderGB(map[string]any{"size": size, "storage_gb": includedGB})
 		after := renderGB(map[string]any{"size": "dev", "storage_gb": includedGB})
+		// THE CONTROL, per size rather than once at the end. Re-deriving from
+		// the smaller requested size IS the shrink this test exists to catch; if
+		// for some catalog size it is not smaller (an included_gb at or below
+		// minVolumeGB collapses both to 10), the two assertions below are
+		// vacuous for that size and must say so rather than pass quietly.
+		if rederived := renderGB(map[string]any{"size": "dev", "storage_gb": 0}); rederived >= before {
+			t.Errorf("re-deriving from `dev` yields %dGi against %s's retained %dGi — for THIS size "+
+				"the shrink is not expressible, so the assertions below prove nothing about it",
+				rederived, size, before)
+			continue
+		}
 		if after < before {
 			t.Errorf("%s(%dGi) downgraded to dev renders %dGi — a PVC cannot shrink, so the CSI "+
 				"driver refuses this and the service is stranded outstanding forever",
@@ -627,41 +638,10 @@ func TestASizeDowngradeRendersTheRetainedVolume(t *testing.T) {
 		}
 	}
 
-	// The negative control: re-deriving from the smaller requested size IS a
-	// shrink. If this ever stops being smaller, the assertions above prove
-	// nothing, because retained and re-derived would be the same number.
-	rederived := renderGB(map[string]any{"size": "dev", "storage_gb": 0})
-	retained := renderGB(map[string]any{"size": "standard", "storage_gb": 50})
-	if rederived >= retained {
-		t.Fatalf("re-deriving from `dev` yields %dGi and the retained standard is %dGi — the "+
-			"shrink this test exists to catch is no longer expressible, so it proves nothing",
-			rederived, retained)
-	}
 }
 
-// RECONCILIATION CONVERGES: the same ratcheted shape renders the same volume
-// every time, so a repeated converge never re-attempts an impossible downgrade.
-func TestAReconciledDowngradeConvergesRatherThanRetryingAShrink(t *testing.T) {
-	shape := map[string]any{"size": "dev", "storage_gb": 50} // post-downgrade, storage retained
-	spec := devSpec()
-	spec.Shape = shape
-	var first int
-	for i := 0; i < 5; i++ {
-		ms, err := New().Render(spec)
-		if err != nil {
-			t.Fatalf("converge %d: %v", i, err)
-		}
-		got := renderedStorageGB(t, ms[0].YAML)
-		if i == 0 {
-			first = got
-			continue
-		}
-		if got != first {
-			t.Fatalf("converge %d rendered %dGi after %dGi — the driver is not deterministic, so "+
-				"each reconcile asks the CSI driver for a different size", i, got, first)
-		}
-	}
-	if first != 50 {
-		t.Fatalf("the converged size is %dGi, want the retained 50Gi", first)
-	}
-}
+// The ruling's convergence clause is NOT tested here. `Driver.Render` is a pure
+// function of its Spec — five renders of one shape are five identical calls and
+// prove only determinism. The real property is about successive CONVERGES, and
+// it is measured one layer up, against what reaches the API server:
+// render.TestSuccessiveConvergesNeverAskForASmallerVolume.
