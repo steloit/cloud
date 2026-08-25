@@ -577,3 +577,84 @@ func TestABranchWithNoSourceShapeIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A SIZE DOWNGRADE RENDERS THE RETAINED VOLUME, NEVER THE SMALLER SIZE'S DEFAULT.
+//
+// STORAGE IS A RATCHET (founder, 2026-08-25): a PostgreSQL volume may grow and
+// must never physically shrink, so a downgrade must not attempt to shrink the
+// existing volume and the effective storage stays at the provisioned capacity.
+//
+// The control plane enforces that upstream — the PATCH merge carries the stored
+// `storage_gb` forward, `estimates.Resolve` only ever RAISES a value below the
+// size's included_gb, and an explicit reduction is refused. This is the DRIVER's
+// half of the same rule: given the ratcheted shape it must render the retained
+// size, because rendering the smaller size's default is precisely the shrink the
+// CSI driver would reject — leaving the row outstanding forever with nothing
+// written back.
+//
+// Measured: `{size: standard, storage_gb: 50}` -> 50Gi; after a downgrade
+// `{size: dev, storage_gb: 50}` -> 50Gi; and `{size: dev, storage_gb: 0}` — what
+// re-deriving from the smaller requested size would produce — is 10Gi, the
+// shrink. The third case is why the second one is asserted.
+func TestASizeDowngradeRendersTheRetainedVolume(t *testing.T) {
+	renderGB := func(shape map[string]any) int {
+		t.Helper()
+		spec := devSpec()
+		spec.Shape = shape
+		ms, err := New().Render(spec)
+		if err != nil {
+			t.Fatalf("render %v: %v", shape, err)
+		}
+		return renderedStorageGB(t, ms[0].YAML)
+	}
+
+	// Every catalog size, downgraded to `dev` while holding that size's storage.
+	for size, includedGB := range catalogSizes(t) {
+		if size == "dev" {
+			continue
+		}
+		// TWO storage values per size: the size's own floor, and one ABOVE it.
+		// QA finding — the sweep used only includedGB, where "carry the
+		// customer's number" and "re-derive from the catalog floor" are the same
+		// number, so it could not tell them apart. The above-floor value is the
+		// one that bites: it is the only input for which storageForShape's
+		// storage_gb term does any work on a downgrade.
+		for _, gb := range []int{includedGB, includedGB*4 + 40} {
+			b := renderGB(map[string]any{"size": size, "storage_gb": gb})
+			a := renderGB(map[string]any{"size": "dev", "storage_gb": gb})
+			if a != b {
+				t.Errorf("%s(%dGi) -> dev renders %dGi, want the retained %dGi", size, b, a, b)
+			}
+		}
+		before := renderGB(map[string]any{"size": size, "storage_gb": includedGB})
+		after := renderGB(map[string]any{"size": "dev", "storage_gb": includedGB})
+		// THE CONTROL, per size rather than once at the end. Re-deriving from
+		// the smaller requested size IS the shrink this test exists to catch; if
+		// for some catalog size it is not smaller (an included_gb at or below
+		// minVolumeGB collapses both to 10), the two assertions below are
+		// vacuous for that size and must say so rather than pass quietly.
+		if rederived := renderGB(map[string]any{"size": "dev", "storage_gb": 0}); rederived >= before {
+			t.Errorf("re-deriving from `dev` yields %dGi against %s's retained %dGi — for THIS size "+
+				"the shrink is not expressible, so the assertions below prove nothing about it",
+				rederived, size, before)
+			continue
+		}
+		if after < before {
+			t.Errorf("%s(%dGi) downgraded to dev renders %dGi — a PVC cannot shrink, so the CSI "+
+				"driver refuses this and the service is stranded outstanding forever",
+				size, before, after)
+		}
+		if after != before {
+			t.Errorf("%s -> dev renders %dGi, want the retained %dGi: the effective storage is "+
+				"the already-provisioned capacity, and the price the customer is charged is "+
+				"derived from exactly that", size, after, before)
+		}
+	}
+
+}
+
+// The ruling's convergence clause is NOT tested here. `Driver.Render` is a pure
+// function of its Spec — five renders of one shape are five identical calls and
+// prove only determinism. The real property is about successive CONVERGES, and
+// it is measured one layer up, against what reaches the API server:
+// render.TestSuccessiveConvergesNeverAskForASmallerVolume.
