@@ -47,6 +47,71 @@ func (q *Queries) GetQuotaUsage(ctx context.Context, arg GetQuotaUsageParams) ([
 	return items, nil
 }
 
+const markCarryForwardApplied = `-- name: MarkCarryForwardApplied :exec
+UPDATE usage_carry_forward SET applied_period = $2
+WHERE org_id = $1 AND applied_period IS NULL
+`
+
+type MarkCarryForwardAppliedParams struct {
+	OrgID         string
+	AppliedPeriod pgtype.Text
+}
+
+func (q *Queries) MarkCarryForwardApplied(ctx context.Context, arg MarkCarryForwardAppliedParams) error {
+	_, err := q.db.Exec(ctx, markCarryForwardApplied, arg.OrgID, arg.AppliedPeriod)
+	return err
+}
+
+const periodIsClosed = `-- name: PeriodIsClosed :one
+SELECT EXISTS (SELECT 1 FROM invoices WHERE org_id = $1 AND period = $2)
+`
+
+type PeriodIsClosedParams struct {
+	OrgID  string
+	Period string
+}
+
+// O39: is this period's accounting closed? The rollup consults this so the READ
+// path (GET /usage of a past month) keeps working instead of hitting the trigger
+// and 500ing. The trigger is still the enforcement — this is the polite door.
+func (q *Queries) PeriodIsClosed(ctx context.Context, arg PeriodIsClosedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, periodIsClosed, arg.OrgID, arg.Period)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const recordCarryForward = `-- name: RecordCarryForward :exec
+INSERT INTO usage_carry_forward (id, org_id, meter, origin_period, used, rate_cents)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (org_id, meter, origin_period)
+DO UPDATE SET used = EXCLUDED.used, rate_cents = EXCLUDED.rate_cents, detected_at = now()
+WHERE usage_carry_forward.applied_period IS NULL
+`
+
+type RecordCarryForwardParams struct {
+	ID           string
+	OrgID        string
+	Meter        string
+	OriginPeriod string
+	Used         int64
+	RateCents    int64
+}
+
+// Idempotent on (org, meter, origin_period): the amount is a DELTA against a
+// frozen number, so re-detecting the same shortfall must not charge twice.
+func (q *Queries) RecordCarryForward(ctx context.Context, arg RecordCarryForwardParams) error {
+	_, err := q.db.Exec(ctx, recordCarryForward,
+		arg.ID,
+		arg.OrgID,
+		arg.Meter,
+		arg.OriginPeriod,
+		arg.Used,
+		arg.RateCents,
+	)
+	return err
+}
+
 const spanEdgesForOrg = `-- name: SpanEdgesForOrg :many
 SELECT service_id, edge, product, rate_cents, at FROM usage_events
 WHERE org_id = $1 AND meter = 'service_span' AND at < $2
@@ -81,6 +146,39 @@ func (q *Queries) SpanEdgesForOrg(ctx context.Context, arg SpanEdgesForOrgParams
 			&i.Product,
 			&i.RateCents,
 			&i.At,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unappliedCarryForward = `-- name: UnappliedCarryForward :many
+SELECT id, org_id, meter, origin_period, applied_period, used, rate_cents, detected_at FROM usage_carry_forward WHERE org_id = $1 AND applied_period IS NULL ORDER BY origin_period
+`
+
+func (q *Queries) UnappliedCarryForward(ctx context.Context, orgID string) ([]UsageCarryForward, error) {
+	rows, err := q.db.Query(ctx, unappliedCarryForward, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageCarryForward
+	for rows.Next() {
+		var i UsageCarryForward
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Meter,
+			&i.OriginPeriod,
+			&i.AppliedPeriod,
+			&i.Used,
+			&i.RateCents,
+			&i.DetectedAt,
 		); err != nil {
 			return nil, err
 		}

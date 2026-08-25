@@ -9,6 +9,7 @@ package metering
 import (
 	"context"
 	"fmt"
+	"github.com/steloit/cloud/services/api/internal/platform/ids"
 	"log/slog"
 	"time"
 
@@ -141,9 +142,59 @@ func (e *Emitter) Rollup(ctx context.Context, orgID, period string, now time.Tim
 			"org", orgID, "period", period, "seconds", totalSeconds, "accrual", weighted.String(), "err", err)
 		return fmt.Errorf("metering: rollup %s/%s: %w", orgID, period, err)
 	}
+	// O39: A CLOSED PERIOD IS FROZEN. Recomputing one is not an error — GET
+	// /orgs/{org}/usage takes a caller-supplied month and calls Rollup on the READ
+	// path, so erroring here would make viewing any past month a permanent 500
+	// with a remediation that cannot succeed. The application asks politely; the
+	// database refuses regardless (quota_usage_no_write_after_close), so a writer
+	// that forgets to ask cannot bypass it.
+	closed, err := e.q.PeriodIsClosed(ctx, store.PeriodIsClosedParams{OrgID: orgID, Period: period})
+	if err != nil {
+		return err
+	}
+	if closed {
+		return e.carryForward(ctx, orgID, period, totalSeconds, weightedCents)
+	}
 	return e.q.UpsertQuotaUsage(ctx, store.UpsertQuotaUsageParams{
 		OrgID: orgID, Meter: "service_span_seconds", Period: period,
 		Used: totalSeconds, RateCents: weightedCents,
+	})
+}
+
+// carryForward records usage that belongs to a period whose invoice is already
+// closed, as a DELTA against the frozen figure.
+//
+// The market offers three answers and they are not equivalent. Stripe drops past
+// its grace window — and documents that under a mid-cycle price change the late
+// usage lands on NEITHER the current nor a later invoice, i.e. it is silently
+// lost. Metronome voids and regenerates. Lago carries forward for recurring
+// meters.
+//
+// Carry-forward is the only one that neither loses money silently nor changes a
+// number the customer has already been shown: dropping is invisible under-billing,
+// and restating destroys what "closed" means. The delta is recomputed from the
+// frozen row every time, so re-detecting the same shortfall is idempotent by
+// construction rather than by a guard.
+func (e *Emitter) carryForward(ctx context.Context, orgID, period string, totalSeconds, weightedCents int64) error {
+	frozen, err := e.q.GetQuotaUsage(ctx, store.GetQuotaUsageParams{OrgID: orgID, Period: period})
+	if err != nil {
+		return err
+	}
+	var billedSeconds, billedCents int64
+	for _, u := range frozen {
+		if u.Meter == "service_span_seconds" {
+			billedSeconds, billedCents = u.Used, u.RateCents
+		}
+	}
+	deltaSeconds, deltaCents := totalSeconds-billedSeconds, weightedCents-billedCents
+	if deltaSeconds <= 0 && deltaCents <= 0 {
+		return nil // nothing late; the recompute agrees with the frozen figure
+	}
+	slog.WarnContext(ctx, "late usage for a CLOSED period — carried forward, not dropped and not restated (O39)",
+		"org", orgID, "origin_period", period, "delta_seconds", deltaSeconds, "delta_cents", deltaCents)
+	return e.q.RecordCarryForward(ctx, store.RecordCarryForwardParams{
+		ID: ids.New("cf"), OrgID: orgID, Meter: "service_span_seconds",
+		OriginPeriod: period, Used: deltaSeconds, RateCents: deltaCents,
 	})
 }
 

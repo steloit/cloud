@@ -37,6 +37,8 @@ type Store interface {
 	GetOrg(ctx context.Context, id string) (store.Org, error)
 	GetQuotaUsage(ctx context.Context, arg store.GetQuotaUsageParams) ([]store.QuotaUsage, error)
 	UpsertInvoiceForPeriod(ctx context.Context, arg store.UpsertInvoiceForPeriodParams) (store.Invoice, error)
+	UnappliedCarryForward(ctx context.Context, orgID string) ([]store.UsageCarryForward, error)
+	MarkCarryForwardApplied(ctx context.Context, arg store.MarkCarryForwardAppliedParams) error
 	GetInvoiceForPeriod(ctx context.Context, arg store.GetInvoiceForPeriodParams) (store.Invoice, error)
 }
 
@@ -109,6 +111,33 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 		total += u.RateCents
 	}
 
+	// O39: LATE USAGE FROM A CLOSED PERIOD IS BILLED HERE, or carrying it forward
+	// would have been a more elaborate way of losing it. Each carried delta is its
+	// own line naming the period it belongs to, so the customer sees "late usage
+	// from 2026-07" on their August invoice rather than an unexplained increase.
+	carried, err := s.q.UnappliedCarryForward(ctx, orgID)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	for _, cf := range carried {
+		if cf.RateCents == 0 {
+			continue
+		}
+		lines = append(lines, Line{
+			Description: "late usage from " + cf.OriginPeriod,
+			Cents:       cf.RateCents,
+			UsageRef:    "carry:" + cf.Meter + ":" + cf.OriginPeriod,
+		})
+		// Same rule as the meter loop above: refuse to close rather than write a
+		// total that does not equal Σ(lines).
+		if cf.RateCents < 0 || total > math.MaxInt64-cf.RateCents {
+			return store.Invoice{}, fmt.Errorf(
+				"invoice: %s/%s cannot be totalled: carried usage from %s contributes %d to a running total of %d",
+				orgID, period, cf.OriginPeriod, cf.RateCents, total)
+		}
+		total += cf.RateCents
+	}
+
 	linesJSON, err := json.Marshal(lines)
 	if err != nil {
 		return store.Invoice{}, err
@@ -120,7 +149,22 @@ func (s *Service) Close(ctx context.Context, orgID, period string) (store.Invoic
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// already closed for this period — return the frozen invoice unchanged.
+		// The carry-forward rows are deliberately NOT marked applied here: this
+		// close billed nothing, so claiming they were billed would lose them.
 		return s.q.GetInvoiceForPeriod(ctx, store.GetInvoiceForPeriodParams{OrgID: orgID, Period: period})
 	}
-	return inv, err
+	if err != nil {
+		return inv, err
+	}
+	// Marked applied only after the invoice that carries them actually exists, so
+	// a failure anywhere above leaves them unapplied and they land on the next
+	// close instead of vanishing.
+	if len(carried) > 0 {
+		if err := s.q.MarkCarryForwardApplied(ctx, store.MarkCarryForwardAppliedParams{
+			OrgID: orgID, AppliedPeriod: pgtype.Text{String: period, Valid: true},
+		}); err != nil {
+			return inv, fmt.Errorf("invoice: carried usage was billed but not marked applied (it would bill again): %w", err)
+		}
+	}
+	return inv, nil
 }

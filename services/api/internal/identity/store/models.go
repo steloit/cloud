@@ -441,6 +441,17 @@ type Token struct {
 	Permissions []string
 }
 
+type UsageCarryForward struct {
+	ID            string
+	OrgID         string
+	Meter         string
+	OriginPeriod  string
+	AppliedPeriod pgtype.Text
+	Used          int64
+	RateCents     int64
+	DetectedAt    pgtype.Timestamptz
+}
+
 type UsageEvent struct {
 	ID        string
 	OrgID     string

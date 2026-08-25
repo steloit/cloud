@@ -117,9 +117,18 @@ func TestInvoiceGenerator(t *testing.T) {
 		t.Fatalf("monthly close not idempotent: %d invoices for the period", count)
 	}
 
-	// --- the freeze is real: usage changing after close does NOT re-price -----
-	if _, err := w.pool.Exec(ctx, "update quota_usage set rate_cents=999999 where org_id=$1 and meter='egress_bytes'", org.ID); err != nil {
-		t.Fatal(err)
+	// --- the freeze is real, and O39 made it STRONGER than this test assumed ---
+	//
+	// This step used to mutate quota_usage after close and then assert the invoice
+	// did not follow. That mutation is now REFUSED outright by
+	// quota_usage_no_write_after_close: a closed period cannot change at all, so
+	// the invoice cannot diverge from the rollup it was computed from. Asserting
+	// the refusal is the stronger claim, and the old arrangement can no longer be
+	// set up — which is the point.
+	if _, err := w.pool.Exec(ctx, "update quota_usage set rate_cents=999999 where org_id=$1 and meter='egress_bytes'", org.ID); err == nil {
+		t.Fatal("quota_usage for a CLOSED period accepted an UPDATE — the freeze is caller discipline again")
+	} else if !strings.Contains(err.Error(), "is frozen") {
+		t.Fatalf("refused, but not by the close guard: %v", err)
 	}
 	inv3, err := gen.Close(ctx, org.ID, period)
 	if err != nil {
