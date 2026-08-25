@@ -613,6 +613,19 @@ func TestASizeDowngradeRendersTheRetainedVolume(t *testing.T) {
 		if size == "dev" {
 			continue
 		}
+		// TWO storage values per size: the size's own floor, and one ABOVE it.
+		// QA finding — the sweep used only includedGB, where "carry the
+		// customer's number" and "re-derive from the catalog floor" are the same
+		// number, so it could not tell them apart. The above-floor value is the
+		// one that bites: it is the only input for which storageForShape's
+		// storage_gb term does any work on a downgrade.
+		for _, gb := range []int{includedGB, includedGB*4 + 40} {
+			b := renderGB(map[string]any{"size": size, "storage_gb": gb})
+			a := renderGB(map[string]any{"size": "dev", "storage_gb": gb})
+			if a != b {
+				t.Errorf("%s(%dGi) -> dev renders %dGi, want the retained %dGi", size, b, a, b)
+			}
+		}
 		before := renderGB(map[string]any{"size": size, "storage_gb": includedGB})
 		after := renderGB(map[string]any{"size": "dev", "storage_gb": includedGB})
 		// THE CONTROL, per size rather than once at the end. Re-deriving from

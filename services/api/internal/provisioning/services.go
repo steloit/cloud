@@ -515,6 +515,13 @@ func refuseStorageShrink(storedShape []byte, merged map[string]any) error {
 	}
 	prior, hadPrior := shapeGB(stored["storage_gb"])
 	next, hasNext := shapeGB(merged["storage_gb"])
+	// !hadPrior is a DELIBERATE pass, not an oversight — and it is now nearly
+	// unreachable. UpdateService resolves the stored shape before merging, so any
+	// postgres row whose size is in the catalog carries a number here. What is
+	// left is a shape the catalog cannot resolve, which `storageForShape` refuses
+	// outright: no volume was ever provisioned, so there is nothing to shrink.
+	// Before that change this arm fired on every pre-US-3.7 verbatim-persist row
+	// and silently accepted a downgrade to zero.
 	if !hadPrior || !hasNext || next >= prior {
 		return nil
 	}
@@ -525,9 +532,17 @@ func refuseStorageShrink(storedShape []byte, merged map[string]any) error {
 	// name a next action, and the next action is not a retry.
 	p := problem.ValidationFailed([]problem.FieldError{{
 		Field: "shape.storage_gb",
-		Detail: fmt.Sprintf("cannot be reduced from %d to %d — a volume cannot shrink. "+
-			"Kubernetes supports expansion only, so the %d GB is still provisioned and still "+
-			"billed.", prior, next, prior),
+		// The wording is deliberate about WHICH claim is physical. QA found the
+		// previous text ("a volume cannot shrink … so the 8 GB is still
+		// provisioned") asserting a physical fact that is false below the
+		// driver's 10Gi minimum volume: canon ships svc_jobs at storage_gb 4, and
+		// 4 and 3 render the same 10Gi PVC, so nothing shrinks there. The REASON
+		// the refusal is right at that size is billing, not geometry — the
+		// recorded figure is what the invoice charges. State the rule, then the
+		// mechanism behind it, and claim only what is true of both.
+		Detail: fmt.Sprintf("cannot be reduced from %d to %d. Recorded storage only grows, "+
+			"because the volume behind it cannot shrink — Kubernetes supports expansion only. "+
+			"The %d GB stays provisioned and stays billed.", prior, next, prior),
 	}})
 	p.Remediation = "Create a new service at the smaller size and migrate the data; " +
 		"retrying this request cannot succeed."
@@ -1109,6 +1124,34 @@ func (s *Service) UpdateService(ctx context.Context, svc store.Service, orgID, a
 		if current == nil {
 			current = map[string]any{}
 		}
+		// RESOLVE THE STORED SHAPE BEFORE MERGING — this is what makes the
+		// storage ratchet structural rather than a property of how the row
+		// happened to be written.
+		//
+		// "Absent keys survive" only retains what is THERE. A row stored as
+		// `{"size":"standard"}` with no storage_gb — the verbatim-persist shape
+		// that predates US-3.7, and the one the ratchet migration cannot reach
+		// because its WHERE requires a catalogued `size` — loses the 50 GB it
+		// actually has the moment a PATCH changes the size: the merge yields
+		// `{"size":"dev"}`, which resolves to 0, and refuseStorageShrink's
+		// no-prior-value arm lets it through. Measured on that row: ACCEPTED,
+		// priced 1900 against the ruled 4400, desired 0, and the cell renders a
+		// 10Gi PVC against a 50Gi volume the CSI driver will refuse.
+		//
+		// Resolving here recovers the floor from the catalog, so the merge has a
+		// number to preserve and every downstream comparison sees the same
+		// value. It is a no-op for a row create already resolved, which is all of
+		// them since US-3.7 — the point is that the guard no longer DEPENDS on
+		// that being true of history.
+		if resolvedCurrent, err := estimates.Resolve(estimates.ShapeInput{
+			Product: svc.Product, Intent: svc.Intent.String, Name: svc.Name, Shape: current,
+		}); err == nil {
+			current = resolvedCurrent
+		}
+		// A stored shape that does NOT resolve is left raw on purpose: it names a
+		// size the catalog does not have, so `cnpg.storageForShape` refuses it and
+		// no volume was ever provisioned for it. There is nothing to ratchet, and
+		// the Resolve of the MERGED shape below is what reports the real problem.
 		for k, v := range shape {
 			current[k] = v
 		}
