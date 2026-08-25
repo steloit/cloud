@@ -367,10 +367,17 @@ func asMap(v any) map[string]any {
 // failover. Microcopy in `docs/product/00-sources/` is verbatim-binding, so a
 // primary and a single standby is what was sold and is what must exist.
 //
-// Three would be CNPG's more common production shape and would survive losing a
-// node while keeping a standby, but it is not what this product's own frame
-// promises, and inventing a larger number here would silently change both the
-// price justification and the environment's quota arithmetic.
+// TWO REALLY DOES FAIL OVER — checked, not assumed. CNPG coordinates promotion
+// through the Kubernetes API server and a per-cluster lease, NOT through a quorum
+// of Postgres instances, so a primary + one standby promotes automatically. (A
+// Postgres quorum reading would have made 3 the minimum, which is why this was
+// worth confirming rather than reasoning about.) Quorum-based synchronous
+// replication is a separate, opt-in feature via minSyncReplicas/maxSyncReplicas.
+//
+// CNPG *recommends* 3 for production — the third instance is what leaves you a
+// standby after a failover or during maintenance. That is a stronger promise than
+// this product sells today; upgrading to it is a pricing decision (the frame
+// prices one standby), not an implementation detail to change here.
 const haInstances = 2
 
 // instancesOf resolves the replica count from the desired doc.
