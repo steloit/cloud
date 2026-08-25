@@ -94,6 +94,40 @@ for (const [api, types] of [...used].sort()) {
   }
 }
 
+// T1.9/T1.7 keep the enumeration in docs/founder-config.md §2 as well (T1.7 option
+// (a): "fifteen in local.services, fifteen in the founder-config row"). Two
+// representations of one list is exactly how this gap arrived — they agreed at 14
+// and were both short one — so agreement is asserted here rather than assumed.
+const FOUNDER_CONFIG = fileURLToPath(new URL("../../docs/founder-config.md", import.meta.url));
+const fcRow = readFileSync(FOUNDER_CONFIG, "utf8")
+  .split("\n")
+  .find((l) => l.startsWith("| APIs enabled |"));
+if (!fcRow) {
+  errors.push("docs/founder-config.md has no `| APIs enabled |` row — the second representation vanished");
+} else {
+  // The row writes short names ("compute", "iam(+creds)"); local.services writes
+  // FQDNs. Compare on the short name, and expand the one shorthand the row uses.
+  const rowNames = new Set(
+    fcRow
+      .replace(/\*\*/g, "")
+      .split("|")[2]
+      .split(/[,—]/)
+      .map((x) => x.trim().replace(/`/g, ""))
+      .flatMap((x) => (x === "iam(+creds)" ? ["iam", "iamcredentials"] : [x]))
+      .filter((x) => /^[a-z][a-z0-9]*$/.test(x))
+  );
+  const declaredShort = new Set([...declared].map((a) => a.replace(".googleapis.com", "")));
+  const onlyInCode = [...declaredShort].filter((x) => !rowNames.has(x)).sort();
+  const onlyInDoc = [...rowNames].filter((x) => !declaredShort.has(x)).sort();
+  if (onlyInCode.length || onlyInDoc.length) {
+    errors.push(
+      `docs/founder-config.md's APIs row and project-base's local.services disagree — ` +
+        `only in code: [${onlyInCode.join(", ")}]; only in the doc: [${onlyInDoc.join(", ")}]. ` +
+        `They agreed at 14 once and were both wrong; agreeing is necessary, not sufficient.`
+    );
+  }
+}
+
 if (errors.length) {
   console.error("required-apis: FAIL");
   for (const e of errors) console.error(`  ${e}`);
