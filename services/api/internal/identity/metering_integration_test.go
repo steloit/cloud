@@ -10,6 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steloit/cloud/services/api/internal/identity/store"
+
+	"github.com/steloit/cloud/services/api/internal/metering"
 )
 
 func TestMeteringSpans(t *testing.T) {
@@ -123,5 +127,114 @@ func TestMeteringSpans(t *testing.T) {
 	if _, err := w.pool.Exec(ctx, "delete from usage_events where org_id=$1", org.Id); err == nil ||
 		!strings.Contains(err.Error(), "append-only") {
 		t.Fatalf("usage_events DELETE did not raise: %v", err)
+	}
+}
+
+// O38: A METERING EDGE IS IDEMPOTENT, AND THE OVER-DEDUPE CASE MATTERS MORE.
+//
+// The point of the key is not mainly that a retry double-bills today —
+// MustEmitSpan does not retry, it logs. It is that BECAUSE retrying was unsafe we
+// did not retry, so a failed emit was a silent billing GAP whose recovery path
+// was a human reading a log line. Once a replay is safe, the emit can be retried
+// and the gap closes.
+//
+// Both directions are asserted, and the second is the one that would hurt more:
+// a key that dedupes too EAGERLY collapses two genuine transitions into one and
+// silently drops revenue, which is invisible in a way double-billing is not.
+func TestAMeteringEdgeIsIdempotentWithoutCollapsingRealTransitions(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	q := store.New(w.pool)
+
+	tags := metering.Tags{OrgID: "org_x", ProjectID: "prj_x", EnvID: "env_x", ServiceID: "svc_x"}
+	em := metering.NewEmitter(q)
+	count := func() int {
+		t.Helper()
+		var n int
+		if err := w.pool.QueryRow(ctx,
+			`select count(*) from usage_events where service_id = $1`, tags.ServiceID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	at := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	key := metering.SpanKeyForStatus(tags.ServiceID, "open", at)
+
+	dup, err := em.EmitSpan(ctx, tags, key, "open", "postgres", 2400)
+	if err != nil || dup {
+		t.Fatalf("first emit: dup=%v err=%v — the first write must insert", dup, err)
+	}
+	// The retry. It must SUCCEED, or the retry path becomes error handling and
+	// nobody writes it.
+	dup, err = em.EmitSpan(ctx, tags, key, "open", "postgres", 2400)
+	if err != nil {
+		t.Fatalf("retrying the same edge must not error, or retry is unusable: %v", err)
+	}
+	if !dup {
+		t.Fatal("the retry was not reported as a duplicate")
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("the same edge emitted twice wrote %d rows, want 1 — this bills twice", got)
+	}
+
+	// THE OVER-DEDUPE CASE. A service that cycles ready -> suspended -> ready
+	// produces a SECOND open edge with the same (service, edge, from->to). Only
+	// status_changed_at separates them, which is exactly why the column exists.
+	later := at.Add(2 * time.Hour)
+	if _, err := em.EmitSpan(ctx, tags, metering.SpanKeyForStatus(tags.ServiceID, "open", later),
+		"open", "postgres", 2400); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("a genuinely later transition wrote %d rows, want 2 — the key is collapsing real "+
+			"transitions, which drops revenue silently and is worse than billing twice", got)
+	}
+
+	// A close at the same instant is a different edge, not a duplicate.
+	if _, err := em.EmitSpan(ctx, tags, metering.SpanKeyForStatus(tags.ServiceID, "close", later),
+		"close", "postgres", 2400); err != nil {
+		t.Fatal(err)
+	}
+	if got := count(); got != 3 {
+		t.Fatalf("open and close at the same instant collapsed: %d rows, want 3", got)
+	}
+
+	// A reprice pair shares a generation and is separated by the edge.
+	for _, edge := range []string{"close", "open"} {
+		if _, err := em.EmitSpan(ctx, tags, metering.SpanKeyForReprice(tags.ServiceID, edge, 7),
+			edge, "postgres", 2400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := count(); got != 5 {
+		t.Fatalf("the reprice pair wrote %d rows, want 5 total", got)
+	}
+	// …and replaying that whole pair is a no-op.
+	for _, edge := range []string{"close", "open"} {
+		if _, err := em.EmitSpan(ctx, tags, metering.SpanKeyForReprice(tags.ServiceID, edge, 7),
+			edge, "postgres", 2400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := count(); got != 5 {
+		t.Fatalf("replaying the reprice pair wrote %d rows, want 5 — a replay must be safe", got)
+	}
+}
+
+// A random key satisfies the column and defeats the mechanism, which is worse
+// than refusing because it looks like it worked.
+func TestAnEmitWithoutADedupeKeyIsRefused(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	em := metering.NewEmitter(store.New(w.pool))
+	_, err := em.EmitSpan(context.Background(), metering.Tags{
+		OrgID: "o", ProjectID: "p", EnvID: "e", ServiceID: "s",
+	}, "", "open", "postgres", 100)
+	if err == nil {
+		t.Fatal("an emit with no dedupe key was accepted — a caller that forgets one would " +
+			"silently lose idempotency for that edge forever")
+	}
+	if !strings.Contains(err.Error(), "never at random") {
+		t.Fatalf("the refusal does not say what to do instead: %v", err)
 	}
 }

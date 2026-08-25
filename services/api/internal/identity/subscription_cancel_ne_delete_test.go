@@ -220,8 +220,8 @@ func TestCancelledOrgStillBilledAtRollup(t *testing.T) {
 	period := metering.Period(t0)
 	// an OPEN span (running service), planted at t0.
 	if _, err := w.pool.Exec(ctx,
-		`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-		 values ('use_bc', $1, $2, $3, 'svc_bc', 'service_span', 'open', 'postgres', 2400, $4)`,
+		`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+		 values ('use_bc', 'seed_bc', $1, $2, $3, 'svc_bc', 'service_span', 'open', 'postgres', 2400, $4)`,
 		org.ID, prj.ID, env.ID, t0); err != nil {
 		t.Fatal(err)
 	}

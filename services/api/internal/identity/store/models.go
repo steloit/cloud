@@ -379,6 +379,7 @@ type Service struct {
 	Generation           int64
 	ObservedGeneration   int64
 	LastReconciledAt     pgtype.Timestamptz
+	StatusChangedAt      pgtype.Timestamptz
 }
 
 type Session struct {
@@ -453,6 +454,7 @@ type UsageEvent struct {
 	Quantity  int64
 	At        pgtype.Timestamptz
 	Detail    []byte
+	DedupeKey string
 }
 
 type User struct {

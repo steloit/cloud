@@ -18,7 +18,7 @@ UPDATE services SET
     desired = $3,
     generation = generation + 1
 WHERE id = $1 AND generation = $4 AND override IS NOT NULL AND status <> 'deleting'
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type ClearExpiredOverrideParams struct {
@@ -86,6 +86,7 @@ func (q *Queries) ClearExpiredOverride(ctx context.Context, arg ClearExpiredOver
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }
@@ -104,7 +105,7 @@ func (q *Queries) CountServicesForEnvs(ctx context.Context, projectID string) (i
 }
 
 const getService = `-- name: GetService :one
-SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services WHERE id = $1
+SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at FROM services WHERE id = $1
 `
 
 func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
@@ -129,6 +130,7 @@ func (q *Queries) GetService(ctx context.Context, id string) (Service, error) {
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }
@@ -141,7 +143,7 @@ VALUES (
     $6, $7, $8,
     $9, $10, coalesce($11, '{}'::jsonb)
 )
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type InsertServiceParams struct {
@@ -197,12 +199,13 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) (S
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }
 
 const listExpiredOverrides = `-- name: ListExpiredOverrides :many
-SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services
+SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at FROM services
 WHERE override IS NOT NULL
   AND status <> 'deleting'
   AND CASE
@@ -305,6 +308,7 @@ func (q *Queries) ListExpiredOverrides(ctx context.Context) ([]Service, error) {
 			&i.Generation,
 			&i.ObservedGeneration,
 			&i.LastReconciledAt,
+			&i.StatusChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -317,7 +321,7 @@ func (q *Queries) ListExpiredOverrides(ctx context.Context) ([]Service, error) {
 }
 
 const listServicesForEnv = `-- name: ListServicesForEnv :many
-SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at FROM services WHERE env_id = $1 ORDER BY created_at
+SELECT id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at FROM services WHERE env_id = $1 ORDER BY created_at
 `
 
 func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Service, error) {
@@ -348,6 +352,7 @@ func (q *Queries) ListServicesForEnv(ctx context.Context, envID string) ([]Servi
 			&i.Generation,
 			&i.ObservedGeneration,
 			&i.LastReconciledAt,
+			&i.StatusChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -374,9 +379,14 @@ func (q *Queries) OrgForService(ctx context.Context, id string) (string, error) 
 }
 
 const setServiceStatus = `-- name: SetServiceStatus :one
-UPDATE services SET status = $3, provisioning_steps = coalesce($4, provisioning_steps)
+UPDATE services SET status = $3, provisioning_steps = coalesce($4, provisioning_steps),
+    -- O38: a transition needs an IDENTITY, or a dedupe key built from
+    -- (service, edge, from->to) collapses every ready->suspended cycle into one
+    -- class and silently drops revenue on the second. Stamped here, in the same
+    -- statement as the status, so the two can never disagree.
+    status_changed_at = now()
 WHERE id = $1 AND status = $2
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type SetServiceStatusParams struct {
@@ -413,6 +423,7 @@ func (q *Queries) SetServiceStatus(ctx context.Context, arg SetServiceStatusPara
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }
@@ -426,7 +437,7 @@ UPDATE services SET
     desired = coalesce($6, desired),
     generation = generation + 1
 WHERE id = $1 AND generation = $7 AND status <> 'deleting'
-RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at
+RETURNING id, env_id, name, product, intent, status, shape, scaling, override, provisioning_steps, monthly_estimate_cents, estimate_id, cell_id, created_at, desired, generation, observed_generation, last_reconciled_at, status_changed_at
 `
 
 type UpdateServiceShapeParams struct {
@@ -481,6 +492,7 @@ func (q *Queries) UpdateServiceShape(ctx context.Context, arg UpdateServiceShape
 		&i.Generation,
 		&i.ObservedGeneration,
 		&i.LastReconciledAt,
+		&i.StatusChangedAt,
 	)
 	return i, err
 }

@@ -57,8 +57,8 @@ func TestUsageReport(t *testing.T) {
 	// store forbids UPDATE, which is exactly the T3.7 guarantee); the span is
 	// still running, so the rollup accrues seconds up to now.
 	if _, err := w.pool.Exec(ctx,
-		`insert into usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
-		 values ('use_'||substr(md5(random()::text),1,12), $1, $2, $3, $4, 'service_span', 'open', 'worker', 1100, now() - interval '1 hour')`,
+		`insert into usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, at)
+		 values ('use_'||substr(md5(random()::text),1,12), 'seed_'||substr(md5(random()::text),1,16), $1, $2, $3, $4, 'service_span', 'open', 'worker', 1100, now() - interval '1 hour')`,
 		org.Id, prj.ID, env.ID, svc.Id); err != nil {
 		t.Fatal(err)
 	}

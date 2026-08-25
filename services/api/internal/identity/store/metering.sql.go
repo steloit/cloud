@@ -9,15 +9,16 @@ import (
 	"context"
 )
 
-const insertUsageEvent = `-- name: InsertUsageEvent :one
+const insertUsageEvent = `-- name: InsertUsageEvent :execrows
 
-INSERT INTO usage_events (id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, quantity, detail)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, quantity, at, detail
+INSERT INTO usage_events (id, dedupe_key, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, quantity, detail)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (dedupe_key) DO NOTHING
 `
 
 type InsertUsageEventParams struct {
 	ID        string
+	DedupeKey string
 	OrgID     string
 	ProjectID string
 	EnvID     string
@@ -31,9 +32,15 @@ type InsertUsageEventParams struct {
 }
 
 // T3.7: raw metering (D10). Append-only; rollup is T6.3.
-func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) (UsageEvent, error) {
-	row := q.db.QueryRow(ctx, insertUsageEvent,
+// O38: ON CONFLICT DO NOTHING, not an error. A caller retrying a metering edge is
+// behaving correctly — that is the whole point of the key — so a duplicate must be
+// a no-op it can treat as success, or the retry path becomes error handling and
+// nobody writes it. :execrows lets the caller tell "inserted" from "already there"
+// without either being a failure.
+func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertUsageEvent,
 		arg.ID,
+		arg.DedupeKey,
 		arg.OrgID,
 		arg.ProjectID,
 		arg.EnvID,
@@ -45,26 +52,14 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 		arg.Quantity,
 		arg.Detail,
 	)
-	var i UsageEvent
-	err := row.Scan(
-		&i.ID,
-		&i.OrgID,
-		&i.ProjectID,
-		&i.EnvID,
-		&i.ServiceID,
-		&i.Meter,
-		&i.Edge,
-		&i.Product,
-		&i.RateCents,
-		&i.Quantity,
-		&i.At,
-		&i.Detail,
-	)
-	return i, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listUsageEventsForOrg = `-- name: ListUsageEventsForOrg :many
-SELECT id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, quantity, at, detail FROM usage_events WHERE org_id = $1 ORDER BY at
+SELECT id, org_id, project_id, env_id, service_id, meter, edge, product, rate_cents, quantity, at, detail, dedupe_key FROM usage_events WHERE org_id = $1 ORDER BY at
 `
 
 func (q *Queries) ListUsageEventsForOrg(ctx context.Context, orgID string) ([]UsageEvent, error) {
@@ -89,6 +84,7 @@ func (q *Queries) ListUsageEventsForOrg(ctx context.Context, orgID string) ([]Us
 			&i.Quantity,
 			&i.At,
 			&i.Detail,
+			&i.DedupeKey,
 		); err != nil {
 			return nil, err
 		}
