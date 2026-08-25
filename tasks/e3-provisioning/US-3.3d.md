@@ -183,3 +183,50 @@ a per-size mapping, and reading it as one would be inventing authority.
 
 The numbers in the proposal above are market anchors, **not** a derivation. They
 must be ruled, not adopted because they are written down here.
+
+## 2026-08-25 — TWO OF THE THREE SIZES ARE ALREADY RULED, in `00-sources`
+
+Searched the design spec before asking again. The create/detail frames state
+compute directly, and microcopy there is verbatim-binding:
+
+| frame text | maps to | because |
+|---|---|---|
+| `PostgreSQL 16.4 Dev · 1 vCPU / 2 GB` | **`dev` = 1 vCPU / 2 GB** | names the size |
+| `PostgreSQL db-main · 2 vCPU / 4 GB` | **`standard` = 2 vCPU / 4 GB** | canon's `svc_dbmain` is `size: "standard"`, and `pricing.json`'s own note pins `db-main standard+50GB=$58` |
+
+**`performance` has no frame.** That one is genuinely undecided.
+
+### This contradicts the proposal above, on `dev`
+
+The proposal says `dev` 0.5 vCPU / 1 GiB. The spec says **1 vCPU / 2 GB**.
+`standard` matches at 2 / 4. The proposal was market-anchored against DigitalOcean
+and is not authority; the frame is. **Do not adopt the proposal's `dev` row.**
+
+### And it sharpens the consequence
+
+A `free` environment's envelope is **1 vCPU / 2 GiB** (ruled 2026-08-23). At the
+spec's `dev` = 1 vCPU / 2 GB, **one `dev` postgres consumes the entire free
+envelope** — leaving nothing for a web service, a worker, or a second database.
+That is a stronger consequence than "standard does not fit", and it is arithmetic
+from two ruled numbers rather than a proposal.
+
+### Correction to this task's other stated consequence
+
+"`performance` + `ha` is 12 vCPU / 24 GiB — exactly `business`'s ceiling" was
+computed at **three** instances. The create frame sells HA as "standby +
+auto-failover" — one standby, so **two** instances (US-3.16, now implemented). At
+two, `performance` + `ha` is 8 vCPU / 16 GiB and fits `business` comfortably.
+
+### What remains for the founder
+
+1. **`performance`'s vCPU/RAM** — the only unmapped size.
+2. Whether to **ratify** the two frame-derived mappings here explicitly, since
+   they are currently authority-by-microcopy rather than a ruled row in
+   `founder-config.md` §5.
+3. Whether `dev` consuming 100% of the `free` envelope is intended.
+
+Measured while checking this: with storage held equal, `dev` and `standard`
+currently render **byte-identical** manifests — the Cluster declares no
+`resources:`, so the $39 price difference buys nothing the cell builds. Pinned by
+`render.TestTheSizeYouPayForBuysOnlyItsStorageFloor`, which fails when this task
+lands.

@@ -2,7 +2,7 @@
 id: US-3.16
 title: "ha: true is charged $19/mo and renders a single instance — the replica does not exist"
 epic: E3
-status: ready
+status: done
 phase: MVP
 priority: critical
 sprint: 3
@@ -59,19 +59,27 @@ was billed for.
 **Not a decision:** that `ha: true` must provision more than one instance. It is
 sold as high availability; one instance is not.
 
-**A decision, and it is the founder's:** *how many*. CNPG's own documentation
-treats `instances: 3` as the standard HA shape (one primary, two replicas);
-`instances: 2` is a valid smaller form with weaker failure tolerance. The number
-changes both the price justification and the quota arithmetic:
+**NOT a founder decision after all — the repository answers it.** The create
+frame sells HA as, verbatim:
+
+> **High availability · standby + auto-failover · +$19/mo**
+
+One **standby**, singular, plus failover. Microcopy in `00-sources/` is
+verbatim-binding, so primary + one standby = **2 instances** is what was sold.
+CNPG's more common production shape is 3 (surviving a node loss while keeping a
+standby), and that would have been the easy guess — but it is not what this
+product promises, and inventing a bigger number would silently change both the
+price justification and the quota arithmetic:
 
 | ha renders | postgres `performance` + ha, under US-3.3d's *proposed* sizing | `business` envelope |
 |---|---|---|
 | 2 instances | 8 vCPU / 16 GiB | 12 / 24 GiB — fits |
 | 3 instances | 12 vCPU / 24 GiB | 12 / 24 GiB — **exactly the ceiling** |
 
-That second row is the consequence **US-3.3d** states, and it is true only at
-three instances. So this task and US-3.3d share one decision and should be ruled
-together.
+US-3.3d's stated consequence — "performance + ha is exactly business's ceiling" —
+is therefore **wrong**: at the two instances the frame sells, `performance` + `ha`
+is 8 vCPU / 16 GiB and fits `business` (12 / 24 GiB) comfortably. That correction
+is recorded on US-3.3d.
 
 ## Acceptance criteria
 
@@ -97,3 +105,53 @@ turned up underneath them.
 been charged for HA is a month they did not receive it. The fleet is empty, so
 today that is zero customers — which is the cheapest moment this will ever be
 fixable.
+
+## Outcome
+
+**Fixed structurally, not by adding a branch.** `instancesOf` now takes the
+**maximum** of the HA floor and any manual capacity pin, rather than letting one
+"win". A precedence rule would leave a pin of 1 able to remove the standby a
+customer is billed $19/month for — silently, for 24 hours at a time, with the
+price untouched. `max()` makes that unrepresentable: **no value of `override`
+drops a service below what it was sold.**
+
+`ha: true` renders **2** instances, and the number is cited to the frame that
+sells it rather than chosen.
+
+### The root cause was the seam, so that is what got the guard
+
+The defect was not that someone forgot `ha`. It is that *priced* and
+*provisioned* were two representations with nothing tying them together — the
+estimate suite was green, the driver suite was green, and customers got one
+instance. `TestEveryPricedDimensionChangesWhatIsApplied` asserts the property:
+for each shape key the catalog charges for, two converges differing **only** in
+that key must apply different manifests. A dimension that changes the bill and
+not the cluster now fails, whoever adds it next.
+
+### A row I had to remove from that test, because it passed for the wrong reason
+
+`base_cents` (`{size:dev}` vs `{size:standard}`) **passed** — but only because
+their storage floors differ, so it was answered by the storage dimension one row
+down. An assertion satisfied by a different object is the exact trap the test
+exists to catch, so it must not commit it itself.
+
+Measured instead, and it is a real finding:
+`TestTheSizeYouPayForBuysOnlyItsStorageFloor` holds storage equal and shows
+`dev` ($19) and `standard` ($58) render **byte-identical** manifests. The $39
+difference buys nothing the cell builds. It asserts today's truth deliberately, so
+it **fails when US-3.3d lands** — a reminder in the right place rather than a
+comment nobody reads.
+
+### Evidence
+
+| mutation | result |
+|---|---|
+| revert the fix — `ha` unread again | **RED** (3 tests) |
+| `haInstances = 1` — a standby that is not one | **RED** (3 tests) |
+| `max()` → precedence, so a pin can drop the standby | **RED**, exactly the test that owns it |
+
+`services/cell-agent` full suite green under `-race`; `estimates` green.
+
+**Billing:** every month a customer was charged for HA is a month they did not
+receive it. The fleet is empty (0 clusters, verified), so that is zero customers —
+which is why this was the cheapest possible moment to find it.

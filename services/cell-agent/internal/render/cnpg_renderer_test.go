@@ -914,3 +914,185 @@ func appliedStorageGB(t *testing.T, a *fakeApplier, ns string) int {
 	t.Fatalf("no CNPG Cluster was applied to %s: %d objects", ns, len(a.applied[ns]))
 	return 0
 }
+
+// EVERY DIMENSION THE CUSTOMER PAYS FOR MUST CHANGE WHAT WE BUILD.
+//
+// US-3.16's root cause was not that someone forgot `ha`. It is that "priced" and
+// "provisioned" are two representations with no mechanism tying them together:
+// `estimates.Price` read `shape["ha"]` and charged $19/month for it, nothing on
+// this side ever read it, and both halves had good tests. The estimate suite was
+// green, the driver suite was green, and customers got a single instance.
+//
+// This is the seam, asserted as a property rather than as one more example: for
+// each shape key the catalog prices, two converges differing ONLY in that key
+// must apply different manifests. A dimension that changes the bill and not the
+// cluster fails here, whatever the dimension is and whoever adds it next.
+func TestEveryPricedDimensionChangesWhatIsApplied(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	id := "svc_0123456789abcdef0123456789abcdef"
+
+	// Keyed by the pricing.json term that makes each one cost money, so a reader
+	// can check the list against the catalog rather than trusting it.
+	priced := []struct {
+		key      string // the pricing.json term
+		a, b     map[string]any
+		whatItIs string
+	}{
+		// postgres.sizes[*].base_cents is DELIBERATELY ABSENT from this list, and
+		// TestTheSizeYouPayForBuysOnlyItsStorageFloor below says why. A row here
+		// with `{size:dev}` vs `{size:standard}` PASSES — but only because their
+		// storage floors differ (0 vs 50), so it would be answered by the storage
+		// dimension one row down rather than by the size. An assertion satisfied
+		// by a different object is the trap this whole test exists to catch, so it
+		// must not be the first thing the test does itself.
+		{
+			key:      "postgres.storage_cents_per_gb",
+			a:        map[string]any{"size": "standard", "storage_gb": 50},
+			b:        map[string]any{"size": "standard", "storage_gb": 200},
+			whatItIs: "storage beyond the included amount",
+		},
+		{
+			key:      "postgres.ha_cents",
+			a:        map[string]any{"size": "standard", "ha": false},
+			b:        map[string]any{"size": "standard", "ha": true},
+			whatItIs: "high availability — a standby and auto-failover",
+		},
+	}
+
+	render := func(t *testing.T, shape map[string]any) string {
+		t.Helper()
+		a := newFakeApplier("Cluster in healthy state")
+		svcWith := svc(id, "ready")
+		svcWith.Desired["shape"] = shape
+		if _, err := newRenderer(a).Converge(context.Background(), svcWith); err != nil {
+			t.Fatalf("converge %v: %v", shape, err)
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		var joined strings.Builder
+		for _, o := range a.applied[ns] {
+			joined.Write(o)
+		}
+		return joined.String()
+	}
+
+	for _, p := range priced {
+		t.Run(p.key, func(t *testing.T) {
+			if render(t, p.a) == render(t, p.b) {
+				t.Fatalf("the catalog charges for %s (%s), and changing it applies a BYTE-IDENTICAL "+
+					"set of manifests. The customer is billed for something the cell does not build.\n"+
+					"  %v\n  %v", p.key, p.whatItIs, p.a, p.b)
+			}
+		})
+	}
+}
+
+// THE GAP US-3.3d OWNS, measured rather than asserted.
+//
+// Hold storage equal and `dev` ($19/mo) and `standard` ($58/mo) render
+// BYTE-IDENTICAL manifests. The $39 difference buys nothing the cell builds: the
+// Cluster declares no `resources:`, so both get the same pod. The only thing a
+// size changes today is its storage floor.
+//
+// This test asserts the CURRENT truth on purpose. When US-3.3d rules the
+// SIZE -> vCPU/RAM mapping it will fail, which is the point — it is the reminder
+// that lands in the right place at the right time, rather than a comment nobody
+// reads. Two of the three sizes are already fixed by the design spec's create
+// frames ("PostgreSQL 16.4 Dev · 1 vCPU / 2 GB", "PostgreSQL db-main · 2 vCPU /
+// 4 GB", and canon's db-main is `standard`); `performance` is not.
+func TestTheSizeYouPayForBuysOnlyItsStorageFloor(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	render := func(shape map[string]any) string {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "ready")
+		s.Desired["shape"] = shape
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		for _, o := range a.applied[ns] {
+			b.Write(o)
+		}
+		return b.String()
+	}
+	dev := render(map[string]any{"size": "dev", "storage_gb": 50})
+	std := render(map[string]any{"size": "standard", "storage_gb": 50})
+	if dev != std {
+		t.Fatalf("dev and standard now render differently with storage held equal — if US-3.3d " +
+			"has ruled the SIZE->vCPU/RAM mapping, DELETE this test and add base_cents to " +
+			"TestEveryPricedDimensionChangesWhatIsApplied, which can then prove it honestly")
+	}
+	t.Log("dev($19) and standard($58) are byte-identical at equal storage — US-3.3d")
+}
+
+// The count itself, pinned to the promise it comes from.
+func TestHARendersAStandby(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		ha   bool
+		want int
+	}{{false, 1}, {true, 2}} {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "ready")
+		s.Desired["shape"] = map[string]any{"size": "standard", "ha": tc.ha}
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		if got := appliedInstances(t, a, ns); got != tc.want {
+			t.Fatalf("ha=%v applied instances: %d, want %d — the create frame sells HA as "+
+				"\"standby + auto-failover\", so exactly one standby must exist", tc.ha, got, tc.want)
+		}
+	}
+}
+
+// A manual pin may raise the count and must never lower it below what was sold.
+func TestAnInstancePinCannotRemoveTheStandbyTheCustomerPaidFor(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name string
+		pin  float64
+		want int
+	}{
+		{"a pin of 1 on an HA service does not drop the standby", 1, 2},
+		{"a pin below HA is floored, not honoured", 0, 2},
+		{"a pin above HA still raises", 5, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newFakeApplier("Cluster in healthy state")
+			s := svc("svc_0123456789abcdef0123456789abcdef", "ready")
+			s.Desired["shape"] = map[string]any{"size": "standard", "ha": true}
+			s.Desired["override"] = map[string]any{"instances": tc.pin, "reason": "capacity test"}
+			if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+				t.Fatal(err)
+			}
+			if got := appliedInstances(t, a, ns); got != tc.want {
+				t.Fatalf("pin=%v with ha applied %d instances, want %d — the price still charges "+
+					"for HA, so no pin may take the service below it", tc.pin, got, tc.want)
+			}
+		})
+	}
+}
+
+// appliedInstances reads spec.instances off the Cluster that reached the applier.
+func appliedInstances(t *testing.T, a *fakeApplier, ns string) int {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, o := range a.applied[ns] {
+		var doc map[string]any
+		if yaml.Unmarshal(o, &doc) != nil || doc["kind"] != "Cluster" {
+			continue
+		}
+		spec, _ := doc["spec"].(map[string]any)
+		if spec == nil {
+			continue
+		}
+		n, err := strconv.Atoi(fmt.Sprint(spec["instances"]))
+		if err != nil {
+			t.Fatalf("spec.instances is %v, not a number", spec["instances"])
+		}
+		return n
+	}
+	t.Fatalf("no CNPG Cluster applied to %s", ns)
+	return 0
+}

@@ -359,13 +359,46 @@ func asMap(v any) map[string]any {
 	m, _ := v.(map[string]any)
 	return m
 }
+
+// haInstances is what `ha: true` provisions.
+//
+// TWO, and the number is not a preference. The create frame sells HA as
+// "High availability · standby + auto-failover · +$19/mo" — ONE standby, plus
+// failover. Microcopy in `docs/product/00-sources/` is verbatim-binding, so a
+// primary and a single standby is what was sold and is what must exist.
+//
+// Three would be CNPG's more common production shape and would survive losing a
+// node while keeping a standby, but it is not what this product's own frame
+// promises, and inventing a larger number here would silently change both the
+// price justification and the environment's quota arithmetic.
+const haInstances = 2
+
+// instancesOf resolves the replica count from the desired doc.
+//
+// WHY IT IS A max(), NOT A PRECEDENCE RULE. Two inputs can raise the count: the
+// HA the customer bought, and a manual capacity pin (D22, auto-expiring in 24h).
+// Making one "win" means the other can silently lose — and a pin of 1 on an HA
+// service would remove the standby the customer is billed $19/month for, without
+// touching the price, for a day at a time. Taking the maximum makes that
+// unrepresentable rather than merely forbidden: there is no value of `override`
+// that drops a service below what it was sold.
+//
+// US-3.16: before this, `ha` was priced by the estimate and read by NOTHING on
+// the cell side — `ha: true` and `ha: false` both rendered `instances: 1`, so
+// every HA customer paid for a standby that did not exist.
 func instancesOf(desired map[string]any) int {
-	if o, ok := desired["override"].(map[string]any); ok {
-		if n, ok := o["instances"].(float64); ok && n >= 1 {
-			return int(n)
+	instances := 1
+	if shape, ok := desired["shape"].(map[string]any); ok {
+		if ha, ok := shape["ha"].(bool); ok && ha {
+			instances = haInstances
 		}
 	}
-	return 1
+	if o, ok := desired["override"].(map[string]any); ok {
+		if n, ok := o["instances"].(float64); ok && int(n) > instances {
+			instances = int(n)
+		}
+	}
+	return instances
 }
 
 // TeardownEnvironment removes an environment's cluster-scoped objects — today
