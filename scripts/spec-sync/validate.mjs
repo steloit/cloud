@@ -23,6 +23,35 @@ const REVIEW_AGENTS = ["reviewer", "qa"];
 const READONLY_TOOLS = new Set(["Read", "Grep", "Glob", "Bash"]);
 
 const schema = JSON.parse(readFileSync(new URL("./task.schema.json", import.meta.url), "utf8"));
+
+// ONE definition of "how many lines is this", used by every cap below.
+//
+// O12: the three caps in this file each enforced one number and REPORTED a
+// different one — 160/"150", 320/"300" — so an author trimming to satisfy the
+// message trimmed to a limit the tool did not hold, and a diagnosis of "the pack
+// is at its cap, nothing can be added" was false while ten lines were free (O11).
+// The counting was a third disagreement: `split("\n").length` is one MORE than
+// `wc -l` on a newline-terminated file, so the number in the message did not
+// match the number in the author's editor either. This counts what an editor
+// shows: split on newlines, and drop the empty element a trailing newline leaves.
+const lineCount = (text) => {
+  const parts = text.split("\n");
+  if (parts.length && parts[parts.length - 1] === "") parts.pop();
+  return parts.length;
+};
+
+// The caps themselves, named once so the message cannot drift from the check.
+// Ruled 2026-08-25 (engineering, reversible): where the enforced and documented
+// numbers disagreed, the ENFORCED one stands. Every pack and task body was
+// written and reviewed against it; tightening to the documented number would
+// delete reviewer-verified mistake-bank content to satisfy a figure that appears
+// in one line of prose and that no ADR or decision record chose. Lowering these
+// later is a trim exercise, not a correctness fix.
+const CAP_PACK_LINES = 160;
+const CAP_BODY_LINES = 320;
+const CAP_AGENTS_LINES = 150;
+const CAP_PACK_COUNT = 12;
+
 const errors = [];
 const err = (f, msg) => errors.push(`${f.replace(/^.*\/tasks\//, "tasks/")}: ${msg}`);
 
@@ -58,8 +87,8 @@ for (const t of tasks) {
     if (!ids.has(d)) err(t.file, `dep "${d}" does not resolve to a task id`);
   for (const c of m.contexts ?? [])
     if (!packs.has(c)) err(t.file, `context pack "${c}" not found in contexts/`);
-  const bodyLines = t.body.split("\n").length;
-  if (bodyLines > 320) err(t.file, `body ${bodyLines} lines > 300-line cap`);
+  const bodyLines = lineCount(t.body);
+  if (bodyLines > CAP_BODY_LINES) err(t.file, `body ${bodyLines} lines > ${CAP_BODY_LINES}-line cap`);
   if (m.status === "ready" && (!m.verify || m.verify.length === 0))
     err(t.file, `status ready requires a non-empty verify block`);
 }
@@ -70,14 +99,14 @@ if (!existsSync(AGENTS_MD)) {
   // since a missing AGENTS.md is exactly when a dangling CLAUDE.md symlink matters most.
   errors.push(`AGENTS.md: missing — it is the real steering file; CLAUDE.md is a symlink to it`);
 } else {
-  const agentsLines = readFileSync(AGENTS_MD, "utf8").split("\n").length;
-  if (agentsLines > 150) errors.push(`AGENTS.md: ${agentsLines} lines > 150 cap`);
+  const agentsLines = lineCount(readFileSync(AGENTS_MD, "utf8"));
+  if (agentsLines > CAP_AGENTS_LINES) errors.push(`AGENTS.md: ${agentsLines} lines > ${CAP_AGENTS_LINES} cap`);
 }
 for (const p of packs) {
-  const lines = readFileSync(`${CONTEXTS_DIR}${p}.md`, "utf8").split("\n").length;
-  if (lines > 160) errors.push(`contexts/${p}.md: ${lines} lines > 150 cap`);
+  const lines = lineCount(readFileSync(`${CONTEXTS_DIR}${p}.md`, "utf8"));
+  if (lines > CAP_PACK_LINES) errors.push(`contexts/${p}.md: ${lines} lines > ${CAP_PACK_LINES} cap`);
 }
-if (packs.size > 12) errors.push(`contexts/: ${packs.size} packs > 12 cap`);
+if (packs.size > CAP_PACK_COUNT) errors.push(`contexts/: ${packs.size} packs > ${CAP_PACK_COUNT} cap`);
 
 // entrypoint-symlink: CLAUDE.md must stay a symlink to AGENTS.md.
 // Checked on the WORKING TREE, not the index: under a core.symlinks=false checkout the index

@@ -77,6 +77,11 @@ func newWorld(t *testing.T, ttl time.Duration) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// O34: prove this port is served by THIS container's Postgres before anything
+	// uses it. Under colima the VM picks the host port and nothing reserves it, so
+	// a long-lived macOS listener can already own it — measured: rapportd holding
+	// *:54167 since Aug 17 answered one of our containers with `01 00 00 00`.
+	testenv.RequirePostgresPeer(t, url)
 	if err := db.Migrate(url); err != nil {
 		t.Fatal(err)
 	}
