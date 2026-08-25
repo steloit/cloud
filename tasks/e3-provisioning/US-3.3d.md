@@ -184,49 +184,55 @@ a per-size mapping, and reading it as one would be inventing authority.
 The numbers in the proposal above are market anchors, **not** a derivation. They
 must be ruled, not adopted because they are written down here.
 
-## 2026-08-25 — TWO OF THE THREE SIZES ARE ALREADY RULED, in `00-sources`
+## 2026-08-25 — ALL THREE SIZES ARE ALREADY RULED, in `00-sources`
 
-Searched the design spec before asking again. The create/detail frames state
-compute directly, and microcopy there is verbatim-binding:
+The create frame's **Size** block states compute directly, beside the price, and
+microcopy in `00-sources/` is verbatim-binding
+(`Steloit-Console-Screens.html:5579-5581`):
 
-| frame text | maps to | because |
+| frame | mapping | catalog price |
 |---|---|---|
-| `PostgreSQL 16.4 Dev · 1 vCPU / 2 GB` | **`dev` = 1 vCPU / 2 GB** | names the size |
-| `PostgreSQL db-main · 2 vCPU / 4 GB` | **`standard` = 2 vCPU / 4 GB** | canon's `svc_dbmain` is `size: "standard"`, and `pricing.json`'s own note pins `db-main standard+50GB=$58` |
+| `Dev · 1 vCPU · 2 GB · $19/mo` | **`dev` = 1 vCPU / 2 GB** | `base_cents: 1900` ✓ |
+| `Standard · 2 vCPU · 4 GB · $58/mo` | **`standard` = 2 vCPU / 4 GB** | `base_cents: 5800` ✓ |
+| `Performance · 4 vCPU · 8 GB · $112/mo` | **`performance` = 4 vCPU / 8 GB** | `base_cents: 11200` ✓ |
 
-**`performance` has no frame.** That one is genuinely undecided.
+All three prices match `pricing.json` exactly, which is what confirms the block is
+the same catalog and not a different one.
 
-### This contradicts the proposal above, on `dev`
+*An earlier revision of this note said "`performance` has no frame — that one is
+genuinely undecided", and routed it to the founder. That was **wrong**: my search
+used `vCPU / N GB` and the frame separates with `·`, so it matched the two prose
+mentions elsewhere and missed the Size block entirely. Recorded rather than
+quietly corrected — a task file is read as authority by the next agent, and this
+one would have sent a settled question upstairs.*
 
-The proposal says `dev` 0.5 vCPU / 1 GiB. The spec says **1 vCPU / 2 GB**.
-`standard` matches at 2 / 4. The proposal was market-anchored against DigitalOcean
-and is not authority; the frame is. **Do not adopt the proposal's `dev` row.**
+### The proposal in this task contradicts the frame on `dev`
 
-### And it sharpens the consequence
+Proposal: `dev` 0.5 vCPU / 1 GiB. Frame: **1 vCPU / 2 GB**. `standard` (2/4) and
+`performance` (4/8) match. The proposal is market-anchored against DigitalOcean
+and is not authority. **Do not adopt its `dev` row.**
 
-A `free` environment's envelope is **1 vCPU / 2 GiB** (ruled 2026-08-23). At the
-spec's `dev` = 1 vCPU / 2 GB, **one `dev` postgres consumes the entire free
-envelope** — leaving nothing for a web service, a worker, or a second database.
-That is a stronger consequence than "standard does not fit", and it is arithmetic
-from two ruled numbers rather than a proposal.
+### Consequences, from ruled numbers only
 
-### Correction to this task's other stated consequence
+- A `free` environment's envelope is **1 vCPU / 2 GiB** (founder 2026-08-23). At
+  the frame's `dev` sizing, **one `dev` postgres consumes all of it** — no room
+  for a web service, a worker, or a second database.
+- `standard` (2 vCPU) does not fit `free` at all.
+- `performance` + `ha` is **8 vCPU / 16 GiB** at the two instances the frame sells
+  (US-3.16), fitting `business` (12 / 24 GiB) comfortably. *An earlier revision
+  said it was "exactly business's ceiling"; that was computed at three instances.*
 
-"`performance` + `ha` is 12 vCPU / 24 GiB — exactly `business`'s ceiling" was
-computed at **three** instances. The create frame sells HA as "standby +
-auto-failover" — one standby, so **two** instances (US-3.16, now implemented). At
-two, `performance` + `ha` is 8 vCPU / 16 GiB and fits `business` comfortably.
+### What actually remains
 
-### What remains for the founder
+**Nothing to decide — this is implementation.** Render `resources:` on the CNPG
+Cluster from the frame's mapping, as **Guaranteed QoS** (requests == limits), and
+reconcile with the environment ResourceQuota. Optionally ratify the three rows in
+`founder-config.md` §5 so the mapping is a table rather than authority-by-microcopy.
 
-1. **`performance`'s vCPU/RAM** — the only unmapped size.
-2. Whether to **ratify** the two frame-derived mappings here explicitly, since
-   they are currently authority-by-microcopy rather than a ruled row in
-   `founder-config.md` §5.
-3. Whether `dev` consuming 100% of the `free` envelope is intended.
+The one thing worth a founder's eye is not the mapping but its consequence: that
+`free` fits exactly one `dev` postgres and nothing else.
 
 Measured while checking this: with storage held equal, `dev` and `standard`
 currently render **byte-identical** manifests — the Cluster declares no
-`resources:`, so the $39 price difference buys nothing the cell builds. Pinned by
-`render.TestTheSizeYouPayForBuysOnlyItsStorageFloor`, which fails when this task
-lands.
+`resources:`, so the $39 difference buys nothing the cell builds. Pinned by
+`render.TestTheSizeYouPayForBuysOnlyItsStorageFloor`, which fails when this lands.

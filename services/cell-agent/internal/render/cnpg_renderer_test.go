@@ -9,6 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -915,76 +918,232 @@ func appliedStorageGB(t *testing.T, a *fakeApplier, ns string) int {
 	return 0
 }
 
-// EVERY DIMENSION THE CUSTOMER PAYS FOR MUST CHANGE WHAT WE BUILD.
+// EVERY DIMENSION THE CUSTOMER PAYS FOR MUST MOVE ITS OWN PROVISIONED FIELD.
 //
-// US-3.16's root cause was not that someone forgot `ha`. It is that "priced" and
-// "provisioned" are two representations with no mechanism tying them together:
-// `estimates.Price` read `shape["ha"]` and charged $19/month for it, nothing on
-// this side ever read it, and both halves had good tests. The estimate suite was
-// green, the driver suite was green, and customers got a single instance.
+// US-3.16's root cause was not a forgotten key. "Priced" and "provisioned" were
+// two representations with nothing tying them together: `estimates.Price` read
+// `shape["ha"]` and charged $19/month, nothing here read it, and both suites were
+// green while customers got one instance.
 //
-// This is the seam, asserted as a property rather than as one more example: for
-// each shape key the catalog prices, two converges differing ONLY in that key
-// must apply different manifests. A dimension that changes the bill and not the
-// cluster fails here, whatever the dimension is and whoever adds it next.
-func TestEveryPricedDimensionChangesWhatIsApplied(t *testing.T) {
+// THE FIRST VERSION OF THIS GUARD COMPARED BYTES, AND QA BROKE IT. Neutralise
+// both priced reads AND add a `steloit.dev/shape` annotation to the template —
+// a routine SSA drift-detection pattern, not a contrived change — and the guard
+// PASSED with the cell provisioning neither dimension. The manifests differed;
+// they just differed somewhere that builds nothing. That is the very bug this
+// test exists to prevent, reported green by the test.
+//
+// So each row now names the FIELD its dimension is supposed to move, and the
+// assertion reads that field out of the Cluster by path. A row without a reader
+// does not compile, so the next dimension cannot be added as a bytes-only row.
+func TestEveryPricedDimensionMovesItsOwnProvisionedField(t *testing.T) {
 	const ns = "env-0123456789abcdef0123456789abcdef"
 	id := "svc_0123456789abcdef0123456789abcdef"
 
-	// Keyed by the pricing.json term that makes each one cost money, so a reader
-	// can check the list against the catalog rather than trusting it.
 	priced := []struct {
-		key      string // the pricing.json term
+		key      string // the pricing.json term that makes it cost money
 		a, b     map[string]any
+		read     func(t *testing.T, a *fakeApplier) string // the provisioned field it must move
 		whatItIs string
 	}{
-		// postgres.sizes[*].base_cents is DELIBERATELY ABSENT from this list, and
-		// TestTheSizeYouPayForBuysOnlyItsStorageFloor below says why. A row here
-		// with `{size:dev}` vs `{size:standard}` PASSES — but only because their
-		// storage floors differ (0 vs 50), so it would be answered by the storage
-		// dimension one row down rather than by the size. An assertion satisfied
-		// by a different object is the trap this whole test exists to catch, so it
-		// must not be the first thing the test does itself.
 		{
 			key:      "postgres.storage_cents_per_gb",
 			a:        map[string]any{"size": "standard", "storage_gb": 50},
 			b:        map[string]any{"size": "standard", "storage_gb": 200},
-			whatItIs: "storage beyond the included amount",
+			read:     func(t *testing.T, a *fakeApplier) string { return clusterField(t, a, ns, "spec.storage.size") },
+			whatItIs: "storage beyond the included amount -> spec.storage.size",
 		},
 		{
 			key:      "postgres.ha_cents",
 			a:        map[string]any{"size": "standard", "ha": false},
 			b:        map[string]any{"size": "standard", "ha": true},
-			whatItIs: "high availability — a standby and auto-failover",
+			read:     func(t *testing.T, a *fakeApplier) string { return clusterField(t, a, ns, "spec.instances") },
+			whatItIs: "high availability — a standby -> spec.instances",
 		},
+		// postgres.sizes[*].base_cents is DELIBERATELY ABSENT — see
+		// TestTheSizeYouPayForBuysOnlyItsStorageFloor. A row here would have to
+		// name a field, and there is none: the Cluster declares no `resources:`
+		// until US-3.3d rules the SIZE -> vCPU/RAM mapping. Under the old
+		// bytes-comparison it "passed", answered by the storage floor one row up.
 	}
 
-	render := func(t *testing.T, shape map[string]any) string {
+	converge := func(t *testing.T, shape map[string]any) *fakeApplier {
 		t.Helper()
 		a := newFakeApplier("Cluster in healthy state")
-		svcWith := svc(id, "ready")
-		svcWith.Desired["shape"] = shape
-		if _, err := newRenderer(a).Converge(context.Background(), svcWith); err != nil {
+		s := svc(id, "ready")
+		s.Desired["shape"] = shape
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
 			t.Fatalf("converge %v: %v", shape, err)
 		}
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		var joined strings.Builder
-		for _, o := range a.applied[ns] {
-			joined.Write(o)
+		return a
+	}
+
+	// THE ROW SET MUST COVER THE CATALOG, and the catalog is the one that moves.
+	// Review measured the gap: adding `postgres.connections_cents` to pricing.json
+	// left every package `ok`. A hand-written list claiming "a dimension that
+	// changes the bill and not the cluster now fails, whoever adds it next" while
+	// nothing binds it to the bill is the same defect this test exists to catch,
+	// committed by the test. The cell-agent is a separate module and must not
+	// IMPORT the API's pricing table, so the file is read from the repo root —
+	// the precedent is cnpg_test.go's catalogSizes.
+	covered := map[string]bool{}
+	for _, p := range priced {
+		covered[p.key] = true
+	}
+	for _, key := range pricedPostgresDimensions(t) {
+		if covered[key] || key == exemptBaseCents {
+			continue
 		}
-		return joined.String()
+		t.Errorf("pricing.json charges for %s and no row here names the field it provisions. "+
+			"Add one — or, if nothing provisions it yet, add it to the exemption beside "+
+			"%s with the task that owns it.", key, exemptBaseCents)
 	}
 
 	for _, p := range priced {
 		t.Run(p.key, func(t *testing.T) {
-			if render(t, p.a) == render(t, p.b) {
-				t.Fatalf("the catalog charges for %s (%s), and changing it applies a BYTE-IDENTICAL "+
-					"set of manifests. The customer is billed for something the cell does not build.\n"+
-					"  %v\n  %v", p.key, p.whatItIs, p.a, p.b)
+			got, want := p.read(t, converge(t, p.a)), p.read(t, converge(t, p.b))
+			if got == want {
+				t.Fatalf("the catalog charges for %s (%s), and changing it leaves that field at %q.\n"+
+					"The customer is billed for something the cell does not build.\n  %v\n  %v",
+					p.key, p.whatItIs, got, p.a, p.b)
 			}
 		})
 	}
+}
+
+// THE GUARD MUST STILL BE ABLE TO FAIL.
+//
+// The companion to the test above, and independent of it: a shape key the driver
+// provably does NOT read must render an identical Cluster. If this ever fails,
+// something is echoing the shape onto a surface that builds nothing — which is
+// exactly what disarmed the first version of the guard — and the guard's passes
+// have stopped meaning anything.
+//
+// `version` is the right probe: it is in the closed shape schema, it is NOT
+// priced, and no template consumes it.
+func TestTheSeamGuardCanStillFail(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	render := func(shape map[string]any) string {
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "ready")
+		s.Desired["shape"] = shape
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		var b strings.Builder
+		for _, o := range a.applied[ns] {
+			b.Write(o)
+		}
+		return b.String()
+	}
+	if render(map[string]any{"size": "standard", "version": "16"}) !=
+		render(map[string]any{"size": "standard", "version": "17"}) {
+		t.Fatal("an UNPRICED, unread shape key changed the rendered manifests. Something now " +
+			"echoes the shape onto a surface that provisions nothing (a shape-hash annotation " +
+			"would do it), so a byte-difference no longer implies anything was provisioned. " +
+			"TestEveryPricedDimensionMovesItsOwnProvisionedField reads fields by path and is " +
+			"unaffected — but check that nothing else in this package compares whole manifests.")
+	}
+}
+
+// clusterField reads one dotted path out of the CNPG Cluster that reached the
+// applier — the object the API server would store, not a re-render.
+func clusterField(t *testing.T, a *fakeApplier, ns, path string) string {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, o := range a.applied[ns] {
+		var doc map[string]any
+		if yaml.Unmarshal(o, &doc) != nil || doc["kind"] != "Cluster" {
+			continue
+		}
+		var cur any = doc
+		for _, seg := range strings.Split(path, ".") {
+			m, ok := cur.(map[string]any)
+			if !ok {
+				t.Fatalf("%s: %q is not a map", path, seg)
+			}
+			cur, ok = m[seg]
+			if !ok {
+				t.Fatalf("the applied Cluster has no %s — the field this dimension must move "+
+					"does not exist, so nothing provisions it", path)
+			}
+		}
+		return fmt.Sprint(cur)
+	}
+	t.Fatalf("no CNPG Cluster applied to %s", ns)
+	return ""
+}
+
+// exemptBaseCents is the ONE priced dimension with no provisioned field, and it
+// is named here rather than left out of the list, so that deleting the reminder
+// test below cannot silently drop a $39/month dimension from the seam guard.
+//
+// US-3.3d owns removing it: all three sizes ARE ruled by the create frame's Size
+// block (Dev 1 vCPU · 2 GB · $19, Standard 2 · 4 · $58, Performance 4 · 8 · $112),
+// but the Cluster declares no `resources:` yet, so there is no field to read.
+const exemptBaseCents = "postgres.sizes[*].base_cents"
+
+// pricedPostgresDimensions reads every money term the catalog charges for under
+// `postgres`, so this test's coverage is checked against the bill rather than
+// against a list someone remembered to update.
+func pricedPostgresDimensions(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRootFromRender(t), "services", "api", "internal", "estimates", "pricing.json"))
+	if err != nil {
+		t.Fatalf("read the pricing table: %v", err)
+	}
+	var doc struct {
+		Postgres map[string]json.RawMessage `json:"postgres"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Postgres) == 0 {
+		t.Fatal("no postgres block in pricing.json — this check would pass vacuously")
+	}
+	var out []string
+	for k, v := range doc.Postgres {
+		switch {
+		case strings.HasPrefix(k, "$"):
+			continue
+		case k == "sizes":
+			var sizes map[string]map[string]any
+			if err := json.Unmarshal(v, &sizes); err != nil {
+				t.Fatal(err)
+			}
+			inner := map[string]bool{}
+			for _, fields := range sizes {
+				for f := range fields {
+					if strings.Contains(f, "cents") {
+						inner[f] = true
+					}
+				}
+			}
+			for f := range inner {
+				out = append(out, "postgres.sizes[*]."+f)
+			}
+		case strings.Contains(k, "cents"):
+			out = append(out, "postgres."+k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// repoRootFromRender walks up for AGENTS.md and FAILS rather than defaulting —
+// same rule as the driver package's repoRoot: a parity check must not silently
+// disarm because it could not find the file it compares against.
+func repoRootFromRender(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for i := 0; i < 8; i++ {
+		if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	t.Fatal("repo root not found (AGENTS.md) — the catalog-coverage check must not silently disarm")
+	return ""
 }
 
 // THE GAP US-3.3d OWNS, measured rather than asserted.
@@ -1055,7 +1214,12 @@ func TestAnInstancePinCannotRemoveTheStandbyTheCustomerPaidFor(t *testing.T) {
 	}{
 		{"a pin of 1 on an HA service does not drop the standby", 1, 2},
 		{"a pin below HA is floored, not honoured", 0, 2},
-		{"a pin above HA still raises", 5, 5},
+		// UNREACHABLE THROUGH THE API, and pinned as behaviour rather than as
+		// intent: PriceWithInstances 422s any postgres pin ("capacity we cannot
+		// price is capacity we must not provision"), so five unpriced instances
+		// is not something the platform will produce. Kept because the arm exists
+		// and hand-planted rows reach it; it is not an endorsement of the raise.
+		{"a pin above HA still raises (unreachable via the API — see the comment)", 5, 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newFakeApplier("Cluster in healthy state")
@@ -1095,4 +1259,82 @@ func appliedInstances(t *testing.T, a *fakeApplier, ns string) int {
 	}
 	t.Fatalf("no CNPG Cluster applied to %s", ns)
 	return 0
+}
+
+// THE INPUT SPACE, because "absent" and "unreadable" are not the same thing.
+//
+// QA probed the first version and found six classes that silently returned the
+// WRONG count: `ha: "true"` (a string) meant no standby — US-3.16's own bug
+// arriving by type instead of by omission — and an `override.instances` held as
+// an int or a json.Number was dropped entirely. The wire path decodes into
+// float64 so those shapes come from migrated or hand-planted rows, which is
+// exactly the population the override machinery documents itself as serving.
+//
+// `cnpg.asGB` had already solved this one file away, with a comment saying
+// reading a single numeric type "would silently ignore every storage_gb on the
+// wire, which is the defect class this task exists to close". This is that rule,
+// applied to the two keys the new code reads.
+func TestInstancesOfReadsEveryShapeADesiredDocCanCarry(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	instances := func(t *testing.T, shape, override map[string]any) int {
+		t.Helper()
+		a := newFakeApplier("Cluster in healthy state")
+		s := svc("svc_0123456789abcdef0123456789abcdef", "ready")
+		s.Desired["shape"] = shape
+		if override != nil {
+			s.Desired["override"] = override
+		}
+		if _, err := newRenderer(a).Converge(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		return appliedInstances(t, a, ns)
+	}
+
+	t.Run("ha in every representation a doc can hold", func(t *testing.T) {
+		for _, ha := range []any{true, "true"} {
+			if got := instances(t, map[string]any{"size": "standard", "ha": ha}, nil); got != haInstances {
+				t.Errorf("ha=%#v (%T) rendered %d instances, want %d — HA is billed either way, "+
+					"so a representation this code cannot read must not mean 'no standby'", ha, ha, got, haInstances)
+			}
+		}
+		// Genuinely absent, or explicitly false, is one instance.
+		for _, shape := range []map[string]any{
+			{"size": "standard"}, {"size": "standard", "ha": false}, {"size": "standard", "ha": nil},
+		} {
+			if got := instances(t, shape, nil); got != 1 {
+				t.Errorf("%v rendered %d instances, want 1", shape, got)
+			}
+		}
+	})
+
+	t.Run("a pin in every numeric representation", func(t *testing.T) {
+		for _, pin := range []any{float64(3), 3, int64(3), json.Number("3")} {
+			got := instances(t, map[string]any{"size": "standard"}, map[string]any{"instances": pin, "reason": "capacity"})
+			if got != 3 {
+				t.Errorf("pin %#v (%T) rendered %d instances, want 3 — a deliberate pin must not "+
+					"silently vanish because of its JSON type", pin, pin, got)
+			}
+		}
+		// Unreadable or absurd values fall back to the floor rather than being trusted.
+		for _, pin := range []any{"3", 2.7, 1e19, nil} {
+			if got := instances(t, map[string]any{"size": "standard"}, map[string]any{"instances": pin}); got != 1 {
+				t.Errorf("pin %#v (%T) rendered %d instances, want the floor of 1", pin, pin, got)
+			}
+		}
+	})
+
+	// The non-HA path lost its old `n >= 1` guard in the rewrite. Same answers,
+	// different mechanism — so pin them, since every other case here sets ha.
+	t.Run("the non-HA path is unchanged by the rewrite", func(t *testing.T) {
+		for _, tc := range []struct {
+			pin  any
+			want int
+		}{{float64(0), 1}, {float64(1), 1}, {float64(3), 3}, {float64(-2), 1}} {
+			got := instances(t, map[string]any{"size": "standard", "ha": false},
+				map[string]any{"instances": tc.pin, "reason": "capacity"})
+			if got != tc.want {
+				t.Errorf("ha=false pin=%v rendered %d, want %d", tc.pin, got, tc.want)
+			}
+		}
+	})
 }
