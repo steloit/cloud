@@ -153,3 +153,33 @@ exist.
   US-3.3e reinstated it (`defaultRequest` only), and its package doc
 - `docs/founder-config.md` §5 — the ruled envelope, and the row recording that
   the compute half does not yet bind
+
+## Verified 2026-08-25 — the proposal's consequences are arithmetically right
+
+Checked against the RULED per-environment envelope (`plans.json` `quota`, founder
+2026-08-23), not against the prose:
+
+| claim in the proposal | check | result |
+|---|---|---|
+| `standard` (2 vCPU) does not fit `free` at all | free ceiling is **1** vCPU | **confirmed** |
+| `performance` + `ha` is 12 vCPU / 24 GiB — exactly `business`'s ceiling | business is **12 / 24Gi** | **confirmed — at THREE instances** |
+
+The second holds only if `ha` means **3** instances. At 2 it is 8 vCPU / 16 GiB
+and fits comfortably. So the envelope consequence the founder is being asked to
+weigh depends on a number that is not written down anywhere.
+
+**And today `ha` provisions nothing at all.** Rendered through the real driver,
+`ha: true` and `ha: false` both produce `instances: 1`, while the estimate charges
+`ha_cents` = 1900. Filed as **US-3.16** (critical). The replica count is one
+decision shared by both tasks and should be ruled once.
+
+### Still blocked, and on exactly this
+
+No authoritative mapping from postgres SIZE to vCPU/RAM exists in the repository:
+`pricing.json` carries only `base_cents` and `included_gb`; `shapeSchema` has no
+compute key; the rendered Cluster declares no `resources:`. INF-001's *"active
+project ≈ 0.6 vCPU / 1.5 GB"* is a capacity rule of thumb about **projects**, not
+a per-size mapping, and reading it as one would be inventing authority.
+
+The numbers in the proposal above are market anchors, **not** a derivation. They
+must be ruled, not adopted because they are written down here.
