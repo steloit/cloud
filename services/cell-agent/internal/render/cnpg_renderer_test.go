@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -815,4 +816,101 @@ func TestTheDesiredDocsStorageSizesTheAppliedCluster(t *testing.T) {
 				"never reached the manifest:\n%s", tc.storage, tc.want, cluster)
 		}
 	}
+}
+
+// RECONCILIATION CONVERGES ON THE RETAINED VOLUME — measured through Converge,
+// against what actually reaches the (fake) API server, on every tick.
+//
+// The founder ruling's last clause is "repeated reconciliation must converge
+// rather than continuously attempting an impossible downgrade". An earlier
+// version of this test lived in the driver package and rendered the same shape
+// five times: `Driver.Render` is a pure function of its Spec with no state, no
+// clock and no I/O, so those were five identical calls to a deterministic
+// function and the only thing they could catch was non-determinism. Review
+// named it, and it was right — the property is about SUCCESSIVE CONVERGES, so
+// the test has to converge successively and read what was applied.
+func TestSuccessiveConvergesNeverAskForASmallerVolume(t *testing.T) {
+	const ns = "env-0123456789abcdef0123456789abcdef"
+	id := "svc_0123456789abcdef0123456789abcdef"
+
+	downgraded := svc(id, "ready")
+	// The desired doc AFTER a standard->dev downgrade: the size fell, the
+	// storage the cluster already carries did not. This is exactly the document
+	// UpdateService writes (its API-side test is
+	// TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState).
+	// 200, NOT 50. 50 is `standard`'s catalog floor, so a driver that re-derived
+	// from the catalog instead of reading storage_gb would render the same number
+	// and this test could not tell the two apart — the defect QA measured
+	// surviving the whole api module. 200 is a value no floor produces.
+	downgraded.Desired["shape"] = map[string]any{"size": "dev", "storage_gb": 200}
+
+	a := newFakeApplier("Cluster in healthy state")
+	r := newRenderer(a)
+	for tick := range 3 {
+		if _, err := r.Converge(context.Background(), downgraded); err != nil {
+			t.Fatalf("tick %d: %v", tick, err)
+		}
+		got := appliedStorageGB(t, a, ns)
+		if got != 200 {
+			t.Fatalf("tick %d applied a %dGi volume against the 200Gi already provisioned — a PVC "+
+				"cannot shrink, so the CSI driver refuses this, the service never reports observed "+
+				"and every subsequent tick asks for the same impossible size again", tick, got)
+		}
+	}
+	if a.applies != 3 {
+		t.Fatalf("expected 3 converges to apply 3 times, got %d", a.applies)
+	}
+
+	// THE DISCRIMINATOR. Without it the loop above passes for a reason unrelated
+	// to the ratchet — e.g. if the driver ignored storage_gb entirely and always
+	// rendered 50. A doc whose storage_gb is GONE must apply the size's own
+	// floor, which for dev is smaller. If this stops being smaller, the loop
+	// above proves nothing and this fails loudly rather than silently.
+	lost := svc(id, "ready")
+	lost.Desired["shape"] = map[string]any{"size": "dev"}
+	b := newFakeApplier("Cluster in healthy state")
+	if _, err := NewCNPGRenderer(cnpg.New(), b, "cell-0", "sa@steloit-dev.iam.gserviceaccount.com",
+		"steloit-dev-wal-customer", testAPIServerCIDR, quiet()).Converge(context.Background(), lost); err != nil {
+		t.Fatal(err)
+	}
+	if floor := appliedStorageGB(t, b, ns); floor >= 200 {
+		t.Fatalf("a desired doc with NO storage_gb applied %dGi, not less than the retained 200 — "+
+			"the assertions above cannot distinguish the ratchet from a driver that ignores the "+
+			"key, so they prove nothing", floor)
+	}
+}
+
+// appliedStorageGB reads spec.storage.size off the CNPG Cluster the renderer
+// actually handed the applier — not off a re-render, which would assert the
+// driver against itself.
+func appliedStorageGB(t *testing.T, a *fakeApplier, ns string) int {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, o := range a.applied[ns] {
+		var doc map[string]any
+		if yaml.Unmarshal(o, &doc) != nil {
+			continue
+		}
+		if doc["kind"] != "Cluster" {
+			continue
+		}
+		storage, _ := doc["spec"].(map[string]any)
+		if storage == nil {
+			continue
+		}
+		st, _ := storage["storage"].(map[string]any)
+		if st == nil {
+			continue
+		}
+		s := fmt.Sprint(st["size"])
+		n, err := strconv.Atoi(strings.TrimSuffix(s, "Gi"))
+		if err != nil {
+			t.Fatalf("spec.storage.size is %q — the driver must render whole Gi, and a unit change "+
+				"would otherwise read as a number change", s)
+		}
+		return n
+	}
+	t.Fatalf("no CNPG Cluster was applied to %s: %d objects", ns, len(a.applied[ns]))
+	return 0
 }

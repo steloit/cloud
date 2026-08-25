@@ -4,6 +4,7 @@ package identity_test
 // LAYER (US-3.2's law), the guarded status machine, D22 update semantics.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -2869,17 +2871,20 @@ func TestTheBackfillGivesEveryExistingServiceItsOrgsEnvelope(t *testing.T) {
 // PATCH priced 1900 — two customers, one resulting configuration, two prices,
 // decided by signup date.
 //
-// 4400 is TODAY'S ARITHMETIC, and this test pins it as such — not as a ruling.
-// What the customer should PAY for a size downgrade while storage is retained is
-// recorded as ❓ NEEDS FOUNDER INPUT in docs/founder-config.md §5, with three
-// live options, one of which (refuse the downgrade) would make this test fail.
-// That is the correct outcome if it is ruled: the test would be updated with the
-// ruling. Stated here because an earlier revision called 4400 "the right
-// answer", which frames an open pricing question as settled — the one thing
-// implementation must never do (founder, 2026-07-27).
+// 4400 IS NOW THE RULING, not merely today's arithmetic (founder, 2026-08-25):
+// "Storage is a ratchet. A PostgreSQL volume may grow but must not physically
+// shrink… Pricing must reflect the resulting effective configuration." The
+// effective configuration after the downgrade is dev + the 50 GB the cluster
+// still carries, so that is what is priced — deliberately NOT re-derived from
+// the smaller requested size, which would price a shrink that cannot happen.
+// Option (b) refuse-the-downgrade and (c) decouple-storage were declined.
 //
-// What is NOT open is the arithmetic below, which is the catalog's own rather
-// than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
+// This comment previously said the number was unruled, with a note that an even
+// earlier revision had called it "the right answer" on the implementer's
+// authority. That distinction mattered and still does: what changed is the
+// AUTHORITY, not the arithmetic.
+//
+// The arithmetic below is the catalog's own rather than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
 // expansion only, and a request below .status.capacity is rejected), so the
 // customer keeps the 50Gi volume and pays for the 50 GB beyond dev's zero
 // included. Billing 1900 would be giving away storage the cluster is still
@@ -3302,5 +3307,567 @@ func TestTheShippedRatchetMigrationRowByRow(t *testing.T) {
 		if g != after[r.id] {
 			t.Errorf("%s: a second run bumped generation %d → %d", r.id, after[r.id], g)
 		}
+	}
+}
+
+// THE DOWNGRADE MUST CARRY THE PROVISIONED STORAGE INTO DESIRED STATE, not just
+// into the price.
+//
+// STORAGE IS A RATCHET (founder, 2026-08-25). The sibling test above proves the
+// PRICE of a size downgrade; this proves the other half of the same ruling — "a
+// downgrade request must not attempt to shrink the existing volume", which is a
+// statement about what reaches the CELL, not about the invoice.
+//
+// The two are one property and can diverge: the price is computed from the
+// resolved shape, and the desired doc is written from the same shape, but only
+// this test reads what the AGENT would actually receive. Measured in the driver
+// (TestASizeDowngradeRendersTheRetainedVolume): given `{dev, storage_gb:50}` it
+// renders 50Gi, and given `{dev, storage_gb:0}` — what re-deriving from the
+// smaller requested size produces — it renders 10Gi, which the CSI driver
+// refuses. So a downgrade that dropped storage_gb from desired would price
+// correctly and strand the service.
+func TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "ratchet-desired@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetdesired"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"standard"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	q := store.New(w.pool)
+	before, err := q.GetService(ctx, svc.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioned := desiredStorageGB(t, before.Desired)
+	if provisioned != 50 {
+		t.Fatalf("a standard provisioned %d GB, want 50 — the ratchet has nothing to hold", provisioned)
+	}
+
+	// The downgrade: size only, storage_gb unspecified.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"dev"}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("downgrade: %d %s", resp.StatusCode, body)
+	}
+
+	after, err := q.GetService(ctx, svc.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := desiredStorageGB(t, after.Desired)
+	if got < provisioned {
+		t.Fatalf("after downgrading to dev, desired carries %d GB against %d provisioned — the "+
+			"cell would render a smaller PVC, the CSI driver would refuse it, and the service "+
+			"would sit outstanding forever with nothing written back", got, provisioned)
+	}
+	if got != provisioned {
+		t.Fatalf("desired carries %d GB, want the retained %d", got, provisioned)
+	}
+	// And the generation moved, so the cell actually re-converges on it.
+	if after.Generation <= before.Generation {
+		t.Fatalf("generation %d -> %d: the downgrade never reaches the cell",
+			before.Generation, after.Generation)
+	}
+}
+
+// desiredStorageGB reads storage_gb out of the DESIRED doc — the document the
+// cell-agent actually receives — and out of NOTHING ELSE.
+//
+// An earlier version fell back to the stored shape when the desired doc carried
+// no `shape` key at all. That made the test green on the one failure it exists to
+// catch: `desiredDoc` builds the doc with `embed("shape", ...)`, which OMITS the
+// key entirely for an empty payload, and the stored column always carries the
+// retained 50 — so deleting the embed left the test passing while the agent,
+// handed a doc with no shape, would resolve size->dev and render a 10Gi PVC.
+// A helper that reads a second representation when the first is missing is not
+// reading the first.
+func desiredStorageGB(t *testing.T, desired []byte) int {
+	t.Helper()
+	var d struct {
+		Shape map[string]any `json:"shape"`
+	}
+	if err := json.Unmarshal(desired, &d); err != nil {
+		t.Fatalf("desired doc is not JSON: %v (%s)", err, desired)
+	}
+	if d.Shape == nil {
+		t.Fatalf("the desired doc carries NO shape — the agent would resolve every key "+
+			"to its default and render the smallest volume: %s", desired)
+	}
+	v, ok := d.Shape["storage_gb"]
+	if !ok {
+		t.Fatalf("the desired doc carries a shape with NO storage_gb: %s", desired)
+	}
+	f, ok := v.(float64)
+	if !ok {
+		t.Fatalf("desired storage_gb is %T (%v), not a number: %s", v, v, desired)
+	}
+	return int(f)
+}
+
+// catalogIncludedGB reads postgres included_gb from the ONE pricing table.
+//
+// QA finding: this file retyped `50` as a literal in the downgrade tests while
+// its sibling in the cell-agent read the catalog, "precisely because a
+// hand-maintained list is exactly what let two defects ship". 4400 is a founder
+// ruling and quoting it is right; 50 is catalog, and catalog moves.
+func catalogIncludedGB(t *testing.T) map[string]int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "estimates", "pricing.json"))
+	if err != nil {
+		t.Fatalf("read the pricing table: %v", err)
+	}
+	var doc struct {
+		Postgres struct {
+			Sizes map[string]struct {
+				IncludedGB int `json:"included_gb"`
+			} `json:"sizes"`
+		} `json:"postgres"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Postgres.Sizes) == 0 {
+		t.Fatal("no postgres sizes in the catalog — every assertion built on this would be vacuous")
+	}
+	out := map[string]int{}
+	for k, v := range doc.Postgres.Sizes {
+		out[k] = v.IncludedGB
+	}
+	return out
+}
+
+// ratchetService creates an org, a project and one postgres service with the
+// given shape, through the real estimate gate. Returns the service id and the
+// owner's cookie.
+func ratchetService(t *testing.T, w *world, slug, shapeJSON string) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, slug+"@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"`+slug+`"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":`+shapeJSON+`}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":`+shapeJSON+`}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+	return svc.Id, ownerCk
+}
+
+// THE CASE EVERY OTHER DOWNGRADE TEST MISSES: storage ABOVE the size's floor.
+//
+// QA finding, with a measured survivor. Every downgrade test in the repo used
+// `storage_gb: 50`, which is exactly `standard`'s included_gb — so "carry the
+// customer's number" and "re-derive from the catalog floor" produce the same
+// answer and the two are indistinguishable. Clamping the resolved storage_gb
+// down to the old size's included_gb on a downgrade left the ENTIRE api module
+// green. On this shape it is a 200Gi volume met by a 50Gi PVC the CSI driver
+// refuses, and a bill that falls from 11900 to 4400.
+func TestADowngradeKeepsStorageDeclaredAboveTheSizeFloor(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	included := catalogIncludedGB(t)
+	const declared = 200
+	if declared <= included["standard"] {
+		t.Fatalf("the catalog now includes %d GB on standard, so %d is no longer ABOVE the floor "+
+			"and this test proves nothing — raise it", included["standard"], declared)
+	}
+	id, ck := ratchetService(t, w, "ratchetabove", `{"size":"standard","storage_gb":200}`)
+
+	q := store.New(w.pool)
+	before, err := q.GetService(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := desiredStorageGB(t, before.Desired); got != declared {
+		t.Fatalf("created with %d GB but desired carries %d", declared, got)
+	}
+
+	resp, body := w.patch(t, "/v1/services/"+id, `{"shape":{"size":"dev"}}`, ck)
+	if resp.StatusCode != 200 {
+		t.Fatalf("downgrade: %d %s", resp.StatusCode, body)
+	}
+	after, err := q.GetService(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := desiredStorageGB(t, after.Desired); got != declared {
+		t.Fatalf("after standard(%dGB) -> dev, desired carries %d GB. %d would be the RETAINED "+
+			"value; %d is standard's catalog floor and %d is dev's — a %d here means the code "+
+			"re-derived from the catalog instead of carrying what the customer has, and the cell "+
+			"will render a PVC the CSI driver refuses",
+			declared, got, declared, included["standard"], included["dev"], included["standard"])
+	}
+	// The price follows the effective configuration, which is the whole ruling.
+	want := int64(1900 + declared*50)
+	if after.MonthlyEstimateCents != want {
+		t.Fatalf("priced %d, want %d = dev's base plus the %d GB still provisioned",
+			after.MonthlyEstimateCents, want, declared)
+	}
+}
+
+// THE FAIL-OPEN ARM. `refuseStorageShrink` returns nil when the stored shape
+// carries no storage_gb, and the ratchet migration cannot reach a row whose
+// `size` is absent or uncatalogued, so on such a row the guard was disarmed
+// permanently.
+//
+// Measured before the fix: stored `{"size":"standard"}` + PATCH `{"size":"dev"}`
+// was ACCEPTED with resolved storage_gb 0, price 1900 against the ruled 4400,
+// and a desired doc that would render 10Gi against the 50Gi the cluster holds.
+// UpdateService now resolves the STORED shape before merging, so the floor is
+// recovered from the catalog and there is a number to carry.
+func TestAShapeWithNoStorageGBIsNotSilentlyDowngradedToZero(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	included := catalogIncludedGB(t)
+	id, ck := ratchetService(t, w, "ratchetnoprior", `{"size":"standard"}`)
+
+	// Reproduce the pre-US-3.7 verbatim-persist row. Deliberately NOT via the
+	// migration: this is precisely the row the migration's WHERE cannot reach.
+	q := store.New(w.pool)
+	if _, err := w.pool.Exec(ctx,
+		`update services set shape = shape - 'storage_gb' where id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	row, err := q.GetService(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	_ = json.Unmarshal(row.Shape, &stored)
+	if _, present := stored["storage_gb"]; present {
+		t.Fatal("the arrange did not strip storage_gb — this test would pass for the wrong reason")
+	}
+
+	resp, body := w.patch(t, "/v1/services/"+id, `{"shape":{"size":"dev"}}`, ck)
+	after, err := q.GetService(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch resp.StatusCode {
+	case 200:
+		got := desiredStorageGB(t, after.Desired)
+		if got < included["standard"] {
+			t.Fatalf("a standard with no recorded storage_gb was downgraded to dev and desired "+
+				"now carries %d GB, below the %d the size includes and the cluster actually has. "+
+				"The volume cannot shrink, so the cell renders a PVC the CSI driver refuses and "+
+				"the row sits outstanding forever — while the bill drops.", got, included["standard"])
+		}
+		want := int64(1900 + included["standard"]*50)
+		if after.MonthlyEstimateCents != want {
+			t.Fatalf("priced %d, want %d — the effective configuration is dev plus the %d GB "+
+				"still provisioned", after.MonthlyEstimateCents, want, included["standard"])
+		}
+	case 422:
+		// Also acceptable: refusing is not a silent shrink. It must not be a 200
+		// that quietly zeroes the storage, which is what it used to be.
+	default:
+		t.Fatalf("downgrade: %d %s", resp.StatusCode, body)
+	}
+}
+
+// THE INVARIANT, stated once and swept — not the implementation, exercised.
+//
+// «Before merging an update, resolve the existing stored configuration to its
+//
+//	effective/catalogued shape, then merge the requested changes while preserving
+//	the effective storage floor.»
+//
+// So for EVERY accepted PATCH: effective_after >= effective_before, read off the
+// DESIRED doc, which is the only representation the cell acts on. And for every
+// refused one: the stored row does not move. The table exists to make the
+// invariant falsifiable across the axes that can break it independently —
+// storage present/absent, size catalogued/not, above/below the floor, up/down,
+// and the same edit applied twice.
+//
+// NOT a value of 50 anywhere it matters. 50 is `standard`'s catalog floor, so
+// "preserve the customer's value" and "re-derive from the catalog" agree there
+// and the case proves nothing; QA measured a mutation surviving the whole api
+// module for exactly that reason. Every row below either uses a value the floor
+// cannot produce, or is explicitly the floor-vs-capacity case and says so.
+func TestTheStorageRatchetInvariantHoldsForEveryAcceptedPatch(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	q := store.New(w.pool)
+	included := catalogIncludedGB(t)
+	if included["standard"] != 50 || included["dev"] != 0 {
+		t.Logf("catalog moved: standard=%d dev=%d — the literals below are derived from it, "+
+			"not retyped, so this is a note rather than a failure", included["standard"], included["dev"])
+	}
+
+	// mangle rewrites the stored shape AFTER create, for the rows the API itself
+	// cannot produce: the pre-US-3.7 verbatim-persist shape (no storage_gb) and a
+	// size the catalog does not have. Both are exactly the rows the ratchet
+	// migration's `shape->>'size' = v.size` predicate cannot reach.
+	mangle := func(t *testing.T, id, shapeJSON string) {
+		t.Helper()
+		if _, err := w.pool.Exec(ctx, `update services set shape = $2::jsonb where id = $1`, id, shapeJSON); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		name string
+		// create is what the API accepts; mangled, if set, replaces the stored
+		// shape afterwards.
+		create, mangled string
+		patch           string
+		wantStatus      int
+		// wantGB is the effective storage the DESIRED doc must carry afterwards.
+		wantGB int
+		why    string
+	}{
+		{
+			name:   "standard+200 -> standard: an above-floor value survives an edit that does not touch it",
+			create: `{"size":"standard","storage_gb":200}`, patch: `{"shape":{"size":"standard"}}`,
+			wantStatus: 200, wantGB: 200,
+			why: "re-deriving would give 50 — the floor — and silently discard 150 GB the customer has",
+		},
+		{
+			name:   "standard+200 -> dev: the downgrade case the floor cannot fake",
+			create: `{"size":"standard","storage_gb":200}`, patch: `{"shape":{"size":"dev"}}`,
+			wantStatus: 200, wantGB: 200,
+			why: "50 would mean standard's floor, 0 would mean dev's; only 200 is the retained value",
+		},
+		{
+			name:   "stored standard with NO storage_gb -> dev",
+			create: `{"size":"standard"}`, mangled: `{"size":"standard"}`, patch: `{"shape":{"size":"dev"}}`,
+			wantStatus: 200, wantGB: 50,
+			why: "the floor is recovered by resolving the STORED shape; without that the merge has nothing to preserve and lands on dev's 0",
+		},
+		{
+			name:   "stored UNCATALOGUED size with an explicit value -> dev keeps the value",
+			create: `{"size":"standard","storage_gb":200}`, mangled: `{"size":"pro","storage_gb":200}`,
+			patch: `{"shape":{"size":"dev"}}`, wantStatus: 200, wantGB: 200,
+			why: "resolving the stored shape FAILS here, so the raw map is merged over — and it must still carry the number",
+		},
+		{
+			name:   "stored UNCATALOGUED size with no value -> dev is accepted at the new floor",
+			create: `{"size":"standard"}`, mangled: `{"size":"pro"}`,
+			patch: `{"shape":{"size":"dev"}}`, wantStatus: 200, wantGB: 0,
+			why: "nothing is provisioned to preserve: cnpg.storageForShape REFUSES an uncatalogued size " +
+				"(pinned by render.TestAServiceWithAnUncatalogedSizeIsStillDeletable), so no PVC exists. " +
+				"Accepting is the repair path for a corrupt row, and it cannot shrink a volume that was never created",
+		},
+		{
+			name:   "dev+20 -> standard: the new size's FLOOR beats the smaller existing value",
+			create: `{"size":"dev","storage_gb":20}`, patch: `{"shape":{"size":"standard"}}`,
+			wantStatus: 200, wantGB: 50,
+			why: "the invariant preserves a floor, it does not pin a number — an upgrade must raise to the included amount",
+		},
+		{
+			name:   "explicit reduction below what is provisioned is REFUSED",
+			create: `{"size":"standard","storage_gb":200}`, patch: `{"shape":{"storage_gb":120}}`,
+			wantStatus: 422, wantGB: 200,
+			why: "and the stored row must not move on a refusal",
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id, ck := ratchetService(t, w, fmt.Sprintf("ratchetinv%d", i), tc.create)
+			if tc.mangled != "" {
+				mangle(t, id, tc.mangled)
+			}
+			before, err := q.GetService(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The desired doc of a mangled row is the pre-mangle one, so read the
+			// effective floor from the stored shape for those and from desired
+			// otherwise — stated rather than silently blended.
+			effBefore := -1
+			if tc.mangled == "" {
+				effBefore = desiredStorageGB(t, before.Desired)
+			}
+
+			resp, body := w.patch(t, "/v1/services/"+id, tc.patch, ck)
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("PATCH %s -> %d, want %d (%s): %s", tc.patch, resp.StatusCode, tc.wantStatus, tc.why, body)
+			}
+			after, err := q.GetService(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.wantStatus == 422 {
+				if !bytes.Equal(before.Shape, after.Shape) {
+					t.Fatalf("a REFUSED patch moved the stored shape:\n  before %s\n  after  %s", before.Shape, after.Shape)
+				}
+				if after.MonthlyEstimateCents != before.MonthlyEstimateCents {
+					t.Fatalf("a REFUSED patch moved the price: %d -> %d",
+						before.MonthlyEstimateCents, after.MonthlyEstimateCents)
+				}
+				return
+			}
+
+			got := desiredStorageGB(t, after.Desired)
+			if got != tc.wantGB {
+				t.Fatalf("desired carries %d GB, want %d — %s", got, tc.wantGB, tc.why)
+			}
+			// THE INVARIANT ITSELF, asserted separately from the expected value so
+			// a wrong wantGB cannot hide a violation of the property.
+			if effBefore >= 0 && got < effBefore {
+				t.Fatalf("RATCHET VIOLATED: effective storage fell %d -> %d on an ACCEPTED patch. "+
+					"The volume cannot shrink, so the cell renders a PVC the CSI driver refuses and "+
+					"the row sits outstanding forever while the bill drops", effBefore, got)
+			}
+			// Price follows the effective configuration, always.
+			var sizeNow struct {
+				Size string `json:"size"`
+			}
+			_ = json.Unmarshal(after.Shape, &sizeNow)
+			wantCents := int64(catalogBaseCents(t)[sizeNow.Size]) + int64((got-included[sizeNow.Size])*50)
+			if got < included[sizeNow.Size] {
+				wantCents = int64(catalogBaseCents(t)[sizeNow.Size])
+			}
+			if after.MonthlyEstimateCents != wantCents {
+				t.Fatalf("priced %d, want %d = %s base plus the %d GB above its %d included",
+					after.MonthlyEstimateCents, wantCents, sizeNow.Size, got, included[sizeNow.Size])
+			}
+		})
+	}
+}
+
+// REPEATED RECONCILIATION, at the API. The same downgrade applied twice must be a
+// no-op the second time — not a second shrink attempt, and not a price that
+// drifts. The driver half is
+// render.TestSuccessiveConvergesNeverAskForASmallerVolume.
+func TestRepeatingADowngradeConverges(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	q := store.New(w.pool)
+	id, ck := ratchetService(t, w, "ratchetrepeat", `{"size":"standard","storage_gb":200}`)
+
+	var lastGB int
+	var lastCents int64
+	for i := range 3 {
+		resp, body := w.patch(t, "/v1/services/"+id, `{"shape":{"size":"dev"}}`, ck)
+		if resp.StatusCode != 200 {
+			t.Fatalf("apply %d: %d %s — a repeated identical edit must not start failing", i, resp.StatusCode, body)
+		}
+		row, err := q.GetService(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gb := desiredStorageGB(t, row.Desired)
+		if i == 0 {
+			lastGB, lastCents = gb, row.MonthlyEstimateCents
+			if gb != 200 {
+				t.Fatalf("first apply landed on %d GB, want the retained 200", gb)
+			}
+			continue
+		}
+		if gb != lastGB {
+			t.Fatalf("apply %d moved storage %d -> %d: reconciliation is not converging, it is "+
+				"walking the value down one edit at a time", i, lastGB, gb)
+		}
+		if row.MonthlyEstimateCents != lastCents {
+			t.Fatalf("apply %d moved the price %d -> %d on an identical edit", i, lastCents, row.MonthlyEstimateCents)
+		}
+	}
+}
+
+// catalogBaseCents reads base_cents from the ONE pricing table, for the same
+// reason catalogIncludedGB does.
+func catalogBaseCents(t *testing.T) map[string]int {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "estimates", "pricing.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Postgres struct {
+			Sizes map[string]struct {
+				BaseCents int `json:"base_cents"`
+			} `json:"sizes"`
+		} `json:"postgres"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int{}
+	for k, v := range doc.Postgres.Sizes {
+		out[k] = v.BaseCents
+	}
+	return out
+}
+
+// BELOW THE DRIVER'S MINIMUM VOLUME, the refusal is a BILLING rule, not geometry
+// — and the message must not claim otherwise.
+//
+// QA finding: canon ships svc_jobs as postgres/dev/storage_gb 4. The driver
+// floors every PVC at 10Gi, so 4 and 3 render the SAME volume and nothing
+// physically shrinks. The refusal is still right — the recorded figure is what
+// the invoice charges, so lowering it drops the bill for storage the customer
+// still has — but the old Detail asserted "a volume cannot shrink, so the 4 GB is
+// still provisioned", a physical claim that is false at that size.
+func TestASubFloorReductionIsRefusedWithoutClaimingAPhysicalShrink(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	id, ck := ratchetService(t, w, "ratchetsubfloor", `{"size":"dev","storage_gb":8}`)
+
+	resp, body := w.patch(t, "/v1/services/"+id, `{"shape":{"storage_gb":3}}`, ck)
+	if resp.StatusCode != 422 {
+		t.Fatalf("8 -> 3 GB: %d %s — the recorded figure is what the invoice charges, so "+
+			"lowering it drops the bill for storage the customer still has", resp.StatusCode, body)
+	}
+	// The claim in the message has to survive the case it is shown in. Both 8 and
+	// 3 render a 10Gi PVC (cnpg.minVolumeGB), so "the volume shrank" is false here.
+	if strings.Contains(body, "so the 8 GB is still provisioned") {
+		t.Fatalf("the refusal asserts a physical shrink that does not happen below the "+
+			"driver's 10Gi minimum volume: %s", body)
+	}
+	if !strings.Contains(body, "Recorded storage only grows") {
+		t.Fatalf("the refusal does not state the rule it is enforcing: %s", body)
+	}
+	// And it must still name a next action that can succeed — a retry cannot.
+	if !strings.Contains(body, "migrate the data") {
+		t.Fatalf("no actionable remediation: %s", body)
 	}
 }
