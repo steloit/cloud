@@ -2869,17 +2869,20 @@ func TestTheBackfillGivesEveryExistingServiceItsOrgsEnvelope(t *testing.T) {
 // PATCH priced 1900 — two customers, one resulting configuration, two prices,
 // decided by signup date.
 //
-// 4400 is TODAY'S ARITHMETIC, and this test pins it as such — not as a ruling.
-// What the customer should PAY for a size downgrade while storage is retained is
-// recorded as ❓ NEEDS FOUNDER INPUT in docs/founder-config.md §5, with three
-// live options, one of which (refuse the downgrade) would make this test fail.
-// That is the correct outcome if it is ruled: the test would be updated with the
-// ruling. Stated here because an earlier revision called 4400 "the right
-// answer", which frames an open pricing question as settled — the one thing
-// implementation must never do (founder, 2026-07-27).
+// 4400 IS NOW THE RULING, not merely today's arithmetic (founder, 2026-08-25):
+// "Storage is a ratchet. A PostgreSQL volume may grow but must not physically
+// shrink… Pricing must reflect the resulting effective configuration." The
+// effective configuration after the downgrade is dev + the 50 GB the cluster
+// still carries, so that is what is priced — deliberately NOT re-derived from
+// the smaller requested size, which would price a shrink that cannot happen.
+// Option (b) refuse-the-downgrade and (c) decouple-storage were declined.
 //
-// What is NOT open is the arithmetic below, which is the catalog's own rather
-// than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
+// This comment previously said the number was unruled, with a note that an even
+// earlier revision had called it "the right answer" on the implementer's
+// authority. That distinction mattered and still does: what changed is the
+// AUTHORITY, not the arithmetic.
+//
+// The arithmetic below is the catalog's own rather than a new pricing rule: a PersistentVolumeClaim CANNOT SHRINK (Kubernetes supports
 // expansion only, and a request below .status.capacity is rejected), so the
 // customer keeps the 50Gi volume and pays for the 50 GB beyond dev's zero
 // included. Billing 1900 would be giving away storage the cluster is still
@@ -3303,4 +3306,115 @@ func TestTheShippedRatchetMigrationRowByRow(t *testing.T) {
 			t.Errorf("%s: a second run bumped generation %d → %d", r.id, after[r.id], g)
 		}
 	}
+}
+
+// THE DOWNGRADE MUST CARRY THE PROVISIONED STORAGE INTO DESIRED STATE, not just
+// into the price.
+//
+// STORAGE IS A RATCHET (founder, 2026-08-25). The sibling test above proves the
+// PRICE of a size downgrade; this proves the other half of the same ruling — "a
+// downgrade request must not attempt to shrink the existing volume", which is a
+// statement about what reaches the CELL, not about the invoice.
+//
+// The two are one property and can diverge: the price is computed from the
+// resolved shape, and the desired doc is written from the same shape, but only
+// this test reads what the AGENT would actually receive. Measured in the driver
+// (TestASizeDowngradeRendersTheRetainedVolume): given `{dev, storage_gb:50}` it
+// renders 50Gi, and given `{dev, storage_gb:0}` — what re-deriving from the
+// smaller requested size produces — it renders 10Gi, which the CSI driver
+// refuses. So a downgrade that dropped storage_gb from desired would price
+// correctly and strand the service.
+func TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState(t *testing.T) {
+	w := newWorld(t, time.Hour)
+	ctx := context.Background()
+	ownerCk, ownerID := w.signupUser(t, "ratchet-desired@example.com")
+	resp, body := w.post(t, "/v1/orgs", `{"name":"ratchetdesired"}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createOrg: %d %s", resp.StatusCode, body)
+	}
+	var org struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &org)
+	orgRow, err := w.svc.GetOrg(ctx, org.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, env, err := w.prov.CreateProject(ctx, orgRow, "shop", "", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body = w.post(t, "/v1/estimates",
+		`{"env":"`+env.ID+`","services":[{"product":"postgres","name":"db","shape":{"size":"standard"}}]}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("estimate: %d %s", resp.StatusCode, body)
+	}
+	var est struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &est)
+	resp, body = w.post(t, "/v1/envs/"+env.ID+"/services",
+		`{"name":"db","product":"postgres","estimate_id":"`+est.Id+`","shape":{"size":"standard"}}`, ownerCk)
+	if resp.StatusCode != 201 {
+		t.Fatalf("createService: %d %s", resp.StatusCode, body)
+	}
+	var svc struct{ Id string }
+	_ = json.Unmarshal([]byte(body), &svc)
+
+	q := store.New(w.pool)
+	before, err := q.GetService(ctx, svc.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioned := desiredStorageGB(t, before.Desired, before.Shape)
+	if provisioned != 50 {
+		t.Fatalf("a standard provisioned %d GB, want 50 — the ratchet has nothing to hold", provisioned)
+	}
+
+	// The downgrade: size only, storage_gb unspecified.
+	resp, body = w.patch(t, "/v1/services/"+svc.Id, `{"shape":{"size":"dev"}}`, ownerCk)
+	if resp.StatusCode != 200 {
+		t.Fatalf("downgrade: %d %s", resp.StatusCode, body)
+	}
+
+	after, err := q.GetService(ctx, svc.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := desiredStorageGB(t, after.Desired, after.Shape)
+	if got < provisioned {
+		t.Fatalf("after downgrading to dev, desired carries %d GB against %d provisioned — the "+
+			"cell would render a smaller PVC, the CSI driver would refuse it, and the service "+
+			"would sit outstanding forever with nothing written back", got, provisioned)
+	}
+	if got != provisioned {
+		t.Fatalf("desired carries %d GB, want the retained %d", got, provisioned)
+	}
+	// And the generation moved, so the cell actually re-converges on it.
+	if after.Generation <= before.Generation {
+		t.Fatalf("generation %d -> %d: the downgrade never reaches the cell",
+			before.Generation, after.Generation)
+	}
+}
+
+// desiredStorageGB reads storage_gb from the DESIRED doc — what the agent
+// receives — falling back to the stored shape only if desired carries no shape,
+// so a doc that silently lost the key is visible rather than papered over.
+func desiredStorageGB(t *testing.T, desired, shape []byte) int {
+	t.Helper()
+	var d struct {
+		Shape map[string]any `json:"shape"`
+	}
+	if err := json.Unmarshal(desired, &d); err == nil && d.Shape != nil {
+		if v, ok := d.Shape["storage_gb"]; ok {
+			return int(v.(float64))
+		}
+		t.Fatalf("the desired doc carries a shape with NO storage_gb: %s", desired)
+	}
+	var sh map[string]any
+	if err := json.Unmarshal(shape, &sh); err != nil {
+		t.Fatalf("stored shape: %v", err)
+	}
+	v, ok := sh["storage_gb"]
+	if !ok {
+		t.Fatalf("neither desired nor the stored shape carries storage_gb: %s / %s", desired, shape)
+	}
+	return int(v.(float64))
 }

@@ -577,3 +577,91 @@ func TestABranchWithNoSourceShapeIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A SIZE DOWNGRADE RENDERS THE RETAINED VOLUME, NEVER THE SMALLER SIZE'S DEFAULT.
+//
+// STORAGE IS A RATCHET (founder, 2026-08-25): a PostgreSQL volume may grow and
+// must never physically shrink, so a downgrade must not attempt to shrink the
+// existing volume and the effective storage stays at the provisioned capacity.
+//
+// The control plane enforces that upstream — the PATCH merge carries the stored
+// `storage_gb` forward, `estimates.Resolve` only ever RAISES a value below the
+// size's included_gb, and an explicit reduction is refused. This is the DRIVER's
+// half of the same rule: given the ratcheted shape it must render the retained
+// size, because rendering the smaller size's default is precisely the shrink the
+// CSI driver would reject — leaving the row outstanding forever with nothing
+// written back.
+//
+// Measured: `{size: standard, storage_gb: 50}` -> 50Gi; after a downgrade
+// `{size: dev, storage_gb: 50}` -> 50Gi; and `{size: dev, storage_gb: 0}` — what
+// re-deriving from the smaller requested size would produce — is 10Gi, the
+// shrink. The third case is why the second one is asserted.
+func TestASizeDowngradeRendersTheRetainedVolume(t *testing.T) {
+	renderGB := func(shape map[string]any) int {
+		t.Helper()
+		spec := devSpec()
+		spec.Shape = shape
+		ms, err := New().Render(spec)
+		if err != nil {
+			t.Fatalf("render %v: %v", shape, err)
+		}
+		return renderedStorageGB(t, ms[0].YAML)
+	}
+
+	// Every catalog size, downgraded to `dev` while holding that size's storage.
+	for size, includedGB := range catalogSizes(t) {
+		if size == "dev" {
+			continue
+		}
+		before := renderGB(map[string]any{"size": size, "storage_gb": includedGB})
+		after := renderGB(map[string]any{"size": "dev", "storage_gb": includedGB})
+		if after < before {
+			t.Errorf("%s(%dGi) downgraded to dev renders %dGi — a PVC cannot shrink, so the CSI "+
+				"driver refuses this and the service is stranded outstanding forever",
+				size, before, after)
+		}
+		if after != before {
+			t.Errorf("%s -> dev renders %dGi, want the retained %dGi: the effective storage is "+
+				"the already-provisioned capacity, and the price the customer is charged is "+
+				"derived from exactly that", size, after, before)
+		}
+	}
+
+	// The negative control: re-deriving from the smaller requested size IS a
+	// shrink. If this ever stops being smaller, the assertions above prove
+	// nothing, because retained and re-derived would be the same number.
+	rederived := renderGB(map[string]any{"size": "dev", "storage_gb": 0})
+	retained := renderGB(map[string]any{"size": "standard", "storage_gb": 50})
+	if rederived >= retained {
+		t.Fatalf("re-deriving from `dev` yields %dGi and the retained standard is %dGi — the "+
+			"shrink this test exists to catch is no longer expressible, so it proves nothing",
+			rederived, retained)
+	}
+}
+
+// RECONCILIATION CONVERGES: the same ratcheted shape renders the same volume
+// every time, so a repeated converge never re-attempts an impossible downgrade.
+func TestAReconciledDowngradeConvergesRatherThanRetryingAShrink(t *testing.T) {
+	shape := map[string]any{"size": "dev", "storage_gb": 50} // post-downgrade, storage retained
+	spec := devSpec()
+	spec.Shape = shape
+	var first int
+	for i := 0; i < 5; i++ {
+		ms, err := New().Render(spec)
+		if err != nil {
+			t.Fatalf("converge %d: %v", i, err)
+		}
+		got := renderedStorageGB(t, ms[0].YAML)
+		if i == 0 {
+			first = got
+			continue
+		}
+		if got != first {
+			t.Fatalf("converge %d rendered %dGi after %dGi — the driver is not deterministic, so "+
+				"each reconcile asks the CSI driver for a different size", i, got, first)
+		}
+	}
+	if first != 50 {
+		t.Fatalf("the converged size is %dGi, want the retained 50Gi", first)
+	}
+}
