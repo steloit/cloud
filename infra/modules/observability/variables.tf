@@ -5,4 +5,3 @@ variable "project_id" {
 variable "cell_id" {
   type = string
 }
-

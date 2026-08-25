@@ -20,4 +20,3 @@ variable "content_domain" {
   description = "Customer-content eTLD+1 (A2.4). Empty until P2 registers it — the zone is gated on this."
   default     = ""
 }
-

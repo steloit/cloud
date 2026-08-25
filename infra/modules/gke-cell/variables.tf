@@ -100,4 +100,3 @@ variable "workload_max_nodes" {
     error_message = "workload_max_nodes must be at least 1: an autoscaled workload pool capped at zero accepts no customer workloads."
   }
 }
-
