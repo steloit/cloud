@@ -838,7 +838,11 @@ func TestSuccessiveConvergesNeverAskForASmallerVolume(t *testing.T) {
 	// storage the cluster already carries did not. This is exactly the document
 	// UpdateService writes (its API-side test is
 	// TestASizeDowngradeKeepsTheProvisionedStorageInDesiredState).
-	downgraded.Desired["shape"] = map[string]any{"size": "dev", "storage_gb": 50}
+	// 200, NOT 50. 50 is `standard`'s catalog floor, so a driver that re-derived
+	// from the catalog instead of reading storage_gb would render the same number
+	// and this test could not tell the two apart — the defect QA measured
+	// surviving the whole api module. 200 is a value no floor produces.
+	downgraded.Desired["shape"] = map[string]any{"size": "dev", "storage_gb": 200}
 
 	a := newFakeApplier("Cluster in healthy state")
 	r := newRenderer(a)
@@ -847,8 +851,8 @@ func TestSuccessiveConvergesNeverAskForASmallerVolume(t *testing.T) {
 			t.Fatalf("tick %d: %v", tick, err)
 		}
 		got := appliedStorageGB(t, a, ns)
-		if got != 50 {
-			t.Fatalf("tick %d applied a %dGi volume against the 50Gi already provisioned — a PVC "+
+		if got != 200 {
+			t.Fatalf("tick %d applied a %dGi volume against the 200Gi already provisioned — a PVC "+
 				"cannot shrink, so the CSI driver refuses this, the service never reports observed "+
 				"and every subsequent tick asks for the same impossible size again", tick, got)
 		}
@@ -869,8 +873,8 @@ func TestSuccessiveConvergesNeverAskForASmallerVolume(t *testing.T) {
 		"steloit-dev-wal-customer", testAPIServerCIDR, quiet()).Converge(context.Background(), lost); err != nil {
 		t.Fatal(err)
 	}
-	if floor := appliedStorageGB(t, b, ns); floor >= 50 {
-		t.Fatalf("a desired doc with NO storage_gb applied %dGi, not less than the retained 50 — "+
+	if floor := appliedStorageGB(t, b, ns); floor >= 200 {
+		t.Fatalf("a desired doc with NO storage_gb applied %dGi, not less than the retained 200 — "+
 			"the assertions above cannot distinguish the ratchet from a driver that ignores the "+
 			"key, so they prove nothing", floor)
 	}
