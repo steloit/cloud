@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classify, verdict, SUCCESS, FAILURE, RUNNING, SKIPPED, NEUTRAL, STALE, UNKNOWN } from "./check-state.mjs";
+import { parseArgs, ArgError } from "./args.mjs";
 
 const run = (o) => ({ __typename: "CheckRun", name: "go", ...o });
 
@@ -127,14 +128,17 @@ test("the REST check-runs payload — lowercase — is what production actually 
   );
 });
 
-test("StatusContext (legacy commit statuses) is classified too", () => {
+test("a legacy commit status is UNKNOWN — this guard does not consume them", () => {
+  // The branch that classified these was deleted: `await-checks.mjs` queries
+  // /check-runs, which never returns a status context, so nothing production-side
+  // reached it — and review found it carried the same missing-toUpperCase() bug
+  // mutation caught next door, unfixed because no real payload exercised it.
+  // Unknown is the safe reading: if one ever arrives it BLOCKS.
   const ctx = (state) => ({ __typename: "StatusContext", context: "ci/legacy", state });
-  assert.equal(classify(ctx("SUCCESS")).state, SUCCESS);
-  assert.equal(classify(ctx("PENDING")).state, RUNNING);
-  assert.equal(classify(ctx("EXPECTED")).state, RUNNING);
-  assert.equal(classify(ctx("FAILURE")).state, FAILURE);
-  assert.equal(classify(ctx("ERROR")).state, FAILURE);
-  assert.equal(classify(ctx("WHAT")).state, UNKNOWN);
+  for (const state of ["SUCCESS", "success", "PENDING", "FAILURE"]) {
+    assert.equal(classify(ctx(state)).state, UNKNOWN, state);
+  }
+  assert.equal(verdict([ctx("SUCCESS")]).ready, false, "a legacy status must never be sufficient");
 });
 
 // ---------------------------------------------------------------------------
@@ -160,12 +164,45 @@ test("SKIPPED needs an explicit allow-list entry, by name", () => {
   assert.equal(verdict(goSkipped, { allowSkipped: ["build-sign"] }).ready, false);
 });
 
-test("green checks for a DIFFERENT commit are not an answer about this one", () => {
-  const green = [run({ name: "go", status: "COMPLETED", conclusion: "SUCCESS" })];
-  assert.equal(verdict(green, { expectedSha: "a".repeat(40), rollupSha: "a".repeat(40) }).ready, true);
-  const stale = verdict(green, { expectedSha: "a".repeat(40), rollupSha: "b".repeat(40) });
-  assert.equal(stale.ready, false, "a green run for an older head must not merge the new one");
-  assert.equal(stale.wait, false, "and it is not a matter of waiting — it needs a new run");
+test("a required check that has not been created yet blocks, and WAITS", () => {
+  // The blocker review found: "absence is not success" was enforced only for a
+  // rollup of length zero, so any non-empty SUBSET was ready. Reproduced against
+  // this repo's own workflows — `build-sign` lives in a separate workflow and
+  // completes as skipped in ~1s, so a tick can see only that.
+  const onlySkip = [{ name: "build-sign", status: "completed", conclusion: "skipped" }];
+  const v = verdict(onlySkip, { allowSkipped: ["build-sign"], require: ["validate", "go", "infra"] });
+  assert.equal(v.ready, false, "one allow-listed skip must not merge a PR nothing ran on");
+  assert.equal(v.wait, true, "a check not yet CREATED is 'not yet', not 'never'");
+  assert.match(v.reason, /required check not reported yet/);
+
+  // A subset of the required set blocks too.
+  const partial = [{ name: "validate", status: "completed", conclusion: "success" }];
+  assert.equal(verdict(partial, { require: ["validate", "go", "infra"] }).ready, false);
+  // And the full set, all green, passes — the guard must still be able to say yes.
+  const full = ["validate", "go", "infra"].map((name) => ({ name, status: "completed", conclusion: "success" }));
+  assert.equal(verdict(full, { require: ["validate", "go", "infra"] }).ready, true);
+});
+
+test("an all-skipped rollup is not success, however generous the allow-list", () => {
+  const skipped = ["validate", "go", "infra"].map((name) => ({ name, status: "completed", conclusion: "skipped" }));
+  const v = verdict(skipped, { allowSkipped: ["validate", "go", "infra"], require: [] });
+  assert.equal(v.ready, false, "zero work done is not a pass");
+  assert.match(v.reason, /nothing actually succeeded/);
+});
+
+test("a FAILURE alongside a still-running check stops the poll rather than waiting it out", () => {
+  // Survived mutation: flipping `if (bad.length)` to `if (false)` left the suite
+  // green, because no test had a failure and a running check in one rollup — the
+  // only state where that branch is observable, and the common real one (go fails
+  // at 2 min while infra is still going). Without it the poller spins to the
+  // 30-minute timeout instead of reporting the failure.
+  const v = verdict([
+    { name: "go", status: "completed", conclusion: "failure" },
+    { name: "infra", status: "in_progress", conclusion: null },
+  ]);
+  assert.equal(v.ready, false);
+  assert.equal(v.wait, false, "a known failure must not be polled until timeout");
+  assert.match(v.reason, /failed: go/);
 });
 
 // ---------------------------------------------------------------------------
@@ -188,4 +225,92 @@ test("one unfinished check among successes still blocks", () => {
   assert.equal(v.ready, false);
   assert.equal(v.wait, true);
   assert.match(v.reason, /go\(running\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Survivors found by an independent QA mutation sweep (37 mutations, 14 real
+// survivors). Each of these pins a branch that was previously unobservable.
+// ---------------------------------------------------------------------------
+
+test("a payload carrying BOTH state and status is read by its status", () => {
+  // Mutating `(check.state && !check.status)` to `(check.state)` survived: a
+  // RUNNING check that happens to carry a stray `state` would have been read by
+  // that field instead. Consulting the wrong field first is the original bug's
+  // exact shape, one layer over.
+  assert.equal(
+    classify({ name: "go", state: "SUCCESS", status: "IN_PROGRESS", conclusion: "" }).state,
+    RUNNING,
+    "a live status must beat a stray state field",
+  );
+  assert.equal(
+    classify({ name: "go", state: "FAILURE", status: "COMPLETED", conclusion: "SUCCESS" }).state,
+    SUCCESS,
+  );
+});
+
+test("the allow-list excuses a SKIP, not the job", () => {
+  // Mutating the predicate to `!allow.has(s.name)` survived, which widens
+  // allowSkipped from "this job's skip is expected" to "this job may return
+  // anything" — so an allow-listed job going NEUTRAL or STALE would merge.
+  for (const conclusion of ["NEUTRAL", "STALE", "CANCELLED"]) {
+    const v = verdict(
+      [
+        { name: "validate", status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "build-sign", status: "COMPLETED", conclusion },
+      ],
+      { allowSkipped: ["build-sign"] },
+    );
+    assert.equal(v.ready, false, `an allow-listed job returning ${conclusion} must not merge`);
+  }
+});
+
+test("an unnamed check cannot be allow-listed by accident", () => {
+  const c = classify({ name: "", status: "COMPLETED", conclusion: "SKIPPED" });
+  assert.equal(c.name, "<unnamed>", "an empty name must not collapse into a real one");
+  assert.equal(
+    verdict([{ name: "", status: "COMPLETED", conclusion: "SKIPPED" }], { allowSkipped: [""] }).ready,
+    false,
+    "allow-listing the empty string must not excuse an unnamed skip",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Argument parsing — extracted precisely so these are testable at all.
+// ---------------------------------------------------------------------------
+
+test("a flag VALUE is never mistaken for the PR number", () => {
+  // Measured: `args.find(a => /^\d+$/.test(a))` on ["--timeout-min","5","346"]
+  // returned 5, so the poller reported confidently about the wrong PR.
+  assert.equal(parseArgs(["--timeout-min", "5", "346"]).pr, "346");
+  assert.equal(parseArgs(["346", "--timeout-min", "5"]).pr, "346");
+});
+
+test("a timeout that cannot be parsed is refused, never treated as no timeout", () => {
+  // Number(undefined) * 60_000 is NaN, and `elapsed > NaN` is false forever — so
+  // the timeout, the mechanism that turns "no answer" into a non-merge, could
+  // never fire. O37's own defect class inside O37's fix.
+  for (const argv of [["346", "--timeout-min"], ["346", "--timeout-min", "abc"],
+                      ["346", "--timeout-min", "0"], ["346", "--timeout-min", "-5"],
+                      ["346", "--interval-sec", "NaN"]]) {
+    assert.throws(() => parseArgs(argv), ArgError, argv.join(" "));
+  }
+  assert.equal(Number.isFinite(parseArgs(["346"]).timeoutMs), true);
+  assert.ok(parseArgs(["346"]).timeoutMs > 0, "the default timeout must be a real bound");
+});
+
+test("a flag whose value is another flag is an error, not a value", () => {
+  // `--allow-skipped` last on the line used to yield the string "undefined" and
+  // allow-list a job by that name.
+  assert.throws(() => parseArgs(["346", "--allow-skipped"]), ArgError);
+  assert.throws(() => parseArgs(["346", "--allow-skipped", "--timeout-min", "5"]), ArgError);
+  assert.throws(() => parseArgs(["346", "--unknown", "x"]), ArgError);
+  assert.throws(() => parseArgs([]), ArgError);
+  assert.throws(() => parseArgs(["346", "347"]), ArgError);
+  assert.throws(() => parseArgs(["not-a-number"]), ArgError);
+});
+
+test("required defaults to the real CI jobs, and is disabled only deliberately", () => {
+  assert.deepEqual(parseArgs(["346"]).required, ["validate", "go", "infra"]);
+  assert.deepEqual(parseArgs(["346", "--require", "a,b"]).required, ["a", "b"]);
+  assert.deepEqual(parseArgs(["346", "--require", ""]).required, [], "an explicit opt-out is allowed");
 });
